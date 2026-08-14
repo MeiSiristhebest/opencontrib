@@ -3,12 +3,13 @@ node_modules/
 .pnp
 .pnp.js
 
-# Build Outputs
+# Build Outputs & Caches
 dist/
 build/
 .turbo/
+*.tsbuildinfo
 
-# Logs
+# Logs & System Generated
 logs/
 *.log
 npm-debug.log*
@@ -16,12 +17,15 @@ yarn-debug.log*
 yarn-error.log*
 bun.lockb
 .system_generated/
+.gemini/
+.opencontrib/
 
 # Environment Variables & Secrets
 .env
 .env.local
 .env.*.local
 *.pem
+*.key
 
 # IDE & Editor Temporary Files
 .vscode/*
@@ -39,8 +43,10 @@ bun.lockb
 Thumbs.db
 ehthumbs.db
 
-# Scratch and ephemeral test artifacts
+# Scratch and Ephemeral Test Artifacts
 scratch/
 temp/
+tmp/
+*.tmp
 coverage/
 .nyc_output/
