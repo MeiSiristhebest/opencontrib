@@ -120,7 +120,7 @@ export async function probeRepository(
     }
   }
 
-  // 5. Scan Python (pyproject.toml)
+  // 5. Scan Python Ecosystem (pyproject.toml / setup.cfg / requirements.txt)
   const pyprojectContent = await client.getRepoTextFile(owner, repo, 'pyproject.toml');
   if (pyprojectContent) {
     scannedFiles.push('pyproject.toml');
@@ -140,7 +140,7 @@ export async function probeRepository(
     }
   }
 
-  // 6. Scan Rust (Cargo.toml)
+  // 6. Scan Rust Ecosystem (Cargo.toml / clippy.toml)
   const cargoContent = await client.getRepoTextFile(owner, repo, 'Cargo.toml');
   if (cargoContent) {
     scannedFiles.push('Cargo.toml');
@@ -158,9 +158,119 @@ export async function probeRepository(
         prPotentialScore: 86,
       });
     }
+
+    if (cargoContent.includes('edition = "2015"') || cargoContent.includes('edition = "2018"')) {
+      suggestions.push({
+        id: 'rust-upgrade-edition-2021',
+        title: 'Upgrade Rust edition to 2021 in Cargo.toml',
+        category: 'code_hygiene',
+        summary: 'Crate uses legacy Rust edition (2015/2018).',
+        rationale: 'Rust 2021 edition provides disjoint closure capture, standard array IntoIterator, and modern macro resolver.',
+        targetFiles: [{ path: 'Cargo.toml', reason: 'Rust crate manifest' }],
+        proposedChanges: ['Update edition = "2021" in [package] or [workspace.package]'],
+        validationPlan: ['Run cargo check --all-targets'],
+        estimatedDiffLines: 2,
+        prPotentialScore: 88,
+      });
+    }
   }
 
-  // 7. Scan Dependabot (.github/dependabot.yml)
+  // 7. Scan Go Ecosystem (go.mod / .golangci.yml)
+  const goModContent = await client.getRepoTextFile(owner, repo, 'go.mod');
+  if (goModContent) {
+    scannedFiles.push('go.mod');
+    const goVerMatch = goModContent.match(/^go\s+(\d+\.\d+)/m);
+    if (goVerMatch && (goVerMatch[1] === '1.16' || goVerMatch[1] === '1.17' || goVerMatch[1] === '1.18')) {
+      suggestions.push({
+        id: 'go-upgrade-mod-version',
+        title: `Upgrade deprecated Go version (${goVerMatch[1]}) in go.mod`,
+        category: 'code_hygiene',
+        summary: `go.mod specifies Go ${goVerMatch[1]}, which has reached official End-of-Life.`,
+        rationale: 'Upgrading go.mod to Go 1.21+ enables modern toolchain directives, structured logging (slog), and loopvar semantics.',
+        targetFiles: [{ path: 'go.mod', reason: 'Go module definition' }],
+        proposedChanges: ['Update go directive to go 1.21 or go 1.22 in go.mod'],
+        validationPlan: ['Run go test ./...'],
+        estimatedDiffLines: 2,
+        prPotentialScore: 89,
+      });
+    }
+  }
+
+  const golangCiContent =
+    (await client.getRepoTextFile(owner, repo, '.golangci.yml')) ||
+    (await client.getRepoTextFile(owner, repo, '.golangci.yaml'));
+  if (golangCiContent) {
+    scannedFiles.push('.golangci.yml');
+    const deprecatedLinters = ['deadcode', 'varcheck', 'structcheck', 'golint', 'scopelint', 'nosnakecase'];
+    const foundDeprecated = deprecatedLinters.filter((l) => golangCiContent.includes(l));
+    if (foundDeprecated.length > 0) {
+      suggestions.push({
+        id: 'go-remove-deprecated-golangci-linters',
+        title: `Remove deprecated linters (${foundDeprecated.join(', ')}) from .golangci.yml`,
+        category: 'code_hygiene',
+        summary: `.golangci.yml contains linters removed in recent golangci-lint releases: ${foundDeprecated.join(', ')}.`,
+        rationale: 'Running removed linters triggers fatal errors on modern golangci-lint v1.50+ runners.',
+        targetFiles: [{ path: '.golangci.yml', reason: 'Go linter configuration' }],
+        proposedChanges: [`Remove deprecated linters: ${foundDeprecated.join(', ')} from enable/disable lists`],
+        validationPlan: ['Run golangci-lint run'],
+        estimatedDiffLines: foundDeprecated.length * 2,
+        prPotentialScore: 94,
+      });
+    }
+  }
+
+  // 8. Scan Java / JVM Ecosystem (pom.xml / build.gradle / build.gradle.kts)
+  const pomContent = await client.getRepoTextFile(owner, repo, 'pom.xml');
+  const gradleContent =
+    (await client.getRepoTextFile(owner, repo, 'build.gradle')) ||
+    (await client.getRepoTextFile(owner, repo, 'build.gradle.kts'));
+  if (pomContent || gradleContent) {
+    if (pomContent) scannedFiles.push('pom.xml');
+    if (gradleContent) scannedFiles.push('build.gradle');
+
+    // Check Java setup in workflows
+    for (const wf of workflows) {
+      if (wf.content.includes('actions/setup-java@v1') || wf.content.includes('actions/setup-java@v2')) {
+        suggestions.push({
+          id: `java-upgrade-setup-java-${wf.path.replace(/[^a-zA-Z0-9]/g, '_')}`,
+          title: `Upgrade setup-java to v4 with Temurin distribution in ${wf.path}`,
+          category: 'ci_workflow',
+          summary: 'Workflow uses outdated setup-java action version.',
+          rationale: 'setup-java@v4 provides built-in dependency caching for Maven/Gradle and supports modern LTS JDKs.',
+          targetFiles: [{ path: wf.path, reason: 'Java CI workflow' }],
+          proposedChanges: [
+            "Upgrade to uses: actions/setup-java@v4 with distribution: 'temurin' and cache: 'maven'/'gradle'",
+          ],
+          validationPlan: ['Verify workflow syntax'],
+          estimatedDiffLines: 6,
+          prPotentialScore: 90,
+        });
+      }
+    }
+  }
+
+  // 9. Scan C / C++ Ecosystem (CMakeLists.txt / .clang-format)
+  const cmakeContent = await client.getRepoTextFile(owner, repo, 'CMakeLists.txt');
+  if (cmakeContent) {
+    scannedFiles.push('CMakeLists.txt');
+    const legacyCmakeMatch = cmakeContent.match(/cmake_minimum_required\s*\(\s*VERSION\s*([0-9.]+)/i);
+    if (legacyCmakeMatch && parseFloat(legacyCmakeMatch[1]) < 3.12) {
+      suggestions.push({
+        id: 'cmake-bump-minimum-version',
+        title: `Modernize legacy CMake minimum version (${legacyCmakeMatch[1]} -> 3.15) in CMakeLists.txt`,
+        category: 'code_hygiene',
+        summary: `CMakeLists.txt specifies legacy CMake ${legacyCmakeMatch[1]}.`,
+        rationale: 'Modern CMake (>= 3.15) enables target-based compile options and modern toolchain integration without policy warnings.',
+        targetFiles: [{ path: 'CMakeLists.txt', reason: 'CMake build script' }],
+        proposedChanges: ['Update cmake_minimum_required(VERSION 3.15)'],
+        validationPlan: ['Run cmake -B build'],
+        estimatedDiffLines: 2,
+        prPotentialScore: 85,
+      });
+    }
+  }
+
+  // 10. Scan Security & Community Health (Dependabot, SECURITY.md)
   const dependabotContent = await client.getRepoTextFile(owner, repo, '.github/dependabot.yml');
   if (!dependabotContent) {
     suggestions.push({
@@ -177,6 +287,25 @@ export async function probeRepository(
     });
   }
 
+  const securityContent = await client.getRepoTextFile(owner, repo, 'SECURITY.md');
+  if (!securityContent) {
+    const rootSecurity = await client.getRepoTextFile(owner, repo, '.github/SECURITY.md');
+    if (!rootSecurity) {
+      suggestions.push({
+        id: 'security-add-disclosure-policy',
+        title: 'Add SECURITY.md vulnerability disclosure policy',
+        category: 'security',
+        summary: 'Repository is missing a coordinated vulnerability reporting policy.',
+        rationale: 'A clear SECURITY.md policy provides ethical security researchers with a private channel to report vulnerabilities before public disclosure.',
+        targetFiles: [{ path: 'SECURITY.md', reason: 'Security advisory policy' }],
+        proposedChanges: ['Add standard GitHub SECURITY.md with contact details and response SLAs'],
+        validationPlan: ['Verify Markdown formatting'],
+        estimatedDiffLines: 18,
+        prPotentialScore: 87,
+      });
+    }
+  }
+
   return {
     repoFullName,
     scannedFiles,
@@ -185,3 +314,4 @@ export async function probeRepository(
     timestamp: new Date().toISOString(),
   };
 }
+
