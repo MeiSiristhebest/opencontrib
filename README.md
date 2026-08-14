@@ -1,64 +1,161 @@
-# 🌟 OpenContrib Engine & Studio
+<div align="center">
 
-**Agent-Native Open Source Contribution Engine, MCP Server, and Visual Studio**
+# 🚀 OpenContrib
 
-OpenContrib fuses the **rigorous governance and empirical evidence standards** of enterprise open source engineering with the **high-precision search algorithms, OS feasibility matrix, zero-pollution Git worktrees, and proactive probing** of modern agentic engines.
+**The Agent-Native Open Source Contribution Engine, MCP Server & Visual Studio**
+
+[![CI](https://github.com/MeiSiristhebest/opencontrib/actions/workflows/ci.yml/badge.svg)](https://github.com/MeiSiristhebest/opencontrib/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![MCP Native](https://img.shields.io/badge/Model%20Context%20Protocol-Compatible-8B5CF6)](https://modelcontextprotocol.io)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/MeiSiristhebest/opencontrib/pulls)
+
+<p align="center">
+  <b>A production-grade, 3-tier autonomous contribution system combining Agent Orchestration, Schema-First Intelligence, Deterministic Governance, Clean-room Sandboxes, and Claude-inspired Web Studio.</b>
+</p>
+
+</div>
 
 ---
 
-## 🏛️ System Architecture
+## 🌟 Why OpenContrib?
+
+Most automated coding tools treat open-source contributions as unstructured LLM prompts, leading to rejected PRs, spam complaints, and brittle hallucinated fixes. 
+
+**OpenContrib** introduces a structured, production-grade **3-Tier Architecture** that enforces empirical proof, strict governance gates, and human-in-the-loop oversight before any code reaches GitHub:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   Layer 1: Agent Runtime & Orchestration                    │
+│      ContributionStateMachine (状态机) + ExecutionPolicyEngine (策略引擎)    │
+│      (Supports: interactive, dry_run, draft_only, local_artifacts, autonomous) │
+└────────────────────────────────────┬────────────────────────────────────────┘
+                                     │
+┌────────────────────────────────────▼────────────────────────────────────────┐
+│                 Layer 2: Contribution Intelligence Layer                    │
+│  - ContextAssembler: Integrates Problem + Repo Skeleton + Cognitive Memory │
+│  - HybridIssueRanker: Profile Keywords + OS Feasibility + Timeline PR Match │
+│  - Schema-First LLM: Typed Zod Contracts + Automated Repair Loop            │
+│  - Subagent Review: 7-Dimension Mathematical Confidence Score >= 90%        │
+└────────────────────────────────────┬────────────────────────────────────────┘
+                                     │
+┌────────────────────────────────────▼────────────────────────────────────────┐
+│                 Layer 3: Deterministic Tooling & Safe Sandbox               │
+│  - WorktreeManager: Parameterized spawnSync git worktree clean-room sandbox │
+│  - EvidenceCollector: Empirical failure assertion capture + 20x stress loop │
+│  - Multi-Ecosystem Probes: Go / Rust / Python / Java / CMake / Security     │
+│  - PR Pipeline: Native template merger + GitHub Git Data API submissions    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📦 Monorepo Structure
 
 ```
 opencontrib/
 ├── packages/
-│   ├── core/                  # Domain algorithms, Feasibility Matrix, Worktree Sandbox, 7D Confidence Math
-│   ├── mcp-server/            # Standard MCP Server exposing tools to Anti-Gravity, Codex, Cursor, etc.
-│   └── studio/                # Modern, dark-mode Web Control Plane (Radar, Timeline, Diff, Flywheel)
-└── skills/
-    └── open-source-contributor/ # Standardized Agent Skill & Prompt Package
+│   ├── core/           # 🧠 Domain logic, State Machine, Context Assembler, Sandboxes
+│   ├── mcp-server/     # 🔌 12 MCP Tools for Claude Code, Cursor, Antigravity
+│   └── studio/         # 🎨 Obsidian/Claude-themed Native Web Control Studio
+├── skills/             # 📜 Master Open-Source Contributor Skill
+├── .github/workflows/  # ⚡ Automated CI and verification pipelines
+└── package.json        # 🛠️ Root Monorepo configuration
 ```
 
 ---
 
-## 🚀 Quick Start
+## ⚡ Quick Start
 
-### 1. Run the MCP Server (For any AI Agent)
+### 1. Installation & Test Suite
 
 ```bash
-bun run mcp
-# or configure in Antigravity / Claude Desktop / Cursor MCP settings:
-# command: bun
-# args: ["run", "<path-to>/opencontrib/packages/mcp-server/src/index.ts"]
+# Clone the repository
+git clone https://github.com/MeiSiristhebest/opencontrib.git
+cd opencontrib
+
+# Install dependencies via Bun
+bun install
+
+# Run all 12 test suites (31 unit & integration tests)
+bun test
 ```
 
-#### Available MCP Tools:
-- `contrib_scout`: Scout qualified GitHub issues with Anti-bandwagoning and Feasibility checks.
-- `contrib_probe`: Proactively diagnose repositories for <=100 line PR suggestions when no issues exist.
-- `contrib_prepare_workspace`: Create zero-pollution Git worktrees under `~/.opencontrib/workspaces`.
-- `contrib_collect_evidence`: Run Step 4.0 baseline flaky isolation and 20x stress test loops.
-- `contrib_audit_governance`: Audit diff size (RFC Gate), anti-AI phrase linter, and 7D confidence math.
-- `contrib_sync_flywheel`: Update local memory ledger and sync live PR showcase to GitHub Profile.
+### 2. Launching OpenContrib Studio Web UI
 
----
-
-### 2. Run the Visual Studio Control Plane
+OpenContrib Studio provides an interactive, beautiful Obsidian-themed visual cockpit:
 
 ```bash
 bun run studio
-# Open http://localhost:4173 in your browser
+# 🚀 OpenContrib Studio is running at: http://localhost:4173
 ```
 
-Features in Studio:
-- 📡 **Opportunity Radar**: Filter GitHub issues by tech stack and local OS feasibility score.
-- 🚦 **7-Phase Gated Timeline**: Live visual tracker for the 7 engineering checkpoints.
-- 🛡️ **Governance & Diff Inspector**: Real-time Anti-AI tone auditor and RFC 100-line budget gate.
-- 🌟 **Profile Flywheel Showcase**: Live Markdown PR table and dynamic SVG badge preview.
+Features included in Studio:
+- **Opportunities Radar**: Scan repositories for qualified, unclaimed bugs.
+- **7-Stage Lifecycle Tracker**: Real-time progress bar from Phase 0 to Phase 7.
+- **Visual Code Diff Review**: Inspect proposed patch before approving submission.
+- **Flywheel Dashboard**: View total contributions, merged PRs, and SVG badges.
+- **One-Click Sandbox Cleanup**: Purge ephemeral worktrees and test logs.
 
 ---
 
-## 🧪 Testing
+## 🔌 Model Context Protocol (MCP) Setup
 
-```bash
-bun test
-# 100% tests passing across core contracts, discovery, governance, memory, and MCP server.
+OpenContrib exposes **12 zero-token domain tools** compatible with any MCP client (Claude Desktop, Cursor, Claude Code, Antigravity).
+
+Add the following to your MCP client config (`claude_desktop_config.json` / `antigravity.json`):
+
+```json
+{
+  "mcpServers": {
+    "opencontrib": {
+      "command": "bun",
+      "args": ["run", "E:/Mei/下载/cs/opencontrib/packages/mcp-server/src/index.ts"],
+      "env": {
+        "GITHUB_TOKEN": "your_github_pat_here"
+      }
+    }
+  }
+}
 ```
+
+### Available MCP Tools:
+1. `contrib_scout`: Scout high-match, unclaimed GitHub issues with real stargazer counts.
+2. `contrib_probe`: Deep multi-ecosystem repository hygiene diagnostic scanner.
+3. `contrib_assemble_context`: Assemble problem, repo skeleton, memory pitfalls & host environment.
+4. `contrib_prepare_workspace`: Allocate an isolated, zero-pollution Git Worktree sandbox.
+5. `contrib_collect_evidence`: Run flaky test baseline isolation and 20x stress loops.
+6. `contrib_audit_governance`: 100-line RFC gate, anti-robotic linter, and 7D confidence math.
+7. `contrib_render_pr_template`: Intelligently merge into target repository native templates.
+8. `contrib_sync_flywheel`: Synchronize local memory ledger and render profile SVG badge.
+9. `contrib_purge_sandbox`: Garbage collection for temporary worktrees and test scripts.
+10. `contrib_doctor`: Audit host environment health (Git, Node/Bun, Docker, WSL).
+11. `contrib_track_pr_status`: Phase 7 CI tracking and maintainer review reply generator.
+
+---
+
+## 🏆 Real-World Contribution Milestones
+
+OpenContrib has already been verified on high-profile upstream repositories:
+
+| Target Repository | Contribution Description | Issue | Pull Request | Status |
+| :--- | :--- | :--- | :--- | :---: |
+| **`bytedance/flowgram.ai`** | Upgrade deprecated Actions to v4 | [#1158](https://github.com/bytedance/flowgram.ai/issues/1158) | [#1159](https://github.com/bytedance/flowgram.ai/pull/1159) | 🟢 **Open** |
+| **`bytedance/flowgram.ai`** | Fix ShortCache falsy value cache bypass & timer leaks | [#1160](https://github.com/bytedance/flowgram.ai/issues/1160) | [#1161](https://github.com/bytedance/flowgram.ai/pull/1161) | 🟢 **Open** |
+
+---
+
+## 🛡️ Core Governance Principles
+
+1. **Repo Convention Override**: Always inspect and prioritize target repo `.github/PULL_REQUEST_TEMPLATE.md` and `CONTRIBUTING.md`.
+2. **100-Line RFC Gate**: Surgical minimal fixes; any patch exceeding 100 lines must be gated for RFC approval.
+3. **Empirical Evidence Required**: Must include verifiable Red-to-Green assertion proof.
+4. **Anti-Bandwagoning**: Respect 7-day author intention rights and avoid claiming issues already being worked on.
+5. **Human-in-the-Loop Approval**: In interactive mode, PR creation is physically blocked until explicit user consent.
+
+---
+
+## 📄 License
+
+Distributed under the [MIT License](LICENSE). Copyright (c) 2026 Nefelibata.
