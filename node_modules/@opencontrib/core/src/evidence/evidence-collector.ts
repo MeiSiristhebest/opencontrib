@@ -67,6 +67,52 @@ export function runStressLoop(cwd: string, testCommand: string, count: number = 
   return { passed: true, completedRuns };
 }
 
+export function verifyEmpiricalReproduction(input: {
+  cwd: string;
+  reproductionScriptPath: string;
+  runnerCommand?: string;
+}): {
+  isFailingOnBaseline: boolean;
+  baselineOutput: string;
+  assertionCaptured: boolean;
+} {
+  const { cwd, reproductionScriptPath, runnerCommand = 'bun' } = input;
+  const safeEnv = {
+    ...process.env,
+    CI: 'true',
+    FORCE_COLOR: '0',
+    DEBIAN_FRONTEND: 'noninteractive',
+  };
+
+  try {
+    const output = execSync(`${runnerCommand} "${reproductionScriptPath}"`, {
+      cwd,
+      encoding: 'utf-8',
+      env: safeEnv,
+      timeout: 15000,
+      stdio: 'pipe',
+    });
+
+    const hasFailureFlag = /BUG CONFIRMED|FAILED|FAIL|assertion failed|error/i.test(output);
+
+    return {
+      isFailingOnBaseline: hasFailureFlag,
+      baselineOutput: output,
+      assertionCaptured: hasFailureFlag,
+    };
+  } catch (err: any) {
+    const stdout = err.stdout?.toString() || '';
+    const stderr = err.stderr?.toString() || '';
+    const full = `${stdout}\n${stderr}`;
+
+    return {
+      isFailingOnBaseline: true,
+      baselineOutput: full,
+      assertionCaptured: true,
+    };
+  }
+}
+
 export async function collectEvidence(options: EvidenceCollectionOptions): Promise<EvidenceReport> {
   const { cwd, testCommand, stressLoopCount = 20, runFlakyBaseline = true } = options;
 
