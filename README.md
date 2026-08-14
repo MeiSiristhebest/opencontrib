@@ -4,12 +4,11 @@
 
 **The Agent-Native Open Source Contribution Engine, MCP Server & Visual Studio**
 
-[![CI](https://github.com/MeiSiristhebest/opencontrib/actions/workflows/ci.yml/badge.svg)](https://github.com/MeiSiristhebest/opencontrib/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP Native](https://img.shields.io/badge/Model%20Context%20Protocol-Compatible-8B5CF6)](https://modelcontextprotocol.io)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/MeiSiristhebest/opencontrib/pulls)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
 
 <p align="center">
   <b>A production-grade, 3-tier autonomous contribution system combining Agent Orchestration, Schema-First Intelligence, Deterministic Governance, Clean-room Sandboxes, and Claude-inspired Web Studio.</b>
@@ -19,11 +18,11 @@
 
 ---
 
-## 🌟 Why OpenContrib?
+## 🌟 Overview
 
-Most automated coding tools treat open-source contributions as unstructured LLM prompts, leading to rejected PRs, spam complaints, and brittle hallucinated fixes. 
+**OpenContrib** is an intelligent, protocol-native infrastructure engine designed to help autonomous agents (and human developers) make high-quality, high-trust contributions to open-source software.
 
-**OpenContrib** introduces a structured, production-grade **3-Tier Architecture** that enforces empirical proof, strict governance gates, and human-in-the-loop oversight before any code reaches GitHub:
+Unlike unconstrained coding agents that spam repositories with hallucinated or low-quality changes, OpenContrib enforces rigorous **governance gates, clean-room sandboxes, and empirical failure assertion verification** before any code is proposed.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -51,7 +50,7 @@ Most automated coding tools treat open-source contributions as unstructured LLM 
 
 ---
 
-## 📦 Monorepo Structure
+## 📦 Monorepo Architecture
 
 ```
 opencontrib/
@@ -60,7 +59,6 @@ opencontrib/
 │   ├── mcp-server/     # 🔌 12 MCP Tools for Claude Code, Cursor, Antigravity
 │   └── studio/         # 🎨 Obsidian/Claude-themed Native Web Control Studio
 ├── skills/             # 📜 Master Open-Source Contributor Skill
-├── .github/workflows/  # ⚡ Automated CI and verification pipelines
 └── package.json        # 🛠️ Root Monorepo configuration
 ```
 
@@ -72,7 +70,7 @@ opencontrib/
 
 ```bash
 # Clone the repository
-git clone https://github.com/MeiSiristhebest/opencontrib.git
+git clone https://github.com/opencontrib/opencontrib.git
 cd opencontrib
 
 # Install dependencies via Bun
@@ -84,7 +82,7 @@ bun test
 
 ### 2. Launching OpenContrib Studio Web UI
 
-OpenContrib Studio provides an interactive, beautiful Obsidian-themed visual cockpit:
+OpenContrib Studio provides an interactive, beautiful visual cockpit:
 
 ```bash
 bun run studio
@@ -113,7 +111,7 @@ Add the following to your MCP client config (`claude_desktop_config.json` / `ant
       "command": "bun",
       "args": ["run", "/path/to/opencontrib/packages/mcp-server/src/index.ts"],
       "env": {
-        "GITHUB_TOKEN": "your_github_pat_here"
+        "GITHUB_TOKEN": "your_github_personal_access_token_here"
       }
     }
   }
@@ -135,17 +133,6 @@ Add the following to your MCP client config (`claude_desktop_config.json` / `ant
 
 ---
 
-## 🏆 Real-World Contribution Milestones
-
-OpenContrib has already been verified on high-profile upstream repositories:
-
-| Target Repository | Contribution Description | Issue | Pull Request | Status |
-| :--- | :--- | :--- | :--- | :---: |
-| **`bytedance/flowgram.ai`** | Upgrade deprecated Actions to v4 | [#1158](https://github.com/bytedance/flowgram.ai/issues/1158) | [#1159](https://github.com/bytedance/flowgram.ai/pull/1159) | 🟢 **Open** |
-| **`bytedance/flowgram.ai`** | Fix ShortCache falsy value cache bypass & timer leaks | [#1160](https://github.com/bytedance/flowgram.ai/issues/1160) | [#1161](https://github.com/bytedance/flowgram.ai/pull/1161) | 🟢 **Open** |
-
----
-
 ## 🛡️ Core Governance Principles
 
 1. **Repo Convention Override**: Always inspect and prioritize target repo `.github/PULL_REQUEST_TEMPLATE.md` and `CONTRIBUTING.md`.
@@ -158,4 +145,4 @@ OpenContrib has already been verified on high-profile upstream repositories:
 
 ## 📄 License
 
-Distributed under the [MIT License](LICENSE). Copyright (c) 2026 Nefelibata.
+Distributed under the [MIT License](LICENSE). Copyright (c) 2026 OpenContrib Contributors.

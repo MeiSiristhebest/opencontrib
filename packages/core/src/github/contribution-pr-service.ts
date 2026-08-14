@@ -123,7 +123,7 @@ export class ContributionPrService {
     let finalCommitMessage = commitMessage;
     if (dcoSignOff && !finalCommitMessage.includes('Signed-off-by:')) {
       const user = await this.octokit.rest.users.getAuthenticated();
-      finalCommitMessage += `\n\nSigned-off-by: ${user.data.name || user.data.login} <${user.data.email || 'developer@users.noreply.github.com'}>`;
+      finalCommitMessage += `\n\nSigned-off-by: ${user.data.name || user.data.login} <${user.data.email || 'noreply@github.com'}>`;
     }
 
     const newCommit = await this.octokit.rest.git.createCommit({

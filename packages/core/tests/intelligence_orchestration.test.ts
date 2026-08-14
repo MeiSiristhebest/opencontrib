@@ -27,7 +27,7 @@ describe('Intelligence & Orchestration Upgrades', () => {
     const assembler = new ContextAssembler();
     const ctx = assembler.assemble({
       repoFullName: 'bytedance/flowgram.ai',
-      issueNumber: 1160,
+      issueNumber: 100,
       issueTitle: 'createShortCache falsy bypass',
       issueBody: 'ShortCache evaluates if (cache), bypassing false / 0 values.',
       primaryLanguage: 'TypeScript',

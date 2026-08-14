@@ -59,7 +59,7 @@ export class ProfileFlywheel {
       md += `| [\`${r.repoFullName}\`](https://github.com/${r.repoFullName}) | ${issueText} | [${prText}](${r.prUrl}) | ${statusIcon} | \`${r.submittedAt.split('T')[0]}\` |\n`;
     }
 
-    md += `\n*Updated automatically via [OpenContrib Engine](https://github.com/MeiSiristhebest/opencontrib)*\n<!-- END_OPENCONTRIB_SECTION -->`;
+    md += `\n*Updated automatically via [OpenContrib Engine](https://github.com/opencontrib/opencontrib)*\n<!-- END_OPENCONTRIB_SECTION -->`;
 
     return md;
   }

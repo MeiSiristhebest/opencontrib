@@ -12,7 +12,7 @@ describe('Doctor Audit & PR Lifecycle Tracker', () => {
 
   it('correctly tracks merged PR state and recommends flywheel sync', () => {
     const status = analyzePrLifecycle({
-      prNumber: 1161,
+      prNumber: 42,
       isOpen: false,
       isMerged: true,
     });
@@ -22,7 +22,7 @@ describe('Doctor Audit & PR Lifecycle Tracker', () => {
 
   it('correctly tracks open PR with changes requested and generates maintainer reply', () => {
     const status = analyzePrLifecycle({
-      prNumber: 1160,
+      prNumber: 43,
       isOpen: true,
       isMerged: false,
       reviews: [{ author: 'maintainerA', state: 'CHANGES_REQUESTED' }],

@@ -31,14 +31,24 @@ export function runDoctorAudit(): DoctorReport {
   // 1. Check Git
   let gitVersion: string | undefined;
   try {
-    const gitOut = execSync('git --version', { encoding: 'utf-8', timeout: 5000 }).trim();
-    gitVersion = gitOut;
-    checks.push({
-      category: 'VCS',
-      name: 'Git Binary',
-      status: 'PASSED',
-      message: `Git is installed: ${gitOut}`,
-    });
+    const gitRes = spawnSync('git', ['--version'], { encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] });
+    const gitOut = (gitRes.stdout || '').trim();
+    if (gitRes.status === 0 && gitOut) {
+      gitVersion = gitOut;
+      checks.push({
+        category: 'VCS',
+        name: 'Git Binary',
+        status: 'PASSED',
+        message: `Git is installed: ${gitOut}`,
+      });
+    } else {
+      checks.push({
+        category: 'VCS',
+        name: 'Git Binary',
+        status: 'FAILED',
+        message: 'Git is not installed or not in PATH',
+      });
+    }
   } catch (err: any) {
     checks.push({
       category: 'VCS',
@@ -50,8 +60,10 @@ export function runDoctorAudit(): DoctorReport {
 
   // 2. Check Git User Identity
   try {
-    const userName = execSync('git config user.name', { encoding: 'utf-8', timeout: 3000 }).trim();
-    const userEmail = execSync('git config user.email', { encoding: 'utf-8', timeout: 3000 }).trim();
+    const nameRes = spawnSync('git', ['config', 'user.name'], { encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] });
+    const emailRes = spawnSync('git', ['config', 'user.email'], { encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] });
+    const userName = (nameRes.stdout || '').trim();
+    const userEmail = (emailRes.stdout || '').trim();
     if (userName && userEmail) {
       checks.push({
         category: 'VCS',
