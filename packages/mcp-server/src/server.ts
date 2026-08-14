@@ -463,5 +463,88 @@ export function createOpenContribMcpServer(): McpServer {
     },
   );
 
+  // -------------------------------------------------------------
+  // Tool 10: contrib_doctor (宿主机环境健康与依赖诊断)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_doctor',
+    'Audit host environment health (Git, Bun/Node, Docker, WSL, and OpenContrib storage)',
+    {},
+    async () => {
+      const { runDoctorAudit } = await import('@opencontrib/core');
+      const report = runDoctorAudit();
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'success',
+                report,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool 11: contrib_track_pr_status (Phase 7: PR 生命周期与维护者互动)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_track_pr_status',
+    'Analyze submitted PR CI checks, review status, and generate maintainer response templates',
+    {
+      prNumber: z.number().describe('Pull Request number'),
+      isOpen: z.boolean().describe('Whether PR is currently open'),
+      isMerged: z.boolean().describe('Whether PR has been merged'),
+      checkRuns: z
+        .array(
+          z.object({
+            name: z.string(),
+            status: z.string(),
+            conclusion: z.string().nullable(),
+          }),
+        )
+        .optional()
+        .describe('GitHub check runs status array'),
+      reviews: z
+        .array(
+          z.object({
+            state: z.string(),
+            author: z.string(),
+            body: z.string().optional(),
+          }),
+        )
+        .optional()
+        .describe('GitHub PR reviews array'),
+      commentsCount: z.number().optional().describe('Total review comments count'),
+    },
+    async (args) => {
+      const { analyzePrLifecycle } = await import('@opencontrib/core');
+      const status = analyzePrLifecycle(args);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'success',
+                lifecycle: status,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
   return server;
 }
