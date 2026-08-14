@@ -366,42 +366,45 @@ export function createOpenContribMcpServer(): McpServer {
   );
 
   // -------------------------------------------------------------
-  // Tool 8: contrib_sync_flywheel (本地资产：记忆库与Profile飞轮)
+  // Tool 8: contrib_sync_flywheel (飞轮同步与主页资产生成)
   // -------------------------------------------------------------
   server.tool(
     'contrib_sync_flywheel',
-    'Record contribution into local memory ledger and generate GitHub Profile README flywheel table and SVG badge',
+    'Record completed contribution to local memory ledger and render profile markdown & SVG badges',
     {
-      repoFullName: z.string().describe('Target repository, e.g. "vercel/next.js"'),
-      prUrl: z.string().describe('URL of submitted Pull Request'),
-      title: z.string().describe('Title of contribution'),
-      issueNumber: z.number().optional().describe('Associated issue number'),
+      repoFullName: z.string().describe('Repository full name (e.g. bytedance/flowgram.ai)'),
+      issueTitle: z.string().describe('Title of the issue or feature'),
+      prUrl: z.string().describe('URL of the opened pull request'),
+      issueNumber: z.number().optional().describe('Issue number if available'),
       prNumber: z.number().optional().describe('PR number if available'),
-      status: z.enum(['submitted', 'in_review', 'merged']).default('submitted'),
+      diffStat: z.string().optional().describe('Diff stats (e.g. +14 -2)'),
+      evidenceSummary: z.string().optional().describe('Summary of verification evidence'),
     },
     async (args) => {
+      const flywheel = new ProfileFlywheel();
+      const memory = new RepoMemoryLedger();
+
       memory.recordSuccess(args.repoFullName, {
+        title: args.issueTitle,
         prUrl: args.prUrl,
-        title: args.title,
         issueNumber: args.issueNumber,
         prNumber: args.prNumber,
       });
 
-      flywheel.saveRecord({
+      const record: ContributionRecord = {
         id: `${args.repoFullName}#${args.prNumber || Date.now()}`,
         repoFullName: args.repoFullName,
-        issueNumber: args.issueNumber,
-        issueTitle: args.title,
-        prNumber: args.prNumber,
+        issueTitle: args.issueTitle,
         prUrl: args.prUrl,
-        status: args.status,
+        issueNumber: args.issueNumber,
+        prNumber: args.prNumber,
+        status: 'submitted',
         submittedAt: new Date().toISOString(),
-        diffStat: 'Verified minimal patch',
-        evidenceSummary: 'Passed all gates and empirical evidence checks',
-      });
+        diffStat: args.diffStat,
+        evidenceSummary: args.evidenceSummary,
+      };
 
-      const markdown = flywheel.renderProfileMarkdown();
-      const svg = flywheel.renderBadgeSvg();
+      const result = flywheel.saveRecord(record);
 
       return {
         content: [
@@ -410,9 +413,46 @@ export function createOpenContribMcpServer(): McpServer {
             text: JSON.stringify(
               {
                 status: 'success',
-                message: 'Contribution recorded into memory ledger and flywheel synced.',
-                profileMarkdownPreview: markdown,
-                badgeSvgPreview: svg,
+                message: 'Flywheel synced and local memory ledger updated',
+                profileSnippet: result.profileSnippet,
+                totalContributions: result.allRecords.length,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool 9: contrib_purge_sandbox (沙箱与临时测试工作区一键清理)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_purge_sandbox',
+    'Purge all ephemeral git worktrees, temporary scratch test scripts, and cached bare repos',
+    {
+      cleanRepos: z.boolean().optional().describe('Whether to also delete bare repo cache (~/.opencontrib/repos)'),
+      cleanScratchDir: z.string().optional().describe('Optional path to local scratch directory to clean'),
+    },
+    async (args) => {
+      const { WorktreeManager } = await import('@opencontrib/core');
+      const manager = new WorktreeManager();
+      const report = manager.purgeAllWorkspaces({
+        cleanRepos: args.cleanRepos ?? false,
+        cleanScratchDir: args.cleanScratchDir,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'success',
+                message: 'Sandbox cleanup completed',
+                report,
               },
               null,
               2,

@@ -100,4 +100,60 @@ export class WorktreeManager {
       rmSync(workspacePath, { recursive: true, force: true });
     }
   }
+
+  purgeAllWorkspaces(options: {
+    cleanRepos?: boolean;
+    cleanScratchDir?: string;
+  } = {}): {
+    purgedWorkspaces: string[];
+    purgedScratchFiles: string[];
+    cleanedRepos: boolean;
+  } {
+    const { cleanRepos = false, cleanScratchDir } = options;
+    const purgedWorkspaces: string[] = [];
+    const purgedScratchFiles: string[] = [];
+
+    // 1. Purge all ephemeral worktrees in ~/.opencontrib/workspaces
+    if (existsSync(this.workspaceRoot)) {
+      const { readdirSync } = require('fs');
+      const items = readdirSync(this.workspaceRoot);
+      for (const item of items) {
+        const itemPath = join(this.workspaceRoot, item);
+        try {
+          rmSync(itemPath, { recursive: true, force: true });
+          purgedWorkspaces.push(item);
+        } catch {}
+      }
+    }
+
+    // 2. Optionally purge cached bare repos in ~/.opencontrib/repos
+    let cleanedRepos = false;
+    if (cleanRepos && existsSync(this.cacheRoot)) {
+      try {
+        rmSync(this.cacheRoot, { recursive: true, force: true });
+        mkdirSync(this.cacheRoot, { recursive: true });
+        cleanedRepos = true;
+      } catch {}
+    }
+
+    // 3. Clean temporary scratch directory if specified
+    if (cleanScratchDir && existsSync(cleanScratchDir)) {
+      const { readdirSync } = require('fs');
+      const scratchItems = readdirSync(cleanScratchDir);
+      for (const item of scratchItems) {
+        const itemPath = join(cleanScratchDir, item);
+        try {
+          rmSync(itemPath, { recursive: true, force: true });
+          purgedScratchFiles.push(item);
+        } catch {}
+      }
+    }
+
+    return {
+      purgedWorkspaces,
+      purgedScratchFiles,
+      cleanedRepos,
+    };
+  }
 }
+
