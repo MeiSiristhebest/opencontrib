@@ -42,7 +42,7 @@ export async function scoutOpportunities(
     const repo = repoMatch ? repoMatch[2] : '';
     const repoFullName = `${owner}/${repo}`;
 
-    // 1. Fetch comments for Anti-bandwagoning check
+    // 1. Fetch comments and timeline for Anti-bandwagoning and real linked PR check
     const rawComments = await client.getIssueComments(owner, repo, item.number);
     const comments = rawComments.map((c: any) => ({
       id: c.id,
@@ -50,6 +50,8 @@ export async function scoutOpportunities(
       user: { login: c.user?.login },
       created_at: c.created_at,
     }));
+
+    const existingLinkedPrsCount = await client.getIssueLinkedPrsCount(owner, repo, item.number);
 
     // 2. Run Qualification Check
     const labels = (item.labels || []).map((l: any) => (typeof l === 'string' ? l : l.name || ''));
@@ -62,16 +64,21 @@ export async function scoutOpportunities(
       assignees: (item.assignees || []).map((a: any) => a.login),
       createdAt: item.created_at,
       comments,
+      existingLinkedPrsCount,
     });
 
     if (!qualification.isQualified) {
       continue; // Filter out disqualified issues (claimed, already PR'd, or active author intent)
     }
 
-    // 3. Run Feasibility Assessment
+    // 3. Fetch real repository details (stars, default branch)
+    const repoDetails = await client.getRepoDetails(owner, repo);
+    if (repoDetails.isArchived) continue;
+
+    // 4. Run Feasibility Assessment
     const feasibility = assessFeasibility(item.title, item.body || '', labels, capabilities);
 
-    // 4. Calculate Base & Adjusted Match Score
+    // 5. Calculate Base & Adjusted Match Score
     let matchScore = 75; // Baseline
     const text = `${item.title} ${item.body || ''}`.toLowerCase();
     
@@ -87,7 +94,7 @@ export async function scoutOpportunities(
     if (adjustedScore >= profile.minMatchScore) {
       opportunities.push({
         repoFullName,
-        repoStars: item.reactions?.total_count || 0, // Fallback if repo stars not attached directly in search item
+        repoStars: repoDetails.stars,
         issueNumber: item.number,
         title: item.title,
         url: item.html_url,

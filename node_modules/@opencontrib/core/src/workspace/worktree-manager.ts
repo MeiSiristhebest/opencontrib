@@ -36,6 +36,24 @@ export class WorktreeManager {
     };
   }
 
+  detectDefaultBranch(sourceRepoPath: string): string {
+    // 1. Try to read symbolic-ref of origin/HEAD
+    const headResult = this.runGit(['-C', sourceRepoPath, 'symbolic-ref', 'refs/remotes/origin/HEAD']);
+    if (headResult.success && headResult.stdout.trim()) {
+      const match = headResult.stdout.trim().match(/refs\/remotes\/origin\/(.+)$/);
+      if (match) return match[1];
+    }
+
+    // 2. Check if main or master branch exists
+    const branchResult = this.runGit(['-C', sourceRepoPath, 'branch', '-a']);
+    if (branchResult.success) {
+      if (branchResult.stdout.includes('main')) return 'main';
+      if (branchResult.stdout.includes('master')) return 'master';
+    }
+
+    return 'main';
+  }
+
   createIsolatedWorkspace(input: {
     repoFullName: string;
     issueOrTaskId: string | number;
@@ -68,6 +86,8 @@ export class WorktreeManager {
       sourceRepoPath = cachedRepoPath;
     }
 
+    const defaultBranch = this.detectDefaultBranch(sourceRepoPath);
+
     // Create Git Worktree
     try {
       // Clean previous branch if it existed
@@ -93,10 +113,10 @@ export class WorktreeManager {
         baseRepoPath: sourceRepoPath,
       };
     } catch (err) {
-      // Fallback: If worktree add fails, clone regular working copy into workspace
+      // Fallback: If worktree add fails, clone regular working copy into workspace with detected default branch
       if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
       const cloneUrl = `https://github.com/${repoFullName}.git`;
-      this.runGit(['clone', '--depth', '1', '-b', 'main', cloneUrl, workspacePath]);
+      this.runGit(['clone', '--depth', '1', '-b', defaultBranch, cloneUrl, workspacePath]);
       this.runGit(['-C', workspacePath, 'checkout', '-b', branchName]);
 
       return {

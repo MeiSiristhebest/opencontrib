@@ -7,3 +7,5 @@ export * from './governance/index.js';
 export * from './memory/index.js';
 export * from './flywheel/index.js';
 export * from './orchestration/index.js';
+export * from './llm/index.js';
+export * from './github/index.js';

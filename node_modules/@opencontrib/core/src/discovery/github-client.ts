@@ -181,4 +181,71 @@ export class GitHubClient {
       return [];
     }
   }
+
+  async getRepoDetails(owner: string, repo: string): Promise<{
+    stars: number;
+    defaultBranch: string;
+    isFork: boolean;
+    isArchived: boolean;
+    description: string;
+  }> {
+    const cacheKey = `repo_details_${owner}_${repo}`;
+    const cached = this.getCached<any>(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const resp = await this.octokit.rest.repos.get({ owner, repo });
+      const details = {
+        stars: resp.data.stargazers_count ?? 0,
+        defaultBranch: resp.data.default_branch ?? 'main',
+        isFork: resp.data.fork ?? false,
+        isArchived: resp.data.archived ?? false,
+        description: resp.data.description ?? '',
+      };
+      this.setCache(cacheKey, details);
+      return details;
+    } catch {
+      return {
+        stars: 0,
+        defaultBranch: 'main',
+        isFork: false,
+        isArchived: false,
+        description: '',
+      };
+    }
+  }
+
+  async getIssueLinkedPrsCount(owner: string, repo: string, issue_number: number): Promise<number> {
+    const cacheKey = `issue_timeline_${owner}_${repo}_${issue_number}`;
+    const cached = this.getCached<number>(cacheKey);
+    if (cached !== null) return cached;
+
+    try {
+      const resp = await this.octokit.rest.issues.listEventsForTimeline({
+        owner,
+        repo,
+        issue_number,
+        per_page: 50,
+      });
+
+      let prCount = 0;
+      for (const event of resp.data) {
+        if (
+          event.event === 'cross-referenced' &&
+          (event as any).source?.issue?.pull_request
+        ) {
+          const prState = (event as any).source?.issue?.state;
+          if (prState === 'open') {
+            prCount++;
+          }
+        }
+      }
+
+      this.setCache(cacheKey, prCount);
+      return prCount;
+    } catch {
+      return 0;
+    }
+  }
 }
+
