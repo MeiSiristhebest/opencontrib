@@ -316,11 +316,11 @@ export function createOpenContribMcpServer(): McpServer {
   );
 
   // -------------------------------------------------------------
-  // Tool 7: contrib_render_pr_template (多厂融合 PR 模板渲染)
+  // Tool 7: contrib_render_pr_template (支持目标仓库原生模板融合或 Master 模板保底)
   // -------------------------------------------------------------
   server.tool(
     'contrib_render_pr_template',
-    'Render Google/VSCode/PyTorch/CloudWeGo/Linux DCO master PR description markdown',
+    'Render PR description markdown (merging into target repo native template if provided, or using master template)',
     {
       issueNumber: z.number().describe('Issue number'),
       problemSummary: z.string().describe('What problem this PR solves'),
@@ -329,23 +329,30 @@ export function createOpenContribMcpServer(): McpServer {
       reproductionCommand: z.string().describe('Command to reproduce bug baseline'),
       verificationCommand: z.string().describe('Command to verify fix passes'),
       testCount: z.number().describe('Total passing tests count'),
+      stressLoopCount: z.number().optional().describe('Stress loop iteration count'),
       dcoAuthorName: z.string().optional().describe('Author name for DCO Signed-off-by trailer if repo mandates it'),
       dcoAuthorEmail: z.string().optional().describe('Author email for DCO Signed-off-by trailer if repo mandates it'),
       conditionalAiRequired: z.boolean().optional().describe('Whether target repo mandates AI disclosure'),
+      nativeTemplateContent: z.string().optional().describe('Optional raw content of target repo .github/PULL_REQUEST_TEMPLATE.md'),
     },
     async (args) => {
-      const markdown = renderMasterPrTemplate({
-        issueNumber: args.issueNumber,
-        problemSummary: args.problemSummary,
-        rootCause: args.rootCause,
-        keyChanges: args.keyChanges,
-        reproductionCommand: args.reproductionCommand,
-        verificationCommand: args.verificationCommand,
-        testCount: args.testCount,
-        dcoAuthorName: args.dcoAuthorName,
-        dcoAuthorEmail: args.dcoAuthorEmail,
-        conditionalAiRequired: args.conditionalAiRequired,
-      });
+      const { buildPrDescription } = await import('@opencontrib/core');
+      const markdown = buildPrDescription(
+        {
+          issueNumber: args.issueNumber,
+          problemSummary: args.problemSummary,
+          rootCause: args.rootCause,
+          keyChanges: args.keyChanges,
+          reproductionCommand: args.reproductionCommand,
+          verificationCommand: args.verificationCommand,
+          testCount: args.testCount,
+          stressLoopCount: args.stressLoopCount,
+          dcoAuthorName: args.dcoAuthorName,
+          dcoAuthorEmail: args.dcoAuthorEmail,
+          conditionalAiRequired: args.conditionalAiRequired,
+        },
+        args.nativeTemplateContent,
+      );
 
       return {
         content: [
