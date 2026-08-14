@@ -91,12 +91,12 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
       reproductionCommand: 'act -j build (or push to branch for CI)',
       verificationCommand: 'rush check && rush lint',
       testCount: 48,
-      dcoAuthorName: 'Mei',
-      dcoAuthorEmail: 'mei@example.com',
+      dcoAuthorName: 'Contributor',
+      dcoAuthorEmail: 'contributor@example.com',
       conditionalAiRequired: false,
     });
 
-    expect(renderedPr).toContain('Mei <mei@example.com>');
+    expect(renderedPr).toContain('Contributor <contributor@example.com>');
     expect(renderedPr).toContain('Motivation');
     expect(renderedPr).not.toContain('I have carefully analyzed');
 

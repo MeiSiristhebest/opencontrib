@@ -111,7 +111,7 @@ Add the following to your MCP client config (`claude_desktop_config.json` / `ant
   "mcpServers": {
     "opencontrib": {
       "command": "bun",
-      "args": ["run", "E:/Mei/下载/cs/opencontrib/packages/mcp-server/src/index.ts"],
+      "args": ["run", "/path/to/opencontrib/packages/mcp-server/src/index.ts"],
       "env": {
         "GITHUB_TOKEN": "your_github_pat_here"
       }
