@@ -110,8 +110,28 @@ const server = Bun.serve({
       });
     }
 
+    // 6. API: Sandbox & Workspace Purge / Cleanup
+    if (url.pathname === '/api/cleanup' && req.method === 'POST') {
+      try {
+        const { WorktreeManager } = await import('@opencontrib/core');
+        const manager = new WorktreeManager();
+        const report = manager.purgeAllWorkspaces({
+          cleanRepos: false,
+          cleanScratchDir: join(__dirname, '..', '..', '..', 'scratch'),
+        });
+        return new Response(JSON.stringify({ status: 'success', report }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ status: 'error', message: err.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     return new Response('Not Found', { status: 404 });
   },
 });
 
-console.log(`\n🚀 OpenContrib Studio is running at: http://localhost:${PORT}`);
+console.log(`[OpenContrib Studio] Running at http://localhost:${PORT}`);
