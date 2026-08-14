@@ -12,6 +12,15 @@ export const IssueEvaluationSchema = z.object({
 
 export type IssueEvaluation = z.infer<typeof IssueEvaluationSchema>;
 
+export const CodeChangeFileSchema = z.object({
+  path: z.string(),
+  operation: z.enum(['CREATE', 'MODIFY', 'DELETE']),
+  content: z.string(),
+  explanation: z.string(),
+});
+
+export type CodeChangeFile = z.infer<typeof CodeChangeFileSchema>;
+
 export const PatchDraftSchema = z.object({
   title: z.string(),
   summary: z.string(),
@@ -22,12 +31,40 @@ export const PatchDraftSchema = z.object({
       reason: z.string(),
     }),
   ),
+  files: z.array(CodeChangeFileSchema).default([]),
   implementationSteps: z.array(z.string()),
   regressionTestPlan: z.array(z.string()),
   estimatedDiffLines: z.number(),
 });
 
 export type PatchDraft = z.infer<typeof PatchDraftSchema>;
+
+export const SubagentReviewEvaluationSchema = z.object({
+  maintainerPerspective: z.object({
+    acceptanceLikelihood: z.enum(['HIGH', 'MEDIUM', 'LOW']),
+    styleConformance: z.string(),
+    concerns: z.array(z.string()),
+  }),
+  securityPerspective: z.object({
+    vulnerabilitiesDetected: z.boolean(),
+    findings: z.array(z.string()),
+  }),
+  qaPerspective: z.object({
+    testAdequacy: z.string(),
+    flakyRisk: z.string(),
+  }),
+  confidenceBreakdown: z.object({
+    rootCause: z.number().min(0).max(100),
+    implementation: z.number().min(0).max(100),
+    regression: z.number().min(0).max(100),
+    defensiveCoverage: z.number().min(0).max(100),
+    testCoverage: z.number().min(0).max(100),
+    styleMatch: z.number().min(0).max(100),
+    securityAudit: z.number().min(0).max(100),
+  }),
+});
+
+export type SubagentReviewEvaluation = z.infer<typeof SubagentReviewEvaluationSchema>;
 
 export const PullRequestDraftSchema = z.object({
   title: z.string(),
@@ -39,12 +76,3 @@ export const PullRequestDraftSchema = z.object({
 });
 
 export type PullRequestDraft = z.infer<typeof PullRequestDraftSchema>;
-
-export const CodeChangeFileSchema = z.object({
-  path: z.string(),
-  operation: z.enum(['CREATE', 'MODIFY', 'DELETE']),
-  content: z.string(),
-  explanation: z.string(),
-});
-
-export type CodeChangeFile = z.infer<typeof CodeChangeFileSchema>;

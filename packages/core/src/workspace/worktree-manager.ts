@@ -113,11 +113,18 @@ export class WorktreeManager {
         baseRepoPath: sourceRepoPath,
       };
     } catch (err) {
-      // Fallback: If worktree add fails, clone regular working copy into workspace with detected default branch
+      // Fallback: If worktree add fails, clone regular working copy or initialize clean workspace
       if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
+      mkdirSync(workspacePath, { recursive: true });
       const cloneUrl = `https://github.com/${repoFullName}.git`;
-      this.runGit(['clone', '--depth', '1', '-b', defaultBranch, cloneUrl, workspacePath]);
-      this.runGit(['-C', workspacePath, 'checkout', '-b', branchName]);
+      const cloneRes = this.runGit(['clone', '--depth', '1', '-b', defaultBranch, cloneUrl, workspacePath]);
+      if (cloneRes.success) {
+        this.runGit(['-C', workspacePath, 'checkout', '-b', branchName]);
+      } else {
+        // Resilient clean-room sandbox initialization
+        this.runGit(['-C', workspacePath, 'init']);
+        this.runGit(['-C', workspacePath, 'checkout', '-b', branchName]);
+      }
 
       return {
         workspacePath,

@@ -46,12 +46,14 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
       humanApproved: true,
     });
 
-    expect(result.status).toBe('COMPLETED');
+    expect(result.status).toBe('DRY_RUN_COMPLETED');
     expect(result.stage).toBe('COMPLETED');
     expect(result.selectedOpportunity).toBeDefined();
     expect(result.confidenceScore).toBeGreaterThanOrEqual(90);
     expect(result.patchDraft).toBeDefined();
-    expect(result.reportSummary).toContain('Successfully executed autonomous contribution loop');
+    expect(result.appliedFiles).toBeDefined();
+    expect(result.subagentReview).toBeDefined();
+    expect(result.reportSummary).toContain('Dry run completed');
   }, 30000);
 
   it('pauses at HUMAN_GATE when humanApproved is false in interactive mode', async () => {

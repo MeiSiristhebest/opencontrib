@@ -134,4 +134,47 @@ export class HybridIssueRanker {
 
     return results.sort((a, b) => b.finalScore - a.finalScore);
   }
+
+  rankOpportunities(opportunities: Array<{
+    issueNumber: number;
+    title: string;
+    body?: string;
+    repoFullName: string;
+    matchScore: number;
+    labels?: string[];
+    [key: string]: any;
+  }>): Array<{ opportunity: any; finalScore: number }> {
+    return opportunities
+      .map((opp) => {
+        const fullText = `${opp.title} ${opp.body || ''}`.toLowerCase();
+        let keywordHits = 0;
+        for (const tech of this.profile.techStack) {
+          if (fullText.includes(tech.toLowerCase())) keywordHits++;
+        }
+        for (const area of this.profile.focusAreas) {
+          if (fullText.includes(area.toLowerCase())) keywordHits++;
+        }
+        const profileKeywordScore = Math.min(100, 50 + keywordHits * 12);
+        const feasibility = calculateOsFeasibility(
+          {
+            os: this.profile.os,
+            hasDocker: this.profile.hasDocker,
+            hasWsl: this.profile.os === 'wsl2',
+          },
+          opp.labels || [],
+          fullText,
+        );
+
+        const domainMatchScore = opp.matchScore || 80;
+        const finalScore = Math.round(
+          0.35 * profileKeywordScore + 0.35 * domainMatchScore + 0.30 * feasibility.feasibilityScore,
+        );
+
+        return {
+          opportunity: opp,
+          finalScore,
+        };
+      })
+      .sort((a, b) => b.finalScore - a.finalScore);
+  }
 }
