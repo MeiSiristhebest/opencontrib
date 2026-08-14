@@ -58,22 +58,38 @@ describe('Governance & Anti-AI Audit Engine', () => {
 
   it('enforces RFC 100-line diff gate', () => {
     const auditPass = auditGovernance({
-      diffText: 'const x = 1;',
-      prBodyText: 'Fixes bug cleanly without fluff.',
+      diffText: 'const clean = true;',
+      prBodyText: 'Fixes bug cleanly without robotic tags.',
       confidenceBreakdown: {
         rootCause: 95,
         implementation: 95,
-        regression: 95,
-        defensiveCoverage: 95,
-        testCoverage: 95,
+        regression: 90,
+        defensiveCoverage: 90,
+        testCoverage: 90,
         styleMatch: 95,
         securityAudit: 95,
       },
       lineCount: 45, // <= 100 lines
+      humanApproved: true,
     });
 
     expect(auditPass.isGatedPassed).toBe(true);
     expect(auditPass.rfcGatePassed).toBe(true);
+    expect(auditPass.requiresHumanApproval).toBe(false);
+
+    // Test that unapproved draft is gated
+    const auditUnapproved = auditGovernance({
+      diffText: 'const clean = true;',
+      prBodyText: 'Fixes bug cleanly.',
+      confidenceBreakdown: {
+        rootCause: 95, implementation: 95, regression: 90,
+        defensiveCoverage: 90, testCoverage: 90, styleMatch: 95, securityAudit: 95,
+      },
+      lineCount: 45,
+      humanApproved: false,
+    });
+    expect(auditUnapproved.isGatedPassed).toBe(false);
+    expect(auditUnapproved.requiresHumanApproval).toBe(true);
 
     const auditFailRfc = auditGovernance({
       diffText: 'const x = 1;',
@@ -88,6 +104,7 @@ describe('Governance & Anti-AI Audit Engine', () => {
         securityAudit: 95,
       },
       lineCount: 150, // > 100 lines
+      humanApproved: true,
     });
 
     expect(auditFailRfc.isGatedPassed).toBe(false);
@@ -95,7 +112,7 @@ describe('Governance & Anti-AI Audit Engine', () => {
     expect(auditFailRfc.remediationSuggestions[0]).toContain('exceeds 100 lines');
   });
 
-  it('renders multi-org Master PR template with DCO and zero AI smell', () => {
+  it('renders natural humanized PR template and bans robotic meta headers', () => {
     const template = renderMasterPrTemplate({
       issueNumber: 402,
       problemSummary: 'Null dereference on empty input',
@@ -109,10 +126,14 @@ describe('Governance & Anti-AI Audit Engine', () => {
     });
 
     expect(template).toContain('Null dereference on empty input');
-    expect(template).toContain('Google / ByteDance Standard');
-    expect(template).toContain('Microsoft VSCode / Meta PyTorch Standard');
+    expect(template).toContain('Verification');
     expect(template).toContain('Developer Name <dev@domain.com>');
+    expect(template).not.toContain('Google / ByteDance Standard');
     expect(template).not.toContain('I have carefully analyzed');
+
+    // Test that anti-AI scanner rejects robotic meta headers
+    const roboticCheck = lintAntiAiText('## Summary (Google / ByteDance Standard)');
+    expect(roboticCheck.isClean).toBe(false);
 
     // Test without DCO
     const cleanTemplate = renderMasterPrTemplate({

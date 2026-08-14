@@ -286,6 +286,7 @@ export function createOpenContribMcpServer(): McpServer {
       prBodyText: z.string().describe('Proposed PR body text'),
       diffLineCount: z.number().describe('Total number of modified/added lines in diff'),
       confidence: ConfidenceBreakdownSchema,
+      humanApproved: z.boolean().optional().describe('Whether the human user has previewed and explicitly approved the PR draft'),
     },
     async (args) => {
       const audit = auditGovernance({
@@ -293,6 +294,7 @@ export function createOpenContribMcpServer(): McpServer {
         prBodyText: args.prBodyText,
         confidenceBreakdown: args.confidence,
         lineCount: args.diffLineCount,
+        humanApproved: args.humanApproved ?? false,
       });
 
       return {

@@ -71,6 +71,7 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
         styleMatch: 95,
         securityAudit: 95,
       },
+      humanApproved: true,
     });
 
     expect(audit.isGatedPassed).toBe(true);
@@ -96,7 +97,7 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
     });
 
     expect(renderedPr).toContain('Mei <mei@example.com>');
-    expect(renderedPr).toContain('Google / ByteDance Standard');
+    expect(renderedPr).toContain('Motivation');
     expect(renderedPr).not.toContain('I have carefully analyzed');
 
     // 4. Memory & Flywheel Sync

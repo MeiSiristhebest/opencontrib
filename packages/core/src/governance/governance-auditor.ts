@@ -12,6 +12,14 @@ export const FORBIDDEN_AI_PHRASES = [
   '// helper function',
   '// this function fixes the bug',
   '// loop through items',
+  'google standard',
+  'bytedance standard',
+  'microsoft vscode standard',
+  'pytorch standard',
+  'cncf standard',
+  'linux foundation standard',
+  'i hope this meets your expectations',
+  'feel free to ask',
 ];
 
 export function lintAntiAiText(text: string): { isClean: boolean; flaggedPhrases: string[] } {
@@ -22,6 +30,12 @@ export function lintAntiAiText(text: string): { isClean: boolean; flaggedPhrases
     if (lower.includes(phrase)) {
       flaggedPhrases.push(phrase);
     }
+  }
+
+  // Regex to detect rigid robotic meta tags like "(... Standard)"
+  const roboticTagMatch = text.match(/\([A-Za-z0-9\s/]+\s+Standard\)/i);
+  if (roboticTagMatch) {
+    flaggedPhrases.push(roboticTagMatch[0]);
   }
 
   return {
@@ -58,7 +72,9 @@ export function calculateConfidenceScore(breakdown: ConfidenceBreakdown): {
 
   let weakest = dimensions[0];
   for (const d of dimensions) {
-    if (d.score < weakest.score) weakest = d;
+    if (d.score < weakest.score) {
+      weakest = d;
+    }
   }
 
   // Passing criteria: Overall >= 90 AND Weakest Dimension >= 80
@@ -76,10 +92,11 @@ export function auditGovernance(input: {
   prBodyText: string;
   confidenceBreakdown: ConfidenceBreakdown;
   lineCount: number;
+  humanApproved?: boolean;
 }): GovernanceAuditResult {
-  const { diffText, prBodyText, confidenceBreakdown, lineCount } = input;
+  const { diffText, prBodyText, confidenceBreakdown, lineCount, humanApproved = false } = input;
 
-  // 1. Anti-AI Linting on both code diff & PR body
+  // 1. Anti-AI & Anti-Robotic Linting on both code diff & PR body
   const aiDiffCheck = lintAntiAiText(diffText);
   const aiPrCheck = lintAntiAiText(prBodyText);
   const flaggedAiPhrases = [...aiDiffCheck.flaggedPhrases, ...aiPrCheck.flaggedPhrases];
@@ -91,11 +108,14 @@ export function auditGovernance(input: {
   // 3. Mathematical Confidence Calculation
   const confidence = calculateConfidenceScore(confidenceBreakdown);
 
-  const isGatedPassed = antiAiCheckPassed && rfcGatePassed && confidence.isPassed;
+  // 4. Human-in-the-Loop Pre-flight Gate
+  const requiresHumanApproval = !humanApproved;
+
+  const isGatedPassed = antiAiCheckPassed && rfcGatePassed && confidence.isPassed && humanApproved;
 
   const remediationSuggestions: string[] = [];
   if (!antiAiCheckPassed) {
-    remediationSuggestions.push(`Remove flagged AI phrases: ${flaggedAiPhrases.join(', ')}`);
+    remediationSuggestions.push(`Remove flagged robotic/AI phrases: ${flaggedAiPhrases.join(', ')}`);
   }
   if (!rfcGatePassed) {
     remediationSuggestions.push(`Diff exceeds 100 lines (${lineCount} lines). Split into RFC Discussion issue first.`);
@@ -105,11 +125,15 @@ export function auditGovernance(input: {
       `Confidence score requirement not met (Overall: ${confidence.overallScore}%, Weakest: ${confidence.weakestDimension.dimension} at ${confidence.weakestDimension.score}%). Must reach >=90% overall and >=80% on all dimensions.`,
     );
   }
+  if (requiresHumanApproval) {
+    remediationSuggestions.push('Pre-flight Human Gate: Draft requires explicit user preview and approval before submission.');
+  }
 
   return {
     overallScore: confidence.overallScore,
     weakestDimension: confidence.weakestDimension,
     isGatedPassed,
+    requiresHumanApproval,
     rfcGatePassed,
     diffLineCount: lineCount,
     antiAiCheckPassed,
@@ -147,19 +171,12 @@ export function renderMasterPrTemplate(data: {
 
   const hasDco = Boolean(dcoAuthorName && dcoAuthorEmail);
 
-  let doc = `## PR Type
-**Type:** \`[TOOLING/CI/BUGFIX]\`
+  let doc = `Fixes #${issueNumber}
 
-## Issue & RFC Links
-- **Fixes Issue:** Fixes #${issueNumber}
-
----
-
-## 1. Summary & Motivation (Google / ByteDance Standard)
-### What problem does this PR solve?
+### Motivation
 ${problemSummary}
 
-### Root Cause Analysis
+### Root Cause
 ${rootCause}
 
 ### Key Changes
@@ -167,35 +184,19 @@ ${keyChanges.map((c) => `- ${c}`).join('\n')}
 
 ---
 
-## 2. Reviewer Verification & Test Plan (Microsoft VSCode / Meta PyTorch Standard)
-### Step-by-Step Local Verification
-1. Run reproduction command: \`${reproductionCommand}\`
-2. Checkout branch and run verification: \`${verificationCommand}\`
-
-### Automated Test Suite Status
-- [x] **Unit & Integration Tests**: Passed (${testCount} passed, 0 failed)
-- [x] **Lint & Typecheck**: Clean
-
----
-
-## 3. Diagnostic & Performance Evidence (ByteDance CloudWeGo / CNCF Standard)
-- [x] **File Descriptor / Socket Leak Check**: Clean
-- [x] **Stress Test Loop**: Passed (${stressLoopCount} consecutive iterations clean)
-
----
-
-## 4. Release Notes (Kubernetes / Apache Standard)
-\`\`\`release-note
-NONE
-\`\`\`
+### Verification
+- **Local Reproduction**: \`${reproductionCommand}\`
+- **Verification Command**: \`${verificationCommand}\`
+- **Test Status**: Passed (${testCount} passed)
+- **Stress Loop**: Passed (${stressLoopCount} consecutive iterations)
 `;
 
   if (hasDco) {
-    doc += `\n---\n\n## 5. Author Compliance Checklist (Linux Foundation Standard)\n- [x] **Atomic Commit Hygiene**: Verified\n- [x] **Repo Style Alignment**: Verified\n- [x] **Developer Certificate of Origin (DCO)**: \`Signed-off-by: ${dcoAuthorName} <${dcoAuthorEmail}>\`\n`;
+    doc += `\n---\n\n### Compliance Checklist\n- [x] **Signed-off-by**: \`${dcoAuthorName} <${dcoAuthorEmail}>\`\n`;
   }
 
   if (conditionalAiRequired) {
-    doc += `\n---\n\n**AI Disclosure**: Initial patch logic drafted with AI assistance; independently reviewed, refactored, and verified by author.\n`;
+    doc += `\n---\n\n**AI Disclosure**: Initial patch drafted with AI assistance; independently reviewed, tested, and verified by author.\n`;
   }
 
   return doc;

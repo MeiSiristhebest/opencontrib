@@ -142,6 +142,7 @@ export const GovernanceAuditResultSchema = z.object({
     score: z.number(),
   }),
   isGatedPassed: z.boolean(),
+  requiresHumanApproval: z.boolean(),
   rfcGatePassed: z.boolean(),
   diffLineCount: z.number(),
   antiAiCheckPassed: z.boolean(),
