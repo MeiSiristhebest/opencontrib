@@ -182,3 +182,19 @@ export function assessFeasibility(
     rationale,
   };
 }
+
+export function calculateOsFeasibility(
+  env: { os: string; hasDocker?: boolean; hasWsl?: boolean },
+  labels: string[] = [],
+  text: string = '',
+): { feasibilityScore: number; isFeasible: boolean; penalty: number; reason?: string } {
+  const assessment = assessFeasibility(text, '', labels);
+  const score = Math.max(0, 100 - assessment.scorePenalty);
+  return {
+    feasibilityScore: score,
+    isFeasible: assessment.level !== 'impossible',
+    penalty: assessment.scorePenalty,
+    reason: assessment.rationale,
+  };
+}
+

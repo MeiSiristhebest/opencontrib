@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { existsSync, mkdirSync, rmSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
@@ -20,6 +20,20 @@ export class WorktreeManager {
 
     if (!existsSync(this.workspaceRoot)) mkdirSync(this.workspaceRoot, { recursive: true });
     if (!existsSync(this.cacheRoot)) mkdirSync(this.cacheRoot, { recursive: true });
+  }
+
+  private runGit(args: string[], cwd?: string): { success: boolean; stdout: string; stderr: string } {
+    const result = spawnSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30000,
+    });
+    return {
+      success: result.status === 0,
+      stdout: result.stdout || '',
+      stderr: result.stderr || '',
+    };
   }
 
   createIsolatedWorkspace(input: {
@@ -49,7 +63,7 @@ export class WorktreeManager {
       const cachedRepoPath = join(this.cacheRoot, sanitizedRepoName);
       if (!existsSync(cachedRepoPath)) {
         const cloneUrl = `https://github.com/${repoFullName}.git`;
-        execSync(`git clone --bare ${cloneUrl} "${cachedRepoPath}"`, { stdio: 'ignore' });
+        this.runGit(['clone', '--bare', cloneUrl, cachedRepoPath]);
       }
       sourceRepoPath = cachedRepoPath;
     }
@@ -57,13 +71,20 @@ export class WorktreeManager {
     // Create Git Worktree
     try {
       // Clean previous branch if it existed
-      try {
-        execSync(`git -C "${sourceRepoPath}" branch -D "${branchName}"`, { stdio: 'ignore' });
-      } catch {}
+      this.runGit(['-C', sourceRepoPath, 'branch', '-D', branchName]);
 
-      execSync(`git -C "${sourceRepoPath}" worktree add -B "${branchName}" "${workspacePath}" HEAD`, {
-        stdio: 'ignore',
-      });
+      const addResult = this.runGit([
+        '-C',
+        sourceRepoPath,
+        'worktree',
+        'add',
+        '-B',
+        branchName,
+        workspacePath,
+        'HEAD',
+      ]);
+
+      if (!addResult.success) throw new Error(addResult.stderr);
 
       return {
         workspacePath,
@@ -75,8 +96,8 @@ export class WorktreeManager {
       // Fallback: If worktree add fails, clone regular working copy into workspace
       if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
       const cloneUrl = `https://github.com/${repoFullName}.git`;
-      execSync(`git clone --depth 1 -b main ${cloneUrl} "${workspacePath}"`, { stdio: 'ignore' });
-      execSync(`git -C "${workspacePath}" checkout -b "${branchName}"`, { stdio: 'ignore' });
+      this.runGit(['clone', '--depth', '1', '-b', 'main', cloneUrl, workspacePath]);
+      this.runGit(['-C', workspacePath, 'checkout', '-b', branchName]);
 
       return {
         workspacePath,
@@ -91,9 +112,7 @@ export class WorktreeManager {
     if (!existsSync(workspacePath)) return;
 
     if (baseRepoPath && existsSync(baseRepoPath)) {
-      try {
-        execSync(`git -C "${baseRepoPath}" worktree remove --force "${workspacePath}"`, { stdio: 'ignore' });
-      } catch {}
+      this.runGit(['-C', baseRepoPath, 'worktree', 'remove', '--force', workspacePath]);
     }
 
     if (existsSync(workspacePath)) {

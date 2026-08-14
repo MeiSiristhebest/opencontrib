@@ -546,5 +546,45 @@ export function createOpenContribMcpServer(): McpServer {
     },
   );
 
+  // -------------------------------------------------------------
+  // Tool 12: contrib_assemble_context (上下文装配器: Issue + Repo + Memory + Environment)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_assemble_context',
+    'Assemble complete multi-dimensional context (problem context, repository skeletons, cognitive memory pitfalls, and host environment)',
+    {
+      repoFullName: z.string().describe('Target repository full name (e.g. bytedance/flowgram.ai)'),
+      issueTitle: z.string().describe('Title of the issue'),
+      issueBody: z.string().describe('Body description of the issue'),
+      issueNumber: z.number().optional().describe('Issue number if available'),
+      packageManifest: z.string().optional().describe('Optional package.json / Cargo.toml / go.mod content snippet'),
+      ciWorkflow: z.string().optional().describe('Optional CI workflow yaml snippet'),
+      primaryLanguage: z.string().optional().describe('Primary language of repository'),
+    },
+    async (args) => {
+      const { ContextAssembler } = await import('@opencontrib/core');
+      const assembler = new ContextAssembler();
+      const assembled = assembler.assemble(args);
+      const prompt = assembler.formatContextPrompt(assembled);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'success',
+                assembled,
+                formattedPrompt: prompt,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
   return server;
 }

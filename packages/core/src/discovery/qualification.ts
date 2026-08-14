@@ -129,8 +129,8 @@ export function qualifyIssue(input: {
       claimantDetails = `@${user} commented claim intent on ${comment.created_at}`;
     }
 
-    // Bot instruction capture
-    if (cBody.includes('cla') || cBody.includes('dco') || cBody.includes('contributor license agreement')) {
+    // Bot instruction capture with word-boundary regex to prevent false positives (e.g. "class", "cleanup")
+    if (/\bcla\b/i.test(cBody) || /\bdco\b/i.test(cBody) || cBody.includes('contributor license agreement')) {
       botRules.push('Requires CLA/DCO sign-off');
     }
   }
