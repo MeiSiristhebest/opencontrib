@@ -12,12 +12,13 @@ description: |
 
 ---
 
-## 🚨 四大铁律 (Four Immutable Governance Rules)
+## 🚨 五大铁律 (Five Immutable Governance Rules)
 
-1. **仓库固有规范优先 (Repo Convention Override)**：优先遵循目标仓库的 commit 风格、PR 模板与 DCO 签名要求。
-2. **条件式 AI 声明默认隐藏 (Conditional AI Disclosure)**：默认严禁添加 AI 声明与机器人口吻注释；仅当目标仓库明确强制要求时附带。
-3. **真实物证链标准 (Empirical Evidence Chain)**：严禁无证据裸提交。必须包含基线测试对比、20 次压力测试循环与资源句柄物证。
-4. **100 行 RFC 防卫门禁 (RFC 100-Line Gate)**：变更预估 > 100 行或涉及公开架构变动，强制阻断并转为提交 RFC Issue 讨论。
+1. **仓库固有规范优先 (Repo Convention Override)**：优先遵循目标仓库的 commit 风格、原生 PR 模板与 DCO 签名要求。
+2. **人机协作硬门禁 (Human-in-the-Loop Pre-Flight Gate)**：在调用 GitHub MCP 创建任何 Issue 或 PR 之前，**必须先将拟提交的完整标题与正文草案呈现给用户确认，未获明确指令前绝不可直接推送**！
+3. **自然工程师口吻 (Humanized Engineering Tone)**：严禁任何机械化模板标题（如“Google Standard”等标签），使用最自然、地道、清晰的资深工程师口吻书写，杜绝任何 AI Smell。
+4. **真实物证链标准 (Empirical Evidence Chain)**：严禁无证据裸提交。必须包含基线测试对比、20 次压力测试循环与资源句柄物证。
+5. **100 行 RFC 防卫门禁 (RFC 100-Line Gate)**：变更预估 > 100 行或涉及公开架构变动，强制阻断并转为提交 RFC Issue 讨论。
 
 ---
 
