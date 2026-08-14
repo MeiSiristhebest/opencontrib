@@ -1,0 +1,19 @@
+{
+  "name": "opencontrib-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "build": "bun run --filter '*' build",
+    "mcp": "bun run packages/mcp-server/src/index.ts",
+    "studio": "bun run packages/studio/src/server/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.3"
+  }
+}
