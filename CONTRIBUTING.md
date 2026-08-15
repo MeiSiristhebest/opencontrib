@@ -7,7 +7,7 @@ Thank you for your interest in contributing to OpenContrib! We are dedicated to 
 1. **Prerequisites**: Ensure you have [Bun](https://bun.sh) (v1.2+) installed.
 2. **Clone & Install**:
    ```bash
-   git clone https://github.com/opencontrib/opencontrib.git
+   git clone https://github.com/MeiSiristhebest/opencontrib.git
    cd opencontrib
    bun install
    ```

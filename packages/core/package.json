@@ -13,7 +13,14 @@
     "./evidence": "./src/evidence/index.ts",
     "./governance": "./src/governance/index.ts",
     "./memory": "./src/memory/index.ts",
-    "./flywheel": "./src/flywheel/index.ts"
+    "./flywheel": "./src/flywheel/index.ts",
+    "./orchestration": "./src/orchestration/index.ts",
+    "./llm": "./src/llm/index.ts",
+    "./github": "./src/github/index.ts",
+    "./sandbox": "./src/sandbox/index.ts",
+    "./run": "./src/run/index.ts",
+    "./storage": "./src/storage/index.ts",
+    "./risk": "./src/risk/index.ts"
   },
   "dependencies": {
     "@octokit/rest": "^21.1.1",

@@ -12,5 +12,7 @@ export * from './github/index.js';
 export * from './sandbox/index.js';
 export * from './run/index.js';
 export * from './storage/index.js';
+export * from './risk/index.js';
+
 
 
