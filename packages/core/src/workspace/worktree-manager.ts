@@ -123,27 +123,29 @@ export class WorktreeManager {
         baseRepoPath: sourceRepoPath,
       };
     } catch (err) {
-      // Fallback: If worktree add fails, clone regular working copy or initialize clean workspace
+      // Fallback: If worktree add fails, attempt direct single-branch clone into workspace
       if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
       mkdirSync(workspacePath, { recursive: true });
       const cloneUrl = `https://github.com/${repoFullName}.git`;
       const cloneRes = this.runGit(['clone', '--depth', '1', '-b', defaultBranch, cloneUrl, workspacePath]);
       if (cloneRes.success) {
         this.runGit(['-C', workspacePath, 'checkout', '-b', branchName]);
+        return {
+          workspacePath,
+          branchName,
+          isWorktree: false,
+          baseRepoPath: workspacePath,
+        };
       } else {
-        // Resilient clean-room sandbox initialization
-        this.runGit(['-C', workspacePath, 'init']);
-        this.runGit(['-C', workspacePath, 'checkout', '-b', branchName]);
+        // Clone failed: strictly fail-closed, refuse to masquerade as an empty repository
+        if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
+        throw new Error(
+          `Failed to create isolated workspace for ${repoFullName}: clone failed (${cloneRes.stderr || 'Network/Auth failure'}). Refusing to initialize empty repository.`,
+        );
       }
-
-      return {
-        workspacePath,
-        branchName,
-        isWorktree: false,
-        baseRepoPath: workspacePath,
-      };
     }
   }
+
 
   cleanupWorkspace(workspacePath: string, baseRepoPath?: string): void {
     if (!existsSync(workspacePath)) return;

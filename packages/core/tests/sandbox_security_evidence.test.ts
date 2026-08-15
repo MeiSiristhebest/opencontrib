@@ -207,4 +207,15 @@ describe('Evidence-Backed Quality Rubric & Subagent Review Decoupling', () => {
     expect(rubric.rubricResult.isPassed).toBe(true);
     expect(rubric.rubricResult.overallScore).toBeGreaterThanOrEqual(90);
   });
+
+  test('WorktreeManager strictly fails closed when cloning a nonexistent repository fails', () => {
+    const manager = new WorktreeManager();
+    expect(() => {
+      manager.createIsolatedWorkspace({
+        repoFullName: 'nonexistent-org-test-xyz/nonexistent-repo-99999',
+        issueOrTaskId: 'test-999',
+      });
+    }).toThrow('Failed to create isolated workspace');
+  });
 });
+

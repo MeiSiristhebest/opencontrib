@@ -321,7 +321,8 @@ Please diagnose the exact failure reason above and generate a revised surgical p
       }
     }
 
-    this.stateMachine.setReproductionCaptured(validationStatus === 'VALIDATED');
+    const isReproductionVerified = preFixReproductionCaptured && validationStatus === 'VALIDATED';
+    this.stateMachine.setReproductionCaptured(isReproductionVerified);
 
     // ─────────────────────────────────────────────────────────────
     // Phase 5: Adversarial Subagent Review & Evidence-Backed Quality Rubric
@@ -368,7 +369,7 @@ Please diagnose the exact failure reason above and generate a revised surgical p
     // Derive Evidence-Backed Quality Rubric without fake scores
     const isReviewAvailable = subagentReview.status === 'SUCCESS' && !!subagentReview.confidenceBreakdown;
     const { rubricResult: qualityRubric } = deriveEvidenceBackedQualityRubric({
-      hasReproductionAssertion: preFixReproductionCaptured || validationStatus === 'VALIDATED',
+      hasReproductionAssertion: isReproductionVerified,
       testsPassed: validationStatus === 'VALIDATED' || validationStatus === 'NO_TEST_AVAILABLE',
       passedTestsCount: evidenceReport?.passedUnitTestsCount || (validationStatus === 'VALIDATED' ? 1 : 0),
       diffLines: patchDraft.estimatedDiffLines,
@@ -376,6 +377,7 @@ Please diagnose the exact failure reason above and generate a revised surgical p
       securityScore: subagentReview.confidenceBreakdown?.securityAudit,
       subagentReviewAvailable: isReviewAvailable,
     });
+
 
     this.stateMachine.setConfidenceScore(qualityRubric.overallScore);
 

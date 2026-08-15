@@ -145,11 +145,24 @@ export class SandboxRuntime {
     let sandboxTempDir = '';
     try {
       sandboxTempDir = mkdtempSync(join(tmpdir(), 'opencontrib-sandbox-'));
-    } catch {
+    } catch (err: any) {
+      if (!allowHostFallback) {
+        return {
+          command: `${command} ${args.join(' ')}`.trim(),
+          exitCode: 126,
+          passed: false,
+          stdout: '',
+          stderr: `Sandbox initialization failed: Unable to create isolated scratch directory (${err.message}). Execution blocked (Fail-Closed).`,
+          output: `Sandbox initialization failed: Unable to create isolated scratch directory (${err.message}). Execution blocked (Fail-Closed).`,
+          isSandboxed: false,
+          isolationWarnings: ['Failed to create isolated scratch directory'],
+        };
+      }
       sandboxTempDir = tmpdir();
     }
 
     const sanitizedEnv = this.buildSanitizedEnvironment(sandboxTempDir);
+
 
     try {
       const spawnOptions: SpawnSyncOptionsWithStringEncoding = {
