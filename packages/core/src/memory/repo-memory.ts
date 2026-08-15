@@ -9,6 +9,11 @@ export interface ContributionSubmissionInput {
   title: string;
   prNumber?: number;
   issueNumber?: number;
+  provenance?: {
+    source: 'agent_claim' | 'github_verified' | 'system_recorded';
+    verified: boolean;
+    verifiedAt?: string;
+  };
 }
 
 export class RepoMemoryLedger {
@@ -73,7 +78,7 @@ export class RepoMemoryLedger {
 
   /**
    * Record that a PR has been opened/submitted.
-   * Does NOT mark as merged.
+   * Differentiates unverified agent claim vs verified fact.
    */
   recordSubmission(repoFullName: string, contrib: ContributionSubmissionInput): void {
     const entry = this.getMemory(repoFullName);
@@ -81,20 +86,49 @@ export class RepoMemoryLedger {
       (c) => (contrib.prNumber && c.prNumber === contrib.prNumber) || c.prUrl === contrib.prUrl,
     );
 
+    const prov = contrib.provenance || {
+      source: 'agent_claim' as const,
+      verified: false,
+    };
+
     if (existing) {
       existing.status = 'submitted';
       existing.title = contrib.title;
+      existing.provenance = prov;
       existing.submittedAt = existing.submittedAt || new Date().toISOString();
     } else {
       entry.successfulContributions.push({
         ...contrib,
         status: 'submitted',
+        provenance: prov,
         submittedAt: new Date().toISOString(),
       });
     }
 
     this.cache.set(repoFullName, entry);
     this.save();
+  }
+
+  /**
+   * Mark a contribution as verified through authoritative platform check.
+   */
+  verifyContribution(repoFullName: string, prNumberOrUrl: number | string): boolean {
+    const entry = this.getMemory(repoFullName);
+    const target = entry.successfulContributions.find(
+      (c) => (typeof prNumberOrUrl === 'number' ? c.prNumber === prNumberOrUrl : c.prUrl === prNumberOrUrl),
+    );
+
+    if (target) {
+      target.provenance = {
+        source: 'github_verified',
+        verified: true,
+        verifiedAt: new Date().toISOString(),
+      };
+      this.cache.set(repoFullName, entry);
+      this.save();
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -110,12 +144,22 @@ export class RepoMemoryLedger {
     if (target) {
       target.status = 'merged';
       target.mergedAt = now;
+      target.provenance = {
+        source: 'github_verified',
+        verified: true,
+        verifiedAt: now,
+      };
     } else {
       entry.successfulContributions.push({
         prUrl: typeof prNumberOrUrl === 'string' ? prNumberOrUrl : `https://github.com/${repoFullName}/pull/${prNumberOrUrl}`,
         prNumber: typeof prNumberOrUrl === 'number' ? prNumberOrUrl : undefined,
         title: `PR #${prNumberOrUrl}`,
         status: 'merged',
+        provenance: {
+          source: 'github_verified',
+          verified: true,
+          verifiedAt: now,
+        },
         submittedAt: now,
         mergedAt: now,
       });
@@ -148,7 +192,7 @@ export class RepoMemoryLedger {
   }
 
   /**
-   * Record review state (e.g. changes requested or approved).
+   * Record review state (e.g. changes requested or in_review).
    */
   recordReview(repoFullName: string, prNumberOrUrl: number | string, state: 'changes_requested' | 'in_review'): void {
     const entry = this.getMemory(repoFullName);

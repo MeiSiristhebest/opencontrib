@@ -95,7 +95,12 @@ describe('Contribution Run & Artifact Bundle Primitives', () => {
     expect(summary?.availableArtifactFiles).toContain('opportunity.json');
     expect(summary?.availableArtifactFiles).toContain('patch.diff');
     expect(summary?.availableArtifactFiles).toContain('evidence.json');
+    expect(summary?.events).toBeArray();
+    if (summary?.events && summary.events.length > 0) {
+      expect(summary.events[0].eventId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    }
   });
+
 
   it('resumes interrupted contribution run with state and suggested next action', () => {
     const customBase = makeTempDir();

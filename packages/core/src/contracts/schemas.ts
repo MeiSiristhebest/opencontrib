@@ -185,6 +185,11 @@ export const RepoMemoryEntrySchema = z.object({
     prUrl: z.string(),
     title: z.string(),
     status: z.enum(['submitted', 'in_review', 'changes_requested', 'merged', 'closed']).optional().default('submitted'),
+    provenance: z.object({
+      source: z.enum(['agent_claim', 'github_verified', 'system_recorded']).default('agent_claim'),
+      verified: z.boolean().default(false),
+      verifiedAt: z.string().optional(),
+    }).optional().default({ source: 'agent_claim', verified: false }),
     submittedAt: z.string().optional(),
     mergedAt: z.string().optional(),
     closedAt: z.string().optional(),
@@ -201,9 +206,15 @@ export const ContributionRecordSchema = z.object({
   prNumber: z.number().optional(),
   prUrl: z.string(),
   status: z.enum(['draft', 'submitted', 'in_review', 'merged', 'closed']),
+  provenance: z.object({
+    source: z.enum(['agent_claim', 'github_verified', 'system_recorded']).default('agent_claim'),
+    verified: z.boolean().default(false),
+    verifiedAt: z.string().optional(),
+  }).optional().default({ source: 'agent_claim', verified: false }),
   submittedAt: z.string(),
   mergedAt: z.string().optional(),
   diffStat: z.string(),
   evidenceSummary: z.string(),
 });
+
 export type ContributionRecord = z.infer<typeof ContributionRecordSchema>;

@@ -453,11 +453,15 @@ export function createOpenContribMcpServer(): McpServer {
       const flywheel = new ProfileFlywheel();
       const memory = new RepoMemoryLedger();
 
-      memory.recordSuccess(args.repoFullName, {
+      memory.recordSubmission(args.repoFullName, {
         title: args.issueTitle,
         prUrl: args.prUrl,
         issueNumber: args.issueNumber,
         prNumber: args.prNumber,
+        provenance: {
+          source: 'agent_claim',
+          verified: false,
+        },
       });
 
       const record: ContributionRecord = {
@@ -468,10 +472,15 @@ export function createOpenContribMcpServer(): McpServer {
         issueNumber: args.issueNumber,
         prNumber: args.prNumber,
         status: 'submitted',
+        provenance: {
+          source: 'agent_claim',
+          verified: false,
+        },
         submittedAt: new Date().toISOString(),
         diffStat: args.diffStat,
         evidenceSummary: args.evidenceSummary,
       };
+
 
       const result = flywheel.saveRecord(record);
 

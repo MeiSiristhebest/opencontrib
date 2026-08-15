@@ -12,7 +12,7 @@ describe('Memory & Profile Flywheel Engine', () => {
     expect(entry.pastFailures.length).toBeGreaterThan(0);
     expect(entry.pastFailures[entry.pastFailures.length - 1].reason).toBe('Test failed on Node 18');
 
-    memory.recordSuccess(testRepo, {
+    memory.recordSubmission(testRepo, {
       prUrl: 'https://github.com/test-org/test-repo/pull/1',
       title: 'fix: resolve memory leak',
       prNumber: 1,
@@ -21,8 +21,20 @@ describe('Memory & Profile Flywheel Engine', () => {
 
     const updated = memory.getMemory(testRepo);
     expect(updated.successfulContributions.length).toBeGreaterThan(0);
-    expect(updated.successfulContributions[0].title).toBe('fix: resolve memory leak');
+    const item = updated.successfulContributions[0];
+    expect(item.title).toBe('fix: resolve memory leak');
+    expect(item.status).toBe('submitted');
+    expect(item.provenance?.verified).toBe(false);
+    expect(item.provenance?.source).toBe('agent_claim');
+
+    // Verify and merge
+    memory.recordMerge(testRepo, 1);
+    const mergedEntry = memory.getMemory(testRepo).successfulContributions[0];
+    expect(mergedEntry.status).toBe('merged');
+    expect(mergedEntry.provenance?.verified).toBe(true);
+    expect(mergedEntry.provenance?.source).toBe('github_verified');
   });
+
 
   it('renders dynamic profile markdown and SVG badge in ProfileFlywheel', () => {
     const flywheel = new ProfileFlywheel();

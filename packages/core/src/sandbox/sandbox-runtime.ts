@@ -6,6 +6,7 @@ import { parseCommandSpec, type CommandSpec } from './command-spec.js';
 
 export interface SandboxExecutionOptions {
   cwd: string;
+  workspaceRoot?: string;
   command?: string;
   args?: string[];
   commandSpec?: CommandSpec;
@@ -144,7 +145,15 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
   }
 
   executeInSandbox(options: SandboxExecutionOptions): SandboxExecutionResult {
-    const { cwd, command, args = [], commandSpec, timeoutMs = this.defaultTimeoutMs, allowHostFallback = false } = options;
+    const {
+      cwd,
+      workspaceRoot,
+      command,
+      args = [],
+      commandSpec,
+      timeoutMs = this.defaultTimeoutMs,
+      allowHostFallback = false,
+    } = options;
 
     let finalCommand = command || '';
     let finalArgs = args;
@@ -160,6 +169,25 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
 
     const commandDisplay = `${finalCommand} ${finalArgs.join(' ')}`.trim();
 
+    // 1. Mandatory CWD & Workspace Boundary Enforcement
+    const resolvedCwd = resolve(cwd);
+    if (workspaceRoot) {
+      const resolvedRoot = resolve(workspaceRoot);
+      if (!this.isPathWithinBoundary(resolvedCwd, resolvedRoot)) {
+        return {
+          command: commandDisplay,
+          exitCode: 126,
+          passed: false,
+          stdout: '',
+          stderr: `Sandbox execution blocked: CWD "${resolvedCwd}" violates workspace boundary "${resolvedRoot}" (Path Traversal Protection / Fail-Closed).`,
+          output: `Sandbox execution blocked: CWD "${resolvedCwd}" violates workspace boundary "${resolvedRoot}" (Path Traversal Protection / Fail-Closed).`,
+          isSandboxed: false,
+          isolationWarnings: ['CWD traverses outside workspace boundary'],
+        };
+      }
+    }
+
+    // 2. Availability & Fail-Closed check
     const availability = this.getAvailability();
     if (!availability.available && !allowHostFallback) {
       return {
@@ -174,7 +202,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       };
     }
 
-    const resolvedCwd = resolve(cwd);
+    // 3. Isolated Scratch Directory Creation (Fail-Closed on failure)
     let sandboxTempDir = '';
     try {
       sandboxTempDir = mkdtempSync(join(tmpdir(), 'opencontrib-sandbox-'));
@@ -203,7 +231,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
         timeout: timeoutMs,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: sanitizedEnv,
-        shell: true,
+        shell: process.platform === 'win32', // Use shell wrapper only on Windows for .cmd batch dispatch
       };
 
       const result = spawnSync(finalCommand, finalArgs, spawnOptions);

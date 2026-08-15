@@ -293,11 +293,13 @@ export class AgentOrchestrator {
         }
       } else {
         validationStatus = 'NO_TEST_AVAILABLE';
-        validationPassed = true; // Proceed to human gate
+        validationPassed = false; // No automated tests executed; does not pretend to be validated
+        break; // No repair loop needed when no test command exists
       }
 
       // 3. If failed and attempts remain, trigger LLM Diagnose & Repair with REAL failure trace
-      if (!validationPassed && implementationAttempts < maxAttempts) {
+      if (!validationPassed && implementationAttempts < maxAttempts && validationStatus !== 'NO_TEST_AVAILABLE') {
+
         const repairPrompt = `${prompt}
 
 ### Sandboxed Validation Failure Trace (Attempt ${implementationAttempts}/${maxAttempts}):
@@ -370,13 +372,14 @@ Please diagnose the exact failure reason above and generate a revised surgical p
     const isReviewAvailable = subagentReview.status === 'SUCCESS' && !!subagentReview.confidenceBreakdown;
     const { rubricResult: qualityRubric } = deriveEvidenceBackedQualityRubric({
       hasReproductionAssertion: isReproductionVerified,
-      testsPassed: validationStatus === 'VALIDATED' || validationStatus === 'NO_TEST_AVAILABLE',
+      testsPassed: validationStatus === 'VALIDATED',
       passedTestsCount: evidenceReport?.passedUnitTestsCount || (validationStatus === 'VALIDATED' ? 1 : 0),
       diffLines: patchDraft.estimatedDiffLines,
       styleScore: subagentReview.confidenceBreakdown?.styleMatch,
       securityScore: subagentReview.confidenceBreakdown?.securityAudit,
       subagentReviewAvailable: isReviewAvailable,
     });
+
 
 
     this.stateMachine.setConfidenceScore(qualityRubric.overallScore);

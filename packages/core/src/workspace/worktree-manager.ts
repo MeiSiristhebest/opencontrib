@@ -68,11 +68,14 @@ export class WorktreeManager {
     repoFullName: string;
     issueOrTaskId: string | number;
     localRepoPath?: string;
+    runId?: string;
   }): WorkspaceContext {
-    const { repoFullName, issueOrTaskId, localRepoPath } = input;
+    const { repoFullName, issueOrTaskId, localRepoPath, runId } = input;
     const sanitizedRepoName = repoFullName.replace('/', '__');
-    const branchName = `opencontrib/fix-${issueOrTaskId}`;
-    const workspacePath = join(this.workspaceRoot, `${sanitizedRepoName}__${issueOrTaskId}`);
+    const runSuffix = runId ? `-${runId.replace(/[^a-zA-Z0-9]/g, '').slice(-6)}` : '';
+    const branchName = `opencontrib/fix-${issueOrTaskId}${runSuffix}`;
+    const workspacePath = join(this.workspaceRoot, `${sanitizedRepoName}__${issueOrTaskId}${runSuffix}`);
+
 
     // If workspace directory already exists, return it or clean it
     if (existsSync(workspacePath)) {

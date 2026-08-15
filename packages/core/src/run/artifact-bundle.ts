@@ -1,4 +1,6 @@
+import { randomUUID } from 'crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs';
+
 import { homedir } from 'os';
 import { basename, dirname, join, resolve, sep } from 'path';
 import type {
@@ -148,7 +150,7 @@ export class ArtifactBundleManager {
     const runDir = this.ensureRunDir(runId);
     const eventsPath = join(runDir, 'events.jsonl');
     const fullEvent: RunEvent = {
-      eventId: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      eventId: randomUUID(),
       runId,
       timestamp: new Date().toISOString(),
       ...event,
@@ -156,6 +158,7 @@ export class ArtifactBundleManager {
     appendFileSync(eventsPath, JSON.stringify(fullEvent) + '\n', 'utf-8');
     return fullEvent;
   }
+
 
   readEvents(runId: string): RunEvent[] {
     const runDir = this.getRunDir(runId);

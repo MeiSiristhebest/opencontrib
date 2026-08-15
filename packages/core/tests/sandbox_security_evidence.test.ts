@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { SandboxRuntime, defaultSandboxRuntime } from '../src/sandbox/sandbox-runtime.js';
+import { SandboxRuntime, SanitizedLocalSandboxProvider, defaultSandboxRuntime, defaultSandboxProvider } from '../src/sandbox/sandbox-runtime.js';
+
 import { WorktreeManager, MAX_GENERATED_FILES, MAX_GENERATED_FILE_CHARS } from '../src/workspace/worktree-manager.js';
 import { verifyDualStageReproduction } from '../src/evidence/evidence-collector.js';
 import { OpenAICompatibleProvider, MockLLMProvider, LLMService } from '../src/llm/llm-service.js';
@@ -217,5 +218,23 @@ describe('Evidence-Backed Quality Rubric & Subagent Review Decoupling', () => {
       });
     }).toThrow('Failed to create isolated workspace');
   });
+
+  test('SandboxProvider strictly blocks execution when cwd escapes workspaceRoot', () => {
+    const sandbox = new SanitizedLocalSandboxProvider();
+    const allowedRoot = join(tmpdir(), 'opencontrib-allowed-root');
+    const evilCwd = join(tmpdir(), 'opencontrib-other-dir');
+
+    const result = sandbox.executeInSandbox({
+      cwd: evilCwd,
+      workspaceRoot: allowedRoot,
+      command: 'echo "evil escape"',
+    });
+
+    expect(result.exitCode).toBe(126);
+    expect(result.passed).toBe(false);
+    expect(result.isSandboxed).toBe(false);
+    expect(result.stderr).toContain('violates workspace boundary');
+  });
 });
+
 

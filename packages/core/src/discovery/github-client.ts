@@ -437,4 +437,14 @@ export class GitHubClient {
       statusCode: res.statusCode,
     };
   }
+
+  /**
+   * Submit Pull Request adhering to GitHostPort contract.
+   */
+  async submitPullRequest(options: any): Promise<any> {
+    const { ContributionPrService } = await import('../github/contribution-pr-service.js');
+    const prService = new ContributionPrService(this);
+    return prService.submitPullRequest(options);
+  }
 }
+
