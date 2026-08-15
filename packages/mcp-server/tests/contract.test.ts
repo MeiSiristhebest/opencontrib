@@ -5,14 +5,13 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { createOpenContribMcpServer } from '../src/server.js';
 
-
 describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
   const server = createOpenContribMcpServer();
   const tools = (server as any)._registeredTools;
   const resources = (server as any)._registeredResources;
   const prompts = (server as any)._registeredPrompts;
 
-  it('verifies all 18 MCP tools have well-defined input schemas and handler functions', () => {
+  it('verifies all 20 MCP tools have well-defined input schemas and handler functions', () => {
     const expectedTools = [
       'contrib_scout',
       'contrib_rank_opportunity',
@@ -23,6 +22,8 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
       'contrib_prepare_workspace',
       'contrib_collect_evidence',
       'contrib_audit_governance',
+      'contrib_analyze_impact',
+      'contrib_diagnose_ci',
       'contrib_render_pr_template',
       'contrib_sync_flywheel',
       'contrib_track_pr_status',
@@ -34,11 +35,35 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
       'contrib_resume_run',
     ];
 
-    expect(Object.keys(tools).length).toBe(18);
+    expect(Object.keys(tools).length).toBe(20);
     for (const toolName of expectedTools) {
       expect(tools[toolName]).toBeDefined();
       expect(tools[toolName].handler).toBeFunction();
     }
+  });
+
+  it('contract test: contrib_analyze_impact catches cross-platform filepath.ToSlash traps', async () => {
+    const result = await tools['contrib_analyze_impact'].handler({
+      modifiedFiles: ['internal/tool/code_search.go'],
+      patchContent: '+normalized := filepath.ToSlash(path)',
+    });
+
+    expect(result.content).toBeDefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.analysis.isCompliant).toBe(false);
+    expect(parsed.analysis.crossPlatformHazards.length).toBeGreaterThan(0);
+  });
+
+  it('contract test: contrib_diagnose_ci parses multi-line CI test failures', async () => {
+    const result = await tools['contrib_diagnose_ci'].handler({
+      rawLogText: '--- FAIL: TestCodeSearch_RejectsBackslashPathTraversal (0.00s)\n    code_search_test.go:613: failed',
+    });
+
+    expect(result.content).toBeDefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.status).toBe('failure_detected');
+    expect(parsed.report.totalFailedTests).toBe(1);
+    expect(parsed.report.failedTests[0].testName).toBe('TestCodeSearch_RejectsBackslashPathTraversal');
   });
 
   it('contract test: contrib_rank_opportunity derives signals without prescribing decisions', async () => {
@@ -47,6 +72,11 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
         number: 101,
         title: 'fix: handle falsy value in cache',
         body: 'ShortCache returns undefined when cached value is false or 0',
+        labels: ['bug'],
+        createdAt: '2026-08-01T00:00:00Z',
+        commentsCount: 2,
+        isOpen: true,
+        assigneesCount: 0,
       },
       repository: {
         fullName: 'bytedance/flowgram.ai',
@@ -59,9 +89,9 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.status).toBe('success');
     expect(parsed.signals).toBeDefined();
-    expect(parsed.signals.score).toBeGreaterThan(0);
-    expect(parsed.signals.signals).toBeDefined();
-    expect(parsed.signals.reasons).toBeArray();
+    expect(typeof parsed.signals.signals.skillMatch).toBe('number');
+    expect(typeof parsed.signals.signals.environmentFeasibility).toBe('number');
+    expect(typeof parsed.signals.signals.issueActionability).toBe('number');
   });
 
   it('contract test: Run ID path traversal is strictly rejected across run tools', async () => {
@@ -154,7 +184,6 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
     expect(ws.baseCommitSha).toBeDefined();
     expect(ws.persistence?.saved).toBe(true);
 
-
     // Verify evidence boundary auto-resolution from runId
     const evResult = await tools['contrib_collect_evidence'].handler({
       cwd: ws.workspacePath,
@@ -171,14 +200,10 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
     } catch {}
   });
 
-
-  it('contract test: MCP resources (doctor, memory, runs) and prompt opencontrib_workflow_guide are registered', async () => {
+  it('contract test: MCP resources (doctor, memory, runs) and prompt opencontrib_workflow_guide are registered', () => {
     expect(resources['opencontrib://doctor']).toBeDefined();
     expect(resources['opencontrib://memory']).toBeDefined();
     expect(resources['opencontrib://runs']).toBeDefined();
-
     expect(prompts['opencontrib_workflow_guide']).toBeDefined();
   });
 });
-
-

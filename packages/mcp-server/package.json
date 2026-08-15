@@ -1,20 +1,40 @@
 {
-  "name": "@opencontrib/mcp-server",
+  "name": "opencontrib-mcp",
   "version": "1.0.0",
+  "description": "Agent-Native Open Source Contribution Engine & Model Context Protocol (MCP) Server",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
   "bin": {
-    "opencontrib-mcp": "./src/index.ts",
-    "opencontrib": "./src/index.ts"
+    "opencontrib-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist/index.js",
+    "README.md",
+    "package.json"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
   },
   "scripts": {
     "build": "bun build ./src/index.ts --target=node --outfile=./dist/index.js",
-    "setup": "bun run ./src/index.ts setup"
+    "prepublishOnly": "bun run build"
   },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "open-source",
+    "agentic-ai",
+    "claude",
+    "cursor",
+    "windsurf",
+    "antigravity"
+  ],
+  "author": "OpenContrib Contributors",
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",
-    "@opencontrib/core": "workspace:*",
     "zod": "^3.24.2"
   },
   "devDependencies": {

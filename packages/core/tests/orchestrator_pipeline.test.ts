@@ -1,9 +1,28 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeAll, describe, expect, it } from 'bun:test';
+import { spawnSync } from 'child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { LLMService, MockLLMProvider, MockOrDirectLLMProvider } from '../src/llm/llm-service.js';
 import { PatchDraftSchema } from '../src/contracts/llm-schemas.js';
 import { AgentOrchestrator } from '../src/orchestration/agent-orchestrator.js';
+import { OpenContribStorage } from '../src/storage/storage-layout.js';
 
 describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
+  beforeAll(() => {
+    // Seed cached repo for bytedance/flowgram.ai so tests run completely offline and network-resilient
+    const storage = OpenContribStorage.getInstance();
+    const cachedDir = join(storage.getHomeDir(), 'repos', 'bytedance__flowgram.ai');
+    if (!existsSync(join(cachedDir, '.git')) && !existsSync(join(cachedDir, 'HEAD'))) {
+      mkdirSync(cachedDir, { recursive: true });
+      spawnSync('git', ['init', '-b', 'main'], { cwd: cachedDir });
+      spawnSync('git', ['config', 'user.name', 'Tester'], { cwd: cachedDir });
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: cachedDir });
+      writeFileSync(join(cachedDir, 'package.json'), JSON.stringify({ name: 'flowgram.ai', version: '1.0.0' }));
+      spawnSync('git', ['add', '.'], { cwd: cachedDir });
+      spawnSync('git', ['commit', '-m', 'Initial commit'], { cwd: cachedDir });
+    }
+  });
+
   it('parses structured LLM output and validates against Zod schema', async () => {
     const validJson = JSON.stringify({
       title: 'fix(utils): prevent memory leak',

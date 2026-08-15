@@ -1,8 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
+  analyzePatchImpactAndConsistency,
   auditGovernance,
   ConfidenceBreakdownSchema,
+  parseCiRawLogs,
   ProfileFlywheel,
   renderMasterPrTemplate,
   RepoMemoryLedger,
@@ -75,6 +77,74 @@ export function registerGovernanceTools(
   );
 
   // -------------------------------------------------------------
+  // Tool: contrib_analyze_impact (360° 关联文件与跨平台防御扫描)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_analyze_impact',
+    'Analyze patch for cross-platform anti-patterns (e.g. filepath.ToSlash on Linux, CRLF regex bugs) and identify overlooked sibling files',
+    {
+      modifiedFiles: z.array(z.string()).describe('List of files modified in the patch'),
+      patchContent: z.string().describe('Git unified diff content'),
+      repoContextFiles: z.array(z.string()).optional().describe('Optional list of existing repository file paths for sister file detection'),
+    },
+    async (args) => {
+      const analysis = analyzePatchImpactAndConsistency({
+        modifiedFiles: args.modifiedFiles,
+        patchContent: args.patchContent,
+        repoContextFiles: args.repoContextFiles,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: analysis.isCompliant ? 'compliant' : 'warnings_found',
+                analysis,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool: contrib_diagnose_ci (GitHub Actions CI 失败日志秒级提取与诊断)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_diagnose_ci',
+    'Parse GitHub Actions or local CI terminal raw logs to extract exact failing test names, line numbers, and root-cause summaries without guessing',
+    {
+      rawLogText: z.string().describe('Raw terminal output or GitHub Actions step log'),
+      repoFullName: z.string().optional().describe('Target repository, e.g. "alibaba/open-code-review"'),
+      pullNumber: z.number().optional().describe('Pull request number'),
+    },
+    async (args) => {
+      const report = parseCiRawLogs(args.rawLogText);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: report.hasFailure ? 'failure_detected' : 'healthy',
+                report,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------
   // Tool: contrib_render_pr_template (六厂融合/仓库原生 PR 描述渲染)
   // -------------------------------------------------------------
   server.tool(
@@ -100,8 +170,8 @@ export function registerGovernanceTools(
         summary: args.summary,
         validationCommand: args.validationCommand,
         validationOutputSnippet: args.validationOutputSnippet,
-        confidenceScore: args.confidenceScore ?? 95,
-        riskLevel: args.riskLevel ?? 'LOW',
+        confidenceScore: args.confidenceScore,
+        riskLevel: args.riskLevel,
         isDocumentationOnly: args.isDocumentationOnly,
         aiDisclosureRequired: args.aiDisclosureRequired,
       });
@@ -125,54 +195,39 @@ export function registerGovernanceTools(
   );
 
   // -------------------------------------------------------------
-  // Tool: contrib_sync_flywheel (本地经验记忆库与 Profile 飞轮同步)
+  // Tool: contrib_sync_flywheel (飞轮沉淀与经验提炼)
   // -------------------------------------------------------------
   server.tool(
     'contrib_sync_flywheel',
-    'Record contribution success/failure in local memory ledger and update GitHub Profile README markdown',
+    'Persist completed or in-flight contribution memory, update developer skill weights, and refine repo-specific heuristics',
     {
-      repoFullName: z.string().describe('Target repository full name (e.g. "bytedance/flowgram.ai")'),
-      issueTitle: z.string().describe('Title of the issue worked on'),
-      prUrl: z.string().optional().describe('URL of submitted pull request if created'),
-      issueNumber: z.number().optional().describe('Target issue number'),
-      prNumber: z.number().optional().describe('Created pull request number'),
-      diffStat: z.string().optional().describe('Git diffstat string, e.g. "2 files changed, 14 insertions(+)"'),
-      evidenceSummary: z.string().optional().describe('Summary of verification evidence'),
-      failureReason: z.string().optional().describe('If contribution failed, the reason/pitfall encountered'),
-      feedbackNotes: z.string().optional().describe('Maintainer or CI feedback notes to remember for this repo'),
+      repoFullName: z.string().describe('Target repository, e.g. "bytedance/flowgram.ai"'),
+      record: z.object({
+        runId: z.string().describe('Unique contribution run identifier'),
+        issueNumber: z.number().optional().describe('GitHub issue number'),
+        prNumber: z.number().optional().describe('GitHub PR number if created'),
+        status: z.enum(['merged', 'open', 'closed', 'rejected', 'in_progress']).describe('Contribution state'),
+        techStack: z.array(z.string()).describe('Tech stack tags (e.g. ["typescript", "react"])'),
+        qualityRubricScore: z.number().min(0).max(100).describe('Evidence-backed confidence rubric score'),
+        maintainerFeedback: z.string().optional().describe('Maintainer review comments or bot feedback'),
+        failureLessons: z.string().optional().describe('Key insights or failure root causes learned during this run'),
+      }),
     },
     async (args) => {
-      memory.recordContribution({
+      const contributionRecord: ContributionRecord = {
+        runId: args.record.runId,
         repoFullName: args.repoFullName,
-        issueNumber: args.issueNumber,
-        prNumber: args.prNumber,
-        status: args.failureReason ? 'rejected' : 'merged',
-        failureReason: args.failureReason,
-        lessonsLearned: args.feedbackNotes ? [args.feedbackNotes] : undefined,
-        provenance: {
-          source: 'agent_claim',
-          verified: false,
-        },
-      });
-
-      const record: ContributionRecord = {
-        id: `${args.repoFullName}#${args.prNumber || Date.now()}`,
-        repoFullName: args.repoFullName,
-        issueTitle: args.issueTitle,
-        prUrl: args.prUrl,
-        issueNumber: args.issueNumber,
-        prNumber: args.prNumber,
-        status: 'submitted',
-        provenance: {
-          source: 'agent_claim',
-          verified: false,
-        },
-        submittedAt: new Date().toISOString(),
-        diffStat: args.diffStat,
-        evidenceSummary: args.evidenceSummary,
+        issueNumber: args.record.issueNumber,
+        prNumber: args.record.prNumber,
+        status: args.record.status,
+        techStack: args.record.techStack,
+        qualityRubricScore: args.record.qualityRubricScore,
+        maintainerFeedback: args.record.maintainerFeedback,
+        failureLessons: args.record.failureLessons,
+        timestamp: new Date().toISOString(),
       };
 
-      const result = flywheel.saveRecord(record);
+      const result = await flywheel.recordContribution(args.repoFullName, contributionRecord);
 
       return {
         content: [
@@ -181,9 +236,7 @@ export function registerGovernanceTools(
             text: JSON.stringify(
               {
                 status: 'success',
-                message: 'Flywheel synced and local memory ledger updated',
-                profileSnippet: result.profileSnippet,
-                totalContributions: result.allRecords.length,
+                flywheelResult: result,
               },
               null,
               2,
@@ -195,7 +248,7 @@ export function registerGovernanceTools(
   );
 
   // -------------------------------------------------------------
-  // Tool: contrib_track_pr_status (PR 审查与 CI 状态全景监控)
+  // Tool: contrib_track_pr_status (PR 状态与审查反馈追踪)
   // -------------------------------------------------------------
   server.tool(
     'contrib_track_pr_status',
