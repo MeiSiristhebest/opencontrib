@@ -156,7 +156,25 @@ describe('LLM Service Engineering & Provider Separation', () => {
     expect(parsed.title).toContain('surgical patch');
     expect(parsed.files.length).toBeGreaterThan(0);
   });
+
+  test('LLMService throws clear error when no provider is passed and no API key is in environment', () => {
+    const oldKey = process.env.OPENAI_API_KEY;
+    const oldLlmKey = process.env.LLM_API_KEY;
+    const oldAnthropic = process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.LLM_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+
+    try {
+      expect(() => new LLMService()).toThrow('No LLM Provider configured');
+    } finally {
+      if (oldKey) process.env.OPENAI_API_KEY = oldKey;
+      if (oldLlmKey) process.env.LLM_API_KEY = oldLlmKey;
+      if (oldAnthropic) process.env.ANTHROPIC_API_KEY = oldAnthropic;
+    }
+  });
 });
+
 
 describe('Evidence-Backed Quality Rubric & Subagent Review Decoupling', () => {
   test('calibrates conservative score when subagent review is unavailable (no fake 95 score)', () => {

@@ -2,7 +2,7 @@
 
 # 🚀 OpenContrib
 
-**The Agent-Native Open Source Contribution Engine, MCP Server & Visual Studio**
+**The Agent-Native Open Source Contribution Engine & MCP Server**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
@@ -11,42 +11,37 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
 
 <p align="center">
-  <b>A production-grade, 3-tier autonomous contribution system combining Agent Orchestration, Schema-First Intelligence, Deterministic Governance, Clean-room Sandboxes, and Claude-inspired Web Studio.</b>
+  <b>A composable, protocol-native contribution infrastructure providing autonomous Agents with discrete domain capabilities: Opportunity Signals, Worktree Isolation, Dual-Stage Evidence Verification, Anti-AI Governance, Run Persistence, and Profile Flywheel.</b>
 </p>
 
 </div>
 
 ---
 
-## 🌟 Overview
+## 🌟 Philosophy: Contribution Engine, Not Giant Agent
 
-**OpenContrib** is an intelligent, protocol-native infrastructure engine designed to help autonomous agents (and human developers) make high-quality, high-trust contributions to open-source software.
+OpenContrib does **not** attempt to replace the external reasoning AI (Claude Code, Cursor, Codex, Devin, Antigravity). Instead, it follows a strict separation of concerns:
 
-Unlike unconstrained coding agents that spam repositories with hallucinated or low-quality changes, OpenContrib enforces rigorous **governance gates, clean-room sandboxes, and empirical failure assertion verification** before any code is proposed.
-
+```text
+                       External AI Agent (Brain)
+        ┌───────────────────────────────────────────────────────┐
+        │ Claude Code / Cursor / Codex / Devin / Antigravity    │
+        └──────────────────────────┬────────────────────────────┘
+                                   │
+                   Autonomous Reasoning & Decisions
+                                   │
+                  ┌────────────────┴────────────────┐
+                  │                                 │
+            GitHub MCP                       OpenContrib MCP
+                  │                                 │
+       Native GitHub API State              Contribution Engine
+  (Issues, PRs, Comments, Repo State)  (Sandbox, Evidence, Governance, Runs)
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                   Layer 1: Agent Runtime & Orchestration                    │
-│      ContributionStateMachine (状态机) + ExecutionPolicyEngine (策略引擎)    │
-│      (Supports: interactive, dry_run, draft_only, local_artifacts, autonomous) │
-└────────────────────────────────────┬────────────────────────────────────────┘
-                                     │
-┌────────────────────────────────────▼────────────────────────────────────────┐
-│                 Layer 2: Contribution Intelligence Layer                    │
-│  - ContextAssembler: Integrates Problem + Repo Skeleton + Cognitive Memory │
-│  - HybridIssueRanker: Profile Keywords + OS Feasibility + Timeline PR Match │
-│  - Schema-First LLM: Typed Zod Contracts + Automated Repair Loop            │
-│  - Subagent Review: 7-Dimension Mathematical Confidence Score >= 90%        │
-└────────────────────────────────────┬────────────────────────────────────────┘
-                                     │
-┌────────────────────────────────────▼────────────────────────────────────────┐
-│                 Layer 3: Deterministic Tooling & Safe Sandbox               │
-│  - WorktreeManager: Parameterized spawnSync git worktree clean-room sandbox │
-│  - EvidenceCollector: Empirical failure assertion capture + 20x stress loop │
-│  - Multi-Ecosystem Probes: Go / Rust / Python / Java / CMake / Security     │
-│  - PR Pipeline: Native template merger + GitHub Git Data API submissions    │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+
+- **External Agent**: Makes high-level decisions, reasons about code, and writes patches.
+- **GitHub MCP**: Reads and mutates GitHub repository state.
+- **OpenContrib MCP**: Supplies objective feasibility signals, isolated Git Worktree sandboxes, pre-fix to post-fix dual-stage empirical evidence verification, anti-AI governance linter, and structured run persistence.
+- *(Internal Core retains a lightweight GitHub adapter strictly for standalone local workflow execution)*.
 
 ---
 
@@ -55,8 +50,8 @@ Unlike unconstrained coding agents that spam repositories with hallucinated or l
 ```
 opencontrib/
 ├── packages/
-│   ├── core/           # 🧠 Domain logic, State Machine, Context Assembler, Sandboxes
-│   ├── mcp-server/     # 🔌 12 MCP Tools for Claude Code, Cursor, Antigravity
+│   ├── core/           # 🧠 Domain logic: Runs, Artifacts, Sandbox, Evidence, Governance, Storage
+│   ├── mcp-server/     # 🔌 18 Tools + 3 Resources + 1 Prompt for MCP Clients
 │   └── studio/         # 🎨 Obsidian/Claude-themed Native Web Control Studio
 ├── skills/             # 📜 Master Open-Source Contributor Skill
 └── package.json        # 🛠️ Root Monorepo configuration
@@ -66,43 +61,23 @@ opencontrib/
 
 ## ⚡ Quick Start
 
-### 1. Installation & Test Suite
-
 ```bash
 # Clone the repository
-git clone https://github.com/opencontrib/opencontrib.git
+git clone https://github.com/MeiSiristhebest/opencontrib.git
 cd opencontrib
 
 # Install dependencies via Bun
 bun install
 
-# Run all 12 test suites (31 unit & integration tests)
+# Run full test suite (15 test suites, 64 tests)
 bun test
 ```
-
-### 2. Launching OpenContrib Studio Web UI
-
-OpenContrib Studio provides an interactive, beautiful visual cockpit:
-
-```bash
-bun run studio
-# 🚀 OpenContrib Studio is running at: http://localhost:4173
-```
-
-Features included in Studio:
-- **Opportunities Radar**: Scan repositories for qualified, unclaimed bugs.
-- **7-Stage Lifecycle Tracker**: Real-time progress bar from Phase 0 to Phase 7.
-- **Visual Code Diff Review**: Inspect proposed patch before approving submission.
-- **Flywheel Dashboard**: View total contributions, merged PRs, and SVG badges.
-- **One-Click Sandbox Cleanup**: Purge ephemeral worktrees and test logs.
 
 ---
 
 ## 🔌 Model Context Protocol (MCP) Setup
 
-OpenContrib exposes **12 zero-token domain tools** compatible with any MCP client (Claude Desktop, Cursor, Claude Code, Antigravity).
-
-Add the following to your MCP client config (`claude_desktop_config.json` / `antigravity.json`):
+Add OpenContrib to your MCP client configuration (`claude_desktop_config.json` / `antigravity.json`):
 
 ```json
 {
@@ -111,35 +86,34 @@ Add the following to your MCP client config (`claude_desktop_config.json` / `ant
       "command": "bun",
       "args": ["run", "/path/to/opencontrib/packages/mcp-server/src/index.ts"],
       "env": {
-        "GITHUB_TOKEN": "your_github_personal_access_token_here"
+        "GITHUB_TOKEN": "your_github_token_here"
       }
     }
   }
 }
 ```
 
-### Available MCP Tools:
-1. `contrib_scout`: Scout high-match, unclaimed GitHub issues with real stargazer counts.
-2. `contrib_probe`: Deep multi-ecosystem repository hygiene diagnostic scanner.
-3. `contrib_assemble_context`: Assemble problem, repo skeleton, memory pitfalls & host environment.
-4. `contrib_prepare_workspace`: Allocate an isolated, zero-pollution Git Worktree sandbox.
-5. `contrib_collect_evidence`: Run flaky test baseline isolation and 20x stress loops.
-6. `contrib_audit_governance`: 100-line RFC gate, anti-robotic linter, and 7D confidence math.
-7. `contrib_render_pr_template`: Intelligently merge into target repository native templates.
-8. `contrib_sync_flywheel`: Synchronize local memory ledger and render profile SVG badge.
-9. `contrib_purge_sandbox`: Garbage collection for temporary worktrees and test scripts.
-10. `contrib_doctor`: Audit host environment health (Git, Node/Bun, Docker, WSL).
-11. `contrib_track_pr_status`: Phase 7 CI tracking and maintainer review reply generator.
+### Protocol Capabilities: 18 Tools, 3 Resources, 1 Prompt
+
+| Category | Primitives | Description |
+| :--- | :--- | :--- |
+| **Run & Session** | `contrib_create_run`<br>`contrib_save_artifact`<br>`contrib_get_run`<br>`contrib_resume_run` | Structured session tracking under `~/.opencontrib/runs/<runId>/` with full crash resume. |
+| **Discovery & Feasibility** | `contrib_scout`<br>`contrib_rank_opportunity`<br>`contrib_qualify_issue`<br>`contrib_assess_feasibility`<br>`contrib_diagnose_manifests` | Objective multi-dimensional probability signals (skill, OS feasibility, actionability) without prescribing decisions. |
+| **Context & Workspace** | `contrib_assemble_context`<br>`contrib_prepare_workspace`<br>`contrib_purge_sandbox` | Problem skeleton + reading order + target tests + isolated Git worktree sandbox. |
+| **Evidence & Governance** | `contrib_collect_evidence`<br>`contrib_audit_governance`<br>`contrib_render_pr_template` | Pre-fix failure assertion + post-fix 20x stress loop; 100-line gate + anti-AI audit. |
+| **Flywheel & Lifecycle** | `contrib_sync_flywheel`<br>`contrib_track_pr_status`<br>`contrib_doctor` | Memory ledger, PR lifecycle tracking, and host environment diagnostic. |
+| **Resources** | `opencontrib://doctor`<br>`opencontrib://memory`<br>`opencontrib://runs` | Zero-token instant context injection for host health, repo pitfalls, and run history. |
+| **Prompts** | `opencontrib_workflow_guide` | Standard 9-step Phase-Gated execution protocol for autonomous Agents. |
 
 ---
 
-## 🛡️ Core Governance Principles
+## 🛡️ Core Verification & Governance Principles
 
-1. **Repo Convention Override**: Always inspect and prioritize target repo `.github/PULL_REQUEST_TEMPLATE.md` and `CONTRIBUTING.md`.
-2. **100-Line RFC Gate**: Surgical minimal fixes; any patch exceeding 100 lines must be gated for RFC approval.
-3. **Empirical Evidence Required**: Must include verifiable Red-to-Green assertion proof.
-4. **Anti-Bandwagoning**: Respect 7-day author intention rights and avoid claiming issues already being worked on.
-5. **Human-in-the-Loop Approval**: In interactive mode, PR creation is physically blocked until explicit user consent.
+1. **Credential-Isolated Local Execution Environment**: Test and benchmark execution runs with stripped credentials (`~/.ssh`, `~/.aws`, `~/.npmrc`, `GH_TOKEN` purged), redirected `HOME`/`TMPDIR`, and restricted working-directory boundaries.
+2. **Dual-Stage Empirical Verification**: Contributions require capturing pre-fix failure baseline assertions and verifying clean 20x stress loop execution post-fix.
+3. **100-Line RFC Gate**: Surgical minimal bugfixes; patches exceeding 100 lines require explicit human/RFC approval.
+4. **Anti-Bandwagoning & Author Rights**: Enforces 7-day original author priority rights and blocks claiming already assigned issues.
+5. **Human-in-the-Loop Gate**: All submissions remain draft-safe until explicit user confirmation.
 
 ---
 

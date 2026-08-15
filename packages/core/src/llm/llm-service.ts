@@ -183,13 +183,15 @@ export class LLMService {
   constructor(provider?: LLMProvider) {
     if (provider) {
       this.provider = provider;
-    } else if (process.env.OPENAI_API_KEY || process.env.LLM_API_KEY) {
+    } else if (process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || process.env.ANTHROPIC_API_KEY) {
       this.provider = new OpenAICompatibleProvider();
     } else {
-      // Default to MockLLMProvider in test/dev environment with transparent designation
-      this.provider = new MockLLMProvider();
+      throw new Error(
+        'LLMService: No LLM Provider configured. Pass an explicit provider (e.g. new OpenAICompatibleProvider() or new MockLLMProvider() in tests) or set OPENAI_API_KEY / LLM_API_KEY.',
+      );
     }
   }
+
 
   getProvider(): LLMProvider {
     return this.provider;

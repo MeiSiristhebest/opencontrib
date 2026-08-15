@@ -187,14 +187,18 @@ export function verifyEmpiricalReproduction(input: {
   }
 
   const full = res.output;
-  const hasFailureFlag =
-    !res.passed || /BUG CONFIRMED|FAILED|FAIL|assertion failed|error|TypeError|AssertionError/i.test(full);
+  // Guard against common false positives such as "0 errors", "0 failed", or benign mentions of error handling
+  const isFalsePositiveZeroError = /\b0\s+(errors?|failed|failures)\b/i.test(full) && !/\b[1-9]\d*\s+(errors?|failed|failures)\b/i.test(full);
+  const isRealFailurePattern = /(?:BUG CONFIRMED|\bFAILED\b|\bFAIL\b|assertion failed|\berror:|TypeError:|AssertionError:|panic:|\bstack trace:)/i.test(full);
+
+  const hasFailureFlag = !res.passed || (isRealFailurePattern && !isFalsePositiveZeroError);
 
   return {
     isFailingOnBaseline: hasFailureFlag,
     baselineOutput: full,
     assertionCaptured: hasFailureFlag,
   };
+
 }
 
 export function capturePreFixAssertion(cwd: string, testCommand: string) {

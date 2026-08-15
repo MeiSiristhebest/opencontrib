@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { LLMService, MockOrDirectLLMProvider } from '../src/llm/llm-service.js';
+import { LLMService, MockLLMProvider, MockOrDirectLLMProvider } from '../src/llm/llm-service.js';
 import { PatchDraftSchema } from '../src/contracts/llm-schemas.js';
 import { AgentOrchestrator } from '../src/orchestration/agent-orchestrator.js';
 
@@ -26,13 +26,15 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     expect(result.data.targetFiles.length).toBe(1);
   });
 
-  it('runs full AgentOrchestrator contribution pipeline in dry_run mode', async () => {
+  it('runs full AgentOrchestrator contribution pipeline with explicit MockLLMProvider in dry_run mode', async () => {
+    const mockLlm = new LLMService(new MockLLMProvider());
     const orchestrator = new AgentOrchestrator({
       policy: {
         mode: 'dry_run',
         allowRealPr: false,
         autoPurgeSandboxOnFinish: true,
       },
+      llmService: mockLlm,
     });
 
     const result = await orchestrator.runPipeline({
@@ -57,11 +59,13 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
   }, 60000);
 
   it('pauses at HUMAN_GATE when humanApproved is false in interactive mode', async () => {
+    const mockLlm = new LLMService(new MockLLMProvider());
     const orchestrator = new AgentOrchestrator({
       policy: {
         mode: 'interactive',
         allowRealPr: false,
       },
+      llmService: mockLlm,
     });
 
     const result = await orchestrator.runPipeline({
@@ -79,5 +83,29 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     expect(result.stage).toBe('HUMAN_GATE');
     expect(result.confidenceScore).toBeGreaterThanOrEqual(90);
     expect(result.reportSummary).toContain('Awaiting human');
+  }, 60000);
+
+  it('strictly blocks execution when no LLM provider is configured (no fake patches)', async () => {
+    const orchestratorWithoutLlm = new AgentOrchestrator({
+      policy: {
+        mode: 'dry_run',
+        allowRealPr: false,
+      },
+    });
+
+    const result = await orchestratorWithoutLlm.runPipeline({
+      profile: {
+        techStack: ['typescript', 'react'],
+        proficiency: 'intermediate',
+        focusAreas: ['tooling', 'dx'],
+        minMatchScore: 50,
+      },
+      targetRepo: 'bytedance/flowgram.ai',
+      humanApproved: true,
+    });
+
+    expect(result.status).toBe('BLOCKED');
+    expect(result.stage).toBe('PATCH_DESIGN');
+    expect(result.reportSummary).toContain('Pipeline halted');
   }, 60000);
 });

@@ -78,7 +78,7 @@ export class AgentOrchestrator {
   private flywheel: ProfileFlywheel;
   private worktreeManager: WorktreeManager;
   private prService: ContributionPrService;
-  private llmService: LLMService;
+  private llmService?: LLMService;
   private contextAssembler: ContextAssembler;
   private stateMachine: ContributionStateMachine;
 
@@ -92,10 +92,19 @@ export class AgentOrchestrator {
     this.flywheel = new ProfileFlywheel();
     this.worktreeManager = new WorktreeManager();
     this.prService = new ContributionPrService(this.client);
-    this.llmService = options.llmService || new LLMService();
+    if (options.llmService) {
+      this.llmService = options.llmService;
+    } else {
+      try {
+        this.llmService = new LLMService();
+      } catch {
+        this.llmService = undefined;
+      }
+    }
     this.contextAssembler = new ContextAssembler(this.memory);
     this.stateMachine = new ContributionStateMachine(options.policy);
   }
+
 
   async runPipeline(input: {
     profile: UserProfile;
@@ -196,17 +205,19 @@ export class AgentOrchestrator {
     // Initial Schema-First LLM Patch Generation
     let patchDraft: PatchDraft | null = null;
 
-    try {
-      const llmResult = await this.llmService.generateStructured({
-        prompt: `${prompt}\n\nPlease generate a minimal surgical patch conforming strictly to PatchDraftSchema JSON with concrete code files in the 'files' array.`,
-        schema: PatchDraftSchema,
-      });
-      patchDraft = llmResult.data;
-    } catch {
-      // LLM Error
+    if (this.llmService) {
+      try {
+        const llmResult = await this.llmService.generateStructured({
+          prompt: `${prompt}\n\nPlease generate a minimal surgical patch conforming strictly to PatchDraftSchema JSON with concrete code files in the 'files' array.`,
+          schema: PatchDraftSchema,
+        });
+        patchDraft = llmResult.data;
+      } catch {
+        // LLM Error
+      }
     }
 
-    // P0: Do NOT generate fake placeholder patches if LLM fails!
+    // P0: Do NOT generate fake placeholder patches if LLM fails or is unconfigured!
     if (!patchDraft || !patchDraft.files || patchDraft.files.length === 0) {
       this.stateMachine.transition('BLOCKED', 'LLM Patch generation failed or generated empty patch');
       return {
@@ -214,9 +225,10 @@ export class AgentOrchestrator {
         stage: 'PATCH_DESIGN',
         selectedOpportunity: selectedOpp,
         workspacePath: workspace.workspacePath,
-        reportSummary: 'Pipeline halted: LLM failed to produce a valid surgical patch draft. Refusing to inject fake placeholder files.',
+        reportSummary: 'Pipeline halted: No valid surgical patch produced. Refusing to inject fake placeholder files.',
       };
     }
+
 
     // ─────────────────────────────────────────────────────────────
     // Phase 3 - 4: Observe -> Physical Edit (with Boundary Check) -> Run Test -> Diagnose -> Replan Loop
@@ -329,26 +341,29 @@ Please diagnose the exact failure reason above and generate a revised surgical p
       status: 'UNAVAILABLE',
     };
 
-    try {
-      const reviewResult = await this.llmService.generateStructured({
-        prompt: reviewPrompt,
-        schema: SubagentReviewEvaluationSchema,
-      });
-      if (reviewResult.data && (reviewResult.data as any).confidenceBreakdown) {
+    if (this.llmService) {
+      try {
+        const reviewResult = await this.llmService.generateStructured({
+          prompt: reviewPrompt,
+          schema: SubagentReviewEvaluationSchema,
+        });
+        if (reviewResult.data && (reviewResult.data as any).confidenceBreakdown) {
+          subagentReview = {
+            status: 'SUCCESS',
+            maintainerPerspective: (reviewResult.data as any).maintainerPerspective,
+            securityPerspective: (reviewResult.data as any).securityPerspective,
+            qaPerspective: (reviewResult.data as any).qaPerspective,
+            confidenceBreakdown: (reviewResult.data as any).confidenceBreakdown,
+          };
+        }
+      } catch (err: any) {
         subagentReview = {
-          status: 'SUCCESS',
-          maintainerPerspective: (reviewResult.data as any).maintainerPerspective,
-          securityPerspective: (reviewResult.data as any).securityPerspective,
-          qaPerspective: (reviewResult.data as any).qaPerspective,
-          confidenceBreakdown: (reviewResult.data as any).confidenceBreakdown,
+          status: 'FAILED',
+          failureReason: err.message,
         };
       }
-    } catch (err: any) {
-      subagentReview = {
-        status: 'FAILED',
-        failureReason: err.message,
-      };
     }
+
 
     // Derive Evidence-Backed Quality Rubric without fake scores
     const isReviewAvailable = subagentReview.status === 'SUCCESS' && !!subagentReview.confidenceBreakdown;
