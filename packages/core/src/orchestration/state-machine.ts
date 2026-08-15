@@ -106,14 +106,26 @@ export class ContributionStateMachine {
   canProceedToSubmission(): { allowed: boolean; reason?: string } {
     const { policy, confidenceScore, reproductionCaptured, stage } = this.state;
 
+    // 1. Lifecycle position constraint
+    const validStages: ContributionStage[] = ['HUMAN_GATE', 'PR_SUBMISSION'];
+    if (!validStages.includes(stage)) {
+      return {
+        allowed: false,
+        reason: `Current stage (${stage}) is not submission-ready (must be in HUMAN_GATE or PR_SUBMISSION)`,
+      };
+    }
+
+    // 2. Policy constraint
     if (!policy.allowRealPr) {
       return { allowed: false, reason: `Policy forbids real PR submissions (mode: ${policy.mode})` };
     }
 
+    // 3. Dual-stage evidence constraint
     if (!reproductionCaptured) {
       return { allowed: false, reason: 'Failing reproduction assertion has not been captured in sandbox' };
     }
 
+    // 4. Quality confidence constraint
     if (confidenceScore !== undefined && confidenceScore < policy.minConfidenceScore) {
       return {
         allowed: false,
@@ -124,3 +136,4 @@ export class ContributionStateMachine {
     return { allowed: true };
   }
 }
+

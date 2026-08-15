@@ -22,6 +22,11 @@ export function writeAtomic(filePath: string, content: string): void {
   renameSync(tempPath, filePath);
 }
 
+export function sanitizeRunId(runId: string): string {
+  if (!runId || typeof runId !== 'string') return '';
+  return runId.replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
 export function validateRunId(runId: string, baseDir: string): string {
   if (!runId || typeof runId !== 'string') {
     throw new Error('Invalid runId: must be a non-empty string.');
@@ -38,6 +43,7 @@ export function validateRunId(runId: string, baseDir: string): string {
   }
   return runId;
 }
+
 
 export class ArtifactBundleManager {
   private baseDir: string;

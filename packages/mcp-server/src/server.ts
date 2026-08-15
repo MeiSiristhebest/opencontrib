@@ -226,8 +226,10 @@ export function createOpenContribMcpServer(): McpServer {
         repoFullName: args.repoFullName,
         issueOrTaskId: args.issueOrTaskId,
         localRepoPath: args.localRepoPath,
+        runId: args.runId,
       });
 
+      let persistence: { saved: boolean; error?: string } = { saved: false };
       if (args.runId) {
         try {
           runManager.saveArtifact(
@@ -241,7 +243,10 @@ export function createOpenContribMcpServer(): McpServer {
             },
             'WORKSPACE_PREPARED',
           );
-        } catch {}
+          persistence = { saved: true };
+        } catch (err: any) {
+          persistence = { saved: false, error: err.message };
+        }
       }
 
       return {
@@ -250,10 +255,11 @@ export function createOpenContribMcpServer(): McpServer {
             type: 'text',
             text: JSON.stringify(
               {
-                status: 'success',
+                status: persistence.error ? 'PARTIAL_SUCCESS' : 'success',
                 workspacePath: context.workspacePath,
                 branchName: context.branchName,
                 isWorktree: context.isWorktree,
+                persistence: args.runId ? persistence : undefined,
               },
               null,
               2,
@@ -272,6 +278,7 @@ export function createOpenContribMcpServer(): McpServer {
     'Execute dual-stage empirical verification (capturing pre-fix failing baseline assertion and post-fix stress loop pass)',
     {
       cwd: z.string().describe('Workspace directory to execute test command in'),
+      workspaceRoot: z.string().optional().describe('Optional root workspace directory to enforce security boundary (auto-resolved from runId if omitted)'),
       testCommand: z.string().describe('Exact test command, e.g. "npm test" or "pytest"'),
       preFixAssertionProbe: z
         .string()
@@ -282,9 +289,21 @@ export function createOpenContribMcpServer(): McpServer {
         .optional()
         .describe('Optional separate reproduction script/command to trigger pre-fix failure baseline'),
       stressLoopCount: z.number().optional().describe('Number of stress loop iterations (default 20)'),
-      runId: z.string().optional().describe('Optional runId to automatically save evidence.json artifact and advance phase'),
+      runId: z.string().optional().describe('Optional runId to automatically resolve workspaceRoot and save evidence.json artifact'),
     },
     async (args) => {
+      let resolvedWorkspaceRoot = args.workspaceRoot;
+
+      // Auto-resolve workspaceRoot from runId if not explicitly provided
+      if (!resolvedWorkspaceRoot && args.runId) {
+        try {
+          const run = runManager.getRun(args.runId);
+          if (run?.artifacts?.workspace?.workspacePath) {
+            resolvedWorkspaceRoot = String(run.artifacts.workspace.workspacePath);
+          }
+        } catch {}
+      }
+
       let dualStageResult: any = undefined;
 
       // 1. Dual-stage verification if preFixAssertionProbe is provided
@@ -292,9 +311,11 @@ export function createOpenContribMcpServer(): McpServer {
         const preFixCheck = capturePreFixAssertion(
           args.cwd,
           args.preFixTestCommand || args.testCommand,
+          resolvedWorkspaceRoot,
         );
         dualStageResult = await verifyDualStageReproduction({
           cwd: args.cwd,
+          workspaceRoot: resolvedWorkspaceRoot,
           testCommand: args.testCommand,
           preFixBaselineCaptured: preFixCheck.assertionCaptured,
           preFixFailureOutput: preFixCheck.baselineOutput,
@@ -305,6 +326,7 @@ export function createOpenContribMcpServer(): McpServer {
       // 2. Comprehensive evidence metrics collection (flaky test baseline + handle leak check)
       const evidence = await collectEvidence({
         cwd: args.cwd,
+        workspaceRoot: resolvedWorkspaceRoot,
         testCommand: args.testCommand,
         stressLoopCount: args.stressLoopCount ?? 20,
       });
@@ -314,6 +336,7 @@ export function createOpenContribMcpServer(): McpServer {
         dualStage: dualStageResult,
       };
 
+      let persistence: { saved: boolean; error?: string } = { saved: false };
       if (args.runId) {
         try {
           runManager.saveArtifact(
@@ -322,7 +345,10 @@ export function createOpenContribMcpServer(): McpServer {
             fullEvidenceReport,
             'EVIDENCE_COLLECTED',
           );
-        } catch {}
+          persistence = { saved: true };
+        } catch (err: any) {
+          persistence = { saved: false, error: err.message };
+        }
       }
 
       return {
@@ -331,8 +357,9 @@ export function createOpenContribMcpServer(): McpServer {
             type: 'text',
             text: JSON.stringify(
               {
-                status: 'success',
+                status: persistence.error ? 'PARTIAL_SUCCESS' : 'success',
                 evidence: fullEvidenceReport,
+                persistence: args.runId ? persistence : undefined,
               },
               null,
               2,
@@ -342,6 +369,7 @@ export function createOpenContribMcpServer(): McpServer {
       };
     },
   );
+
 
 
   // -------------------------------------------------------------

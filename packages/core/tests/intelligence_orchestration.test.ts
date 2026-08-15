@@ -17,11 +17,18 @@ describe('Intelligence & Orchestration Upgrades', () => {
     sm.setReproductionCaptured(true);
     sm.setConfidenceScore(95);
 
-    // Should be blocked because allowRealPr is false in policy
-    const check = sm.canProceedToSubmission();
-    expect(check.allowed).toBe(false);
-    expect(check.reason).toContain('Policy forbids real PR');
+    // 1. Should be blocked in DISCOVERY because stage is not submission-ready
+    const earlyCheck = sm.canProceedToSubmission();
+    expect(earlyCheck.allowed).toBe(false);
+    expect(earlyCheck.reason).toContain('not submission-ready');
+
+    // 2. Transition to HUMAN_GATE - blocked because allowRealPr is false
+    sm.transition('HUMAN_GATE', 'Awaiting human review');
+    const policyCheck = sm.canProceedToSubmission();
+    expect(policyCheck.allowed).toBe(false);
+    expect(policyCheck.reason).toContain('Policy forbids real PR');
   });
+
 
   it('assembles multi-dimensional context combining problem, repo, memory, and environment', () => {
     const assembler = new ContextAssembler();

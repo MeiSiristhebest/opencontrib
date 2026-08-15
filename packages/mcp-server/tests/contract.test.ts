@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+import { spawnSync } from 'child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { createOpenContribMcpServer } from '../src/server.js';
+
 
 describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
   const server = createOpenContribMcpServer();
@@ -120,6 +125,51 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
     expect(resume.suggestedNextAction).toBe('collect_evidence');
   });
 
+  it('contract test: contrib_prepare_workspace passes runId and saves workspace artifact with run-isolated branch', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'opencontrib-test-repo-'));
+    spawnSync('git', ['init', '-b', 'main'], { cwd: tempDir });
+    spawnSync('git', ['config', 'user.name', 'Tester'], { cwd: tempDir });
+    spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tempDir });
+    writeFileSync(join(tempDir, 'README.md'), '# Test\n');
+    spawnSync('git', ['add', '.'], { cwd: tempDir });
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: tempDir });
+
+    const runResult = await tools['contrib_create_run'].handler({
+      repoFullName: 'test-org/test-repo',
+      issueNumber: 101,
+    });
+    const runId = JSON.parse(runResult.content[0].text).manifest.runId;
+
+    const wsResult = await tools['contrib_prepare_workspace'].handler({
+      repoFullName: 'test-org/test-repo',
+      issueOrTaskId: 101,
+      localRepoPath: tempDir,
+      runId,
+    });
+
+    expect(wsResult.isError).toBeUndefined();
+    const ws = JSON.parse(wsResult.content[0].text);
+    expect(ws.status).toBe('success');
+    expect(ws.branchName).toContain('opencontrib/fix-101');
+    expect(ws.persistence?.saved).toBe(true);
+
+    // Verify evidence boundary auto-resolution from runId
+    const evResult = await tools['contrib_collect_evidence'].handler({
+      cwd: ws.workspacePath,
+      testCommand: 'echo "test pass"',
+      runId,
+    });
+    expect(evResult.isError).toBeUndefined();
+    const ev = JSON.parse(evResult.content[0].text);
+    expect(ev.status).toBe('success');
+    expect(ev.persistence?.saved).toBe(true);
+
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+
   it('contract test: MCP resources (doctor, memory, runs) and prompt opencontrib_workflow_guide are registered', async () => {
     expect(resources['opencontrib://doctor']).toBeDefined();
     expect(resources['opencontrib://memory']).toBeDefined();
@@ -128,4 +178,5 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
     expect(prompts['opencontrib_workflow_guide']).toBeDefined();
   });
 });
+
 

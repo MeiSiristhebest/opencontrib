@@ -2,6 +2,8 @@ import { spawnSync } from 'child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve, sep, relative } from 'path';
+import { sanitizeRunId } from '../run/artifact-bundle.js';
+
 
 export const MAX_DISCOVERED_FILES = 250;
 export const MAX_GENERATED_FILES = 6;
@@ -72,9 +74,11 @@ export class WorktreeManager {
   }): WorkspaceContext {
     const { repoFullName, issueOrTaskId, localRepoPath, runId } = input;
     const sanitizedRepoName = repoFullName.replace('/', '__');
-    const runSuffix = runId ? `-${runId.replace(/[^a-zA-Z0-9]/g, '').slice(-6)}` : '';
+    const cleanRunId = runId ? sanitizeRunId(runId) : '';
+    const runSuffix = cleanRunId ? `-${cleanRunId.slice(-6)}` : '';
     const branchName = `opencontrib/fix-${issueOrTaskId}${runSuffix}`;
     const workspacePath = join(this.workspaceRoot, `${sanitizedRepoName}__${issueOrTaskId}${runSuffix}`);
+
 
 
     // If workspace directory already exists, return it or clean it

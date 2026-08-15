@@ -3,6 +3,7 @@ import type { EvidenceReport, FlakyTestRecord } from '../contracts/schemas.js';
 
 export interface EvidenceCollectionOptions {
   cwd: string;
+  workspaceRoot?: string;
   testCommand: string;
   stressLoopCount?: number;
   runFlakyBaseline?: boolean;
@@ -58,28 +59,33 @@ export function parseTestCountsFromOutput(output: string): { passed: number; fai
 
   // Pytest: e.g. "5 passed, 1 failed in 0.12s"
   const pytestPass = output.match(/(\d+)\s+passed/i);
-  if (pytestPass && !passMatch) passed = parseInt(pytestPass[1], 10);
+  if (!passMatch && pytestPass) passed = parseInt(pytestPass[1], 10);
 
-  // Cargo test: e.g. "test result: ok. 5 passed; 0 failed;"
-  const cargoMatch = output.match(/(\d+)\s+passed;\s*(\d+)\s+failed/i);
-  if (cargoMatch) {
-    passed = parseInt(cargoMatch[1], 10);
-    failed = parseInt(cargoMatch[2], 10);
+  const pytestFail = output.match(/(\d+)\s+failed/i);
+  if (!failMatch && pytestFail) failed = parseInt(pytestFail[1], 10);
+
+  // Go test: e.g. "PASS" or "FAIL"
+  if (passed === 0 && failed === 0) {
+    if (output.includes('PASS') || output.includes('ok  \t')) passed = 1;
+    if (output.includes('FAIL\t')) failed = 1;
   }
 
-  // Go test: e.g. "PASS" or "ok pkg 0.123s"
-  if (passed === 0 && (output.includes('PASS') || output.includes('ok '))) {
-    passed = 1;
-  }
+  // Cargo test: e.g. "test result: ok. 4 passed; 0 failed"
+  const cargoPass = output.match(/(\d+)\s+passed/i);
+  if (cargoPass) passed = Math.max(passed, parseInt(cargoPass[1], 10));
 
-  return {
-    passed,
-    failed,
-    total: passed + failed,
-  };
+  const cargoFail = output.match(/(\d+)\s+failed/i);
+  if (cargoFail) failed = Math.max(failed, parseInt(cargoFail[1], 10));
+
+  return { passed, failed, total: passed + failed };
 }
 
-export function recordFlakyBaseline(cwd: string, testCommand: string, runs: number = 3): FlakyTestRecord[] {
+export function recordFlakyBaseline(
+  cwd: string,
+  testCommand: string,
+  runs: number = 3,
+  workspaceRoot?: string,
+): FlakyTestRecord[] {
   const testRunResults = new Map<string, { runCount: number; failCount: number }>();
   const parts = testCommand.split(' ');
   const cmd = parts[0];
@@ -88,6 +94,7 @@ export function recordFlakyBaseline(cwd: string, testCommand: string, runs: numb
   for (let i = 0; i < runs; i++) {
     const res = defaultSandboxRuntime.executeInSandbox({
       cwd,
+      workspaceRoot,
       command: cmd,
       args,
       timeoutMs: 30000,
@@ -123,6 +130,7 @@ export function runStressLoop(
   cwd: string,
   testCommand: string,
   count: number = 20,
+  workspaceRoot?: string,
 ): { passed: boolean; completedRuns: number; lastOutput: string } {
   let completedRuns = 0;
   let lastOutput = '';
@@ -134,6 +142,7 @@ export function runStressLoop(
   for (let i = 0; i < count; i++) {
     const res = defaultSandboxRuntime.executeInSandbox({
       cwd,
+      workspaceRoot,
       command: cmd,
       args,
       timeoutMs: 25000,
@@ -152,6 +161,7 @@ export function runStressLoop(
 
 export function verifyEmpiricalReproduction(input: {
   cwd: string;
+  workspaceRoot?: string;
   reproductionScriptPath?: string;
   testCommand?: string;
   runnerCommand?: string;
@@ -160,12 +170,13 @@ export function verifyEmpiricalReproduction(input: {
   baselineOutput: string;
   assertionCaptured: boolean;
 } {
-  const { cwd, reproductionScriptPath, testCommand, runnerCommand = 'bun' } = input;
+  const { cwd, workspaceRoot, reproductionScriptPath, testCommand, runnerCommand = 'bun' } = input;
 
   let res: SandboxExecutionResult;
   if (reproductionScriptPath) {
     res = defaultSandboxRuntime.executeInSandbox({
       cwd,
+      workspaceRoot,
       command: runnerCommand,
       args: [reproductionScriptPath],
       timeoutMs: 15000,
@@ -174,6 +185,7 @@ export function verifyEmpiricalReproduction(input: {
     const parts = testCommand.split(' ');
     res = defaultSandboxRuntime.executeInSandbox({
       cwd,
+      workspaceRoot,
       command: parts[0],
       args: parts.slice(1),
       timeoutMs: 20000,
@@ -188,8 +200,12 @@ export function verifyEmpiricalReproduction(input: {
 
   const full = res.output;
   // Guard against common false positives such as "0 errors", "0 failed", or benign mentions of error handling
-  const isFalsePositiveZeroError = /\b0\s+(errors?|failed|failures)\b/i.test(full) && !/\b[1-9]\d*\s+(errors?|failed|failures)\b/i.test(full);
-  const isRealFailurePattern = /(?:BUG CONFIRMED|\bFAILED\b|\bFAIL\b|assertion failed|\berror:|TypeError:|AssertionError:|panic:|\bstack trace:)/i.test(full);
+  const isFalsePositiveZeroError =
+    /\b0\s+(errors?|failed|failures)\b/i.test(full) && !/\b[1-9]\d*\s+(errors?|failed|failures)\b/i.test(full);
+  const isRealFailurePattern =
+    /(?:BUG CONFIRMED|\bFAILED\b|\bFAIL\b|assertion failed|\berror:|TypeError:|AssertionError:|panic:|\bstack trace:)/i.test(
+      full,
+    );
 
   const hasFailureFlag = !res.passed || (isRealFailurePattern && !isFalsePositiveZeroError);
 
@@ -198,13 +214,11 @@ export function verifyEmpiricalReproduction(input: {
     baselineOutput: full,
     assertionCaptured: hasFailureFlag,
   };
-
 }
 
-export function capturePreFixAssertion(cwd: string, testCommand: string) {
-  return verifyEmpiricalReproduction({ cwd, testCommand });
+export function capturePreFixAssertion(cwd: string, testCommand: string, workspaceRoot?: string) {
+  return verifyEmpiricalReproduction({ cwd, testCommand, workspaceRoot });
 }
-
 
 /**
  * Executes a full dual-stage empirical verification:
@@ -213,14 +227,22 @@ export function capturePreFixAssertion(cwd: string, testCommand: string) {
  */
 export async function verifyDualStageReproduction(input: {
   cwd: string;
+  workspaceRoot?: string;
   testCommand: string;
   preFixBaselineCaptured: boolean;
   preFixFailureOutput?: string;
   stressLoopCount?: number;
 }): Promise<DualStageReproductionResult> {
-  const { cwd, testCommand, preFixBaselineCaptured, preFixFailureOutput = '', stressLoopCount = 5 } = input;
+  const {
+    cwd,
+    workspaceRoot,
+    testCommand,
+    preFixBaselineCaptured,
+    preFixFailureOutput = '',
+    stressLoopCount = 5,
+  } = input;
 
-  const stressResult = runStressLoop(cwd, testCommand, stressLoopCount);
+  const stressResult = runStressLoop(cwd, testCommand, stressLoopCount, workspaceRoot);
   const postFixPassed = stressResult.passed;
 
   // True empirical reproduction is verified when pre-fix had failure/assertion and post-fix passes all runs cleanly
@@ -238,16 +260,16 @@ export async function verifyDualStageReproduction(input: {
 }
 
 export async function collectEvidence(options: EvidenceCollectionOptions): Promise<EvidenceReport> {
-  const { cwd, testCommand, stressLoopCount = 20, runFlakyBaseline = true } = options;
+  const { cwd, workspaceRoot, testCommand, stressLoopCount = 20, runFlakyBaseline = true } = options;
 
   // 1. Initial System Handle & FD Sampling
   const initialHandles = getProcessHandleCount();
 
   // 2. Step 4.0 Flaky Baseline Isolation
-  const baselineFlakyTests = runFlakyBaseline ? recordFlakyBaseline(cwd, testCommand, 3) : [];
+  const baselineFlakyTests = runFlakyBaseline ? recordFlakyBaseline(cwd, testCommand, 3, workspaceRoot) : [];
 
   // 3. Stress Test Loop (consecutive runs executed in sanitized sandbox)
-  const stressResult = runStressLoop(cwd, testCommand, stressLoopCount);
+  const stressResult = runStressLoop(cwd, testCommand, stressLoopCount, workspaceRoot);
 
   // 4. Final System Handle & FD Sampling
   const finalHandles = getProcessHandleCount();
