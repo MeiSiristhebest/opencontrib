@@ -29,6 +29,7 @@ export interface MultiSignalRankedOpportunity {
     freshnessModifier: number;
     actionabilityModifier: number;
   };
+  opportunity?: Opportunity;
 }
 
 export class MultiSignalHeuristicRanker {
@@ -85,8 +86,13 @@ export class MultiSignalHeuristicRanker {
         rationale: osFeasibility.reason || 'Standard environment compatible',
       };
 
-      // 2. Authoritative Qualification (Flexible schema handling)
-      const isOpen = issue.state === 'open' || issue.isOpen === true || issue.state === undefined;
+      // 2. Strict Qualification (Requires explicit open state, rejects missing state assumptions)
+      const isOpen = issue.state === 'open' || issue.isOpen === true;
+      const createdAt = issue.created_at || issue.createdAt;
+      if (!createdAt) {
+        continue; // Discard issues lacking creation timestamps (evidence-first requirement)
+      }
+
       const assignees = (issue.assignees || (issue.assignee ? [issue.assignee] : []))
         .map((a: any) => (typeof a === 'string' ? a : a?.login || ''))
         .filter(Boolean);
@@ -98,7 +104,7 @@ export class MultiSignalHeuristicRanker {
         labels,
         isOpen,
         assignees,
-        createdAt: issue.created_at || issue.createdAt || new Date().toISOString(),
+        createdAt,
         authorLogin: issue.user?.login || issue.authorLogin,
         comments: (issue.commentsData || []).map((c: any) => ({
           id: c.id,
@@ -131,7 +137,7 @@ export class MultiSignalHeuristicRanker {
           title: issue.title,
           body: issue.body || '',
           labels,
-          createdAt: issue.created_at || issue.createdAt || new Date().toISOString(),
+          createdAt,
           updatedAt: issue.updated_at || issue.updatedAt,
           latestCommentAt: issue.latestCommentAt,
           commentDates: (issue.commentsData || []).map((c: any) => c.created_at || c.createdAt),

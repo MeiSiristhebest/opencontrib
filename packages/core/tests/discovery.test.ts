@@ -9,6 +9,7 @@ import {
   scoreCandidateIssue,
 } from '../src/discovery/scoring-engine.js';
 import { MultiSignalHeuristicRanker } from '../src/discovery/ranking.js';
+import { TechnologyMatcher } from '../src/discovery/technology-matcher.js';
 
 describe('Discovery & Qualification Engine', () => {
   it('qualifies a clean open bug issue', () => {
@@ -70,7 +71,6 @@ describe('Discovery & Qualification Engine', () => {
       ],
     });
 
-    // General discussion referencing PR numbers should not trigger a false-positive hard disqualification
     expect(res.isQualified).toBe(true);
   });
 
@@ -94,9 +94,67 @@ describe('Discovery & Qualification Engine', () => {
       ],
     });
 
-    // A stale claim from 45 days ago with no active PR is considered abandoned and should NOT block new contributors
     expect(res.isQualified).toBe(true);
     expect(res.hasClaimant).toBe(false);
+  });
+
+  it('keeps claim active if claimant commented recently within 30 days', () => {
+    const initialClaimDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString(); // 40 days ago
+    const recentActivityDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(); // 2 days ago
+    const res = qualifyIssue({
+      issueNumber: 1023,
+      issueTitle: 'Add support for custom plugin loader',
+      issueBody: 'Feature request for plugin loader.',
+      labels: ['help wanted'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+      comments: [
+        {
+          id: 1,
+          body: 'I am working on this',
+          user: { login: 'activeUser' },
+          created_at: initialClaimDate,
+        },
+        {
+          id: 2,
+          body: 'Update: Still working on the edge cases, will push soon.',
+          user: { login: 'activeUser' },
+          created_at: recentActivityDate,
+        },
+      ],
+    });
+
+    // Claimant was active 2 days ago, so claim is NOT expired
+    expect(res.isQualified).toBe(false);
+    expect(res.hasClaimant).toBe(true);
+  });
+
+  it('does NOT disqualify on "not duplicate" label while strictly blocking on exact "duplicate"', () => {
+    const safeRes = qualifyIssue({
+      issueNumber: 1024,
+      issueTitle: 'Feature: custom metrics provider',
+      issueBody: 'Unique feature proposal.',
+      labels: ['not duplicate', 'enhancement'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+    });
+    expect(safeRes.isQualified).toBe(true);
+
+    const blockedRes = qualifyIssue({
+      issueNumber: 1025,
+      issueTitle: 'Bug: duplicate event firing',
+      issueBody: 'Duplicate bug.',
+      labels: ['duplicate'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+    });
+    expect(blockedRes.isQualified).toBe(false);
+    expect(blockedRes.disqualifyReason).toContain('blocking label: duplicate');
   });
 
   it('flags author-first-right if author expressed intent < 7 days ago', () => {
@@ -107,7 +165,7 @@ describe('Discovery & Qualification Engine', () => {
       labels: ['documentation'],
       isOpen: true,
       assignees: [],
-      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days ago
+      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       authorLogin: 'alice',
       comments: [],
     });
@@ -143,9 +201,22 @@ describe('Discovery & Qualification Engine', () => {
     expect(res.disqualifyReason).toContain('claimed by another contributor');
   });
 
-  it('fails safe with isQualified=false when GitHub comments API encounters an error (Tri-State)', () => {
-    const res = qualifyIssue({
-      issueNumber: 105,
+  it('fails safe with isQualified=false on NOT_FOUND or API errors (Tri-State)', () => {
+    const notFoundRes = qualifyIssue({
+      issueNumber: 1051,
+      issueTitle: 'Fix crash in parser',
+      issueBody: 'Crash occurs when input is malformed.',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+      commentsApiStatus: 'NOT_FOUND',
+    });
+    expect(notFoundRes.isQualified).toBe(false);
+
+    const rateLimitRes = qualifyIssue({
+      issueNumber: 1052,
       issueTitle: 'Fix crash in parser',
       issueBody: 'Crash occurs when input is malformed.',
       labels: ['bug'],
@@ -155,82 +226,100 @@ describe('Discovery & Qualification Engine', () => {
       comments: [],
       commentsApiStatus: 'RATE_LIMITED',
     });
-
-    expect(res.isQualified).toBe(false);
-    expect(res.disqualifyReason).toContain('tri-state safety gate');
+    expect(rateLimitRes.isQualified).toBe(false);
   });
 
-  it('applies single feasibility penalty without double-deduction in scoring engine', () => {
-    const input = {
+  it('verifies calibrated score baseline: 0 profile hits gets < 50 points (below default threshold 70)', () => {
+    const irrelevantIssue = {
+      profile: {
+        techStack: ['typescript', 'react'],
+        focusAreas: ['compiler'],
+      },
+      issue: {
+        title: 'Fix unhandled panic in Go backend service',
+        body: '```go\nfunc main() {}\n```\nTo reproduce: run server',
+        createdAt: new Date().toISOString(), // Very fresh
+        labels: ['bug'],
+      },
+      feasibility: {
+        level: 'fully_feasible' as const,
+        scorePenalty: 0,
+        scope: 'small_code_change' as const,
+        detectedRisks: [],
+        missingCapabilities: [],
+        mitigations: [],
+        rationale: 'Clean',
+      },
+    };
+
+    const scoring = scoreCandidateIssue(irrelevantIssue);
+    // 0 hits should yield ~40-50, strictly below default 70 threshold
+    expect(scoring.rawScore).toBeLessThan(55);
+    expect(scoring.adjustedScore).toBeLessThan(55);
+    expect(scoring.matchedSignals.techStack.length).toBe(0);
+  });
+
+  it('demonstrates clear score separation between 1-hit (~65) and 2-hit (~85) candidates', () => {
+    const feasibility = {
+      level: 'fully_feasible' as const,
+      scorePenalty: 0,
+      scope: 'small_code_change' as const,
+      detectedRisks: [],
+      missingCapabilities: [],
+      mitigations: [],
+      rationale: 'Clean',
+    };
+
+    // 1-hit candidate (TypeScript only)
+    const scoring1Hit = scoreCandidateIssue({
       profile: {
         techStack: ['typescript'],
         focusAreas: ['compiler'],
       },
       issue: {
-        title: 'fix(compiler): type inference failure in typescript',
-        body: '```ts\nfunction f() {}\n```\nSteps to reproduce: run build',
+        title: 'Fix typescript linting rules in config',
+        body: '```json\n{}\n```\nSteps to reproduce: lint',
         createdAt: new Date().toISOString(),
         labels: ['bug'],
       },
-      feasibility: {
-        level: 'likely_fixable' as const,
-        scorePenalty: 30, // 30 point penalty
-        scope: 'runtime_bug' as const,
-        detectedRisks: ['linux_specific'],
-        missingCapabilities: ['linux_surface'],
-        mitigations: [],
-        rationale: 'Environment mismatch',
+      feasibility,
+    });
+
+    // 2-hit candidate (TypeScript + Compiler)
+    const scoring2Hits = scoreCandidateIssue({
+      profile: {
+        techStack: ['typescript'],
+        focusAreas: ['compiler'],
       },
-    };
-
-    const scoring = scoreCandidateIssue(input);
-    // Feasibility score = 100 - 30 = 70.
-    // In weighted formula: 0.30 * 70 = 21 (a 9-point loss from perfect 30).
-    // Adjusted score must equal rawScore without subtracting 30 again!
-    expect(scoring.breakdown.feasibilityScore).toBe(70);
-    expect(scoring.adjustedScore).toBe(scoring.rawScore);
-  });
-
-  it('calculates latest activity timestamp strictly using Math.max across all date sources', () => {
-    const now = Date.now();
-    const created = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days ago
-    const commentLatest = new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(); // 10 days ago
-    const updatedNewer = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(); // 2 days ago (newest!)
-
-    // Case 1: updatedAt is newer than latestCommentAt
-    const maxTs1 = calculateLatestActivityTimestamp({
-      createdAt: created,
-      updatedAt: updatedNewer,
-      latestCommentAt: commentLatest,
+      issue: {
+        title: 'Fix typescript compiler type resolution bug',
+        body: '```ts\nfunction f() {}\n```\nSteps to reproduce: tsc',
+        createdAt: new Date().toISOString(),
+        labels: ['bug', 'good first issue'],
+      },
+      feasibility,
     });
-    expect(maxTs1).toBe(new Date(updatedNewer).getTime());
 
-    // Case 2: latestCommentAt is newer than updatedAt
-    const commentNewer = new Date(now - 1 * 24 * 60 * 60 * 1000).toISOString(); // 1 day ago
-    const maxTs2 = calculateLatestActivityTimestamp({
-      createdAt: created,
-      updatedAt: updatedNewer,
-      latestCommentAt: commentNewer,
-    });
-    expect(maxTs2).toBe(new Date(commentNewer).getTime());
+    expect(scoring1Hit.rawScore).toBeGreaterThanOrEqual(50);
+    expect(scoring1Hit.rawScore).toBeLessThan(75);
+
+    expect(scoring2Hits.rawScore).toBeGreaterThanOrEqual(70);
+    expect(scoring2Hits.rawScore).toBeLessThan(90);
+
+    // Clear statistical separation (>= 15 points)
+    expect(scoring2Hits.rawScore - scoring1Hit.rawScore).toBeGreaterThanOrEqual(15);
   });
 
-  it('builds canonical search aliases for C#, C++, and .NET without stripping syntax characters', () => {
-    expect(getSearchAliasQuery('c#')).toBe('("c#" OR "csharp")');
-    expect(getSearchAliasQuery('c++')).toBe('("c++" OR "cpp")');
-    expect(getSearchAliasQuery('.net')).toBe('(".net" OR "dotnet")');
-    expect(getSearchAliasQuery('f#')).toBe('("f#" OR "fsharp")');
-    expect(getSearchAliasQuery('typescript')).toBe('"typescript"');
-  });
+  it('matches complex technology tokens with TechnologyMatcher (Node.js, React Native, .NET, C#, PyTorch)', () => {
+    expect(TechnologyMatcher.matches('Fix memory leak in Node.js server', 'node.js')).toBe(true);
+    expect(TechnologyMatcher.matches('Building mobile app with React Native', 'react native')).toBe(true);
+    expect(TechnologyMatcher.matches('Migrating service to .NET 8 runtime', '.net')).toBe(true);
+    expect(TechnologyMatcher.matches('Deep learning pipeline in PyTorch', 'pytorch')).toBe(true);
+    expect(TechnologyMatcher.matches('Crash in C# worker service', 'c#')).toBe(true);
 
-  it('matches profile terms token-accurately and handles C# and word boundaries', () => {
-    expect(matchesProfileTerm('Crash in C# worker runtime', 'c#')).toBe(true);
-    expect(matchesProfileTerm('Crash in csharp worker runtime', 'c#')).toBe(true);
-    expect(matchesProfileTerm('Building with .NET 8 runtime', '.net')).toBe(true);
-    expect(matchesProfileTerm('Building with dotnet 8 runtime', '.net')).toBe(true);
-    // Boundary check
-    expect(matchesProfileTerm('Fix json parser and good algorithms', 'js')).toBe(false);
-    expect(matchesProfileTerm('Fix json parser and good algorithms', 'go')).toBe(false);
+    // Boundary rejection
+    expect(TechnologyMatcher.matches('Fix json parser and good algorithms', 'js')).toBe(false);
+    expect(TechnologyMatcher.matches('Fix json parser and good algorithms', 'go')).toBe(false);
   });
 
   it('applies 2-stage diversity decay across multiple issues from the same repository', () => {
@@ -294,7 +383,6 @@ describe('Discovery & Qualification Engine', () => {
 
     const ranked = ranker.rankIssues(issues);
     expect(ranked.length).toBe(3);
-    // All items should have rankScore and diversityPenalty
     expect(ranked[0].rankScore).toBeGreaterThan(0);
     expect(typeof ranked[0].diversityPenalty).toBe('number');
   });

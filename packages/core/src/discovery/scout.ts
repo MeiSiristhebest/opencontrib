@@ -41,7 +41,7 @@ async function mapConcurrent<T, R>(
 }
 
 /**
- * Scout Engine (Two-Tier Discovery + Unified Scoring + Diversity Reranking)
+ * Scout Engine (Two-Tier Discovery + Unified Calibrated Scoring + Diversity Reranking)
  * Orchestrates GitHub discovery, cheap pre-ranking, deep community enrichment,
  * single source of truth scoring, and 2-stage diversity reranking.
  */
@@ -56,7 +56,7 @@ export async function scoutOpportunities(
   const maxStars = options.maxStars;
   const discoveryMode = options.repo ? 'targeted_repo' : 'global_discovery';
 
-  // 1. Build Query (Explicit label parentheses, alias-expanded terms, stars range)
+  // 1. Build Query (Parenthesized labels, techStack + focusAreas search terms, stars range)
   let searchQuery = '';
   if (options.repo) {
     searchQuery = `repo:${options.repo} is:issue is:open no:assignee archived:false`;
@@ -65,21 +65,29 @@ export async function scoutOpportunities(
     const joinedLabels =
       '(label:"good first issue" OR label:"good-first-issue" OR label:"help wanted" OR label:"help-wanted")';
 
-    // Canonical alias query for tech stack (e.g. C# -> ("c#" OR "csharp"))
+    // Canonical alias query for tech stack
     const validTechQueries = (profile.techStack || [])
       .map(getSearchAliasQuery)
       .filter((q) => q.length > 0)
       .slice(0, 5);
 
-    const techQuery = validTechQueries.length > 0 ? `(${validTechQueries.join(' OR ')})` : '';
+    // Search query for focus areas
+    const validAreaQueries = (profile.focusAreas || [])
+      .map(getSearchAliasQuery)
+      .filter((q) => q.length > 0)
+      .slice(0, 3);
+
+    const allTopicQueries = [...validTechQueries, ...validAreaQueries];
+    const topicQuery = allTopicQueries.length > 0 ? `(${allTopicQueries.join(' OR ')})` : '';
     const starsQuery = maxStars !== undefined ? `stars:${minStars}..${maxStars}` : `stars:>=${minStars}`;
 
-    searchQuery = [joinedLabels, techQuery, starsQuery, 'is:issue is:open no:assignee archived:false']
+    searchQuery = [joinedLabels, topicQuery, starsQuery, 'is:issue is:open no:assignee archived:false']
       .filter(Boolean)
       .join(' ');
   }
 
-  const rawItems = await client.searchIssues(searchQuery, { refresh: options.refresh, maxPages: 2 });
+  const searchResult = await client.searchIssues(searchQuery, { refresh: options.refresh, maxPages: 2 });
+  const rawItems = searchResult.items || [];
   if (rawItems.length === 0) {
     return [];
   }
@@ -115,12 +123,17 @@ export async function scoutOpportunities(
       const repoMatch = item.repository_url.match(/repos\/(.+?)\/(.+)$/);
       const owner = repoMatch ? repoMatch[1] : '';
       const repo = repoMatch ? repoMatch[2] : '';
-      const repoFullName = `${owner}/${repo}`;
+      const repoFullName = options.repo || (owner && repo ? `${owner}/${repo}` : '');
+      if (!repoFullName) return null;
 
-      // Batch repo details
+      // Fail-Safe Batch repo details
       let repoDetails = repoDetailsCache.get(repoFullName);
       if (!repoDetails) {
-        repoDetails = await client.getRepoDetails(owner, repo);
+        const repoRes = await client.getRepoDetails(owner, repo);
+        if (repoRes.status !== 'OK' || !repoRes.data) {
+          return null; // Fail-Safe: discard issue if repo metadata cannot be securely verified
+        }
+        repoDetails = repoRes.data;
         repoDetailsCache.set(repoFullName, repoDetails);
       }
       if (repoDetails.isArchived) return null;
@@ -136,7 +149,7 @@ export async function scoutOpportunities(
         created_at: c.created_at,
       }));
 
-      // Authoritative Qualification Check
+      // Authoritative Qualification Check (Strict Gate)
       const qualification = qualifyIssue({
         issueNumber: item.number,
         issueTitle: item.title,
@@ -153,13 +166,22 @@ export async function scoutOpportunities(
       });
 
       if (!qualification.isQualified) {
-        return null; // Filter out disqualified issues
+        return null; // Discard disqualified issues
       }
 
       // Feasibility Assessment
       const feasibility = assessFeasibility(item.title, item.body || '', labels, capabilities);
 
-      // Single Source of Truth Scoring
+      // Latest comment timestamp calculation (strictly computed, not dependent on array ordering)
+      const validCommentTimestamps = comments
+        .map((c: any) => Date.parse(c.created_at))
+        .filter((t: number) => !isNaN(t) && t > 0);
+      const latestCommentAtStr =
+        validCommentTimestamps.length > 0
+          ? new Date(Math.max(...validCommentTimestamps)).toISOString()
+          : undefined;
+
+      // Single Source of Truth Scoring (Calibrated Formula)
       const scoring = scoreCandidateIssue({
         profile: {
           techStack: profile.techStack,
@@ -173,7 +195,7 @@ export async function scoutOpportunities(
           labels,
           createdAt: item.created_at,
           updatedAt: item.updated_at,
-          latestCommentAt: comments.length > 0 ? comments[comments.length - 1].created_at : undefined,
+          latestCommentAt: latestCommentAtStr,
           commentDates: comments.map((c: any) => c.created_at),
           repoStars: repoDetails.stars,
         },

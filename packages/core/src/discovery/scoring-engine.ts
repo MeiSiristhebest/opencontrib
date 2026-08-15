@@ -1,4 +1,5 @@
 import type { FeasibilityAssessment } from '../contracts/schemas.js';
+import { TechnologyMatcher } from './technology-matcher.js';
 
 export interface ScoreCandidateInput {
   profile: {
@@ -44,58 +45,19 @@ export interface IssueScoringResult {
   matchedSignals: MatchedSignals;
 }
 
-export function escapeRegex(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
- * Robust term matcher with word-boundary awareness and canonical alias handling
- * for special language identifiers (C#, C++, .NET, F#, Go, JS).
+ * Robust term matcher with word-boundary awareness and canonical alias handling.
+ * Delegates to TechnologyMatcher.
  */
 export function matchesProfileTerm(text: string, term: string): boolean {
-  if (!text || !term) return false;
-  const t = term.trim().toLowerCase();
-
-  // Special canonical aliases
-  if (t === 'c#' || t === 'csharp') {
-    return /(?:^|[^\w])(?:c#|csharp)(?:[^\w]|$)/i.test(text);
-  }
-  if (t === 'c++' || t === 'cpp') {
-    return /(?:^|[^\w])(?:c\+\+|cpp)(?:[^\w]|$)/i.test(text);
-  }
-  if (t === '.net' || t === 'dotnet') {
-    return /(?:^|[^\w])(?:\.net|dotnet)(?:[^\w]|$)/i.test(text);
-  }
-  if (t === 'f#' || t === 'fsharp') {
-    return /(?:^|[^\w])(?:f#|fsharp)(?:[^\w]|$)/i.test(text);
-  }
-
-  // Standard token word-boundary matching
-  const escaped = escapeRegex(t);
-  const regex = new RegExp(`\\b${escaped}\\b`, 'i');
-  return regex.test(text);
+  return TechnologyMatcher.matches(text, term);
 }
 
 /**
  * Builds GitHub Search aliases for a technical term without stripping crucial characters.
  */
 export function getSearchAliasQuery(term: string): string {
-  const t = term.trim().toLowerCase();
-  if (t === 'c#' || t === 'csharp') {
-    return '("c#" OR "csharp")';
-  }
-  if (t === 'c++' || t === 'cpp') {
-    return '("c++" OR "cpp")';
-  }
-  if (t === '.net' || t === 'dotnet') {
-    return '(".net" OR "dotnet")';
-  }
-  if (t === 'f#' || t === 'fsharp') {
-    return '("f#" OR "fsharp")';
-  }
-  // Remove disrupting shell characters but preserve valid alphanumeric and dots
-  const clean = term.replace(/[^\w\s.+-]/g, '').trim();
-  return clean ? `"${clean}"` : '';
+  return TechnologyMatcher.getSearchAliasQuery(term);
 }
 
 /**
@@ -134,46 +96,52 @@ export function calculateLatestActivityTimestamp(issue: {
 }
 
 /**
- * Calculates freshness modifier based on latest meaningful activity in days.
+ * Calibrated Freshness Modifier based on latest meaningful activity in days.
+ * Bounded between -20 and +6 points.
  */
 export function computeActivityFreshnessModifier(activityTimestampMs: number): number {
   const now = Date.now();
   const ageDays = (now - activityTimestampMs) / (1000 * 60 * 60 * 24);
 
-  if (ageDays < 30) return 12;   // Very fresh (< 1 month)
-  if (ageDays < 90) return 4;    // Active (< 3 months)
-  if (ageDays < 180) return -12; // Moderate stale (> 3 months)
-  if (ageDays < 365) return -25; // Stale (> 6 months)
-  return -35;                    // Dormant (> 1 year)
+  if (ageDays < 30) return 6;    // Fresh (< 1 month)
+  if (ageDays < 90) return 2;    // Active (< 3 months)
+  if (ageDays < 180) return -6;  // Stale (> 3 months)
+  if (ageDays < 365) return -12; // Very stale (> 6 months)
+  return -20;                    // Dormant (> 1 year)
 }
 
 /**
- * Calculates actionability modifier based on code blocks, reproduction steps, error traces.
+ * Calibrated Actionability Modifier based on code blocks, reproduction steps, error traces.
+ * Bounded between -6 and +6 points.
  */
 export function computeActionabilityModifier(body?: string): number {
-  if (!body || body.trim().length < 50) return -10; // Too brief / vague
+  if (!body || body.trim().length < 50) return -6; // Too brief / vague
 
   let modifier = 0;
   // Code block or stack trace
-  if (/```|`[^`]+`|\bat\s+[\w$./]+\s*\(/i.test(body)) modifier += 6;
+  if (/```|`[^`]+`|\bat\s+[\w$./]+\s*\(/i.test(body)) modifier += 3;
   // Reproduction steps or expected vs actual
-  if (/reproduce|reproduction|steps to|expected|actual behavior|to reproduce/i.test(body)) modifier += 6;
+  if (/reproduce|reproduction|steps to|expected|actual behavior|to reproduce/i.test(body)) modifier += 3;
   // Clear error message or assertion
-  if (/error:|exception:|assertion|panic:|traceback/i.test(body)) modifier += 4;
+  if (/error:|exception:|assertion|panic:|traceback/i.test(body)) modifier += 2;
 
-  return Math.min(14, modifier);
+  return Math.min(6, modifier);
 }
 
 /**
  * Single Source of Truth for Candidate Opportunity Scoring.
- * Used across Scout, MultiSignalHeuristicRanker, and Orchestrator.
+ * Mathematically calibrated to prevent score saturation:
+ * - 0 profile hits: score ~35-48 (< default threshold 70)
+ * - 1 profile hit: score ~60-70
+ * - 2 profile hits: score ~78-88
+ * - 3+ strong hits: score ~90-98
  */
 export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringResult {
   const { profile, issue, feasibility } = input;
   const fullText = `${issue.title} ${issue.body || ''}`;
   const normalizedLabels = (issue.labels || []).map((l) => l.toLowerCase());
 
-  // 1. Profile Keyword & Domain Focus Area Matching (Token/Word-Boundary aware)
+  // 1. Profile Keyword & Domain Focus Area Matching (Using TechnologyMatcher)
   const matchedTech: string[] = [];
   for (const tech of profile.techStack) {
     if (matchesProfileTerm(fullText, tech)) {
@@ -189,18 +157,26 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
   }
 
   const totalHits = matchedTech.length + matchedAreas.length;
-  const profileKeywordScore = Math.min(100, 50 + totalHits * 12);
+  // Calibrated Profile Relevance Score (0 to 100)
+  let profileKeywordScore = 15; // Baseline when completely irrelevant
+  if (totalHits === 1) {
+    profileKeywordScore = 45;
+  } else if (totalHits === 2) {
+    profileKeywordScore = 75;
+  } else if (totalHits >= 3) {
+    profileKeywordScore = Math.min(100, 75 + (totalHits - 2) * 10);
+  }
 
-  // 2. Domain & Label Heuristics
-  let domainMatchScore = 60;
+  // 2. Domain & Label Heuristics (Base 25, Max 60)
+  let domainMatchScore = 25;
   const matchedLabels: string[] = [];
 
   if (normalizedLabels.some((l) => /good first issue|starter|easy/i.test(l))) {
-    domainMatchScore += 14;
+    domainMatchScore += 15;
     matchedLabels.push('good-first-issue');
   }
   if (normalizedLabels.some((l) => /help wanted/i.test(l))) {
-    domainMatchScore += 9;
+    domainMatchScore += 10;
     matchedLabels.push('help-wanted');
   }
   if (normalizedLabels.some((l) => /bug|fix|defect|regression/i.test(l)) || /fix|bug|defect|regression/i.test(issue.title)) {
@@ -208,36 +184,33 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
     matchedLabels.push('bugfix');
   }
 
-  // 3. Repository Popularity & Visibility Signal (Stars)
+  // 3. Repository Popularity Signal (Stars: +3 to +6)
   let repoPopularityBonus = 0;
   const stars = issue.repoStars ?? 0;
   if (stars >= 5000) {
     repoPopularityBonus = 6;
   } else if (stars >= 50) {
-    repoPopularityBonus = 4;
+    repoPopularityBonus = 3;
   }
 
   // 4. Activity Freshness: strictly Math.max across createdAt, updatedAt, and comments
   const latestActivityMs = calculateLatestActivityTimestamp(issue);
   const freshnessModifier = computeActivityFreshnessModifier(latestActivityMs);
 
-  // 5. Actionability Modifier
+  // 5. Actionability Modifier (-6 to +6)
   const actionabilityModifier = computeActionabilityModifier(issue.body);
 
   // 6. Feasibility Score (Single Penalty Application)
   const penalty = Math.max(0, feasibility.scorePenalty || 0);
   const feasibilityScore = Math.max(0, 100 - penalty);
 
-  // Weighted Score Formula: feasibility is weighted at 30% without double deduction
-  const rawCalculated =
-    0.35 * profileKeywordScore +
-    0.35 * (domainMatchScore + repoPopularityBonus) +
-    0.30 * feasibilityScore +
-    freshnessModifier +
-    actionabilityModifier;
+  // 7. Weighted Score Formula: Profile relevance dominates (50%), Domain (30%), Feasibility (20%)
+  const baseWeightedScore =
+    0.50 * profileKeywordScore +
+    0.30 * (domainMatchScore + repoPopularityBonus) +
+    0.20 * feasibilityScore;
 
-  const rawScore = Math.max(0, Math.min(100, Math.round(rawCalculated)));
-  // P0 Fix: adjustedScore is strictly rawScore, preserving 30% feasibility weighting
+  const rawScore = Math.max(0, Math.min(100, Math.round(baseWeightedScore + freshnessModifier + actionabilityModifier)));
   const adjustedScore = rawScore;
 
   return {
@@ -268,6 +241,7 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
  */
 export function applyDiversityReranking<T extends { repoFullName: string; rawScore: number }>(
   items: T[],
+  decayPerAppearance = 4,
 ): Array<{ item: T; rankScore: number; diversityPenalty: number }> {
   // Stage 1: Pure Relevance Order
   const sorted = [...items].sort((a, b) => b.rawScore - a.rawScore);
@@ -278,7 +252,7 @@ export function applyDiversityReranking<T extends { repoFullName: string; rawSco
     .map((item) => {
       const seen = repoSeenCount.get(item.repoFullName) || 0;
       repoSeenCount.set(item.repoFullName, seen + 1);
-      const diversityPenalty = seen * 4;
+      const diversityPenalty = seen * decayPerAppearance;
       const rankScore = Math.max(0, item.rawScore - diversityPenalty);
       return {
         item,

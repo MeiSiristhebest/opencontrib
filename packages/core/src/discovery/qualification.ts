@@ -6,11 +6,15 @@ export const ACTION_BLOCKING_LABELS = [
   'duplicate',
   'invalid',
   'needs info',
+  'needs-info',
   'needs information',
+  'needs-information',
   'question',
   'discussion',
   'wontfix',
   'wont-fix',
+  "won't fix",
+  "won't-fix",
   'stale',
 ] as const;
 
@@ -52,6 +56,7 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   } = input;
 
   const normalizedLabels = labels.map((l) => l.toLowerCase().replace(/[-_]+/g, ' ').trim());
+  const rawNormalizedLabels = labels.map((l) => l.toLowerCase().trim());
   const fullText = `${issueTitle} ${issueBody}`.toLowerCase();
 
   // 1. Basic State Gate
@@ -82,9 +87,13 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     };
   }
 
-  // 3. Blocking Labels Gate (Single Source of Truth)
+  // 3. Blocking Labels Gate (Exact & Alias Token Matching, preventing substring false positives)
   for (const blocking of ACTION_BLOCKING_LABELS) {
-    if (normalizedLabels.some((l) => l.includes(blocking))) {
+    const blockingNormalized = blocking.replace(/[-_]+/g, ' ');
+    if (
+      normalizedLabels.includes(blockingNormalized) ||
+      rawNormalizedLabels.includes(blocking)
+    ) {
       return {
         isQualified: false,
         disqualifyReason: `Issue contains blocking label: ${blocking}`,
@@ -98,8 +107,14 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     }
   }
 
-  // 4. Tri-State API Safety Gate (Fail-Safe on Transient or Auth Errors)
-  const isApiError = (s: ApiStatus) => s === 'RATE_LIMITED' || s === 'FORBIDDEN' || s === 'NETWORK_ERROR' || s === 'UNKNOWN_ERROR';
+  // 4. Tri-State API Safety Gate (Fail-Safe on NOT_FOUND, Auth, or Rate-Limit Errors)
+  const isApiError = (s: ApiStatus) =>
+    s === 'NOT_FOUND' ||
+    s === 'RATE_LIMITED' ||
+    s === 'FORBIDDEN' ||
+    s === 'NETWORK_ERROR' ||
+    s === 'UNKNOWN_ERROR';
+
   if (isApiError(commentsApiStatus) || isApiError(timelineApiStatus)) {
     const reason = `GitHub API verification error (comments: ${commentsApiStatus}, timeline: ${timelineApiStatus})`;
     return {
@@ -138,11 +153,13 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   const fixPrAnnouncementRegex =
     /(?:i(?:\s*have|'ve|\s*just)?\s*(?:opened|submitted|created|pushed)\s*(?:a\s*)?(?:pr|pull\s*request)|fix(?:es)?\s*(?:in|via|at)\s*(?:pr|#\d+|pull))/i;
 
+  // Track latest activity per claimant
+  const claimantLatestActivity = new Map<string, number>();
+
   for (const comment of comments) {
     const cBody = comment.body || '';
     const user = comment.user?.login || 'unknown';
     const commentTime = Date.parse(comment.created_at);
-    const ageDays = !isNaN(commentTime) ? (now - commentTime) / (1000 * 60 * 60 * 24) : 0;
 
     // Active Fix PR Announcement Detection (excludes conversational PR references like "PR #123 is unrelated")
     if (fixPrAnnouncementRegex.test(cBody)) {
@@ -158,18 +175,23 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
       };
     }
 
-    // Contributor Claim Intent Detection with Expiry Mechanism (30-Day Limit)
+    // Contributor Claim Intent Detection with Latest Activity Tracking (30-Day Limit)
     const isAuthor = authorLogin && user.toLowerCase() === authorLogin.toLowerCase();
-    if (!isAuthor) {
+    if (!isAuthor && user !== 'unknown') {
       if (
         /\b(?:i am working on this|i'm working on this|can i work on this|please assign|working on a fix|\/claim|\/assign)\b/i.test(
           cBody,
         )
       ) {
-        // Stale Claim Check: If claim was posted > 30 days ago with no active PR, consider claim expired
-        if (ageDays <= 30) {
-          hasClaimant = true;
-          claimantDetails = `@${user} claimed this ${Math.floor(ageDays)} days ago`;
+        const prev = claimantLatestActivity.get(user.toLowerCase()) || 0;
+        if (!isNaN(commentTime) && commentTime > prev) {
+          claimantLatestActivity.set(user.toLowerCase(), commentTime);
+        }
+      } else if (claimantLatestActivity.has(user.toLowerCase())) {
+        // Any subsequent follow-up comment by the claimant refreshes their activity timestamp
+        const prev = claimantLatestActivity.get(user.toLowerCase()) || 0;
+        if (!isNaN(commentTime) && commentTime > prev) {
+          claimantLatestActivity.set(user.toLowerCase(), commentTime);
         }
       }
     }
@@ -177,6 +199,16 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     // Bot instruction capture
     if (/\bcla\b/i.test(cBody) || /\bdco\b/i.test(cBody) || /contributor license agreement/i.test(cBody)) {
       botRules.push('Requires CLA/DCO sign-off');
+    }
+  }
+
+  // Check if any claimant has active claim within 30 days
+  for (const [claimant, latestActivity] of claimantLatestActivity.entries()) {
+    const daysSinceActivity = (now - latestActivity) / (1000 * 60 * 60 * 24);
+    if (daysSinceActivity <= 30) {
+      hasClaimant = true;
+      claimantDetails = `@${claimant} active claim (${Math.floor(daysSinceActivity)} days ago)`;
+      break;
     }
   }
 
