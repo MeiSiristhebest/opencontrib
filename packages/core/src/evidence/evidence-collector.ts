@@ -1,6 +1,8 @@
-import { spawnSync } from 'child_process';
 import { defaultSandboxRuntime, type SandboxExecutionResult } from '../sandbox/sandbox-runtime.js';
 import type { EvidenceReport, FlakyTestRecord } from '../contracts/schemas.js';
+import { defaultTestOutputParserRegistry, TestOutputParserRegistry } from './parsers/registry.js';
+import { defaultVcsDeltaAdapter, type VcsDeltaPort } from './vcs-delta.port.js';
+
 
 export interface EvidenceCollectionOptions {
   cwd: string;
@@ -50,38 +52,9 @@ export function getProcessHandleCount(): number {
 }
 
 export function parseTestCountsFromOutput(output: string): { passed: number; failed: number; total: number } {
-  let passed = 0;
-  let failed = 0;
-
-  // Bun / Vitest / Jest: e.g. "31 pass, 0 fail" or "31 passed, 0 failed" or "Tests: 2 passed, 2 total"
-  const passMatch = output.match(/(\d+)\s+(?:pass|passed)/i);
-  if (passMatch) passed = parseInt(passMatch[1], 10);
-
-  const failMatch = output.match(/(\d+)\s+(?:fail|failed)/i);
-  if (failMatch) failed = parseInt(failMatch[1], 10);
-
-  // Pytest: e.g. "5 passed, 1 failed in 0.12s"
-  const pytestPass = output.match(/(\d+)\s+passed/i);
-  if (!passMatch && pytestPass) passed = parseInt(pytestPass[1], 10);
-
-  const pytestFail = output.match(/(\d+)\s+failed/i);
-  if (!failMatch && pytestFail) failed = parseInt(pytestFail[1], 10);
-
-  // Go test: e.g. "PASS", "FAIL", "ok  package/name  0.123s", "FAIL package/name 0.123s"
-  if (passed === 0 && failed === 0) {
-    if (output.includes('PASS') || output.includes('ok\t') || output.includes('ok  \t') || /ok\s+\S+\s+[\d\.]+s/.test(output)) passed = 1;
-    if (output.includes('FAIL\t') || output.includes('FAIL\n') || /FAIL\s+\S+\s+[\d\.]+s/.test(output)) failed = 1;
-  }
-
-  // Cargo test: e.g. "test result: ok. 4 passed; 0 failed"
-  const cargoPass = output.match(/(\d+)\s+passed/i);
-  if (cargoPass) passed = Math.max(passed, parseInt(cargoPass[1], 10));
-
-  const cargoFail = output.match(/(\d+)\s+failed/i);
-  if (cargoFail) failed = Math.max(failed, parseInt(cargoFail[1], 10));
-
-  return { passed, failed, total: passed + failed };
+  return defaultTestOutputParserRegistry.parse(output);
 }
+
 
 export function recordFlakyBaseline(
   cwd: string,
@@ -276,37 +249,22 @@ export function parseAddedTestCasesFromDiffText(diffText: string): number {
 }
 
 
-export function countAddedTestCasesFromGitDiff(cwd: string, baselineCommitSha?: string): number | undefined {
-  if (baselineCommitSha) {
-    try {
-      const res = spawnSync('git', ['diff', baselineCommitSha, '--unified=0'], {
-        cwd,
-        encoding: 'utf-8',
-        timeout: 5000,
-      });
-      if (res.status === 0 && res.stdout) {
-        return parseAddedTestCasesFromDiffText(res.stdout);
-      }
-    } catch {}
-    return undefined;
+export async function countAddedTestCasesFromGitDiff(
+  cwd: string,
+  baselineCommitSha?: string,
+  vcsAdapter: VcsDeltaPort = defaultVcsDeltaAdapter,
+): Promise<number | undefined> {
+  const diffText = await vcsAdapter.getDiff({ cwd, baselineCommitSha });
+  if (diffText !== undefined) {
+    return parseAddedTestCasesFromDiffText(diffText);
   }
-
-  // If no baseline commit SHA is supplied, check uncommitted working tree diff vs current HEAD
-  // (strictly avoid guessing HEAD~1 which conflates prior commits into the contribution delta)
-  try {
-    const res = spawnSync('git', ['diff', 'HEAD', '--unified=0'], {
-      cwd,
-      encoding: 'utf-8',
-      timeout: 5000,
-    });
-    if (res.status === 0 && res.stdout) {
-      return parseAddedTestCasesFromDiffText(res.stdout);
-    }
-  } catch {}
   return undefined;
 }
 
-export async function collectEvidence(options: EvidenceCollectionOptions): Promise<EvidenceReport> {
+export async function collectEvidence(
+  options: EvidenceCollectionOptions,
+  vcsAdapter: VcsDeltaPort = defaultVcsDeltaAdapter,
+): Promise<EvidenceReport> {
   const { cwd, workspaceRoot, baselineCommitSha, testCommand, stressLoopCount = 20, runFlakyBaseline = true } = options;
 
   // 1. Initial System Handle & FD Sampling
@@ -323,7 +281,7 @@ export async function collectEvidence(options: EvidenceCollectionOptions): Promi
 
   // 5. Real Test Metrics Extraction (diff-backed additions + output parser)
   const parsedCounts = parseTestCountsFromOutput(stressResult.lastOutput);
-  const addedUnitTestsCount = countAddedTestCasesFromGitDiff(cwd, baselineCommitSha);
+  const addedUnitTestsCount = await countAddedTestCasesFromGitDiff(cwd, baselineCommitSha, vcsAdapter);
 
   return {
     baselineTestedAt: new Date().toISOString(),
@@ -337,5 +295,6 @@ export async function collectEvidence(options: EvidenceCollectionOptions): Promi
     addedUnitTestsCount,
   };
 }
+
 
 

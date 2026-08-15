@@ -69,7 +69,7 @@ cd opencontrib
 # Install dependencies via Bun
 bun install
 
-# Run full test suite (16 test suites, 76 tests)
+# Run full test suite (16 test suites, 78 tests)
 bun test
 ```
 

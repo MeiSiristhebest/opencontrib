@@ -259,4 +259,47 @@ describe('Evidence-Backed Quality Rubric & Subagent Review Decoupling', () => {
     // strictly excludes: describe (1), // it (1), /* test (1), # def test (1)
     expect(count).toBe(6);
   });
+
+  test('TestOutputParserRegistry parses multiple ecosystem outputs and supports custom extension (OCP)', async () => {
+    const { defaultTestOutputParserRegistry, TestOutputParserRegistry } = await import('../src/evidence/index.js');
+
+    // Builtin Jest/Vitest/Bun parser
+    const jestOut = 'Tests: 12 passed, 1 failed, 13 total';
+    const parsedJest = defaultTestOutputParserRegistry.parse(jestOut);
+    expect(parsedJest.passed).toBe(12);
+    expect(parsedJest.failed).toBe(1);
+    expect(parsedJest.total).toBe(13);
+
+    // Builtin Cargo parser
+    const cargoOut = 'test result: ok. 8 passed; 0 failed; 0 ignored';
+    const parsedCargo = defaultTestOutputParserRegistry.parse(cargoOut);
+    expect(parsedCargo.passed).toBe(8);
+    expect(parsedCargo.failed).toBe(0);
+
+    // Custom parser extension without modifying existing code (OCP)
+    const customRegistry = new TestOutputParserRegistry();
+    customRegistry.register({
+      id: 'custom-tap',
+      supports: (out) => out.includes('# TAP version 13'),
+      parse: (out) => ({ passed: 99, failed: 1, total: 100 }),
+    });
+
+    const tapResult = customRegistry.parse('# TAP version 13\n1..100');
+    expect(tapResult.passed).toBe(99);
+    expect(tapResult.failed).toBe(1);
+  });
+
+  test('countAddedTestCasesFromGitDiff uses injected VcsDeltaPort (DIP)', async () => {
+    const { countAddedTestCasesFromGitDiff } = await import('../src/evidence/index.js');
+
+    const mockVcsAdapter = {
+      async getDiff(opts: any) {
+        return `+it("handles mock delta", () => {});\n+func TestMock(t *testing.T) {}`;
+      },
+    };
+
+    const count = await countAddedTestCasesFromGitDiff('/fake/cwd', 'mock-sha', mockVcsAdapter);
+    expect(count).toBe(2);
+  });
 });
+
