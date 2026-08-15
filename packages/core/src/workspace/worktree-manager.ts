@@ -86,7 +86,7 @@ export class WorktreeManager {
       const cachedRepoPath = join(this.cacheRoot, sanitizedRepoName);
       if (!existsSync(cachedRepoPath)) {
         const cloneUrl = `https://github.com/${repoFullName}.git`;
-        this.runGit(['clone', '--bare', cloneUrl, cachedRepoPath]);
+        this.runGit(['clone', '--bare', '--depth', '1', cloneUrl, cachedRepoPath]);
       }
       sourceRepoPath = cachedRepoPath;
     }

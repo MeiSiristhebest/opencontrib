@@ -1,4 +1,5 @@
 import { Octokit } from '@octokit/rest';
+import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -8,10 +9,18 @@ export interface GitHubClientOptions {
   cacheTtlMs?: number;
 }
 
+export interface ApiResult<T> {
+  status: 'OK' | 'API_UNAVAILABLE';
+  data: T;
+  error?: string;
+}
+
 export class GitHubClient {
   private octokit: Octokit;
   private cacheDir: string;
   private cacheTtlMs: number;
+  private tokenScope: string;
+  private readonly schemaVersion = 'v2';
 
   constructor(options: GitHubClientOptions = {}) {
     let token = options.token || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
@@ -30,11 +39,16 @@ export class GitHubClient {
     // Fallback 2: Read from GitHub CLI (gh auth token)
     if (!token) {
       try {
-        const ghToken = require('child_process').execSync('gh auth token', { encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] });
+        const ghToken = require('child_process').execSync('gh auth token', {
+          encoding: 'utf-8',
+          timeout: 2000,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
         token = ghToken.trim();
       } catch {}
     }
 
+    this.tokenScope = token ? createHash('sha256').update(token).digest('hex').slice(0, 8) : 'anon';
     this.octokit = new Octokit({ auth: token || undefined });
     this.cacheTtlMs = options.cacheTtlMs ?? 10 * 60 * 1000; // 10 minutes
 
@@ -45,8 +59,10 @@ export class GitHubClient {
   }
 
   private getCachePath(key: string): string {
-    const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
-    return join(this.cacheDir, `${safeKey}.json`);
+    const hash = createHash('sha256')
+      .update(`${this.schemaVersion}_${this.tokenScope}_${key}`)
+      .digest('hex');
+    return join(this.cacheDir, `${hash}.json`);
   }
 
   private getCached<T>(key: string): T | null {
@@ -68,12 +84,26 @@ export class GitHubClient {
     const filePath = this.getCachePath(key);
     try {
       writeFileSync(filePath, JSON.stringify({ timestamp: Date.now(), payload }), 'utf-8');
-    } catch {
-      // Ignore cache write errors
-    }
+    } catch {}
   }
 
-  async searchIssues(query: string, options: { maxPages?: number; refresh?: boolean } = {}) {
+  private getRetryDelayMs(err: any): number {
+    const headers = err?.response?.headers;
+    if (headers) {
+      if (headers['retry-after']) {
+        const seconds = parseInt(headers['retry-after'], 10);
+        if (!isNaN(seconds)) return Math.min(60000, seconds * 1000);
+      }
+      if (headers['x-ratelimit-reset']) {
+        const resetTime = parseInt(headers['x-ratelimit-reset'], 10) * 1000;
+        const diff = resetTime - Date.now();
+        if (diff > 0 && diff < 60000) return diff + 500;
+      }
+    }
+    return 3000; // Default exponential/fallback backoff
+  }
+
+  async searchIssues(query: string, options: { maxPages?: number; refresh?: boolean } = {}): Promise<any[]> {
     const cacheKey = `search_${query}`;
     if (!options.refresh) {
       const cached = this.getCached<any[]>(cacheKey);
@@ -98,15 +128,15 @@ export class GitHubClient {
           items.push(...resp.data.items);
           success = true;
 
-          // Pacing delay (3000ms) between pages
+          // Pacing delay between pages
           if (page < maxPages && resp.data.items.length === 30) {
-            await new Promise((r) => setTimeout(r, 3000));
+            await new Promise((r) => setTimeout(r, 1000));
           }
         } catch (err: any) {
           retries++;
           if (err.status === 403 || err.status === 429) {
-            // Rate limit hit, wait 5s and retry
-            await new Promise((r) => setTimeout(r, 5000));
+            const delay = this.getRetryDelayMs(err);
+            await new Promise((r) => setTimeout(r, delay));
           } else {
             throw err;
           }
@@ -118,22 +148,39 @@ export class GitHubClient {
     return items;
   }
 
-  async getIssueComments(owner: string, repo: string, issue_number: number) {
+  /**
+   * Paged comments retrieval with Tri-State safety return.
+   */
+  async getIssueComments(
+    owner: string,
+    repo: string,
+    issue_number: number,
+    maxPages = 2,
+  ): Promise<ApiResult<any[]>> {
     const cacheKey = `comments_${owner}_${repo}_${issue_number}`;
     const cached = this.getCached<any[]>(cacheKey);
-    if (cached) return cached;
+    if (cached) return { status: 'OK', data: cached };
+
+    const allComments: any[] = [];
 
     try {
-      const resp = await this.octokit.rest.issues.listComments({
-        owner,
-        repo,
-        issue_number,
-        per_page: 50,
-      });
-      this.setCache(cacheKey, resp.data);
-      return resp.data;
-    } catch {
-      return [];
+      for (let page = 1; page <= maxPages; page++) {
+        const resp = await this.octokit.rest.issues.listComments({
+          owner,
+          repo,
+          issue_number,
+          per_page: 50,
+          page,
+        });
+
+        allComments.push(...resp.data);
+        if (resp.data.length < 50) break; // Reached end of comments
+      }
+
+      this.setCache(cacheKey, allComments);
+      return { status: 'OK', data: allComments };
+    } catch (err: any) {
+      return { status: 'API_UNAVAILABLE', data: [], error: err.message };
     }
   }
 
@@ -215,37 +262,50 @@ export class GitHubClient {
     }
   }
 
-  async getIssueLinkedPrsCount(owner: string, repo: string, issue_number: number): Promise<number> {
+  /**
+   * Paged timeline event inspection with Tri-State safety return.
+   */
+  async getIssueLinkedPrsCount(
+    owner: string,
+    repo: string,
+    issue_number: number,
+    maxPages = 2,
+  ): Promise<ApiResult<number>> {
     const cacheKey = `issue_timeline_${owner}_${repo}_${issue_number}`;
     const cached = this.getCached<number>(cacheKey);
-    if (cached !== null) return cached;
+    if (cached !== null) return { status: 'OK', data: cached };
+
+    let prCount = 0;
 
     try {
-      const resp = await this.octokit.rest.issues.listEventsForTimeline({
-        owner,
-        repo,
-        issue_number,
-        per_page: 50,
-      });
+      for (let page = 1; page <= maxPages; page++) {
+        const resp = await this.octokit.rest.issues.listEventsForTimeline({
+          owner,
+          repo,
+          issue_number,
+          per_page: 50,
+          page,
+        });
 
-      let prCount = 0;
-      for (const event of resp.data) {
-        if (
-          event.event === 'cross-referenced' &&
-          (event as any).source?.issue?.pull_request
-        ) {
-          const prState = (event as any).source?.issue?.state;
-          if (prState === 'open') {
-            prCount++;
+        for (const event of resp.data) {
+          if (
+            event.event === 'cross-referenced' &&
+            (event as any).source?.issue?.pull_request
+          ) {
+            const prState = (event as any).source?.issue?.state;
+            if (prState === 'open') {
+              prCount++;
+            }
           }
         }
+
+        if (resp.data.length < 50) break;
       }
 
       this.setCache(cacheKey, prCount);
-      return prCount;
-    } catch {
-      return 0;
+      return { status: 'OK', data: prCount };
+    } catch (err: any) {
+      return { status: 'API_UNAVAILABLE', data: 0, error: err.message };
     }
   }
 }
-

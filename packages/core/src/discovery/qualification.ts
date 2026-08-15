@@ -10,6 +10,7 @@ export const ACTION_BLOCKING_LABELS = [
   'discussion',
   'wontfix',
   'wont-fix',
+  'stale',
 ] as const;
 
 export interface IssueCommentItem {
@@ -19,7 +20,7 @@ export interface IssueCommentItem {
   created_at: string;
 }
 
-export function qualifyIssue(input: {
+export interface QualifyIssueInput {
   issueNumber: number;
   issueTitle: string;
   issueBody: string;
@@ -27,10 +28,27 @@ export function qualifyIssue(input: {
   isOpen: boolean;
   assignees: string[];
   createdAt: string;
+  authorLogin?: string;
   comments: IssueCommentItem[];
+  commentsApiStatus?: 'OK' | 'API_UNAVAILABLE';
   existingLinkedPrsCount?: number;
-}): QualificationResult {
-  const { issueTitle, issueBody, labels, isOpen, assignees, createdAt, comments, existingLinkedPrsCount = 0 } = input;
+  timelineApiStatus?: 'OK' | 'API_UNAVAILABLE';
+}
+
+export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
+  const {
+    issueTitle,
+    issueBody,
+    labels,
+    isOpen,
+    assignees,
+    createdAt,
+    authorLogin,
+    comments,
+    commentsApiStatus = 'OK',
+    existingLinkedPrsCount = 0,
+    timelineApiStatus = 'OK',
+  } = input;
 
   const normalizedLabels = labels.map((l) => l.toLowerCase().replace(/[-_]+/g, ' ').trim());
   const fullText = `${issueTitle} ${issueBody}`.toLowerCase();
@@ -63,7 +81,7 @@ export function qualifyIssue(input: {
     };
   }
 
-  // 3. Blocking Labels Gate
+  // 3. Blocking Labels Gate (Single Source of Truth)
   for (const blocking of ACTION_BLOCKING_LABELS) {
     if (normalizedLabels.some((l) => l.includes(blocking))) {
       return {
@@ -79,7 +97,21 @@ export function qualifyIssue(input: {
     }
   }
 
-  // 4. Duplicate / Existing PR Gate
+  // 4. Tri-State API Safety Gate (Fail-Safe)
+  if (commentsApiStatus === 'API_UNAVAILABLE' || timelineApiStatus === 'API_UNAVAILABLE') {
+    return {
+      isQualified: false,
+      disqualifyReason: 'Unable to verify comments/timeline due to GitHub API error (tri-state safety gate).',
+      track: 'standard_track',
+      hasExistingPr: false,
+      hasClaimant: false,
+      authorFirstRightActive: false,
+      inspectedCommentsCount: comments.length,
+      botRules: [],
+    };
+  }
+
+  // 5. Duplicate / Active Linked PR Gate
   if (existingLinkedPrsCount > 0) {
     return {
       isQualified: false,
@@ -93,17 +125,20 @@ export function qualifyIssue(input: {
     };
   }
 
-  // 5. Comment History & Anti-Bandwagoning Audit
+  // 6. Comment History, Anti-Bandwagoning & Structured PR Detection
   const botRules: string[] = [];
   let hasClaimant = false;
   let claimantDetails = '';
 
+  const prUrlRegex = /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/i;
+  const prRefRegex = /\b(?:pull\s*request|pr|fixes|closes|resolves)\s*#\d+\b/i;
+
   for (const comment of comments) {
-    const cBody = (comment.body || '').toLowerCase();
+    const cBody = comment.body || '';
     const user = comment.user?.login || 'unknown';
 
-    // PR link detection
-    if (cBody.includes('pull/') || cBody.includes('pr #') || cBody.includes('fixes #') || cBody.includes('opened a pr')) {
+    // Robust PR Link Detection (URL or explicit PR reference)
+    if (prUrlRegex.test(cBody) || prRefRegex.test(cBody)) {
       return {
         isQualified: false,
         disqualifyReason: `Another developer (@${user}) posted a PR reference in comments.`,
@@ -116,21 +151,21 @@ export function qualifyIssue(input: {
       };
     }
 
-    // Active claiming detection
-    if (
-      cBody.includes('i am working on this') ||
-      cBody.includes("i'm working on this") ||
-      cBody.includes('can i work on this') ||
-      cBody.includes('please assign') ||
-      cBody.includes('/claim') ||
-      cBody.includes('/assign')
-    ) {
-      hasClaimant = true;
-      claimantDetails = `@${user} commented claim intent on ${comment.created_at}`;
+    // Contributor Claim Intent Detection (Non-author claimants)
+    const isAuthor = authorLogin && user.toLowerCase() === authorLogin.toLowerCase();
+    if (!isAuthor) {
+      if (
+        /\b(?:i am working on this|i'm working on this|can i work on this|please assign|working on a fix|\/claim|\/assign)\b/i.test(
+          cBody,
+        )
+      ) {
+        hasClaimant = true;
+        claimantDetails = `@${user} commented claim intent on ${comment.created_at}`;
+      }
     }
 
-    // Bot instruction capture with word-boundary regex to prevent false positives (e.g. "class", "cleanup")
-    if (/\bcla\b/i.test(cBody) || /\bdco\b/i.test(cBody) || cBody.includes('contributor license agreement')) {
+    // Bot instruction capture
+    if (/\bcla\b/i.test(cBody) || /\bdco\b/i.test(cBody) || /contributor license agreement/i.test(cBody)) {
       botRules.push('Requires CLA/DCO sign-off');
     }
   }
@@ -148,7 +183,7 @@ export function qualifyIssue(input: {
     };
   }
 
-  // 6. Author-First-Right Check (7-Day Rule)
+  // 7. Author-First-Right Check (7-Day Grace Period for Issue Author)
   let authorFirstRightActive = false;
   let authorFirstRightDetails = '';
   const authorFixPhrases = [
@@ -160,18 +195,35 @@ export function qualifyIssue(input: {
     'submitting a pr',
   ];
 
-  if (authorFixPhrases.some((phrase) => fullText.includes(phrase))) {
-    const createdAtTime = new Date(createdAt).getTime();
-    const nowTime = Date.now();
-    const daysSinceCreation = (nowTime - createdAtTime) / (1000 * 60 * 60 * 24);
+  // Check if issue body (authored by issue creator) contains intent
+  const bodyHasAuthorIntent = authorFixPhrases.some((phrase) => fullText.includes(phrase));
 
-    if (daysSinceCreation < 7) {
-      authorFirstRightActive = true;
-      authorFirstRightDetails = `Author expressed intent to fix ${Math.floor(daysSinceCreation)} days ago (< 7 days grace period).`;
+  // Check if any comment by the author contains intent within last 7 days
+  const nowTime = Date.now();
+  let latestAuthorIntentTime = bodyHasAuthorIntent ? new Date(createdAt).getTime() : 0;
+
+  for (const comment of comments) {
+    const user = comment.user?.login;
+    if (user && authorLogin && user.toLowerCase() === authorLogin.toLowerCase()) {
+      const cBody = (comment.body || '').toLowerCase();
+      if (authorFixPhrases.some((phrase) => cBody.includes(phrase))) {
+        const commentTime = new Date(comment.created_at).getTime();
+        if (commentTime > latestAuthorIntentTime) {
+          latestAuthorIntentTime = commentTime;
+        }
+      }
     }
   }
 
-  // 7. Track Routing (Fast-Track vs Standard-Track)
+  if (latestAuthorIntentTime > 0) {
+    const daysSinceIntent = (nowTime - latestAuthorIntentTime) / (1000 * 60 * 60 * 24);
+    if (daysSinceIntent < 7) {
+      authorFirstRightActive = true;
+      authorFirstRightDetails = `Author expressed intent to fix ${Math.floor(daysSinceIntent)} days ago (< 7 days grace period).`;
+    }
+  }
+
+  // 8. Track Routing (Fast-Track vs Standard-Track)
   const isFastTrack =
     normalizedLabels.some((l) => l.includes('doc') || l.includes('typo')) ||
     fullText.includes('typo') ||

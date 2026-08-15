@@ -64,6 +64,14 @@ export const OpportunityOpportunitySchema = z.object({
   qualification: QualificationResultSchema,
   estimatedWorkload: z.string(),
   coreDemand: z.string(),
+  discoveryMode: z.enum(['targeted_repo', 'global_discovery']).optional(),
+  matchedSignals: z.object({
+    techStack: z.array(z.string()),
+    focusAreas: z.array(z.string()),
+    labels: z.array(z.string()),
+    freshnessModifier: z.number(),
+    actionabilityModifier: z.number(),
+  }).optional(),
 });
 export type Opportunity = z.infer<typeof OpportunityOpportunitySchema>;
 
