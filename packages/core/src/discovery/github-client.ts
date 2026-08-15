@@ -16,10 +16,10 @@ export class GitHubClient {
   constructor(options: GitHubClientOptions = {}) {
     let token = options.token || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
 
-    // Fallback 1: Read from ~/.config/openmeta/config.json
+    // Fallback 1: Read from ~/.config/opencontrib/config.json
     if (!token) {
       try {
-        const configPath = join(homedir(), '.config', 'openmeta', 'config.json');
+        const configPath = join(homedir(), '.config', 'opencontrib', 'config.json');
         if (existsSync(configPath)) {
           const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
           token = cfg?.github?.pat || '';

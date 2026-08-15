@@ -2,6 +2,10 @@ import type { Opportunity, UserProfile } from '../contracts/schemas.js';
 import { assessFeasibility, detectSystemCapabilities } from './feasibility.js';
 import { GitHubClient } from './github-client.js';
 import { qualifyIssue } from './qualification.js';
+import {
+  computeFreshnessModifier,
+  computeActionabilityModifier,
+} from './ranking.js';
 
 export interface ScoutOptions {
   repo?: string;
@@ -25,7 +29,8 @@ export async function scoutOpportunities(
   if (options.repo) {
     searchQuery = `repo:${options.repo} is:issue is:open no:assignee archived:false`;
   } else {
-    const joinedLabels = 'label:"good first issue" OR label:"good-first-issue" OR label:"help wanted" OR label:"help-wanted"';
+    const joinedLabels =
+      'label:"good first issue" OR label:"good-first-issue" OR label:"help wanted" OR label:"help-wanted"';
     const techTerms = profile.techStack.slice(0, 3).join(' OR ');
     searchQuery = `(${joinedLabels}) (${techTerms}) stars:>=${minStars} is:issue is:open no:assignee archived:false`;
   }
@@ -78,38 +83,54 @@ export async function scoutOpportunities(
     // 4. Run Feasibility Assessment
     const feasibility = assessFeasibility(item.title, item.body || '', labels, capabilities);
 
-    // 5. Calculate Base & Adjusted Match Score
-    let matchScore = 75; // Baseline
+    // 5. Calculate Calibrated Multi-Signal Score
     const text = `${item.title} ${item.body || ''}`.toLowerCase();
-    
-    // Tech stack match boost
+    let keywordHits = 0;
     for (const tech of profile.techStack) {
-      if (text.includes(tech.toLowerCase())) matchScore += 5;
+      if (text.includes(tech.toLowerCase())) keywordHits++;
     }
-    matchScore = Math.min(100, Math.max(0, matchScore));
+    const profileKeywordScore = Math.min(100, 50 + keywordHits * 12);
 
+    let domainScore = 70;
+    if (labels.some((l: string) => /good first issue|starter|easy/i.test(l))) domainScore += 14;
+    if (labels.some((l: string) => /help wanted/i.test(l))) domainScore += 9;
+
+    const freshnessModifier = computeFreshnessModifier(item.created_at);
+    const actionabilityModifier = computeActionabilityModifier(item.body || '');
+
+    const rawMatch =
+      0.35 * profileKeywordScore +
+      0.35 * domainScore +
+      0.30 * feasibility.feasibilityScore +
+      freshnessModifier +
+      actionabilityModifier;
+
+    const matchScore = Math.max(0, Math.min(100, Math.round(rawMatch)));
     const adjustedScore = Math.max(0, matchScore - feasibility.scorePenalty);
 
-    // Filter by threshold
-    if (adjustedScore >= profile.minMatchScore) {
-      opportunities.push({
-        repoFullName,
-        repoStars: repoDetails.stars,
-        issueNumber: item.number,
-        title: item.title,
-        url: item.html_url,
-        body: item.body || '',
-        labels,
-        createdAt: item.created_at,
-        updatedAt: item.updated_at,
-        matchScore,
-        feasibility,
-        adjustedScore,
-        qualification,
-        estimatedWorkload: feasibility.scope === 'docs_only' ? '30m-1h' : '2-4h',
-        coreDemand: item.title,
-      });
+    // Filter by threshold (for general discovery; targeted repo searches return all candidates ranked by score)
+    const threshold = profile.minMatchScore ?? 0;
+    if (!options.repo && adjustedScore < threshold) {
+      continue;
     }
+
+    opportunities.push({
+      repoFullName,
+      repoStars: repoDetails.stars,
+      issueNumber: item.number,
+      title: item.title,
+      url: item.html_url,
+      body: item.body || '',
+      labels,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+      matchScore,
+      feasibility,
+      adjustedScore,
+      qualification,
+      estimatedWorkload: feasibility.scope === 'docs_only' ? '30m-1h' : '2-4h',
+      coreDemand: item.title,
+    });
 
     if (opportunities.length >= limit) break;
   }
