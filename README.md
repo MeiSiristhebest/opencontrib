@@ -77,11 +77,11 @@ bun test
 
 ## 🔌 Model Context Protocol (MCP) Setup
 
-OpenContrib operates in a **Dual MCP Architecture**:
-- **GitHub MCP** handles all remote GitHub API interactions and authentication.
-- **OpenContrib MCP** is a **Zero-Token local engineering engine** dedicated to sandboxing, evidence collection, quality auditing, and memory tracking.
+OpenContrib supports two flexible operating modes:
 
-Add both to your MCP client configuration (`claude_desktop_config.json` / `antigravity.json`):
+### Mode 1: Dual-MCP Architecture (Recommended for External Agents)
+- **GitHub MCP** handles remote GitHub platform I/O (issues, PRs, comments, forks).
+- **OpenContrib MCP** acts as the local engineering engine (sandboxing, empirical evidence, 7D rubric, memory ledger).
 
 ```json
 {
@@ -96,6 +96,23 @@ Add both to your MCP client configuration (`claude_desktop_config.json` / `antig
     "opencontrib": {
       "command": "bun",
       "args": ["run", "/path/to/opencontrib/packages/mcp-server/src/index.ts"]
+    }
+  }
+}
+```
+
+### Mode 2: Direct / Standalone Setup (with `GITHUB_TOKEN`)
+If you want OpenContrib to directly query GitHub for opportunities (via `contrib_scout`) or run standalone without configuring GitHub MCP, supply `GITHUB_TOKEN` directly:
+
+```json
+{
+  "mcpServers": {
+    "opencontrib": {
+      "command": "bun",
+      "args": ["run", "/path/to/opencontrib/packages/mcp-server/src/index.ts"],
+      "env": {
+        "GITHUB_TOKEN": "your_github_token_here"
+      }
     }
   }
 }
