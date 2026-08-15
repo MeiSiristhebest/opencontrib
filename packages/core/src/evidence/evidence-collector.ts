@@ -64,10 +64,10 @@ export function parseTestCountsFromOutput(output: string): { passed: number; fai
   const pytestFail = output.match(/(\d+)\s+failed/i);
   if (!failMatch && pytestFail) failed = parseInt(pytestFail[1], 10);
 
-  // Go test: e.g. "PASS" or "FAIL"
+  // Go test: e.g. "PASS", "FAIL", "ok  package/name  0.123s", "FAIL package/name 0.123s"
   if (passed === 0 && failed === 0) {
-    if (output.includes('PASS') || output.includes('ok  \t')) passed = 1;
-    if (output.includes('FAIL\t')) failed = 1;
+    if (output.includes('PASS') || output.includes('ok\t') || output.includes('ok  \t') || /ok\s+\S+\s+[\d\.]+s/.test(output)) passed = 1;
+    if (output.includes('FAIL\t') || output.includes('FAIL\n') || /FAIL\s+\S+\s+[\d\.]+s/.test(output)) failed = 1;
   }
 
   // Cargo test: e.g. "test result: ok. 4 passed; 0 failed"
@@ -259,6 +259,19 @@ export async function verifyDualStageReproduction(input: {
   };
 }
 
+export function countAddedTestCasesFromGitDiff(cwd: string): number | undefined {
+  try {
+    const res = spawnSync('git', ['diff', 'HEAD~1', '--unified=0'], { cwd, encoding: 'utf-8', timeout: 5000 });
+    if (res.status === 0 && res.stdout) {
+      const addedLines = res.stdout.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++'));
+      const testPattern = /^\+\s*(?:it\(|test\(|describe\(|def\s+test_|func\s+Test|#\[test\])/;
+      const matches = addedLines.filter(l => testPattern.test(l));
+      return matches.length;
+    }
+  } catch {}
+  return undefined;
+}
+
 export async function collectEvidence(options: EvidenceCollectionOptions): Promise<EvidenceReport> {
   const { cwd, workspaceRoot, testCommand, stressLoopCount = 20, runFlakyBaseline = true } = options;
 
@@ -274,8 +287,9 @@ export async function collectEvidence(options: EvidenceCollectionOptions): Promi
   // 4. Final System Handle & FD Sampling
   const finalHandles = getProcessHandleCount();
 
-  // 5. Real Test Metrics Extraction
+  // 5. Real Test Metrics Extraction (diff-backed additions + output parser)
   const parsedCounts = parseTestCountsFromOutput(stressResult.lastOutput);
+  const addedUnitTestsCount = countAddedTestCasesFromGitDiff(cwd);
 
   return {
     baselineTestedAt: new Date().toISOString(),
@@ -286,6 +300,7 @@ export async function collectEvidence(options: EvidenceCollectionOptions): Promi
     initialDescriptorCount: initialHandles,
     finalDescriptorCount: finalHandles,
     passedUnitTestsCount: parsedCounts.passed,
-    addedUnitTestsCount: parsedCounts.total > 0 ? 1 : 0,
+    addedUnitTestsCount,
   };
 }
+

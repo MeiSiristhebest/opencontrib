@@ -126,7 +126,7 @@ export const EvidenceReportSchema = z.object({
   initialDescriptorCount: z.number().optional(),
   finalDescriptorCount: z.number().optional(),
   passedUnitTestsCount: z.number(),
-  addedUnitTestsCount: z.number(),
+  addedUnitTestsCount: z.number().optional(),
   benchmarkMetrics: z.record(z.string(), z.string()).optional(),
   rawExecutionLogs: z.string().optional(),
 });
