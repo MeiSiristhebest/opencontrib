@@ -139,11 +139,17 @@ export class WorktreeManager {
     if (!existsSync(workspacePath)) return;
 
     if (baseRepoPath && existsSync(baseRepoPath)) {
-      this.runGit(['-C', baseRepoPath, 'worktree', 'remove', '--force', workspacePath]);
+      try {
+        this.runGit(['-C', baseRepoPath, 'worktree', 'remove', '--force', workspacePath]);
+      } catch {}
     }
 
     if (existsSync(workspacePath)) {
-      rmSync(workspacePath, { recursive: true, force: true });
+      try {
+        rmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      } catch {
+        // Safe fallback for Windows file lock
+      }
     }
   }
 

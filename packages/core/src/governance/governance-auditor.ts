@@ -87,6 +87,12 @@ export function calculateConfidenceScore(breakdown: ConfidenceBreakdown): {
   };
 }
 
+/**
+ * 7-Dimensional Weighted Quality Rubric
+ * Deterministic engineering quality gate calibrated across 7 core software engineering axes.
+ */
+export const calculate7DQualityRubric = calculateConfidenceScore;
+
 export function auditGovernance(input: {
   diffText: string;
   prBodyText: string;

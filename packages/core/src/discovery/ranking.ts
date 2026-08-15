@@ -7,6 +7,7 @@ export interface DeveloperProfile {
   proficiency: 'beginner' | 'intermediate' | 'expert';
   os: 'windows' | 'linux' | 'macos' | 'wsl2';
   hasDocker: boolean;
+  hasWsl?: boolean;
 }
 
 export interface RawIssueInput {
@@ -32,11 +33,49 @@ export interface HybridRankedOpportunity {
     profileKeywordScore: number;
     feasibilityScore: number;
     qualificationScore: number;
+    freshnessModifier: number;
+    actionabilityModifier: number;
   };
   matchedKeywords: string[];
   isQualified: boolean;
   qualificationReason: string;
   track: 'FAST_TRACK' | 'STANDARD_TRACK';
+}
+
+/**
+ * Calculates freshness modifier based on issue age in days.
+ */
+export function computeFreshnessModifier(createdAtStr: string): number {
+  try {
+    const created = new Date(createdAtStr).getTime();
+    const now = Date.now();
+    const ageDays = (now - created) / (1000 * 60 * 60 * 24);
+
+    if (ageDays < 30) return 12; // Fresh
+    if (ageDays < 90) return 4;
+    if (ageDays < 180) return -12; // Stale > 3 months
+    if (ageDays < 365) return -25; // Stale > 6 months
+    return -35; // Stale > 1 year
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Calculates actionable body score based on presence of reproduction steps, code blocks, stack traces.
+ */
+export function computeActionabilityModifier(body: string): number {
+  if (!body || body.trim().length < 50) return -10; // Too brief / vague
+
+  let modifier = 0;
+  // Code block or stack trace
+  if (/```|`[^`]+`|\bat\s+[\w$./]+\s*\(/i.test(body)) modifier += 6;
+  // Reproduction steps or expected vs actual
+  if (/reproduce|reproduction|steps to|expected|actual behavior|to reproduce/i.test(body)) modifier += 6;
+  // Clear error message or assertion
+  if (/error:|exception:|assertion|panic:|traceback/i.test(body)) modifier += 4;
+
+  return Math.min(14, modifier);
 }
 
 export class HybridIssueRanker {
@@ -48,6 +87,7 @@ export class HybridIssueRanker {
 
   rankIssues(issues: RawIssueInput[], repoFullName: string): HybridRankedOpportunity[] {
     const results: HybridRankedOpportunity[] = [];
+    const repoSeenCount = new Map<string, number>();
 
     for (const issue of issues) {
       const fullText = `${issue.title} ${issue.body}`.toLowerCase();
@@ -76,7 +116,7 @@ export class HybridIssueRanker {
         {
           os: this.profile.os,
           hasDocker: this.profile.hasDocker,
-          hasWsl: this.profile.os === 'wsl2',
+          hasWsl: this.profile.hasWsl || this.profile.os === 'wsl2',
         },
         issue.labels.map((l) => l.name),
         fullText,
@@ -95,23 +135,45 @@ export class HybridIssueRanker {
         existingLinkedPrsCount: issue.existingLinkedPrsCount ?? 0,
       });
 
-      // 4. Hybrid Weighted Scoring Formula
-      let domainMatchScore = 70;
-      if (issue.labels.some((l) => /good first issue|help wanted|easy/i.test(l.name))) {
-        domainMatchScore += 15;
+      // Disqualifying labels
+      if (issue.labels.some((l) => /wontfix|duplicate|invalid|stale/i.test(l.name))) {
+        qualification.isQualified = false;
+        qualification.reason = 'Disqualified due to blocking label (wontfix/duplicate/invalid)';
       }
-      if (issue.labels.some((l) => /bug|fix|defect/i.test(l.name))) {
+
+      // 4. Domain & Structured Heuristics
+      let domainMatchScore = 70;
+      if (issue.labels.some((l) => /good first issue|starter|easy/i.test(l.name))) {
+        domainMatchScore += 14;
+      }
+      if (issue.labels.some((l) => /help wanted/i.test(l.name))) {
+        domainMatchScore += 9;
+      }
+      if (issue.labels.some((l) => /bug|fix|defect|regression/i.test(l.name))) {
         domainMatchScore += 10;
       }
 
+      // 5. Freshness & Actionability Modifiers
+      const freshnessModifier = computeFreshnessModifier(issue.createdAt);
+      const actionabilityModifier = computeActionabilityModifier(issue.body);
+
+      // 6. Cross-Repository Diversity Penalty
+      const count = repoSeenCount.get(repoFullName) || 0;
+      repoSeenCount.set(repoFullName, count + 1);
+      const diversityPenalty = count * 3;
+
       const qualificationScore = qualification.isQualified ? 100 : 0;
 
+      const rawBase =
+        0.35 * profileKeywordScore +
+        0.35 * domainMatchScore +
+        0.30 * feasibility.feasibilityScore +
+        freshnessModifier +
+        actionabilityModifier -
+        diversityPenalty;
+
       const finalScore = qualification.isQualified
-        ? Math.round(
-            0.35 * profileKeywordScore +
-              0.35 * domainMatchScore +
-              0.30 * feasibility.feasibilityScore,
-          )
+        ? Math.max(0, Math.min(100, Math.round(rawBase)))
         : 0;
 
       results.push({
@@ -124,6 +186,8 @@ export class HybridIssueRanker {
           profileKeywordScore,
           feasibilityScore: feasibility.feasibilityScore,
           qualificationScore,
+          freshnessModifier,
+          actionabilityModifier,
         },
         matchedKeywords,
         isQualified: qualification.isQualified,
@@ -141,9 +205,12 @@ export class HybridIssueRanker {
     body?: string;
     repoFullName: string;
     matchScore: number;
+    createdAt?: string;
     labels?: string[];
     [key: string]: any;
   }>): Array<{ opportunity: any; finalScore: number }> {
+    const repoSeenCount = new Map<string, number>();
+
     return opportunities
       .map((opp) => {
         const fullText = `${opp.title} ${opp.body || ''}`.toLowerCase();
@@ -159,16 +226,33 @@ export class HybridIssueRanker {
           {
             os: this.profile.os,
             hasDocker: this.profile.hasDocker,
-            hasWsl: this.profile.os === 'wsl2',
+            hasWsl: this.profile.hasWsl || this.profile.os === 'wsl2',
           },
           opp.labels || [],
           fullText,
         );
 
-        const domainMatchScore = opp.matchScore || 80;
-        const finalScore = Math.round(
-          0.35 * profileKeywordScore + 0.35 * domainMatchScore + 0.30 * feasibility.feasibilityScore,
-        );
+        let domainMatchScore = opp.matchScore || 80;
+        if (opp.labels && opp.labels.some((l: string) => /good first issue|starter/i.test(l))) {
+          domainMatchScore += 14;
+        }
+
+        const freshness = opp.createdAt ? computeFreshnessModifier(opp.createdAt) : 5;
+        const actionability = computeActionabilityModifier(opp.body || '');
+
+        const seen = repoSeenCount.get(opp.repoFullName) || 0;
+        repoSeenCount.set(opp.repoFullName, seen + 1);
+        const diversityPenalty = seen * 3;
+
+        const rawScore =
+          0.35 * profileKeywordScore +
+          0.35 * domainMatchScore +
+          0.30 * feasibility.feasibilityScore +
+          freshness +
+          actionability -
+          diversityPenalty;
+
+        const finalScore = Math.max(0, Math.min(100, Math.round(rawScore)));
 
         return {
           opportunity: opp,
