@@ -1,13 +1,16 @@
+import { spawnSync } from 'child_process';
 import { defaultSandboxRuntime, type SandboxExecutionResult } from '../sandbox/sandbox-runtime.js';
 import type { EvidenceReport, FlakyTestRecord } from '../contracts/schemas.js';
 
 export interface EvidenceCollectionOptions {
   cwd: string;
   workspaceRoot?: string;
+  baselineCommitSha?: string;
   testCommand: string;
   stressLoopCount?: number;
   runFlakyBaseline?: boolean;
 }
+
 
 export interface DualStageReproductionResult {
   preFixFailingAssertionCaptured: boolean;
@@ -259,21 +262,52 @@ export async function verifyDualStageReproduction(input: {
   };
 }
 
-export function countAddedTestCasesFromGitDiff(cwd: string): number | undefined {
+export function parseAddedTestCasesFromDiffText(diffText: string): number {
+  if (!diffText || typeof diffText !== 'string') return 0;
+  const addedLines = diffText.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'));
+  // Match test case definitions, strictly excluding suites (describe) and comments (//, *, #, /*)
+  const testCasePattern =
+    /^\+\s*(?:(?:it|test)(?:\.(?:skip|only|concurrent|todo|each))?\s*\(|def\s+test_[a-zA-Z0-9_]+\s*\(|func\s+Test[a-zA-Z0-9_]+\s*\(|#\[test\])/;
+  // Comment pattern excludes //, /*, *, and # (except Rust #[test] attributes)
+  const commentPattern = /^\+\s*(?:\/\/|\/\*|\*|#(?!\[))/;
+
+  const matches = addedLines.filter((l) => !commentPattern.test(l) && testCasePattern.test(l));
+  return matches.length;
+}
+
+
+export function countAddedTestCasesFromGitDiff(cwd: string, baselineCommitSha?: string): number | undefined {
+  if (baselineCommitSha) {
+    try {
+      const res = spawnSync('git', ['diff', baselineCommitSha, '--unified=0'], {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+      if (res.status === 0 && res.stdout) {
+        return parseAddedTestCasesFromDiffText(res.stdout);
+      }
+    } catch {}
+    return undefined;
+  }
+
+  // If no baseline commit SHA is supplied, check uncommitted working tree diff vs current HEAD
+  // (strictly avoid guessing HEAD~1 which conflates prior commits into the contribution delta)
   try {
-    const res = spawnSync('git', ['diff', 'HEAD~1', '--unified=0'], { cwd, encoding: 'utf-8', timeout: 5000 });
+    const res = spawnSync('git', ['diff', 'HEAD', '--unified=0'], {
+      cwd,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
     if (res.status === 0 && res.stdout) {
-      const addedLines = res.stdout.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++'));
-      const testPattern = /^\+\s*(?:it\(|test\(|describe\(|def\s+test_|func\s+Test|#\[test\])/;
-      const matches = addedLines.filter(l => testPattern.test(l));
-      return matches.length;
+      return parseAddedTestCasesFromDiffText(res.stdout);
     }
   } catch {}
   return undefined;
 }
 
 export async function collectEvidence(options: EvidenceCollectionOptions): Promise<EvidenceReport> {
-  const { cwd, workspaceRoot, testCommand, stressLoopCount = 20, runFlakyBaseline = true } = options;
+  const { cwd, workspaceRoot, baselineCommitSha, testCommand, stressLoopCount = 20, runFlakyBaseline = true } = options;
 
   // 1. Initial System Handle & FD Sampling
   const initialHandles = getProcessHandleCount();
@@ -289,7 +323,7 @@ export async function collectEvidence(options: EvidenceCollectionOptions): Promi
 
   // 5. Real Test Metrics Extraction (diff-backed additions + output parser)
   const parsedCounts = parseTestCountsFromOutput(stressResult.lastOutput);
-  const addedUnitTestsCount = countAddedTestCasesFromGitDiff(cwd);
+  const addedUnitTestsCount = countAddedTestCasesFromGitDiff(cwd, baselineCommitSha);
 
   return {
     baselineTestedAt: new Date().toISOString(),
@@ -303,4 +337,5 @@ export async function collectEvidence(options: EvidenceCollectionOptions): Promi
     addedUnitTestsCount,
   };
 }
+
 

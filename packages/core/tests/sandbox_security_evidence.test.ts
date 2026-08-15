@@ -2,8 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { SandboxRuntime, SanitizedLocalSandboxProvider, defaultSandboxRuntime, defaultSandboxProvider } from '../src/sandbox/sandbox-runtime.js';
 
 import { WorktreeManager, MAX_GENERATED_FILES, MAX_GENERATED_FILE_CHARS } from '../src/workspace/worktree-manager.js';
-import { verifyDualStageReproduction } from '../src/evidence/evidence-collector.js';
+import { verifyDualStageReproduction, parseAddedTestCasesFromDiffText, countAddedTestCasesFromGitDiff } from '../src/evidence/evidence-collector.js';
 import { OpenAICompatibleProvider, MockLLMProvider, LLMService } from '../src/llm/llm-service.js';
+
 import { deriveEvidenceBackedQualityRubric } from '../src/governance/governance-auditor.js';
 import { existsSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -235,6 +236,27 @@ describe('Evidence-Backed Quality Rubric & Subagent Review Decoupling', () => {
     expect(result.isSandboxed).toBe(false);
     expect(result.stderr).toContain('violates workspace boundary');
   });
+
+  test('parseAddedTestCasesFromDiffText counts test cases accurately and excludes suites and comments', () => {
+    const sampleDiff = `
++describe("Auth suite", () => {
++  // it("commented test", () => {})
++  /* test("block comment", () => {}) */
++  it("authenticates valid token", () => {});
++  it.skip("handles expired token", () => {});
++  test("rejects forged signature", () => {});
++});
++def test_python_case():
++  pass
++# def test_commented():
++func TestGoCase(t *testing.T) {}
++#[test]
++fn rust_case() {}
++`;
+
+    const count = parseAddedTestCasesFromDiffText(sampleDiff);
+    // it (1) + it.skip (1) + test (1) + def test_ (1) + func Test (1) + #[test] (1) = 6
+    // strictly excludes: describe (1), // it (1), /* test (1), # def test (1)
+    expect(count).toBe(6);
+  });
 });
-
-

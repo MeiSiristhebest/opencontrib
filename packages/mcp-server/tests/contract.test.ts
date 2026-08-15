@@ -151,7 +151,9 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
     const ws = JSON.parse(wsResult.content[0].text);
     expect(ws.status).toBe('success');
     expect(ws.branchName).toContain('opencontrib/fix-101');
+    expect(ws.baseCommitSha).toBeDefined();
     expect(ws.persistence?.saved).toBe(true);
+
 
     // Verify evidence boundary auto-resolution from runId
     const evResult = await tools['contrib_collect_evidence'].handler({

@@ -15,7 +15,9 @@ export interface WorkspaceContext {
   branchName: string;
   isWorktree: boolean;
   baseRepoPath: string;
+  baseCommitSha?: string;
 }
+
 
 export class WorktreeManager {
   private workspaceRoot: string;
@@ -107,6 +109,10 @@ export class WorktreeManager {
 
     // Create Git Worktree
     try {
+      // Capture base commit SHA before creating worktree/branch
+      const shaRes = this.runGit(['-C', sourceRepoPath, 'rev-parse', 'HEAD']);
+      const baseCommitSha = shaRes.success ? shaRes.stdout.trim() : undefined;
+
       // Clean previous branch if it existed
       this.runGit(['-C', sourceRepoPath, 'branch', '-D', branchName]);
 
@@ -128,6 +134,7 @@ export class WorktreeManager {
         branchName,
         isWorktree: true,
         baseRepoPath: sourceRepoPath,
+        baseCommitSha,
       };
     } catch (err) {
       // Fallback: If worktree add fails, attempt direct single-branch clone into workspace
@@ -136,12 +143,15 @@ export class WorktreeManager {
       const cloneUrl = `https://github.com/${repoFullName}.git`;
       const cloneRes = this.runGit(['clone', '--depth', '1', '-b', defaultBranch, cloneUrl, workspacePath]);
       if (cloneRes.success) {
+        const shaRes = this.runGit(['-C', workspacePath, 'rev-parse', 'HEAD']);
+        const baseCommitSha = shaRes.success ? shaRes.stdout.trim() : undefined;
         this.runGit(['-C', workspacePath, 'checkout', '-b', branchName]);
         return {
           workspacePath,
           branchName,
           isWorktree: false,
           baseRepoPath: workspacePath,
+          baseCommitSha,
         };
       } else {
         // Clone failed: strictly fail-closed, refuse to masquerade as an empty repository
@@ -151,6 +161,7 @@ export class WorktreeManager {
         );
       }
     }
+
   }
 
 

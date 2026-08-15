@@ -239,6 +239,8 @@ export function createOpenContribMcpServer(): McpServer {
               workspacePath: context.workspacePath,
               branchName: context.branchName,
               isWorktree: context.isWorktree,
+              baseRepoPath: context.baseRepoPath,
+              baseCommitSha: context.baseCommitSha,
               repoFullName: args.repoFullName,
             },
             'WORKSPACE_PREPARED',
@@ -259,6 +261,7 @@ export function createOpenContribMcpServer(): McpServer {
                 workspacePath: context.workspacePath,
                 branchName: context.branchName,
                 isWorktree: context.isWorktree,
+                baseCommitSha: context.baseCommitSha,
                 persistence: args.runId ? persistence : undefined,
               },
               null,
@@ -279,6 +282,7 @@ export function createOpenContribMcpServer(): McpServer {
     {
       cwd: z.string().describe('Workspace directory to execute test command in'),
       workspaceRoot: z.string().optional().describe('Optional root workspace directory to enforce security boundary (auto-resolved from runId if omitted)'),
+      baselineCommitSha: z.string().optional().describe('Optional baseline commit SHA before contribution changes (auto-resolved from workspace artifact in runId)'),
       testCommand: z.string().describe('Exact test command, e.g. "npm test" or "pytest"'),
       preFixAssertionProbe: z
         .string()
@@ -293,13 +297,17 @@ export function createOpenContribMcpServer(): McpServer {
     },
     async (args) => {
       let resolvedWorkspaceRoot = args.workspaceRoot;
+      let resolvedBaselineCommitSha = args.baselineCommitSha;
 
-      // Auto-resolve workspaceRoot from runId if not explicitly provided
-      if (!resolvedWorkspaceRoot && args.runId) {
+      // Auto-resolve workspaceRoot and baselineCommitSha from runId if not explicitly provided
+      if (args.runId) {
         try {
           const run = runManager.getRun(args.runId);
-          if (run?.artifacts?.workspace?.workspacePath) {
+          if (run?.artifacts?.workspace?.workspacePath && !resolvedWorkspaceRoot) {
             resolvedWorkspaceRoot = String(run.artifacts.workspace.workspacePath);
+          }
+          if (run?.artifacts?.workspace?.baseCommitSha && !resolvedBaselineCommitSha) {
+            resolvedBaselineCommitSha = String(run.artifacts.workspace.baseCommitSha);
           }
         } catch {}
       }
@@ -327,9 +335,11 @@ export function createOpenContribMcpServer(): McpServer {
       const evidence = await collectEvidence({
         cwd: args.cwd,
         workspaceRoot: resolvedWorkspaceRoot,
+        baselineCommitSha: resolvedBaselineCommitSha,
         testCommand: args.testCommand,
         stressLoopCount: args.stressLoopCount ?? 20,
       });
+
 
       const fullEvidenceReport = {
         ...evidence,
