@@ -2,11 +2,13 @@ import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'child_proces
 import { mkdtempSync, rmSync, existsSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join, resolve, sep } from 'path';
+import { parseCommandSpec, type CommandSpec } from './command-spec.js';
 
 export interface SandboxExecutionOptions {
   cwd: string;
-  command: string;
+  command?: string;
   args?: string[];
+  commandSpec?: CommandSpec;
   timeoutMs?: number;
   allowHostFallback?: boolean;
 }
@@ -25,11 +27,24 @@ export interface SandboxExecutionResult {
 export interface SandboxAvailability {
   available: boolean;
   reason?: string;
-  isolationMode: 'NATIVE_ISOLATION' | 'SANITIZED_ENVIRONMENT' | 'UNAVAILABLE';
+  isolationMode: 'NATIVE_ISOLATION' | 'SANITIZED_ENVIRONMENT' | 'CONTAINER_ISOLATION' | 'UNAVAILABLE';
   warnings: string[];
 }
 
-export class SandboxRuntime {
+/**
+ * Universal interface for sandbox execution providers
+ * (e.g. SanitizedLocalSandboxProvider, DockerSandboxProvider, BubblewrapSandboxProvider).
+ */
+export interface SandboxProvider {
+  name: string;
+  execute(options: SandboxExecutionOptions): SandboxExecutionResult;
+  getAvailability(): SandboxAvailability;
+  getDeniedPaths(): string[];
+  isPathWithinBoundary(targetPath: string, rootBoundary: string): boolean;
+}
+
+export class SanitizedLocalSandboxProvider implements SandboxProvider {
+  public readonly name = 'sanitized_local';
   private readonly home: string;
   private readonly defaultTimeoutMs = 60_000;
 
@@ -124,13 +139,31 @@ export class SandboxRuntime {
    * Executes a command within the sanitized sandbox environment.
    * Enforces Fail-Closed semantics: if sandbox cannot initialize, halts and does not fall back to host unless explicitly requested.
    */
+  execute(options: SandboxExecutionOptions): SandboxExecutionResult {
+    return this.executeInSandbox(options);
+  }
+
   executeInSandbox(options: SandboxExecutionOptions): SandboxExecutionResult {
-    const { cwd, command, args = [], timeoutMs = this.defaultTimeoutMs, allowHostFallback = false } = options;
+    const { cwd, command, args = [], commandSpec, timeoutMs = this.defaultTimeoutMs, allowHostFallback = false } = options;
+
+    let finalCommand = command || '';
+    let finalArgs = args;
+
+    if (commandSpec) {
+      finalCommand = commandSpec.executable;
+      finalArgs = commandSpec.args;
+    } else if (command && (!args || args.length === 0)) {
+      const parsed = parseCommandSpec(command);
+      finalCommand = parsed.executable;
+      finalArgs = parsed.args;
+    }
+
+    const commandDisplay = `${finalCommand} ${finalArgs.join(' ')}`.trim();
 
     const availability = this.getAvailability();
     if (!availability.available && !allowHostFallback) {
       return {
-        command: `${command} ${args.join(' ')}`.trim(),
+        command: commandDisplay,
         exitCode: 127,
         passed: false,
         stdout: '',
@@ -148,7 +181,7 @@ export class SandboxRuntime {
     } catch (err: any) {
       if (!allowHostFallback) {
         return {
-          command: `${command} ${args.join(' ')}`.trim(),
+          command: commandDisplay,
           exitCode: 126,
           passed: false,
           stdout: '',
@@ -163,7 +196,6 @@ export class SandboxRuntime {
 
     const sanitizedEnv = this.buildSanitizedEnvironment(sandboxTempDir);
 
-
     try {
       const spawnOptions: SpawnSyncOptionsWithStringEncoding = {
         cwd: resolvedCwd,
@@ -174,7 +206,7 @@ export class SandboxRuntime {
         shell: true,
       };
 
-      const result = spawnSync(command, args, spawnOptions);
+      const result = spawnSync(finalCommand, finalArgs, spawnOptions);
 
       const stdout = String(result.stdout || '');
       const stderr = String(result.stderr || '');
@@ -185,7 +217,7 @@ export class SandboxRuntime {
       const passed = exitCode === 0;
 
       return {
-        command: `${command} ${args.join(' ')}`.trim(),
+        command: commandDisplay,
         exitCode,
         passed,
         stdout,
@@ -206,4 +238,7 @@ export class SandboxRuntime {
   }
 }
 
-export const defaultSandboxRuntime = new SandboxRuntime();
+// Backward-compatible aliases and default instance
+export { SanitizedLocalSandboxProvider as SandboxRuntime };
+export const defaultSandboxRuntime = new SanitizedLocalSandboxProvider();
+export const defaultSandboxProvider = defaultSandboxRuntime;

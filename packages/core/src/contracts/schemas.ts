@@ -184,10 +184,14 @@ export const RepoMemoryEntrySchema = z.object({
     prNumber: z.number().optional(),
     prUrl: z.string(),
     title: z.string(),
+    status: z.enum(['submitted', 'in_review', 'changes_requested', 'merged', 'closed']).optional().default('submitted'),
+    submittedAt: z.string().optional(),
     mergedAt: z.string().optional(),
+    closedAt: z.string().optional(),
   })),
 });
 export type RepoMemoryEntry = z.infer<typeof RepoMemoryEntrySchema>;
+
 
 export const ContributionRecordSchema = z.object({
   id: z.string(),

@@ -1,13 +1,41 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { basename, dirname, join, resolve, sep } from 'path';
 import type {
   ArtifactType,
   ContributionRunManifest,
   ContributionRunPhase,
   ContributionRunSummary,
+  RunEvent,
   SavedArtifactResult,
 } from './types.js';
+
+export function writeAtomic(filePath: string, content: string): void {
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  const tempPath = join(dir, `.${basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`);
+  writeFileSync(tempPath, content, 'utf-8');
+  renameSync(tempPath, filePath);
+}
+
+export function validateRunId(runId: string, baseDir: string): string {
+  if (!runId || typeof runId !== 'string') {
+    throw new Error('Invalid runId: must be a non-empty string.');
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(runId)) {
+    throw new Error(
+      `Security error: Invalid runId "${runId}". Only alphanumeric characters, hyphens, and underscores are allowed (path traversal protection).`,
+    );
+  }
+  const resolvedBase = resolve(baseDir);
+  const resolvedTarget = resolve(join(baseDir, runId));
+  if (!resolvedTarget.startsWith(resolvedBase + sep) && resolvedTarget !== resolvedBase) {
+    throw new Error(`Security error: Run ID "${runId}" traverses outside base directory boundary.`);
+  }
+  return runId;
+}
 
 export class ArtifactBundleManager {
   private baseDir: string;
@@ -19,7 +47,12 @@ export class ArtifactBundleManager {
     }
   }
 
+  getBaseDir(): string {
+    return this.baseDir;
+  }
+
   getRunDir(runId: string): string {
+    validateRunId(runId, this.baseDir);
     return join(this.baseDir, runId);
   }
 
@@ -60,7 +93,7 @@ export class ArtifactBundleManager {
     const filePath = join(runDir, filename);
 
     const stringContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
-    writeFileSync(filePath, stringContent, 'utf-8');
+    writeAtomic(filePath, stringContent);
 
     return {
       runId,
@@ -95,7 +128,7 @@ export class ArtifactBundleManager {
   saveManifest(manifest: ContributionRunManifest): void {
     const runDir = this.ensureRunDir(manifest.runId);
     const manifestPath = join(runDir, 'manifest.json');
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+    writeAtomic(manifestPath, JSON.stringify(manifest, null, 2));
   }
 
   readManifest(runId: string): ContributionRunManifest | null {
@@ -108,6 +141,33 @@ export class ArtifactBundleManager {
       return JSON.parse(readFileSync(manifestPath, 'utf-8')) as ContributionRunManifest;
     } catch {
       return null;
+    }
+  }
+
+  appendEvent(runId: string, event: Omit<RunEvent, 'runId' | 'timestamp' | 'eventId'>): RunEvent {
+    const runDir = this.ensureRunDir(runId);
+    const eventsPath = join(runDir, 'events.jsonl');
+    const fullEvent: RunEvent = {
+      eventId: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      runId,
+      timestamp: new Date().toISOString(),
+      ...event,
+    };
+    appendFileSync(eventsPath, JSON.stringify(fullEvent) + '\n', 'utf-8');
+    return fullEvent;
+  }
+
+  readEvents(runId: string): RunEvent[] {
+    const runDir = this.getRunDir(runId);
+    const eventsPath = join(runDir, 'events.jsonl');
+    if (!existsSync(eventsPath)) {
+      return [];
+    }
+    try {
+      const lines = readFileSync(eventsPath, 'utf-8').trim().split('\n').filter(Boolean);
+      return lines.map((l) => JSON.parse(l) as RunEvent);
+    } catch {
+      return [];
     }
   }
 
@@ -137,6 +197,7 @@ export class ArtifactBundleManager {
         prDraft: this.readArtifact(runId, 'pr_draft') ?? undefined,
         result: this.readArtifact(runId, 'result') ?? undefined,
       },
+      events: this.readEvents(runId),
       availableArtifactFiles: this.listArtifactFiles(runId),
     };
   }

@@ -11,6 +11,7 @@ export type ContributionRunPhase =
   | 'FAILED';
 
 export interface ContributionRunManifest {
+  schemaVersion: string;
   runId: string;
   repoFullName: string;
   issueNumber?: number;
@@ -40,6 +41,15 @@ export interface SavedArtifactResult {
   byteSize: number;
 }
 
+export interface RunEvent {
+  eventId: string;
+  runId: string;
+  timestamp: string;
+  phase: ContributionRunPhase;
+  eventType: string;
+  payload?: Record<string, unknown>;
+}
+
 export interface ContributionRunSummary {
   manifest: ContributionRunManifest;
   artifacts: {
@@ -52,5 +62,6 @@ export interface ContributionRunSummary {
     prDraft?: string;
     result?: Record<string, unknown>;
   };
+  events?: RunEvent[];
   availableArtifactFiles: string[];
 }

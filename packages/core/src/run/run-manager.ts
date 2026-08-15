@@ -58,6 +58,7 @@ export class ContributionRunManager {
     const now = new Date().toISOString();
 
     const manifest: ContributionRunManifest = {
+      schemaVersion: '1.0.0',
       runId,
       repoFullName: input.repoFullName,
       issueNumber: input.issueNumber,
@@ -70,6 +71,12 @@ export class ContributionRunManager {
     };
 
     this.bundleManager.saveManifest(manifest);
+    this.bundleManager.appendEvent(runId, {
+      phase: 'INITIALIZED',
+      eventType: 'RUN_CREATED',
+      payload: { repoFullName: input.repoFullName, issueNumber: input.issueNumber, issueTitle: input.issueTitle },
+    });
+
     return manifest;
   }
 
@@ -79,9 +86,17 @@ export class ContributionRunManager {
       throw new Error(`Contribution run ${runId} does not exist`);
     }
 
+    const previousPhase = manifest.currentPhase;
     manifest.currentPhase = newPhase;
     manifest.updatedAt = new Date().toISOString();
     this.bundleManager.saveManifest(manifest);
+
+    this.bundleManager.appendEvent(runId, {
+      phase: newPhase,
+      eventType: 'PHASE_TRANSITION',
+      payload: { fromPhase: previousPhase, toPhase: newPhase },
+    });
+
     return manifest;
   }
 
@@ -98,10 +113,15 @@ export class ContributionRunManager {
 
     const saved = this.bundleManager.saveArtifact(runId, type, content);
 
+    this.bundleManager.appendEvent(runId, {
+      phase: autoAdvancePhase || manifest.currentPhase,
+      eventType: 'ARTIFACT_SAVED',
+      payload: { artifactType: type, byteSize: saved.byteSize },
+    });
+
     if (autoAdvancePhase) {
       this.updateRunPhase(runId, autoAdvancePhase);
     } else {
-      // Map artifact type to natural next phase if manifest is behind
       manifest.updatedAt = new Date().toISOString();
       this.bundleManager.saveManifest(manifest);
     }
@@ -118,84 +138,90 @@ export class ContributionRunManager {
       return [];
     }
 
-    const entries = readdirSync(this.baseDir);
+    const entries = readdirSync(this.baseDir, { withFileTypes: true });
     const manifests: ContributionRunManifest[] = [];
 
     for (const entry of entries) {
-      const manifest = this.bundleManager.readManifest(entry);
-      if (manifest) {
-        manifests.push(manifest);
+      if (entry.isDirectory() && /^[a-zA-Z0-9_-]+$/.test(entry.name)) {
+        const manifest = this.bundleManager.readManifest(entry.name);
+        if (manifest) {
+          manifests.push(manifest);
+        }
       }
     }
 
-    return manifests.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    return manifests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   resumeRun(runId: string): ResumeRunResult {
     const summary = this.bundleManager.getRunSummary(runId);
     if (!summary) {
-      throw new Error(`Contribution run ${runId} not found`);
+      throw new Error(`Cannot resume: contribution run ${runId} not found`);
     }
 
     const artifacts = summary.artifacts;
-    const availableTypes: ArtifactType[] = [];
+    const availableArtifacts: ArtifactType[] = [];
+    if (artifacts.opportunity) availableArtifacts.push('opportunity');
+    if (artifacts.context) availableArtifacts.push('context');
+    if (artifacts.workspace) availableArtifacts.push('workspace');
+    if (artifacts.patch) availableArtifacts.push('patch');
+    if (artifacts.evidence) availableArtifacts.push('evidence');
+    if (artifacts.governance) availableArtifacts.push('governance');
+    if (artifacts.prDraft) availableArtifacts.push('pr_draft');
+    if (artifacts.result) availableArtifacts.push('result');
 
-    if (artifacts.opportunity) availableTypes.push('opportunity');
-    if (artifacts.context) availableTypes.push('context');
-    if (artifacts.workspace) availableTypes.push('workspace');
-    if (artifacts.patch) availableTypes.push('patch');
-    if (artifacts.evidence) availableTypes.push('evidence');
-    if (artifacts.governance) availableTypes.push('governance');
-    if (artifacts.prDraft) availableTypes.push('pr_draft');
-    if (artifacts.result) availableTypes.push('result');
+    const latestSummary = {
+      hasOpportunity: !!artifacts.opportunity,
+      hasContext: !!artifacts.context,
+      hasWorkspace: !!artifacts.workspace,
+      hasPatch: !!artifacts.patch,
+      hasEvidence: !!artifacts.evidence,
+      hasGovernance: !!artifacts.governance,
+      hasPrDraft: !!artifacts.prDraft,
+      hasResult: !!artifacts.result,
+    };
 
-    let suggestedAction = 'assemble_context';
+    let suggestedNextAction = 'scout_opportunity';
     switch (summary.manifest.currentPhase) {
       case 'INITIALIZED':
-        suggestedAction = 'scout_opportunity';
+        suggestedNextAction = 'scout_opportunity';
         break;
       case 'OPPORTUNITY_SCOUTED':
-        suggestedAction = 'assemble_context';
+        suggestedNextAction = 'assemble_context';
         break;
       case 'CONTEXT_ASSEMBLED':
-        suggestedAction = 'prepare_workspace';
+        suggestedNextAction = 'prepare_workspace';
         break;
       case 'WORKSPACE_PREPARED':
-        suggestedAction = 'draft_patch';
+        suggestedNextAction = 'draft_patch';
         break;
       case 'PATCH_DRAFTED':
-        suggestedAction = 'collect_evidence';
+        suggestedNextAction = 'collect_evidence';
         break;
       case 'EVIDENCE_COLLECTED':
-        suggestedAction = 'audit_governance';
+        suggestedNextAction = 'audit_governance';
         break;
       case 'GOVERNANCE_AUDITED':
-        suggestedAction = 'render_pr_and_submit';
+        suggestedNextAction = 'render_pr_and_submit';
         break;
       case 'PR_SUBMITTED':
-      case 'COMPLETED':
-        suggestedAction = 'sync_flywheel';
+        suggestedNextAction = 'sync_flywheel';
         break;
-      default:
-        suggestedAction = 'inspect_artifacts';
+      case 'COMPLETED':
+        suggestedNextAction = 'none (run completed)';
+        break;
+      case 'FAILED':
+        suggestedNextAction = 'inspect_failure_and_replan';
+        break;
     }
 
     return {
-      runId: summary.manifest.runId,
+      runId,
       currentPhase: summary.manifest.currentPhase,
       manifest: summary.manifest,
-      availableArtifacts: availableTypes,
-      latestArtifactSummary: {
-        hasOpportunity: !!artifacts.opportunity,
-        hasContext: !!artifacts.context,
-        hasWorkspace: !!artifacts.workspace,
-        hasPatch: !!artifacts.patch,
-        hasEvidence: !!artifacts.evidence,
-        hasGovernance: !!artifacts.governance,
-        hasPrDraft: !!artifacts.prDraft,
-        hasResult: !!artifacts.result,
-      },
-      suggestedNextAction: suggestedAction,
+      availableArtifacts,
+      latestArtifactSummary: latestSummary,
+      suggestedNextAction,
     };
   }
 }

@@ -218,5 +218,31 @@ describe('Unified OpenContrib Storage Layout', () => {
     expect(storage.getMemoryFile()).toContain('memory.json');
     expect(storage.getFlywheelFile()).toContain('contributions.json');
   });
+
+  it('strictly validates Run ID and blocks path traversal attempts', async () => {
+    const { validateRunId } = await import('../src/run/artifact-bundle.js');
+    const base = join(tmpdir(), 'opencontrib-sec-test');
+
+    expect(() => validateRunId('../../etc/passwd', base)).toThrow('Security error');
+    expect(() => validateRunId('run_123/../../bad', base)).toThrow('Security error');
+    expect(() => validateRunId('run_123\\..\\bad', base)).toThrow('Security error');
+    expect(() => validateRunId('run_valid_123-abc', base)).not.toThrow();
+  });
+
+  it('parses structured CommandSpec safely handling quotes and escaped spaces', async () => {
+    const { parseCommandSpec, serializeCommandSpec } = await import('../src/sandbox/command-spec.js');
+
+    const parsed1 = parseCommandSpec('npm test -- --grep "falsy cache value"');
+    expect(parsed1.executable).toBe('npm');
+    expect(parsed1.args).toEqual(['test', '--', '--grep', 'falsy cache value']);
+
+    const parsed2 = parseCommandSpec('cargo test --package core -- "stress test"');
+    expect(parsed2.executable).toBe('cargo');
+    expect(parsed2.args).toEqual(['test', '--package', 'core', '--', 'stress test']);
+
+    const serialized = serializeCommandSpec(parsed1);
+    expect(serialized).toContain('"falsy cache value"');
+  });
 });
+
 

@@ -1,13 +1,20 @@
 import { Octokit } from '@octokit/rest';
 import { GitHubClient } from '../discovery/github-client.js';
 
+export interface GitTreeEntry {
+  path: string;
+  content: string;
+  mode?: '100644' | '100755' | '120000';
+  type?: 'blob' | 'commit' | 'tree';
+}
+
 export interface PrSubmissionOptions {
   upstreamOwner: string;
   upstreamRepo: string;
   title: string;
   body: string;
   branchName: string;
-  files: Array<{ path: string; content: string }>;
+  files: Array<GitTreeEntry | { path: string; content: string }>;
   commitMessage: string;
   isDraft?: boolean;
   dcoSignOff?: boolean;
@@ -66,7 +73,7 @@ export class ContributionPrService {
 
     const forkOwner = await this.ensureFork(upstreamOwner, upstreamRepo);
 
-    // 1. Get base default branch and SHA
+    // 1. Get base default branch and Base Commit & Tree SHA
     const repoDetails = await this.client.getRepoDetails(upstreamOwner, upstreamRepo);
     const baseBranch = repoDetails.defaultBranch;
 
@@ -75,7 +82,15 @@ export class ContributionPrService {
       repo: upstreamRepo,
       ref: `heads/${baseBranch}`,
     });
-    const baseSha = baseRef.data.object.sha;
+    const baseCommitSha = baseRef.data.object.sha;
+
+    // Correctly query the base commit to obtain the genuine base_tree SHA (not commit SHA)
+    const baseCommit = await this.octokit.rest.git.getCommit({
+      owner: upstreamOwner,
+      repo: upstreamRepo,
+      commit_sha: baseCommitSha,
+    });
+    const baseTreeSha = baseCommit.data.tree.sha;
 
     // 2. Create or update working branch on fork
     try {
@@ -83,7 +98,7 @@ export class ContributionPrService {
         owner: forkOwner,
         repo: upstreamRepo,
         ref: `refs/heads/${branchName}`,
-        sha: baseSha,
+        sha: baseCommitSha,
       });
     } catch {
       // Branch may already exist; update ref
@@ -91,7 +106,7 @@ export class ContributionPrService {
         owner: forkOwner,
         repo: upstreamRepo,
         ref: `heads/${branchName}`,
-        sha: baseSha,
+        sha: baseCommitSha,
         force: true,
       });
     }
@@ -107,8 +122,8 @@ export class ContributionPrService {
       });
       treeItems.push({
         path: f.path,
-        mode: '100644',
-        type: 'blob',
+        mode: (f as GitTreeEntry).mode || '100644',
+        type: (f as GitTreeEntry).type || 'blob',
         sha: blob.data.sha,
       });
     }
@@ -116,7 +131,7 @@ export class ContributionPrService {
     const newTree = await this.octokit.rest.git.createTree({
       owner: forkOwner,
       repo: upstreamRepo,
-      base_tree: baseSha,
+      base_tree: baseTreeSha,
       tree: treeItems,
     });
 
@@ -131,7 +146,7 @@ export class ContributionPrService {
       repo: upstreamRepo,
       message: finalCommitMessage,
       tree: newTree.data.sha,
-      parents: [baseSha],
+      parents: [baseCommitSha],
     });
 
     await this.octokit.rest.git.updateRef({

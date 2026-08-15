@@ -479,8 +479,30 @@ Please diagnose the exact failure reason above and generate a revised surgical p
     // ─────────────────────────────────────────────────────────────
     // Phase 7: Real Pull Request Submission & Verified Flywheel Sync
     // ─────────────────────────────────────────────────────────────
+    // Authoritative State Machine Submission Policy Enforcement
+    if (!this.stateMachine.canProceedToSubmission()) {
+      const currentState = this.stateMachine.getState();
+      this.stateMachine.transition('BLOCKED', 'Submission blocked by authoritative state machine policy');
+      return {
+        status: 'BLOCKED',
+        stage: 'SUBMISSION_POLICY_BLOCKED',
+        selectedOpportunity: selectedOpp,
+        workspacePath: workspace.workspacePath,
+        patchDraft,
+        appliedFiles,
+        implementationAttempts,
+        validationStatus,
+        confidenceScore: qualityRubric.overallScore,
+        subagentReview,
+        riskAssessment,
+        telemetry: { ...telemetry, status: 'BLOCKED' },
+        reportSummary: `PR submission physically blocked by authoritative state machine policy: confidenceScore (${currentState.confidenceScore}) < 90, reproduction unverified, or execution policy violation.`,
+      };
+    }
+
     this.stateMachine.transition('PR_SUBMISSION', 'Creating Pull Request on GitHub');
     const prDraft = buildPrDescription({
+
       targetRepoFullName: selectedOpp.repoFullName,
       issueNumber: selectedOpp.issueNumber,
       issueTitle: selectedOpp.title,

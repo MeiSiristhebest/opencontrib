@@ -692,28 +692,35 @@ export function createOpenContribMcpServer(): McpServer {
         .optional(),
     },
     async (args) => {
-      const signals = rankOpportunitySignals({
-        issue: args.issue,
-        repository: args.repository,
-        developerProfile: args.developerProfile,
-        environment: args.environment,
-      });
+      try {
+        const signals = rankOpportunitySignals({
+          issue: args.issue,
+          repository: args.repository,
+          developerProfile: args.developerProfile,
+          environment: args.environment,
+        });
 
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                signals,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  status: 'success',
+                  signals,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Ranking error: ${err.message}` }],
+        };
+      }
     },
   );
 
@@ -733,23 +740,30 @@ export function createOpenContribMcpServer(): McpServer {
       metadata: z.record(z.unknown()).optional().describe('Arbitrary run metadata'),
     },
     async (args) => {
-      const manifest = runManager.createRun(args);
+      try {
+        const manifest = runManager.createRun(args);
 
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                manifest,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  status: 'success',
+                  manifest,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Security error: ${err.message}` }],
+        };
+      }
     },
   );
 
@@ -789,28 +803,35 @@ export function createOpenContribMcpServer(): McpServer {
         .describe('Optional phase to advance run manifest to'),
     },
     async (args) => {
-      const saved = runManager.saveArtifact(
-        args.runId,
-        args.artifactType,
-        args.content,
-        args.autoAdvancePhase,
-      );
+      try {
+        const saved = runManager.saveArtifact(
+          args.runId,
+          args.artifactType,
+          args.content,
+          args.autoAdvancePhase,
+        );
 
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                saved,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  status: 'success',
+                  saved,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Security error: ${err.message}` }],
+        };
+      }
     },
   );
 
@@ -824,29 +845,36 @@ export function createOpenContribMcpServer(): McpServer {
       runId: z.string().describe('Unique contribution run ID'),
     },
     async (args) => {
-      const run = runManager.getRun(args.runId);
-      if (!run) {
+      try {
+        const run = runManager.getRun(args.runId);
+        if (!run) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `Contribution run "${args.runId}" not found.` }],
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  status: 'success',
+                  run,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
         return {
           isError: true,
-          content: [{ type: 'text', text: `Contribution run "${args.runId}" not found.` }],
+          content: [{ type: 'text', text: `Security error: ${err.message}` }],
         };
       }
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                run,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
     },
   );
 
@@ -860,24 +888,32 @@ export function createOpenContribMcpServer(): McpServer {
       runId: z.string().describe('Unique contribution run ID to resume'),
     },
     async (args) => {
-      const resume = runManager.resumeRun(args.runId);
+      try {
+        const resume = runManager.resumeRun(args.runId);
 
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                resume,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  status: 'success',
+                  resume,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Resume error: ${err.message}` }],
+        };
+      }
     },
+
   );
 
   // -------------------------------------------------------------
