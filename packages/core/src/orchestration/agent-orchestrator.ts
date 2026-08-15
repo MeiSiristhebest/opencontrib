@@ -10,6 +10,7 @@ import {
   collectEvidence,
   runStressLoop,
   verifyEmpiricalReproduction,
+  verifyDualStageReproduction,
 } from '../evidence/evidence-collector.js';
 import { RepoMemoryLedger } from '../memory/repo-memory.js';
 import { ProfileFlywheel } from '../flywheel/profile-sync.js';
@@ -20,14 +21,13 @@ import {
   calculate7DQualityRubric,
   deriveEvidenceBackedQualityRubric,
 } from '../governance/governance-auditor.js';
-import { generateSubagentReviewPrompt } from '../governance/subagent-reviewer.js';
+import { generateSubagentReviewPrompt, type SubagentReviewEvaluation } from '../governance/subagent-reviewer.js';
 import { buildPrDescription } from '../governance/template-merger.js';
 import { LLMService } from '../llm/llm-service.js';
 import {
   PatchDraftSchema,
   SubagentReviewEvaluationSchema,
   type PatchDraft,
-  type SubagentReviewEvaluation,
 } from '../contracts/llm-schemas.js';
 import {
   ContributionStateMachine,
@@ -163,7 +163,7 @@ export class AgentOrchestrator {
     this.stateMachine.setWorkspace(workspace.workspacePath);
 
     // ─────────────────────────────────────────────────────────────
-    // Phase 2: Multi-dimensional Context Assembly & Patch Design
+    // Phase 2: Multi-dimensional Context Assembly
     // ─────────────────────────────────────────────────────────────
     this.stateMachine.transition('PATCH_DESIGN', 'Assembling multi-dimensional context');
     const assembledContext = this.contextAssembler.assemble({
@@ -174,6 +174,24 @@ export class AgentOrchestrator {
       workspacePath: workspace.workspacePath,
     });
     const prompt = this.contextAssembler.formatContextPrompt(assembledContext);
+
+    const testCmd =
+      assembledContext.repoContext.runnableCommands.testCommand ||
+      assembledContext.repoContext.testCommandHint;
+
+    // ─────────────────────────────────────────────────────────────
+    // Phase 2.5: Pre-Fix Baseline Empirical Reproduction Assertion Probe
+    // ─────────────────────────────────────────────────────────────
+    let preFixReproductionCaptured = false;
+    let preFixOutput = '';
+    if (testCmd) {
+      const preCheck = verifyEmpiricalReproduction({
+        cwd: workspace.workspacePath,
+        testCommand: testCmd,
+      });
+      preFixReproductionCaptured = preCheck.assertionCaptured;
+      preFixOutput = preCheck.baselineOutput;
+    }
 
     // Initial Schema-First LLM Patch Generation
     let patchDraft: PatchDraft | null = null;
@@ -201,9 +219,9 @@ export class AgentOrchestrator {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Phase 2.5 - 4: Observe -> Physical Edit -> Run Test -> Diagnose -> Replan Loop
+    // Phase 3 - 4: Observe -> Physical Edit (with Boundary Check) -> Run Test -> Diagnose -> Replan Loop
     // ─────────────────────────────────────────────────────────────
-    this.stateMachine.transition('SANDBOX_VALIDATION', 'Executing empirical baseline assertion checks');
+    this.stateMachine.transition('SANDBOX_VALIDATION', 'Executing empirical baseline assertion checks in sandbox');
 
     let implementationAttempts = 0;
     const maxAttempts = 2;
@@ -214,9 +232,6 @@ export class AgentOrchestrator {
     let evidenceReport: any;
     let lastFailureOutput = '';
 
-    const testCmd =
-      assembledContext.repoContext.runnableCommands.testCommand ||
-      assembledContext.repoContext.testCommandHint;
     const loopRuns = input.stressLoopRuns || (selectedOpp.track === 'FAST_TRACK' ? 3 : 20);
 
     while (implementationAttempts < maxAttempts && !validationPassed) {
@@ -224,19 +239,25 @@ export class AgentOrchestrator {
       appliedFiles = [];
       filesToSubmit = [];
 
-      // 1. Physically apply file edits to worktree
-      for (const f of patchDraft.files) {
-        const fullPath = join(workspace.workspacePath, f.path);
-        try {
-          mkdirSync(dirname(fullPath), { recursive: true });
-          writeFileSync(fullPath, f.content, 'utf-8');
-          appliedFiles.push({ path: f.path, operation: f.operation });
-          filesToSubmit.push({ path: f.path, content: f.content });
-        } catch {}
-      }
+      // 1. Physically apply file edits to worktree with strict boundary checking
+      const safeApplyResult = this.worktreeManager.applySurgicalFilesSafely(
+        workspace.workspacePath,
+        patchDraft.files.map((f) => ({
+          path: f.path,
+          operation: f.operation,
+          content: f.content,
+        })),
+      );
 
-      // 2. Validate in sandbox
-      if (testCmd) {
+      appliedFiles = safeApplyResult.appliedFiles;
+      filesToSubmit = patchDraft.files.map((f) => ({ path: f.path, content: f.content }));
+
+      if (safeApplyResult.errors.length > 0) {
+        validationStatus = 'VALIDATION_FAILED';
+        validationPassed = false;
+        lastFailureOutput = `Workspace safety boundary error: ${safeApplyResult.errors.join('; ')}`;
+      } else if (testCmd) {
+        // 2. Validate in sanitized sandbox runtime
         try {
           evidenceReport = await collectEvidence({
             cwd: workspace.workspacePath,
@@ -254,13 +275,11 @@ export class AgentOrchestrator {
             lastFailureOutput = `Stress loop failed on ${testCmd}. Total passing tests: ${evidenceReport.passedUnitTestsCount}`;
           }
         } catch (err: any) {
-          // P0: Do NOT swallow validation error as success!
           validationStatus = 'VALIDATION_UNAVAILABLE';
           validationPassed = false;
           lastFailureOutput = `Validation execution error: ${err.message}`;
         }
       } else {
-        // P0: Explicit NO_TEST_AVAILABLE status
         validationStatus = 'NO_TEST_AVAILABLE';
         validationPassed = true; // Proceed to human gate
       }
@@ -296,7 +315,7 @@ Please diagnose the exact failure reason above and generate a revised surgical p
     // Phase 5: Adversarial Subagent Review & Evidence-Backed Quality Rubric
     // ─────────────────────────────────────────────────────────────
     this.stateMachine.transition('SUBAGENT_REVIEW', 'Running Maintainer/Security/QA evaluation');
-    const reviewPrompt = generateSubagentReviewPrompt({
+    const reviewPrompt = `${generateSubagentReviewPrompt({
       repoFullName: selectedOpp.repoFullName,
       issueTitle: selectedOpp.title,
       issueBody: selectedOpp.body,
@@ -304,31 +323,10 @@ Please diagnose the exact failure reason above and generate a revised surgical p
       testEvidence: evidenceReport
         ? `Validation status: ${validationStatus}, Stress loops passed: ${evidenceReport.stressLoopPassed}, Passed tests: ${evidenceReport.passedUnitTestsCount}`
         : `Validation status: ${validationStatus} (No automated test detected)`,
-    });
+    })}\n\nPlease return structured JSON conforming strictly to SubagentReviewEvaluationSchema.`;
 
     let subagentReview: SubagentReviewEvaluation = {
-      maintainerPerspective: {
-        acceptanceLikelihood: 'HIGH',
-        styleConformance: 'Conforms to repository style guidelines',
-        concerns: [],
-      },
-      securityPerspective: {
-        vulnerabilitiesDetected: false,
-        findings: [],
-      },
-      qaPerspective: {
-        testAdequacy: 'Covers edge cases with regression test plan',
-        flakyRisk: 'Low',
-      },
-      confidenceBreakdown: {
-        rootCause: 94,
-        implementation: 93,
-        regression: 91,
-        defensiveCoverage: 89,
-        testCoverage: 92,
-        styleMatch: 95,
-        securityAudit: 94,
-      },
+      status: 'UNAVAILABLE',
     };
 
     try {
@@ -336,17 +334,32 @@ Please diagnose the exact failure reason above and generate a revised surgical p
         prompt: reviewPrompt,
         schema: SubagentReviewEvaluationSchema,
       });
-      subagentReview = reviewResult.data;
-    } catch {}
+      if (reviewResult.data && (reviewResult.data as any).confidenceBreakdown) {
+        subagentReview = {
+          status: 'SUCCESS',
+          maintainerPerspective: (reviewResult.data as any).maintainerPerspective,
+          securityPerspective: (reviewResult.data as any).securityPerspective,
+          qaPerspective: (reviewResult.data as any).qaPerspective,
+          confidenceBreakdown: (reviewResult.data as any).confidenceBreakdown,
+        };
+      }
+    } catch (err: any) {
+      subagentReview = {
+        status: 'FAILED',
+        failureReason: err.message,
+      };
+    }
 
-    // Derive Evidence-Backed Quality Rubric
+    // Derive Evidence-Backed Quality Rubric without fake scores
+    const isReviewAvailable = subagentReview.status === 'SUCCESS' && !!subagentReview.confidenceBreakdown;
     const { rubricResult: qualityRubric } = deriveEvidenceBackedQualityRubric({
-      hasReproductionAssertion: validationStatus === 'VALIDATED',
+      hasReproductionAssertion: preFixReproductionCaptured || validationStatus === 'VALIDATED',
       testsPassed: validationStatus === 'VALIDATED' || validationStatus === 'NO_TEST_AVAILABLE',
       passedTestsCount: evidenceReport?.passedUnitTestsCount || (validationStatus === 'VALIDATED' ? 1 : 0),
       diffLines: patchDraft.estimatedDiffLines,
-      styleScore: subagentReview.confidenceBreakdown.styleMatch,
-      securityScore: subagentReview.confidenceBreakdown.securityAudit,
+      styleScore: subagentReview.confidenceBreakdown?.styleMatch,
+      securityScore: subagentReview.confidenceBreakdown?.securityAudit,
+      subagentReviewAvailable: isReviewAvailable,
     });
 
     this.stateMachine.setConfidenceScore(qualityRubric.overallScore);
@@ -362,10 +375,10 @@ Please diagnose the exact failure reason above and generate a revised surgical p
       subagentQualityScore: qualityRubric.overallScore,
     });
 
-    if (riskAssessment.riskLevel === 'CRITICAL' || !qualityRubric.isPassed) {
+    if (riskAssessment.riskLevel === 'CRITICAL' || riskAssessment.recommendedPolicy === 'blocked' || (!qualityRubric.isPassed && !input.humanApproved && validationStatus === 'VALIDATION_FAILED')) {
       this.stateMachine.transition(
         'BLOCKED',
-        `Contribution risk critical or quality score (${qualityRubric.overallScore}%) below threshold: ${riskAssessment.reasons.join(', ')}`,
+        `Contribution risk critical or validation failed: ${riskAssessment.reasons.join(', ')}`,
       );
       return {
         status: 'BLOCKED',

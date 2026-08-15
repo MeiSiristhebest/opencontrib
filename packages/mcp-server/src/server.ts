@@ -1,18 +1,26 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import {
   assessFeasibility,
   auditGovernance,
+  capturePreFixAssertion,
   collectEvidence,
   ConfidenceBreakdownSchema,
+  ContributionRunManager,
   detectSystemCapabilities,
   ProfileFlywheel,
   qualifyIssue,
+  rankOpportunitySignals,
   renderMasterPrTemplate,
   RepoMemoryLedger,
+  runDoctorAudit,
+  scoutOpportunities,
+  verifyDualStageReproduction,
   WorktreeManager,
 } from '@opencontrib/core';
+
+
 
 export function createOpenContribMcpServer(): McpServer {
   const server = new McpServer({
@@ -211,6 +219,7 @@ export function createOpenContribMcpServer(): McpServer {
       repoFullName: z.string().describe('Target repository, e.g. "microsoft/vscode"'),
       issueOrTaskId: z.union([z.string(), z.number()]).describe('Issue number or task identifier'),
       localRepoPath: z.string().optional().describe('Optional local path of existing repo to create worktree from'),
+      runId: z.string().optional().describe('Optional runId to automatically save workspace.json artifact and advance phase'),
     },
     async (args) => {
       const context = worktreeManager.createIsolatedWorkspace({
@@ -218,6 +227,22 @@ export function createOpenContribMcpServer(): McpServer {
         issueOrTaskId: args.issueOrTaskId,
         localRepoPath: args.localRepoPath,
       });
+
+      if (args.runId) {
+        try {
+          runManager.saveArtifact(
+            args.runId,
+            'workspace',
+            {
+              workspacePath: context.workspacePath,
+              branchName: context.branchName,
+              isWorktree: context.isWorktree,
+              repoFullName: args.repoFullName,
+            },
+            'WORKSPACE_PREPARED',
+          );
+        } catch {}
+      }
 
       return {
         content: [
@@ -240,22 +265,65 @@ export function createOpenContribMcpServer(): McpServer {
   );
 
   // -------------------------------------------------------------
-  // Tool 5: contrib_collect_evidence (本地物证：Flaky基线 + 20次压测)
+  // Tool 5: contrib_collect_evidence (双阶段物证：Pre-Fix 失败断言 + Post-Fix 压测)
   // -------------------------------------------------------------
   server.tool(
     'contrib_collect_evidence',
-    'Run Step 4.0 Flaky test baseline isolation, 20x stress loops, and handle leak verification on local machine',
+    'Execute dual-stage empirical verification (capturing pre-fix failing baseline assertion and post-fix stress loop pass)',
     {
       cwd: z.string().describe('Workspace directory to execute test command in'),
       testCommand: z.string().describe('Exact test command, e.g. "npm test" or "pytest"'),
+      preFixAssertionProbe: z
+        .string()
+        .optional()
+        .describe('Expected failure assertion regex or snippet observed before fix (for dual-stage verification)'),
+      preFixTestCommand: z
+        .string()
+        .optional()
+        .describe('Optional separate reproduction script/command to trigger pre-fix failure baseline'),
       stressLoopCount: z.number().optional().describe('Number of stress loop iterations (default 20)'),
+      runId: z.string().optional().describe('Optional runId to automatically save evidence.json artifact and advance phase'),
     },
     async (args) => {
+      let dualStageResult: any = undefined;
+
+      // 1. Dual-stage verification if preFixAssertionProbe is provided
+      if (args.preFixAssertionProbe) {
+        const preFixCheck = capturePreFixAssertion(
+          args.cwd,
+          args.preFixTestCommand || args.testCommand,
+        );
+        dualStageResult = await verifyDualStageReproduction({
+          cwd: args.cwd,
+          testCommand: args.testCommand,
+          preFixBaselineCaptured: preFixCheck.assertionCaptured,
+          preFixFailureOutput: preFixCheck.baselineOutput,
+          stressLoopCount: args.stressLoopCount ?? 5,
+        });
+      }
+
+      // 2. Comprehensive evidence metrics collection (flaky test baseline + handle leak check)
       const evidence = await collectEvidence({
         cwd: args.cwd,
         testCommand: args.testCommand,
         stressLoopCount: args.stressLoopCount ?? 20,
       });
+
+      const fullEvidenceReport = {
+        ...evidence,
+        dualStage: dualStageResult,
+      };
+
+      if (args.runId) {
+        try {
+          runManager.saveArtifact(
+            args.runId,
+            'evidence',
+            fullEvidenceReport,
+            'EVIDENCE_COLLECTED',
+          );
+        } catch {}
+      }
 
       return {
         content: [
@@ -264,7 +332,7 @@ export function createOpenContribMcpServer(): McpServer {
             text: JSON.stringify(
               {
                 status: 'success',
-                evidence,
+                evidence: fullEvidenceReport,
               },
               null,
               2,
@@ -274,6 +342,7 @@ export function createOpenContribMcpServer(): McpServer {
       };
     },
   );
+
 
   // -------------------------------------------------------------
   // Tool 6: contrib_audit_governance (治理门禁：去AI化/100行/7D置信度)
@@ -586,5 +655,385 @@ export function createOpenContribMcpServer(): McpServer {
     },
   );
 
+  // -------------------------------------------------------------
+  // Tool 13: contrib_rank_opportunity (多维概率与客观信号提取)
+  // -------------------------------------------------------------
+  server.tool(
+
+    'contrib_rank_opportunity',
+    'Extract deterministic multi-dimensional objective signals (skill match, environment feasibility, actionability, maintenance risk) without prescribing decisions',
+    {
+      issue: z.object({
+        number: z.number().optional(),
+        title: z.string(),
+        body: z.string().optional(),
+        labels: z.array(z.string()).optional(),
+        state: z.string().optional(),
+        createdAt: z.string().optional(),
+      }),
+      repository: z.object({
+        fullName: z.string(),
+        stars: z.number().optional(),
+        primaryLanguage: z.string().optional(),
+      }),
+      developerProfile: z
+        .object({
+          techStack: z.array(z.string()).optional(),
+          focusAreas: z.array(z.string()).optional(),
+          proficiency: z.enum(['beginner', 'intermediate', 'expert', 'advanced']).optional(),
+        })
+        .optional(),
+      environment: z
+        .object({
+          os: z.enum(['windows', 'linux', 'macos', 'wsl2']).optional(),
+          hasDocker: z.boolean().optional(),
+          hasWsl: z.boolean().optional(),
+        })
+        .optional(),
+    },
+    async (args) => {
+      const signals = rankOpportunitySignals({
+        issue: args.issue,
+        repository: args.repository,
+        developerProfile: args.developerProfile,
+        environment: args.environment,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'success',
+                signals,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool 14: contrib_create_run (贡献 Run 实体创建与持久化会话初始化)
+  // -------------------------------------------------------------
+  const runManager = new ContributionRunManager();
+
+  server.tool(
+    'contrib_create_run',
+    'Create an auditable contribution run session with discrete artifact storage under ~/.opencontrib/runs/<run_id>',
+    {
+      repoFullName: z.string().describe('Target repository, e.g. "bytedance/flowgram.ai"'),
+      issueNumber: z.number().optional().describe('Target issue number'),
+      issueTitle: z.string().optional().describe('Target issue title'),
+      tags: z.array(z.string()).optional().describe('Optional categorization tags'),
+      metadata: z.record(z.unknown()).optional().describe('Arbitrary run metadata'),
+    },
+    async (args) => {
+      const manifest = runManager.createRun(args);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'success',
+                manifest,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool 15: contrib_save_artifact (阶段性物证快照落盘)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_save_artifact',
+    'Save discrete stage artifact (opportunity, context, workspace, patch, evidence, governance, pr_draft, result) to run bundle',
+    {
+      runId: z.string().describe('Unique contribution run ID'),
+      artifactType: z.enum([
+        'opportunity',
+        'context',
+        'workspace',
+        'patch',
+        'evidence',
+        'governance',
+        'pr_draft',
+        'result',
+      ]),
+      content: z.union([z.string(), z.record(z.unknown())]).describe('Artifact payload or raw markdown/diff string'),
+      autoAdvancePhase: z
+        .enum([
+          'INITIALIZED',
+          'OPPORTUNITY_SCOUTED',
+          'CONTEXT_ASSEMBLED',
+          'WORKSPACE_PREPARED',
+          'PATCH_DRAFTED',
+          'EVIDENCE_COLLECTED',
+          'GOVERNANCE_AUDITED',
+          'PR_SUBMITTED',
+          'COMPLETED',
+          'FAILED',
+        ])
+        .optional()
+        .describe('Optional phase to advance run manifest to'),
+    },
+    async (args) => {
+      const saved = runManager.saveArtifact(
+        args.runId,
+        args.artifactType,
+        args.content,
+        args.autoAdvancePhase,
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'success',
+                saved,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool 16: contrib_get_run (查询指定 Run 的完整状态与物证清单)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_get_run',
+    'Retrieve full manifest and all saved artifacts of a contribution run',
+    {
+      runId: z.string().describe('Unique contribution run ID'),
+    },
+    async (args) => {
+      const run = runManager.getRun(args.runId);
+      if (!run) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Contribution run "${args.runId}" not found.` }],
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'success',
+                run,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool 17: contrib_resume_run (断点恢复贡献会话)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_resume_run',
+    'Resume an interrupted contribution run by loading its latest phase, existing artifacts, and suggested next action',
+    {
+      runId: z.string().describe('Unique contribution run ID to resume'),
+    },
+    async (args) => {
+      const resume = runManager.resumeRun(args.runId);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'success',
+                resume,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool 18: contrib_scout (一站式机会雷达: 发现 + 资格预检 + 信号打分)
+  // -------------------------------------------------------------
+  server.tool(
+
+    'contrib_scout',
+    'Scout high-value, unclaimed contribution opportunities for an organization or repository, filtered by feasibility and developer profile',
+    {
+      target: z.string().describe('GitHub repository full name (e.g. "bytedance/flowgram.ai") or organization name (e.g. "bytedance")'),
+      techStack: z.array(z.string()).optional().describe('Developer tech stack keywords (e.g. ["typescript", "react"])'),
+      focusAreas: z.array(z.string()).optional().describe('Developer focus areas (e.g. ["bugfix", "testing", "docs"])'),
+      limit: z.number().optional().describe('Maximum number of ranked candidates to return (default 5)'),
+      minStars: z.number().optional().describe('Minimum repository stars filter (default 50)'),
+      githubToken: z.string().optional().describe('Optional GitHub token if not set in GITHUB_TOKEN environment variable'),
+    },
+    async (args) => {
+      const profile = {
+        techStack: args.techStack ?? ['typescript', 'javascript'],
+        focusAreas: args.focusAreas ?? ['bugfix', 'testing', 'docs'],
+        proficiency: 'intermediate' as const,
+        minMatchScore: 60,
+      };
+
+      const isOrg = !args.target.includes('/');
+      const scoutOpts = {
+        repo: isOrg ? undefined : args.target,
+        limit: args.limit ?? 5,
+        minStars: args.minStars ?? (isOrg ? 100 : 0),
+        githubToken: args.githubToken || process.env.GITHUB_TOKEN,
+      };
+
+      const opportunities = await scoutOpportunities(profile, scoutOpts);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'success',
+                target: args.target,
+                foundCount: opportunities.length,
+                opportunities,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // =============================================================
+  // MCP Resources (只读状态与环境上下文挂载)
+  // =============================================================
+
+  // Resource 1: opencontrib://doctor
+  server.resource(
+    'opencontrib-doctor-report',
+    'opencontrib://doctor',
+    async (uri) => {
+      const report = runDoctorAudit();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            text: JSON.stringify(report, null, 2),
+            mimeType: 'application/json',
+          },
+        ],
+      };
+    },
+  );
+
+  // Resource 2: opencontrib://memory
+  server.resource(
+    'opencontrib-memory-ledger',
+    'opencontrib://memory',
+    async (uri) => {
+      const report = memory.getMemoryReport();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            text: JSON.stringify(report, null, 2),
+            mimeType: 'application/json',
+          },
+        ],
+      };
+    },
+  );
+
+  // Resource 3: opencontrib://runs
+  server.resource(
+    'opencontrib-runs-list',
+    'opencontrib://runs',
+    async (uri) => {
+      const runs = runManager.listRuns();
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            text: JSON.stringify(runs, null, 2),
+            mimeType: 'application/json',
+          },
+        ],
+      };
+    },
+  );
+
+  // =============================================================
+  // MCP Prompts (标准 Agent 执行协议提示词)
+  // =============================================================
+  server.prompt(
+    'opencontrib_workflow_guide',
+    'Standard Phase-Gated execution protocol for autonomous open-source contribution',
+    {
+      repoFullName: z.string().optional().describe('Target repository, e.g. "bytedance/flowgram.ai"'),
+      issueNumber: z.string().optional().describe('Target issue number if known'),
+    },
+    async (args) => {
+      const targetRepo = args.repoFullName || '<target_owner/target_repo>';
+      const issueNum = args.issueNumber ? `#${args.issueNumber}` : '<issue_number>';
+
+      return {
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: `# OpenContrib Phase-Gated Contribution Protocol
+
+You are an expert open-source contributor AI Agent. Follow this mandatory sequence using OpenContrib MCP tools and GitHub MCP tools:
+
+1. **Discovery & Ranking**: Call \`contrib_scout\` or evaluate an issue with \`contrib_rank_opportunity\`. Verify \`isQualified: true\` and \`maintenanceRisk < 0.3\`.
+2. **Context Assembly**: Call \`contrib_assemble_context\` to extract repository skeleton, suggested reading order, target test files, and historical memory pitfalls.
+3. **Session Initialization**: Call \`contrib_create_run\` to obtain a \`runId\` for auditable artifact tracking.
+4. **Isolated Workspace Allocation**: Call \`contrib_prepare_workspace({ repoFullName: "${targetRepo}", issueOrTaskId: "${issueNum}", runId })\` to work inside an ephemeral Git worktree sandbox.
+5. **Code Implementation**: Make surgical edits within the workspace root. Do NOT modify files outside the implementation context.
+6. **Dual-Stage Verification**: Call \`contrib_collect_evidence\` with \`preFixAssertionProbe\` to verify the baseline failed pre-fix and passed 100% post-fix under 20x stress loops.
+7. **Governance & Anti-AI Lint**: Call \`contrib_audit_governance\` to verify 100-line RFC limit, zero AI chatter comments, and mathematical confidence >= 90%.
+8. **PR Template Rendering**: Call \`contrib_render_pr_template\` to merge evidence into the repository's native PR template.
+9. **Submission & Flywheel Sync**: Once approved by human user, create the PR via GitHub MCP and call \`contrib_sync_flywheel\` to record your contribution into local profile memory.
+
+Begin execution starting from Step 1!`,
+            },
+          },
+        ],
+      };
+    },
+  );
+
   return server;
 }
+
+

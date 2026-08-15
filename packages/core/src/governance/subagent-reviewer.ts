@@ -1,20 +1,24 @@
 import type { ConfidenceBreakdown, GovernanceAuditResult } from '../contracts/schemas.js';
 
+export type SubagentReviewStatus = 'SUCCESS' | 'UNAVAILABLE' | 'FAILED';
+
 export interface SubagentReviewEvaluation {
-  maintainerPerspective: {
+  status: SubagentReviewStatus;
+  maintainerPerspective?: {
     acceptanceLikelihood: 'HIGH' | 'MEDIUM' | 'LOW';
     styleConformance: string;
     concerns: string[];
   };
-  securityPerspective: {
+  securityPerspective?: {
     vulnerabilitiesDetected: boolean;
     findings: string[];
   };
-  qaPerspective: {
+  qaPerspective?: {
     testAdequacy: string;
     flakyRisk: string;
   };
-  confidenceBreakdown: ConfidenceBreakdown;
+  confidenceBreakdown?: ConfidenceBreakdown;
+  failureReason?: string;
 }
 
 export function generateSubagentReviewPrompt(data: {

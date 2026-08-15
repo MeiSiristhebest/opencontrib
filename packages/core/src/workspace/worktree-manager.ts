@@ -1,7 +1,12 @@
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { join, resolve } from 'path';
+import { join, resolve, sep, relative } from 'path';
+
+export const MAX_DISCOVERED_FILES = 250;
+export const MAX_GENERATED_FILES = 6;
+export const MAX_GENERATED_FILE_CHARS = 60_000;
+export const MAX_SNIPPET_CHARS = 8_000;
 
 export interface WorkspaceContext {
   workspacePath: string;
@@ -211,6 +216,71 @@ export class WorktreeManager {
       purgedScratchFiles,
       cleanedRepos,
     };
+  }
+
+  /**
+   * Validates whether a relative or absolute path is strictly within the workspace boundary.
+   * Prevents path traversal vulnerabilities.
+   */
+  isPathWithinWorkspace(workspacePath: string, targetRelativePath: string): boolean {
+    const resolvedRoot = resolve(workspacePath);
+    const resolvedTarget = resolve(workspacePath, targetRelativePath);
+    return resolvedTarget.startsWith(resolvedRoot + sep) || resolvedTarget === resolvedRoot;
+  }
+
+  /**
+   * Safely applies generated files to workspace, strictly enforcing file counts, size limits,
+   * and path traversal boundaries.
+   */
+  applySurgicalFilesSafely(
+    workspacePath: string,
+    files: Array<{ path: string; operation: string; content: string }>,
+  ): {
+    appliedFiles: Array<{ path: string; operation: string }>;
+    errors: string[];
+  } {
+    const appliedFiles: Array<{ path: string; operation: string }> = [];
+    const errors: string[] = [];
+
+    if (files.length > MAX_GENERATED_FILES) {
+      errors.push(`Generated files count (${files.length}) exceeds safety limit (${MAX_GENERATED_FILES})`);
+      return { appliedFiles, errors };
+    }
+
+    let totalChars = 0;
+    for (const f of files) {
+      totalChars += f.content.length;
+    }
+    if (totalChars > MAX_GENERATED_FILE_CHARS) {
+      errors.push(`Generated content size (${totalChars} chars) exceeds safety limit (${MAX_GENERATED_FILE_CHARS})`);
+      return { appliedFiles, errors };
+    }
+
+    for (const f of files) {
+      if (!this.isPathWithinWorkspace(workspacePath, f.path)) {
+        errors.push(`Security violation: File path '${f.path}' attempts path traversal outside workspace root`);
+        continue;
+      }
+
+      // Deny writing into .git directory
+      const normalizedPath = f.path.replace(/\\/g, '/');
+      if (normalizedPath.startsWith('.git/') || normalizedPath === '.git') {
+        errors.push(`Security violation: Write to protected directory '${f.path}' is forbidden`);
+        continue;
+      }
+
+      const fullPath = resolve(workspacePath, f.path);
+      try {
+        const { dirname } = require('path');
+        mkdirSync(dirname(fullPath), { recursive: true });
+        writeFileSync(fullPath, f.content, 'utf-8');
+        appliedFiles.push({ path: f.path, operation: f.operation });
+      } catch (err: any) {
+        errors.push(`Failed writing '${f.path}': ${err.message}`);
+      }
+    }
+
+    return { appliedFiles, errors };
   }
 }
 

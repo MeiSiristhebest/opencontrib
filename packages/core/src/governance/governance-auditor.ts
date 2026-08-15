@@ -105,6 +105,7 @@ export const calculate7DQualityRubric = calculateConfidenceScore;
 /**
  * Evidence-Backed Quality Rubric Derivation
  * Grounded in empirical reproduction, sandbox stress loops, and surgical diff size.
+ * If subagent review is unavailable or empirical evidence is absent, scores strictly reflect the gap.
  */
 export function deriveEvidenceBackedQualityRubric(input: {
   hasReproductionAssertion?: boolean;
@@ -113,26 +114,43 @@ export function deriveEvidenceBackedQualityRubric(input: {
   diffLines?: number;
   styleScore?: number;
   securityScore?: number;
+  subagentReviewAvailable?: boolean;
 }): {
   breakdown: ConfidenceBreakdown;
   rubricResult: ReturnType<typeof calculate7DQualityRubric>;
 } {
   const {
-    hasReproductionAssertion = true,
-    testsPassed = true,
-    passedTestsCount = 1,
+    hasReproductionAssertion = false,
+    testsPassed = false,
+    passedTestsCount = 0,
     diffLines = 15,
-    styleScore = 95,
-    securityScore = 94,
+    styleScore,
+    securityScore,
+    subagentReviewAvailable = true,
   } = input;
 
-  const rootCause = hasReproductionAssertion ? 95 : 90;
-  const implementation = diffLines <= 100 ? 94 : Math.max(65, 94 - Math.round((diffLines - 100) * 0.2));
-  const regression = testsPassed ? 93 : 60;
-  const defensiveCoverage = passedTestsCount > 0 ? 91 : 88;
-  const testCoverage = passedTestsCount > 0 ? 92 : 86;
-  const styleMatch = styleScore;
-  const securityAudit = securityScore;
+  // Root cause confidence: 95 only if empirical failure reproduction was confirmed, 90 if standard tests passed, 65 if untested
+  const rootCause = hasReproductionAssertion ? 95 : testsPassed ? 90 : 65;
+  // Implementation confidence: based on surgical diff size
+  const implementation = diffLines <= 100 ? 94 : Math.max(60, 94 - Math.round((diffLines - 100) * 0.25));
+  // Regression confidence: based on actual test passes
+  const regression = testsPassed ? 93 : 50;
+  // Defensive and test coverage: based on real passed unit tests count or clean lint analysis
+  const defensiveCoverage = passedTestsCount > 0 ? 91 : subagentReviewAvailable ? 86 : 75;
+  const testCoverage = passedTestsCount > 0 ? 92 : subagentReviewAvailable ? 85 : 70;
+  // Style and Security scores: grounded in Subagent Review if available, or calibrated conservative defaults if not
+  const styleMatch =
+    typeof styleScore === 'number'
+      ? styleScore
+      : subagentReviewAvailable
+      ? 90
+      : 80;
+  const securityAudit =
+    typeof securityScore === 'number'
+      ? securityScore
+      : subagentReviewAvailable
+      ? 90
+      : 80;
 
   const breakdown: ConfidenceBreakdown = {
     rootCause,

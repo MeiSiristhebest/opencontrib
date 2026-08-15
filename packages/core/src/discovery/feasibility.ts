@@ -188,7 +188,31 @@ export function calculateOsFeasibility(
   labels: string[] = [],
   text: string = '',
 ): { feasibilityScore: number; isFeasible: boolean; penalty: number; reason?: string } {
-  const assessment = assessFeasibility(text, '', labels);
+  const currentOs = (
+    env.os === 'windows' || env.os === 'win32'
+      ? 'win32'
+      : env.os === 'macos' || env.os === 'darwin'
+        ? 'darwin'
+        : env.os === 'linux'
+          ? 'linux'
+          : 'other'
+  ) as 'win32' | 'linux' | 'darwin' | 'other';
+
+  const caps: SystemCapabilities = {
+    os: currentOs,
+    hasWsl: env.hasWsl ?? false,
+    hasDocker: env.hasDocker ?? false,
+    hasHyperV: false,
+    toolchains: {
+      node: true,
+      bun: true,
+      python: true,
+      go: true,
+      rust: true,
+    },
+  };
+
+  const assessment = assessFeasibility(text, '', labels, caps);
   const score = Math.max(0, 100 - assessment.scorePenalty);
   return {
     feasibilityScore: score,
@@ -197,4 +221,5 @@ export function calculateOsFeasibility(
     reason: assessment.rationale,
   };
 }
+
 

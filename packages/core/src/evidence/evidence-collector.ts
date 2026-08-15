@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process';
+import { defaultSandboxRuntime, type SandboxExecutionResult } from '../sandbox/sandbox-runtime.js';
 import type { EvidenceReport, FlakyTestRecord } from '../contracts/schemas.js';
 
 export interface EvidenceCollectionOptions {
@@ -8,22 +8,36 @@ export interface EvidenceCollectionOptions {
   runFlakyBaseline?: boolean;
 }
 
+export interface DualStageReproductionResult {
+  preFixFailingAssertionCaptured: boolean;
+  preFixOutput: string;
+  postFixPassed: boolean;
+  postFixOutput: string;
+  isReproductionVerified: boolean;
+  stressLoopPassed: boolean;
+  completedRuns: number;
+}
+
 export function getProcessHandleCount(): number {
   try {
     if (process.platform === 'win32') {
-      const res = spawnSync('powershell', ['-NoProfile', '-Command', `(Get-Process -Id ${process.pid}).HandleCount`], {
-        encoding: 'utf-8',
-        timeout: 3000,
-        stdio: ['ignore', 'pipe', 'ignore'],
+      const res = defaultSandboxRuntime.executeInSandbox({
+        cwd: process.cwd(),
+        command: 'powershell',
+        args: ['-NoProfile', '-Command', `(Get-Process -Id ${process.pid}).HandleCount`],
+        timeoutMs: 4000,
+        allowHostFallback: true,
       });
-      return parseInt((res.stdout || '').trim(), 10) || 0;
+      return parseInt(res.stdout.trim(), 10) || 0;
     } else {
-      const res = spawnSync('lsof', ['-p', process.pid.toString()], {
-        encoding: 'utf-8',
-        timeout: 3000,
-        stdio: ['ignore', 'pipe', 'ignore'],
+      const res = defaultSandboxRuntime.executeInSandbox({
+        cwd: process.cwd(),
+        command: 'lsof',
+        args: ['-p', process.pid.toString()],
+        timeoutMs: 4000,
+        allowHostFallback: true,
       });
-      const lines = (res.stdout || '').trim().split('\n').filter(Boolean);
+      const lines = res.stdout.trim().split('\n').filter(Boolean);
       return lines.length || 0;
     }
   } catch {
@@ -67,30 +81,20 @@ export function parseTestCountsFromOutput(output: string): { passed: number; fai
 
 export function recordFlakyBaseline(cwd: string, testCommand: string, runs: number = 3): FlakyTestRecord[] {
   const testRunResults = new Map<string, { runCount: number; failCount: number }>();
-  const safeEnv = {
-    ...process.env,
-    CI: 'true',
-    FORCE_COLOR: '0',
-    DEBIAN_FRONTEND: 'noninteractive',
-    GIT_TERMINAL_PROMPT: '0',
-  };
-
   const parts = testCommand.split(' ');
   const cmd = parts[0];
   const args = parts.slice(1);
 
   for (let i = 0; i < runs; i++) {
-    const res = spawnSync(cmd, args, {
+    const res = defaultSandboxRuntime.executeInSandbox({
       cwd,
-      encoding: 'utf-8',
-      timeout: 30000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: safeEnv,
-      shell: true,
+      command: cmd,
+      args,
+      timeoutMs: 30000,
     });
 
-    if (res.status !== 0) {
-      const full = `${res.stdout || ''}\n${res.stderr || ''}`;
+    if (!res.passed) {
+      const full = res.output;
       const failureMatches = full.match(/(?:FAIL|✕|FAILED)\s+([^\r\n]+)/g) || [];
       for (const f of failureMatches) {
         const testName = f.replace(/^(?:FAIL|✕|FAILED)\s+/, '').trim();
@@ -128,16 +132,15 @@ export function runStressLoop(
   const args = parts.slice(1);
 
   for (let i = 0; i < count; i++) {
-    const res = spawnSync(cmd, args, {
+    const res = defaultSandboxRuntime.executeInSandbox({
       cwd,
-      timeout: 20000,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true,
+      command: cmd,
+      args,
+      timeoutMs: 25000,
     });
 
-    lastOutput = `${res.stdout || ''}\n${res.stderr || ''}`;
-    if (res.status === 0) {
+    lastOutput = res.output;
+    if (res.passed) {
       completedRuns++;
     } else {
       return { passed: false, completedRuns, lastOutput };
@@ -149,37 +152,84 @@ export function runStressLoop(
 
 export function verifyEmpiricalReproduction(input: {
   cwd: string;
-  reproductionScriptPath: string;
+  reproductionScriptPath?: string;
+  testCommand?: string;
   runnerCommand?: string;
 }): {
   isFailingOnBaseline: boolean;
   baselineOutput: string;
   assertionCaptured: boolean;
 } {
-  const { cwd, reproductionScriptPath, runnerCommand = 'bun' } = input;
-  const safeEnv = {
-    ...process.env,
-    CI: 'true',
-    FORCE_COLOR: '0',
-    DEBIAN_FRONTEND: 'noninteractive',
-  };
+  const { cwd, reproductionScriptPath, testCommand, runnerCommand = 'bun' } = input;
 
-  const res = spawnSync(runnerCommand, [reproductionScriptPath], {
-    cwd,
-    encoding: 'utf-8',
-    env: safeEnv,
-    timeout: 15000,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: true,
-  });
+  let res: SandboxExecutionResult;
+  if (reproductionScriptPath) {
+    res = defaultSandboxRuntime.executeInSandbox({
+      cwd,
+      command: runnerCommand,
+      args: [reproductionScriptPath],
+      timeoutMs: 15000,
+    });
+  } else if (testCommand) {
+    const parts = testCommand.split(' ');
+    res = defaultSandboxRuntime.executeInSandbox({
+      cwd,
+      command: parts[0],
+      args: parts.slice(1),
+      timeoutMs: 20000,
+    });
+  } else {
+    return {
+      isFailingOnBaseline: false,
+      baselineOutput: 'No reproduction script or test command provided.',
+      assertionCaptured: false,
+    };
+  }
 
-  const full = `${res.stdout || ''}\n${res.stderr || ''}`;
-  const hasFailureFlag = res.status !== 0 || /BUG CONFIRMED|FAILED|FAIL|assertion failed|error/i.test(full);
+  const full = res.output;
+  const hasFailureFlag =
+    !res.passed || /BUG CONFIRMED|FAILED|FAIL|assertion failed|error|TypeError|AssertionError/i.test(full);
 
   return {
     isFailingOnBaseline: hasFailureFlag,
     baselineOutput: full,
     assertionCaptured: hasFailureFlag,
+  };
+}
+
+export function capturePreFixAssertion(cwd: string, testCommand: string) {
+  return verifyEmpiricalReproduction({ cwd, testCommand });
+}
+
+
+/**
+ * Executes a full dual-stage empirical verification:
+ * 1. Verifies pre-fix failure baseline (reproduction proof)
+ * 2. Runs post-fix validation & stress loop (fix proof)
+ */
+export async function verifyDualStageReproduction(input: {
+  cwd: string;
+  testCommand: string;
+  preFixBaselineCaptured: boolean;
+  preFixFailureOutput?: string;
+  stressLoopCount?: number;
+}): Promise<DualStageReproductionResult> {
+  const { cwd, testCommand, preFixBaselineCaptured, preFixFailureOutput = '', stressLoopCount = 5 } = input;
+
+  const stressResult = runStressLoop(cwd, testCommand, stressLoopCount);
+  const postFixPassed = stressResult.passed;
+
+  // True empirical reproduction is verified when pre-fix had failure/assertion and post-fix passes all runs cleanly
+  const isReproductionVerified = preFixBaselineCaptured && postFixPassed;
+
+  return {
+    preFixFailingAssertionCaptured: preFixBaselineCaptured,
+    preFixOutput: preFixFailureOutput,
+    postFixPassed,
+    postFixOutput: stressResult.lastOutput,
+    isReproductionVerified,
+    stressLoopPassed: stressResult.passed,
+    completedRuns: stressResult.completedRuns,
   };
 }
 
@@ -192,7 +242,7 @@ export async function collectEvidence(options: EvidenceCollectionOptions): Promi
   // 2. Step 4.0 Flaky Baseline Isolation
   const baselineFlakyTests = runFlakyBaseline ? recordFlakyBaseline(cwd, testCommand, 3) : [];
 
-  // 3. Stress Test Loop (consecutive runs)
+  // 3. Stress Test Loop (consecutive runs executed in sanitized sandbox)
   const stressResult = runStressLoop(cwd, testCommand, stressLoopCount);
 
   // 4. Final System Handle & FD Sampling
@@ -206,7 +256,7 @@ export async function collectEvidence(options: EvidenceCollectionOptions): Promi
     baselineFlakyTests,
     stressLoopRuns: stressLoopCount,
     stressLoopPassed: stressResult.passed,
-    handleLeakCheckPassed: initialHandles === 0 || finalHandles === 0 ? true : (finalHandles - initialHandles < 15),
+    handleLeakCheckPassed: initialHandles === 0 || finalHandles === 0 ? true : finalHandles - initialHandles < 15,
     initialDescriptorCount: initialHandles,
     finalDescriptorCount: finalHandles,
     passedUnitTestsCount: parsedCounts.passed,

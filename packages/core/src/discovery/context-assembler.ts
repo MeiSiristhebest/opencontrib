@@ -10,6 +10,16 @@ export interface RunnableCommands {
   packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun' | 'cargo' | 'go' | 'pytest' | 'cmake';
 }
 
+export interface ContributionGuidance {
+  suggestedReadingOrder: string[];
+  targetTestFiles: string[];
+  riskSurface: {
+    level: 'LOW' | 'MEDIUM' | 'HIGH';
+    rationale: string;
+    sensitivePaths: string[];
+  };
+}
+
 export interface AssembledContributionContext {
   problemContext: {
     repoFullName: string;
@@ -38,8 +48,10 @@ export interface AssembledContributionContext {
     hasWsl: boolean;
     nodeVersion: string;
   };
+  guidance: ContributionGuidance;
   assembledAt: string;
 }
+
 
 /**
  * Detects actual runnable commands by inspecting manifest files, package managers, and lockfiles.
@@ -221,6 +233,59 @@ export class ContextAssembler {
       } catch {}
     }
 
+    // 5. Generate Exploration Guidance (suggested reading order, target tests, risk surface)
+    const suggestedReadingOrder: string[] = [];
+    const targetTestFiles: string[] = [];
+    const sensitivePaths: string[] = [];
+
+    if (packageManifest) {
+      if (packageManifest.includes('package.json')) suggestedReadingOrder.push('package.json');
+      if (packageManifest.includes('Cargo.toml')) suggestedReadingOrder.push('Cargo.toml');
+      if (packageManifest.includes('go.mod')) suggestedReadingOrder.push('go.mod');
+    }
+    if (contributingGuidelinesSnippet) {
+      suggestedReadingOrder.push('CONTRIBUTING.md');
+    }
+
+    for (const file of detectedSkeletonFiles) {
+      if (file.toLowerCase().includes('readme')) {
+        suggestedReadingOrder.push(file);
+      } else if (file === 'src' || file === 'lib' || file === 'packages') {
+        suggestedReadingOrder.push(file);
+      } else if (file.toLowerCase().includes('test') || file.toLowerCase().includes('spec')) {
+        targetTestFiles.push(file);
+      } else if (file.startsWith('.github') || file === 'scripts') {
+        sensitivePaths.push(file);
+      }
+    }
+
+    for (const pref of preferredPaths) {
+      if (pref.includes('test') || pref.includes('spec')) {
+        targetTestFiles.push(pref);
+      } else {
+        suggestedReadingOrder.push(pref);
+      }
+    }
+
+    const isHighRisk =
+      issueTitle.toLowerCase().includes('breaking') ||
+      issueTitle.toLowerCase().includes('security') ||
+      sensitivePaths.length > 2;
+
+    const guidance: ContributionGuidance = {
+      suggestedReadingOrder: Array.from(new Set(suggestedReadingOrder)).slice(0, 5),
+      targetTestFiles: Array.from(new Set(targetTestFiles)),
+      riskSurface: {
+        level: isHighRisk ? 'HIGH' : sensitivePaths.length > 0 ? 'MEDIUM' : 'LOW',
+        rationale: isHighRisk
+          ? 'Potentially high blast radius or security/breaking boundary'
+          : sensitivePaths.length > 0
+            ? 'Touches build or workflow infrastructure files'
+            : 'Standard scoped module improvement',
+        sensitivePaths: Array.from(new Set(sensitivePaths)),
+      },
+    };
+
     return {
       problemContext: {
         repoFullName,
@@ -249,6 +314,7 @@ export class ContextAssembler {
         hasWsl: doctor.environment.wslAvailable,
         nodeVersion: doctor.environment.nodeVersion,
       },
+      guidance,
       assembledAt: new Date().toISOString(),
     };
   }
@@ -286,8 +352,19 @@ export class ContextAssembler {
       sections.push(`- **Package Manifest**:\n\`\`\`\n${ctx.repoContext.packageManifestSnippet}\n\`\`\``);
     }
 
+    if (ctx.guidance.suggestedReadingOrder.length > 0 || ctx.guidance.targetTestFiles.length > 0) {
+      sections.push(`\n### 3. Contribution Exploration Guidance`);
+      if (ctx.guidance.suggestedReadingOrder.length > 0) {
+        sections.push(`- **Suggested Reading Order**: ${ctx.guidance.suggestedReadingOrder.join(' -> ')}`);
+      }
+      if (ctx.guidance.targetTestFiles.length > 0) {
+        sections.push(`- **Target Test Files**: ${ctx.guidance.targetTestFiles.join(', ')}`);
+      }
+      sections.push(`- **Risk Surface**: [${ctx.guidance.riskSurface.level}] ${ctx.guidance.riskSurface.rationale}`);
+    }
+
     if (ctx.memoryContext.pastFailures.length > 0 || ctx.memoryContext.successfulPatterns.length > 0) {
-      sections.push(`\n### 3. Historical Repository Memory & Pitfalls`);
+      sections.push(`\n### 4. Historical Repository Memory & Pitfalls`);
       if (ctx.memoryContext.pastFailures.length > 0) {
         sections.push(`- **Avoid These Past Mistakes**:\n  - ${ctx.memoryContext.pastFailures.join('\n  - ')}`);
       }
@@ -296,7 +373,7 @@ export class ContextAssembler {
       }
     }
 
-    sections.push(`\n### 4. Local Execution Environment`);
+    sections.push(`\n### 5. Local Execution Environment`);
     sections.push(`- **Host OS**: ${ctx.environmentContext.os}`);
     sections.push(`- **Docker Available**: ${ctx.environmentContext.hasDocker}`);
     sections.push(`- **WSL Available**: ${ctx.environmentContext.hasWsl}`);
@@ -305,3 +382,4 @@ export class ContextAssembler {
     return sections.join('\n');
   }
 }
+
