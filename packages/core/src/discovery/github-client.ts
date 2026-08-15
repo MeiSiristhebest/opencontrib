@@ -9,10 +9,13 @@ export interface GitHubClientOptions {
   cacheTtlMs?: number;
 }
 
+export type ApiStatus = 'OK' | 'NOT_FOUND' | 'RATE_LIMITED' | 'FORBIDDEN' | 'NETWORK_ERROR' | 'UNKNOWN_ERROR';
+
 export interface ApiResult<T> {
-  status: 'OK' | 'API_UNAVAILABLE';
+  status: ApiStatus;
   data: T;
   error?: string;
+  statusCode?: number;
 }
 
 export class GitHubClient {
@@ -20,7 +23,7 @@ export class GitHubClient {
   private cacheDir: string;
   private cacheTtlMs: number;
   private tokenScope: string;
-  private readonly schemaVersion = 'v2';
+  private readonly schemaVersion = 'v3';
 
   constructor(options: GitHubClientOptions = {}) {
     let token = options.token || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
@@ -87,6 +90,17 @@ export class GitHubClient {
     } catch {}
   }
 
+  private mapErrorToApiStatus(err: any): { status: ApiStatus; statusCode?: number } {
+    const status = err?.status || err?.statusCode;
+    if (status === 404) return { status: 'NOT_FOUND', statusCode: 404 };
+    if (status === 403) return { status: 'FORBIDDEN', statusCode: 403 };
+    if (status === 429) return { status: 'RATE_LIMITED', statusCode: 429 };
+    if (err?.code === 'ENOTFOUND' || err?.code === 'ECONNREFUSED' || err?.name === 'FetchError') {
+      return { status: 'NETWORK_ERROR' };
+    }
+    return { status: 'UNKNOWN_ERROR', statusCode: status };
+  }
+
   private getRetryDelayMs(err: any): number {
     const headers = err?.response?.headers;
     if (headers) {
@@ -149,7 +163,7 @@ export class GitHubClient {
   }
 
   /**
-   * Paged comments retrieval with Tri-State safety return.
+   * Paged comments retrieval with comprehensive Tri-State / Error taxonomy return.
    */
   async getIssueComments(
     owner: string,
@@ -180,7 +194,13 @@ export class GitHubClient {
       this.setCache(cacheKey, allComments);
       return { status: 'OK', data: allComments };
     } catch (err: any) {
-      return { status: 'API_UNAVAILABLE', data: [], error: err.message };
+      const errInfo = this.mapErrorToApiStatus(err);
+      return {
+        status: errInfo.status,
+        data: [],
+        error: err.message,
+        statusCode: errInfo.statusCode,
+      };
     }
   }
 
@@ -263,7 +283,9 @@ export class GitHubClient {
   }
 
   /**
-   * Paged timeline event inspection with Tri-State safety return.
+   * Checks if an issue has active open linked PRs.
+   * P0 Fix: Uses Set<number> to count unique open PR numbers across timeline events,
+   * avoiding duplicate counting when a single PR cross-references an issue multiple times.
    */
   async getIssueLinkedPrsCount(
     owner: string,
@@ -275,7 +297,7 @@ export class GitHubClient {
     const cached = this.getCached<number>(cacheKey);
     if (cached !== null) return { status: 'OK', data: cached };
 
-    let prCount = 0;
+    const openPrNumbers = new Set<number>();
 
     try {
       for (let page = 1; page <= maxPages; page++) {
@@ -292,9 +314,10 @@ export class GitHubClient {
             event.event === 'cross-referenced' &&
             (event as any).source?.issue?.pull_request
           ) {
+            const prNumber = (event as any).source?.issue?.number;
             const prState = (event as any).source?.issue?.state;
-            if (prState === 'open') {
-              prCount++;
+            if (prState === 'open' && typeof prNumber === 'number') {
+              openPrNumbers.add(prNumber);
             }
           }
         }
@@ -302,10 +325,30 @@ export class GitHubClient {
         if (resp.data.length < 50) break;
       }
 
-      this.setCache(cacheKey, prCount);
-      return { status: 'OK', data: prCount };
+      const uniqueOpenCount = openPrNumbers.size;
+      this.setCache(cacheKey, uniqueOpenCount);
+      return { status: 'OK', data: uniqueOpenCount };
     } catch (err: any) {
-      return { status: 'API_UNAVAILABLE', data: 0, error: err.message };
+      const errInfo = this.mapErrorToApiStatus(err);
+      return {
+        status: errInfo.status,
+        data: 0,
+        error: err.message,
+        statusCode: errInfo.statusCode,
+      };
     }
+  }
+
+  /**
+   * High-level domain contract for checking existence of active linked PRs.
+   */
+  async hasActiveLinkedPr(owner: string, repo: string, issue_number: number): Promise<ApiResult<boolean>> {
+    const res = await this.getIssueLinkedPrsCount(owner, repo, issue_number);
+    return {
+      status: res.status,
+      data: res.data > 0,
+      error: res.error,
+      statusCode: res.statusCode,
+    };
   }
 }

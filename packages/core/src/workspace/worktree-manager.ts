@@ -22,12 +22,12 @@ export class WorktreeManager {
     if (!existsSync(this.cacheRoot)) mkdirSync(this.cacheRoot, { recursive: true });
   }
 
-  private runGit(args: string[], cwd?: string): { success: boolean; stdout: string; stderr: string } {
+  private runGit(args: string[], cwd?: string, timeoutMs = 25000): { success: boolean; stdout: string; stderr: string } {
     const result = spawnSync('git', args, {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 8000,
+      timeout: timeoutMs,
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',

@@ -1,4 +1,4 @@
-import type { FeasibilityAssessment, UserProfile } from '../contracts/schemas.js';
+import type { FeasibilityAssessment } from '../contracts/schemas.js';
 
 export interface ScoreCandidateInput {
   profile: {
@@ -14,6 +14,7 @@ export interface ScoreCandidateInput {
     createdAt: string;
     updatedAt?: string;
     latestCommentAt?: string;
+    commentDates?: string[];
     repoStars?: number;
   };
   feasibility: FeasibilityAssessment;
@@ -25,7 +26,7 @@ export interface ScoreBreakdown {
   feasibilityScore: number;
   freshnessModifier: number;
   actionabilityModifier: number;
-  repoQualityBonus: number;
+  repoPopularityBonus: number;
 }
 
 export interface MatchedSignals {
@@ -43,29 +44,107 @@ export interface IssueScoringResult {
   matchedSignals: MatchedSignals;
 }
 
-function escapeRegex(text: string): string {
+export function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
- * Calculates freshness modifier based on latest meaningful activity in days.
- * Prefers max(updated_at, latest_comment_at, created_at) over pure creation time.
+ * Robust term matcher with word-boundary awareness and canonical alias handling
+ * for special language identifiers (C#, C++, .NET, F#, Go, JS).
  */
-export function computeActivityFreshnessModifier(activityDateStr: string): number {
-  try {
-    const activityTime = new Date(activityDateStr).getTime();
-    if (isNaN(activityTime)) return 0;
-    const now = Date.now();
-    const ageDays = (now - activityTime) / (1000 * 60 * 60 * 24);
+export function matchesProfileTerm(text: string, term: string): boolean {
+  if (!text || !term) return false;
+  const t = term.trim().toLowerCase();
 
-    if (ageDays < 30) return 12;   // Very fresh (< 1 month)
-    if (ageDays < 90) return 4;    // Active (< 3 months)
-    if (ageDays < 180) return -12; // Moderate stale (> 3 months)
-    if (ageDays < 365) return -25; // Stale (> 6 months)
-    return -35;                    // Dormant (> 1 year)
-  } catch {
-    return 0;
+  // Special canonical aliases
+  if (t === 'c#' || t === 'csharp') {
+    return /(?:^|[^\w])(?:c#|csharp)(?:[^\w]|$)/i.test(text);
   }
+  if (t === 'c++' || t === 'cpp') {
+    return /(?:^|[^\w])(?:c\+\+|cpp)(?:[^\w]|$)/i.test(text);
+  }
+  if (t === '.net' || t === 'dotnet') {
+    return /(?:^|[^\w])(?:\.net|dotnet)(?:[^\w]|$)/i.test(text);
+  }
+  if (t === 'f#' || t === 'fsharp') {
+    return /(?:^|[^\w])(?:f#|fsharp)(?:[^\w]|$)/i.test(text);
+  }
+
+  // Standard token word-boundary matching
+  const escaped = escapeRegex(t);
+  const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+  return regex.test(text);
+}
+
+/**
+ * Builds GitHub Search aliases for a technical term without stripping crucial characters.
+ */
+export function getSearchAliasQuery(term: string): string {
+  const t = term.trim().toLowerCase();
+  if (t === 'c#' || t === 'csharp') {
+    return '("c#" OR "csharp")';
+  }
+  if (t === 'c++' || t === 'cpp') {
+    return '("c++" OR "cpp")';
+  }
+  if (t === '.net' || t === 'dotnet') {
+    return '(".net" OR "dotnet")';
+  }
+  if (t === 'f#' || t === 'fsharp') {
+    return '("f#" OR "fsharp")';
+  }
+  // Remove disrupting shell characters but preserve valid alphanumeric and dots
+  const clean = term.replace(/[^\w\s.+-]/g, '').trim();
+  return clean ? `"${clean}"` : '';
+}
+
+/**
+ * Calculates the exact latest activity timestamp (ms) across all dates.
+ * Strictly implements Math.max(createdAt, updatedAt, latestCommentAt, ...commentDates).
+ */
+export function calculateLatestActivityTimestamp(issue: {
+  createdAt: string;
+  updatedAt?: string;
+  latestCommentAt?: string;
+  commentDates?: string[];
+}): number {
+  const timestamps: number[] = [];
+
+  const createdTime = Date.parse(issue.createdAt);
+  if (!isNaN(createdTime) && createdTime > 0) timestamps.push(createdTime);
+
+  if (issue.updatedAt) {
+    const updatedTime = Date.parse(issue.updatedAt);
+    if (!isNaN(updatedTime) && updatedTime > 0) timestamps.push(updatedTime);
+  }
+
+  if (issue.latestCommentAt) {
+    const commentTime = Date.parse(issue.latestCommentAt);
+    if (!isNaN(commentTime) && commentTime > 0) timestamps.push(commentTime);
+  }
+
+  if (issue.commentDates && Array.isArray(issue.commentDates)) {
+    for (const d of issue.commentDates) {
+      const t = Date.parse(d);
+      if (!isNaN(t) && t > 0) timestamps.push(t);
+    }
+  }
+
+  return timestamps.length > 0 ? Math.max(...timestamps) : (isNaN(createdTime) ? Date.now() : createdTime);
+}
+
+/**
+ * Calculates freshness modifier based on latest meaningful activity in days.
+ */
+export function computeActivityFreshnessModifier(activityTimestampMs: number): number {
+  const now = Date.now();
+  const ageDays = (now - activityTimestampMs) / (1000 * 60 * 60 * 24);
+
+  if (ageDays < 30) return 12;   // Very fresh (< 1 month)
+  if (ageDays < 90) return 4;    // Active (< 3 months)
+  if (ageDays < 180) return -12; // Moderate stale (> 3 months)
+  if (ageDays < 365) return -25; // Stale (> 6 months)
+  return -35;                    // Dormant (> 1 year)
 }
 
 /**
@@ -87,30 +166,24 @@ export function computeActionabilityModifier(body?: string): number {
 
 /**
  * Single Source of Truth for Candidate Opportunity Scoring.
- * Used by Scout, MultiSignalHeuristicRanker, and Orchestrator.
+ * Used across Scout, MultiSignalHeuristicRanker, and Orchestrator.
  */
 export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringResult {
   const { profile, issue, feasibility } = input;
-  const fullText = `${issue.title} ${issue.body || ''}`.toLowerCase();
+  const fullText = `${issue.title} ${issue.body || ''}`;
   const normalizedLabels = (issue.labels || []).map((l) => l.toLowerCase());
 
-  // 1. Tokenized / Word-Boundary Keyword Matching
+  // 1. Profile Keyword & Domain Focus Area Matching (Token/Word-Boundary aware)
   const matchedTech: string[] = [];
   for (const tech of profile.techStack) {
-    if (!tech) continue;
-    const escaped = escapeRegex(tech.toLowerCase());
-    const regex = new RegExp(`\\b${escaped}\\b`, 'i');
-    if (regex.test(fullText)) {
+    if (matchesProfileTerm(fullText, tech)) {
       matchedTech.push(tech.toLowerCase());
     }
   }
 
   const matchedAreas: string[] = [];
   for (const area of profile.focusAreas) {
-    if (!area) continue;
-    const escaped = escapeRegex(area.toLowerCase());
-    const regex = new RegExp(`\\b${escaped}\\b`, 'i');
-    if (regex.test(fullText)) {
+    if (matchesProfileTerm(fullText, area)) {
       matchedAreas.push(area.toLowerCase());
     }
   }
@@ -135,35 +208,37 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
     matchedLabels.push('bugfix');
   }
 
-  // 3. Repository Quality & Maintenance Signal
-  let repoQualityBonus = 0;
+  // 3. Repository Popularity & Visibility Signal (Stars)
+  let repoPopularityBonus = 0;
   const stars = issue.repoStars ?? 0;
   if (stars >= 5000) {
-    repoQualityBonus = 6;
+    repoPopularityBonus = 6;
   } else if (stars >= 50) {
-    repoQualityBonus = 4;
+    repoPopularityBonus = 4;
   }
 
-  // 4. Activity Freshness (Latest meaningful activity)
-  const activityDate = issue.latestCommentAt || issue.updatedAt || issue.createdAt;
-  const freshnessModifier = computeActivityFreshnessModifier(activityDate);
+  // 4. Activity Freshness: strictly Math.max across createdAt, updatedAt, and comments
+  const latestActivityMs = calculateLatestActivityTimestamp(issue);
+  const freshnessModifier = computeActivityFreshnessModifier(latestActivityMs);
 
   // 5. Actionability Modifier
   const actionabilityModifier = computeActionabilityModifier(issue.body);
 
-  // 6. Feasibility Score
-  const feasibilityScore = Math.max(0, 100 - (feasibility.scorePenalty || 0));
+  // 6. Feasibility Score (Single Penalty Application)
+  const penalty = Math.max(0, feasibility.scorePenalty || 0);
+  const feasibilityScore = Math.max(0, 100 - penalty);
 
-  // Weighted Score Formula
+  // Weighted Score Formula: feasibility is weighted at 30% without double deduction
   const rawCalculated =
     0.35 * profileKeywordScore +
-    0.35 * (domainMatchScore + repoQualityBonus) +
+    0.35 * (domainMatchScore + repoPopularityBonus) +
     0.30 * feasibilityScore +
     freshnessModifier +
     actionabilityModifier;
 
   const rawScore = Math.max(0, Math.min(100, Math.round(rawCalculated)));
-  const adjustedScore = Math.max(0, rawScore - (feasibility.scorePenalty || 0));
+  // P0 Fix: adjustedScore is strictly rawScore, preserving 30% feasibility weighting
+  const adjustedScore = rawScore;
 
   return {
     rawScore,
@@ -174,7 +249,7 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
       feasibilityScore,
       freshnessModifier,
       actionabilityModifier,
-      repoQualityBonus,
+      repoPopularityBonus,
     },
     matchedSignals: {
       techStack: matchedTech,
@@ -189,11 +264,11 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
 /**
  * 2-Stage Diversity Reranking Pipeline.
  * Stage 1: Sort by rawScore descending.
- * Stage 2: Apply per-repo appearance frequency decay to prevent repo monopoly in Top N.
+ * Stage 2: Apply per-repo appearance frequency decay to prevent repository monopoly in Top N.
  */
 export function applyDiversityReranking<T extends { repoFullName: string; rawScore: number }>(
   items: T[],
-): Array<{ item: T; finalScore: number }> {
+): Array<{ item: T; rankScore: number; diversityPenalty: number }> {
   // Stage 1: Pure Relevance Order
   const sorted = [...items].sort((a, b) => b.rawScore - a.rawScore);
 
@@ -204,11 +279,12 @@ export function applyDiversityReranking<T extends { repoFullName: string; rawSco
       const seen = repoSeenCount.get(item.repoFullName) || 0;
       repoSeenCount.set(item.repoFullName, seen + 1);
       const diversityPenalty = seen * 4;
-      const finalScore = Math.max(0, item.rawScore - diversityPenalty);
+      const rankScore = Math.max(0, item.rawScore - diversityPenalty);
       return {
         item,
-        finalScore,
+        rankScore,
+        diversityPenalty,
       };
     })
-    .sort((a, b) => b.finalScore - a.finalScore);
+    .sort((a, b) => b.rankScore - a.rankScore);
 }

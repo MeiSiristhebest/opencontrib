@@ -1,4 +1,5 @@
 import type { QualificationResult } from '../contracts/schemas.js';
+import type { ApiStatus } from './github-client.js';
 
 export const ACTION_BLOCKING_LABELS = [
   'blocked',
@@ -30,9 +31,9 @@ export interface QualifyIssueInput {
   createdAt: string;
   authorLogin?: string;
   comments: IssueCommentItem[];
-  commentsApiStatus?: 'OK' | 'API_UNAVAILABLE';
+  commentsApiStatus?: ApiStatus;
   existingLinkedPrsCount?: number;
-  timelineApiStatus?: 'OK' | 'API_UNAVAILABLE';
+  timelineApiStatus?: ApiStatus;
 }
 
 export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
@@ -97,11 +98,13 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     }
   }
 
-  // 4. Tri-State API Safety Gate (Fail-Safe)
-  if (commentsApiStatus === 'API_UNAVAILABLE' || timelineApiStatus === 'API_UNAVAILABLE') {
+  // 4. Tri-State API Safety Gate (Fail-Safe on Transient or Auth Errors)
+  const isApiError = (s: ApiStatus) => s === 'RATE_LIMITED' || s === 'FORBIDDEN' || s === 'NETWORK_ERROR' || s === 'UNKNOWN_ERROR';
+  if (isApiError(commentsApiStatus) || isApiError(timelineApiStatus)) {
+    const reason = `GitHub API verification error (comments: ${commentsApiStatus}, timeline: ${timelineApiStatus})`;
     return {
       isQualified: false,
-      disqualifyReason: 'Unable to verify comments/timeline due to GitHub API error (tri-state safety gate).',
+      disqualifyReason: `Unable to verify comments/timeline due to ${reason} (tri-state safety gate).`,
       track: 'standard_track',
       hasExistingPr: false,
       hasClaimant: false,
@@ -111,7 +114,7 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     };
   }
 
-  // 5. Duplicate / Active Linked PR Gate
+  // 5. Duplicate / Active Linked PR Gate (Authoritative GitHub Timeline)
   if (existingLinkedPrsCount > 0) {
     return {
       isQualified: false,
@@ -125,23 +128,27 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     };
   }
 
-  // 6. Comment History, Anti-Bandwagoning & Structured PR Detection
+  // 6. Comment History, Claim Expiry & Contributor Intent Audit
   const botRules: string[] = [];
   let hasClaimant = false;
   let claimantDetails = '';
+  const now = Date.now();
 
-  const prUrlRegex = /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/i;
-  const prRefRegex = /\b(?:pull\s*request|pr|fixes|closes|resolves)\s*#\d+\b/i;
+  // Pattern for developer actively announcing they opened a fix PR
+  const fixPrAnnouncementRegex =
+    /(?:i(?:\s*have|'ve|\s*just)?\s*(?:opened|submitted|created|pushed)\s*(?:a\s*)?(?:pr|pull\s*request)|fix(?:es)?\s*(?:in|via|at)\s*(?:pr|#\d+|pull))/i;
 
   for (const comment of comments) {
     const cBody = comment.body || '';
     const user = comment.user?.login || 'unknown';
+    const commentTime = Date.parse(comment.created_at);
+    const ageDays = !isNaN(commentTime) ? (now - commentTime) / (1000 * 60 * 60 * 24) : 0;
 
-    // Robust PR Link Detection (URL or explicit PR reference)
-    if (prUrlRegex.test(cBody) || prRefRegex.test(cBody)) {
+    // Active Fix PR Announcement Detection (excludes conversational PR references like "PR #123 is unrelated")
+    if (fixPrAnnouncementRegex.test(cBody)) {
       return {
         isQualified: false,
-        disqualifyReason: `Another developer (@${user}) posted a PR reference in comments.`,
+        disqualifyReason: `Another developer (@${user}) announced a fix PR in comments.`,
         track: 'standard_track',
         hasExistingPr: true,
         hasClaimant: true,
@@ -151,7 +158,7 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
       };
     }
 
-    // Contributor Claim Intent Detection (Non-author claimants)
+    // Contributor Claim Intent Detection with Expiry Mechanism (30-Day Limit)
     const isAuthor = authorLogin && user.toLowerCase() === authorLogin.toLowerCase();
     if (!isAuthor) {
       if (
@@ -159,8 +166,11 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
           cBody,
         )
       ) {
-        hasClaimant = true;
-        claimantDetails = `@${user} commented claim intent on ${comment.created_at}`;
+        // Stale Claim Check: If claim was posted > 30 days ago with no active PR, consider claim expired
+        if (ageDays <= 30) {
+          hasClaimant = true;
+          claimantDetails = `@${user} claimed this ${Math.floor(ageDays)} days ago`;
+        }
       }
     }
 
@@ -183,7 +193,7 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     };
   }
 
-  // 7. Author-First-Right Check (7-Day Grace Period for Issue Author)
+  // 7. Initial Author-First-Right Check (7-Day Grace Period for Issue Author)
   let authorFirstRightActive = false;
   let authorFirstRightDetails = '';
   const authorFixPhrases = [
@@ -195,20 +205,17 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     'submitting a pr',
   ];
 
-  // Check if issue body (authored by issue creator) contains intent
+  // Check if initial issue body (by author) contained intent
   const bodyHasAuthorIntent = authorFixPhrases.some((phrase) => fullText.includes(phrase));
-
-  // Check if any comment by the author contains intent within last 7 days
-  const nowTime = Date.now();
-  let latestAuthorIntentTime = bodyHasAuthorIntent ? new Date(createdAt).getTime() : 0;
+  let latestAuthorIntentTime = bodyHasAuthorIntent ? Date.parse(createdAt) : 0;
 
   for (const comment of comments) {
     const user = comment.user?.login;
     if (user && authorLogin && user.toLowerCase() === authorLogin.toLowerCase()) {
       const cBody = (comment.body || '').toLowerCase();
       if (authorFixPhrases.some((phrase) => cBody.includes(phrase))) {
-        const commentTime = new Date(comment.created_at).getTime();
-        if (commentTime > latestAuthorIntentTime) {
+        const commentTime = Date.parse(comment.created_at);
+        if (!isNaN(commentTime) && commentTime > latestAuthorIntentTime) {
           latestAuthorIntentTime = commentTime;
         }
       }
@@ -216,7 +223,7 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   }
 
   if (latestAuthorIntentTime > 0) {
-    const daysSinceIntent = (nowTime - latestAuthorIntentTime) / (1000 * 60 * 60 * 24);
+    const daysSinceIntent = (now - latestAuthorIntentTime) / (1000 * 60 * 60 * 24);
     if (daysSinceIntent < 7) {
       authorFirstRightActive = true;
       authorFirstRightDetails = `Author expressed intent to fix ${Math.floor(daysSinceIntent)} days ago (< 7 days grace period).`;

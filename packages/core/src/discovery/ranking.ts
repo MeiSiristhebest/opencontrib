@@ -1,91 +1,78 @@
-import type { FeasibilityAssessment, QualificationResult } from '../contracts/schemas.js';
+import type {
+  FeasibilityAssessment,
+  Opportunity,
+  QualificationResult,
+  UserProfile,
+} from '../contracts/schemas.js';
 import { calculateOsFeasibility } from './feasibility.js';
 import { qualifyIssue } from './qualification.js';
 import {
   applyDiversityReranking,
-  computeActivityFreshnessModifier,
-  computeActionabilityModifier,
   scoreCandidateIssue,
-  type MatchedSignals,
-  type ScoreBreakdown,
 } from './scoring-engine.js';
 
-export {
-  applyDiversityReranking,
-  computeActivityFreshnessModifier as computeFreshnessModifier,
-  computeActionabilityModifier,
-  scoreCandidateIssue,
-};
-
-export interface DeveloperProfile {
-  techStack: string[];
-  focusAreas: string[];
-  proficiency: 'beginner' | 'intermediate' | 'expert';
-  os: 'windows' | 'linux' | 'macos' | 'wsl2';
-  hasDocker: boolean;
-  hasWsl?: boolean;
-}
-
-export interface RawIssueInput {
-  number: number;
-  title: string;
-  body: string;
-  htmlUrl: string;
-  labels: Array<{ name: string }>;
-  assignee: any;
-  commentsCount: number;
-  comments?: Array<{ author?: string; body?: string; createdAt?: string }>;
-  commentsApiStatus?: 'OK' | 'API_UNAVAILABLE';
-  existingLinkedPrsCount?: number;
-  timelineApiStatus?: 'OK' | 'API_UNAVAILABLE';
-  createdAt: string;
-  updatedAt?: string;
-}
-
 export interface MultiSignalRankedOpportunity {
+  issue: any;
   issueNumber: number;
-  title: string;
-  url: string;
   finalScore: number;
-  breakdown: ScoreBreakdown & { qualificationScore: number };
+  rawScore: number;
+  adjustedScore: number;
+  rankScore: number;
+  diversityPenalty: number;
+  feasibility: FeasibilityAssessment;
+  qualification: QualificationResult;
   matchedKeywords: string[];
-  matchedSignals: MatchedSignals;
-  isQualified: boolean;
-  qualificationReason?: string;
-  track: 'fast_track' | 'standard_track';
+  matchedSignals: {
+    techStack: string[];
+    focusAreas: string[];
+    labels: string[];
+    freshnessModifier: number;
+    actionabilityModifier: number;
+  };
 }
 
-// Backward compatible alias
-export type HybridRankedOpportunity = MultiSignalRankedOpportunity;
-
-/**
- * MultiSignalHeuristicRanker
- * Calibrated deterministic opportunity ranking incorporating profile match,
- * OS feasibility, community qualification, freshness decay, and 2-stage diversity reranking.
- * Uses `scoreCandidateIssue` as the single source of truth for scoring.
- */
 export class MultiSignalHeuristicRanker {
-  private profile: DeveloperProfile;
+  private profile: UserProfile;
+  private envCapabilities: { os: 'windows' | 'linux' | 'macos' | 'wsl2'; hasDocker: boolean; hasWsl: boolean };
 
-  constructor(profile: DeveloperProfile) {
+  constructor(
+    profile: UserProfile,
+    envCapabilities?: { os: 'windows' | 'linux' | 'macos' | 'wsl2'; hasDocker: boolean; hasWsl: boolean },
+  ) {
     this.profile = profile;
+    this.envCapabilities = envCapabilities || {
+      os: process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux',
+      hasDocker: false,
+      hasWsl: false,
+    };
   }
 
-  rankIssues(issues: RawIssueInput[], repoFullName: string): MultiSignalRankedOpportunity[] {
-    const scoredList: MultiSignalRankedOpportunity[] = [];
+  /**
+   * Authoritative candidate issue ranking.
+   * Delegates scoring to single-source scoreCandidateIssue() and applies 2-stage diversity reranking.
+   */
+  rankIssues(issues: any[], repoFullNameFallback?: string): MultiSignalRankedOpportunity[] {
+    const scoredList: Array<{
+      issue: any;
+      repoFullName: string;
+      rawScore: number;
+      adjustedScore: number;
+      feasibility: FeasibilityAssessment;
+      qualification: QualificationResult;
+      matchedSignals: any;
+    }> = [];
 
     for (const issue of issues) {
-      const labelNames = issue.labels.map((l) => l.name);
+      const labels = (issue.labels || []).map((l: any) =>
+        typeof l === 'string' ? l.toLowerCase() : (l.name || '').toLowerCase(),
+      );
+      const text = `${issue.title} ${issue.body || ''}`.toLowerCase();
 
-      // 1. Feasibility Evaluation
+      // 1. Environment & OS Feasibility Assessment
       const osFeasibility = calculateOsFeasibility(
-        {
-          os: this.profile.os,
-          hasDocker: this.profile.hasDocker,
-          hasWsl: this.profile.hasWsl || this.profile.os === 'wsl2',
-        },
-        labelNames,
-        `${issue.title} ${issue.body}`,
+        this.envCapabilities,
+        labels,
+        text,
       );
 
       const feasibility: FeasibilityAssessment = {
@@ -98,119 +85,111 @@ export class MultiSignalHeuristicRanker {
         rationale: osFeasibility.reason || 'Standard environment compatible',
       };
 
-      // 2. Authoritative Qualification (Single Source of Truth)
+      // 2. Authoritative Qualification (Flexible schema handling)
+      const isOpen = issue.state === 'open' || issue.isOpen === true || issue.state === undefined;
+      const assignees = (issue.assignees || (issue.assignee ? [issue.assignee] : []))
+        .map((a: any) => (typeof a === 'string' ? a : a?.login || ''))
+        .filter(Boolean);
+
       const qualification = qualifyIssue({
-        issueNumber: issue.number,
+        issueNumber: issue.number ?? issue.issueNumber ?? 0,
         issueTitle: issue.title,
-        issueBody: issue.body,
-        labels: labelNames,
-        isOpen: true,
-        assignees: issue.assignee ? [issue.assignee] : [],
-        createdAt: issue.createdAt,
-        comments: ((issue.comments as any) || []).map((c: any, idx: number) => ({
-          id: idx,
+        issueBody: issue.body || '',
+        labels,
+        isOpen,
+        assignees,
+        createdAt: issue.created_at || issue.createdAt || new Date().toISOString(),
+        authorLogin: issue.user?.login || issue.authorLogin,
+        comments: (issue.commentsData || []).map((c: any) => ({
+          id: c.id,
           body: c.body,
-          user: { login: c.author },
-          created_at: c.createdAt || issue.createdAt,
+          user: { login: c.user?.login },
+          created_at: c.created_at || c.createdAt,
         })),
-        commentsApiStatus: issue.commentsApiStatus,
-        existingLinkedPrsCount: issue.existingLinkedPrsCount,
-        timelineApiStatus: issue.timelineApiStatus,
+        existingLinkedPrsCount: issue.existingLinkedPrsCount ?? 0,
       });
 
-      // 3. Score using Single Source of Truth
+      if (!qualification.isQualified) {
+        continue;
+      }
+
+      // 3. Extract repository full name
+      const repoFullName =
+        issue.repoFullName ||
+        repoFullNameFallback ||
+        (issue.repository_url ? issue.repository_url.replace(/.*repos\//, '') : 'unknown/repo');
+
+      // 4. Single Source of Truth Candidate Scoring
       const scoringResult = scoreCandidateIssue({
         profile: {
           techStack: this.profile.techStack,
-          focusAreas: this.profile.focusAreas,
+          focusAreas: this.profile.focusAreas || [],
           proficiency: this.profile.proficiency,
+          minMatchScore: this.profile.minMatchScore,
         },
         issue: {
           title: issue.title,
-          body: issue.body,
-          labels: labelNames,
-          createdAt: issue.createdAt,
-          updatedAt: issue.updatedAt,
+          body: issue.body || '',
+          labels,
+          createdAt: issue.created_at || issue.createdAt || new Date().toISOString(),
+          updatedAt: issue.updated_at || issue.updatedAt,
+          latestCommentAt: issue.latestCommentAt,
+          commentDates: (issue.commentsData || []).map((c: any) => c.created_at || c.createdAt),
+          repoStars: issue.repoStars || issue.stargazers_count || 0,
         },
         feasibility,
       });
 
-      const finalScore = qualification.isQualified ? scoringResult.adjustedScore : 0;
-
       scoredList.push({
-        issueNumber: issue.number,
-        title: issue.title,
-        url: issue.htmlUrl,
-        finalScore,
-        breakdown: {
-          ...scoringResult.breakdown,
-          qualificationScore: qualification.isQualified ? 100 : 0,
-        },
-        matchedKeywords: [
-          ...scoringResult.matchedSignals.techStack,
-          ...scoringResult.matchedSignals.focusAreas,
-        ],
+        issue,
+        repoFullName,
+        rawScore: scoringResult.rawScore,
+        adjustedScore: scoringResult.adjustedScore,
+        feasibility,
+        qualification,
         matchedSignals: scoringResult.matchedSignals,
-        isQualified: qualification.isQualified,
-        qualificationReason: qualification.disqualifyReason,
-        track: qualification.track,
       });
     }
 
-    return scoredList.sort((a, b) => b.finalScore - a.finalScore);
+    // 5. Unified 2-Stage Diversity Reranking Pipeline
+    const reranked = applyDiversityReranking(scoredList);
+
+    return reranked.map(({ item, rankScore, diversityPenalty }) => ({
+      issue: item.issue,
+      issueNumber: item.issue.number ?? item.issue.issueNumber ?? 0,
+      finalScore: rankScore,
+      rawScore: item.rawScore,
+      adjustedScore: item.adjustedScore,
+      rankScore,
+      diversityPenalty,
+      feasibility: item.feasibility,
+      qualification: item.qualification,
+      matchedKeywords: [...item.matchedSignals.techStack, ...item.matchedSignals.focusAreas],
+      matchedSignals: item.matchedSignals,
+    }));
   }
 
   /**
-   * 2-Stage Opportunity Ranking & Diversified Reranking
-   * Stage 1: Computes raw multi-signal score without position bias.
-   * Stage 2: Applies diversity reranking based on repository distribution.
+   * Reranks structured Opportunity objects using the exact same diversity pipeline.
    */
-  rankOpportunities(
-    opportunities: Array<{
-      issueNumber: number;
-      title: string;
-      body?: string;
-      repoFullName: string;
-      repoStars?: number;
-      feasibility?: any;
-      createdAt?: string;
-      updatedAt?: string;
-      labels?: string[];
-      [key: string]: any;
-    }>,
-  ): Array<{ opportunity: any; finalScore: number }> {
-    const rawScored = opportunities.map((opp) => {
-      const scoring = scoreCandidateIssue({
-        profile: {
-          techStack: this.profile.techStack,
-          focusAreas: this.profile.focusAreas,
-          proficiency: this.profile.proficiency,
-        },
-        issue: {
-          title: opp.title,
-          body: opp.body,
-          labels: opp.labels,
-          createdAt: opp.createdAt || new Date().toISOString(),
-          updatedAt: opp.updatedAt,
-          repoStars: opp.repoStars,
-        },
-        feasibility: opp.feasibility || { scorePenalty: 0 },
-      });
+  rankOpportunities(opportunities: Opportunity[]): Opportunity[] {
+    const reranked = applyDiversityReranking(
+      opportunities.map((opp) => ({
+        ...opp,
+        rawScore: opp.adjustedScore,
+      })),
+    );
 
-      return {
-        opportunity: opp,
-        repoFullName: opp.repoFullName,
-        rawScore: scoring.adjustedScore,
-      };
-    });
-
-    const reranked = applyDiversityReranking(rawScored);
-    return reranked.map(({ item, finalScore }) => ({
-      opportunity: item.opportunity,
-      finalScore,
+    return reranked.map(({ item, rankScore, diversityPenalty }) => ({
+      ...item,
+      opportunity: item,
+      finalScore: rankScore,
+      diversityPenalty,
+      rankScore,
     }));
   }
 }
 
-export const MultiSignalRanker = MultiSignalHeuristicRanker;
+// Backward-compatible alias exports
 export const HybridIssueRanker = MultiSignalHeuristicRanker;
+export type HybridRankedOpportunity = MultiSignalRankedOpportunity;

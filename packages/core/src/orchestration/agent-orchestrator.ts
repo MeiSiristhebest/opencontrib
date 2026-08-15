@@ -148,7 +148,7 @@ export class AgentOrchestrator {
     }
 
     // 2-stage reranked top item
-    const selectedOpp = rankedOpportunities[0].opportunity;
+    const selectedOpp = (rankedOpportunities[0] as any).opportunity || rankedOpportunities[0];
     const [owner, repo] = selectedOpp.repoFullName.split('/');
     this.stateMachine.setRepoContext(selectedOpp.repoFullName, selectedOpp.issueNumber);
 

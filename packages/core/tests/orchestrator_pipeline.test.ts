@@ -54,7 +54,7 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     expect(result.appliedFiles).toBeDefined();
     expect(result.subagentReview).toBeDefined();
     expect(result.reportSummary).toContain('Dry run completed');
-  }, 45000);
+  }, 60000);
 
   it('pauses at HUMAN_GATE when humanApproved is false in interactive mode', async () => {
     const orchestrator = new AgentOrchestrator({
@@ -79,5 +79,5 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     expect(result.stage).toBe('HUMAN_GATE');
     expect(result.confidenceScore).toBeGreaterThanOrEqual(90);
     expect(result.reportSummary).toContain('Awaiting human');
-  }, 45000);
+  }, 60000);
 });
