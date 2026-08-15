@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { GitHubClient } from '../discovery/github-client.js';
 import { scoutOpportunities } from '../discovery/scout.js';
-import { HybridIssueRanker } from '../discovery/ranking.js';
+import { MultiSignalHeuristicRanker } from '../discovery/ranking.js';
 import { detectSystemCapabilities } from '../discovery/feasibility.js';
 import { ContextAssembler } from '../discovery/context-assembler.js';
 import { WorktreeManager } from '../workspace/worktree-manager.js';
@@ -17,8 +17,8 @@ import { ContributionPrService } from '../github/contribution-pr-service.js';
 import {
   auditGovernance,
   lintAntiAiText,
-  calculateConfidenceScore,
   calculate7DQualityRubric,
+  deriveEvidenceBackedQualityRubric,
 } from '../governance/governance-auditor.js';
 import { generateSubagentReviewPrompt } from '../governance/subagent-reviewer.js';
 import { buildPrDescription } from '../governance/template-merger.js';
@@ -34,6 +34,11 @@ import {
   type ExecutionPolicy,
   DEFAULT_EXECUTION_POLICY,
 } from './state-machine.js';
+import {
+  assessContributionRisk,
+  type RiskAssessment,
+  type ValidationStatus,
+} from '../risk/risk-engine.js';
 import type { UserProfile, Opportunity, ConfidenceBreakdown } from '../contracts/schemas.js';
 
 export interface TelemetryRecord {
@@ -43,6 +48,8 @@ export interface TelemetryRecord {
   attempts: number;
   durationMs: number;
   qualityScore: number;
+  riskScore: number;
+  riskLevel: string;
   status: string;
   prUrl?: string;
 }
@@ -55,8 +62,10 @@ export interface OrchestratorRunResult {
   patchDraft?: PatchDraft;
   appliedFiles?: Array<{ path: string; operation: string }>;
   implementationAttempts?: number;
+  validationStatus?: ValidationStatus;
   confidenceScore?: number;
   subagentReview?: SubagentReviewEvaluation;
+  riskAssessment?: RiskAssessment;
   prUrl?: string;
   prNumber?: number;
   telemetry?: TelemetryRecord;
@@ -92,6 +101,7 @@ export class AgentOrchestrator {
     profile: UserProfile;
     targetRepo?: string;
     humanApproved?: boolean;
+    stressLoopRuns?: number;
   }): Promise<OrchestratorRunResult> {
     const startTime = Date.now();
     const policy = this.stateMachine.getState().policy;
@@ -115,10 +125,10 @@ export class AgentOrchestrator {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Phase 0.5: Dynamic Runtime Probe & Real Hybrid Issue Ranking
+    // Phase 0.5: Dynamic Runtime Probe & Multi-Signal Heuristic Issue Ranking
     // ─────────────────────────────────────────────────────────────
     const capabilities = detectSystemCapabilities();
-    const ranker = new HybridIssueRanker({
+    const ranker = new MultiSignalHeuristicRanker({
       techStack: input.profile.techStack,
       focusAreas: input.profile.focusAreas,
       proficiency: input.profile.proficiency,
@@ -137,7 +147,7 @@ export class AgentOrchestrator {
       };
     }
 
-    // Genuinely use top ranked item
+    // 2-stage reranked top item
     const selectedOpp = rankedOpportunities[0].opportunity;
     const [owner, repo] = selectedOpp.repoFullName.split('/');
     this.stateMachine.setRepoContext(selectedOpp.repoFullName, selectedOpp.issueNumber);
@@ -166,23 +176,7 @@ export class AgentOrchestrator {
     const prompt = this.contextAssembler.formatContextPrompt(assembledContext);
 
     // Initial Schema-First LLM Patch Generation
-    let patchDraft: PatchDraft = {
-      title: `fix: resolve issue #${selectedOpp.issueNumber}`,
-      summary: selectedOpp.title,
-      rationale: 'Addresses root cause with minimal surgical patch.',
-      targetFiles: [{ path: 'src/index.ts', reason: 'Primary implementation' }],
-      files: [
-        {
-          path: 'src/index.ts',
-          operation: 'MODIFY',
-          content: `// Fix for #${selectedOpp.issueNumber}: ${selectedOpp.title}\n`,
-          explanation: 'Surgical bugfix addressing edge case.',
-        },
-      ],
-      implementationSteps: ['Apply fix to target file', 'Verify unit tests pass'],
-      regressionTestPlan: ['Run regression test suite'],
-      estimatedDiffLines: 12,
-    };
+    let patchDraft: PatchDraft | null = null;
 
     try {
       const llmResult = await this.llmService.generateStructured({
@@ -190,24 +184,40 @@ export class AgentOrchestrator {
         schema: PatchDraftSchema,
       });
       patchDraft = llmResult.data;
-    } catch {}
+    } catch {
+      // LLM Error
+    }
+
+    // P0: Do NOT generate fake placeholder patches if LLM fails!
+    if (!patchDraft || !patchDraft.files || patchDraft.files.length === 0) {
+      this.stateMachine.transition('BLOCKED', 'LLM Patch generation failed or generated empty patch');
+      return {
+        status: 'BLOCKED',
+        stage: 'PATCH_DESIGN',
+        selectedOpportunity: selectedOpp,
+        workspacePath: workspace.workspacePath,
+        reportSummary: 'Pipeline halted: LLM failed to produce a valid surgical patch draft. Refusing to inject fake placeholder files.',
+      };
+    }
 
     // ─────────────────────────────────────────────────────────────
-    // Phase 2.5 - 4: Implementation & Multi-Attempt Validation Loop
-    // (Observe -> Physical Edit -> Run Test -> Capture Failure -> Replan)
+    // Phase 2.5 - 4: Observe -> Physical Edit -> Run Test -> Diagnose -> Replan Loop
     // ─────────────────────────────────────────────────────────────
     this.stateMachine.transition('SANDBOX_VALIDATION', 'Executing empirical baseline assertion checks');
 
     let implementationAttempts = 0;
     const maxAttempts = 2;
     let validationPassed = false;
+    let validationStatus: ValidationStatus = 'NO_TEST_AVAILABLE';
     let appliedFiles: Array<{ path: string; operation: string }> = [];
     let filesToSubmit: Array<{ path: string; content: string }> = [];
     let evidenceReport: any;
+    let lastFailureOutput = '';
 
     const testCmd =
       assembledContext.repoContext.runnableCommands.testCommand ||
       assembledContext.repoContext.testCommandHint;
+    const loopRuns = input.stressLoopRuns || (selectedOpp.track === 'FAST_TRACK' ? 3 : 20);
 
     while (implementationAttempts < maxAttempts && !validationPassed) {
       implementationAttempts++;
@@ -215,25 +225,13 @@ export class AgentOrchestrator {
       filesToSubmit = [];
 
       // 1. Physically apply file edits to worktree
-      if (patchDraft.files && patchDraft.files.length > 0) {
-        for (const f of patchDraft.files) {
-          const fullPath = join(workspace.workspacePath, f.path);
-          try {
-            mkdirSync(dirname(fullPath), { recursive: true });
-            writeFileSync(fullPath, f.content, 'utf-8');
-            appliedFiles.push({ path: f.path, operation: f.operation });
-            filesToSubmit.push({ path: f.path, content: f.content });
-          } catch {}
-        }
-      } else {
-        const defaultRelPath = patchDraft.targetFiles[0]?.path || 'src/index.ts';
-        const defaultFullPath = join(workspace.workspacePath, defaultRelPath);
+      for (const f of patchDraft.files) {
+        const fullPath = join(workspace.workspacePath, f.path);
         try {
-          mkdirSync(dirname(defaultFullPath), { recursive: true });
-          const defaultContent = `// Patch for #${selectedOpp.issueNumber}\n`;
-          writeFileSync(defaultFullPath, defaultContent, 'utf-8');
-          appliedFiles.push({ path: defaultRelPath, operation: 'MODIFY' });
-          filesToSubmit.push({ path: defaultRelPath, content: defaultContent });
+          mkdirSync(dirname(fullPath), { recursive: true });
+          writeFileSync(fullPath, f.content, 'utf-8');
+          appliedFiles.push({ path: f.path, operation: f.operation });
+          filesToSubmit.push({ path: f.path, content: f.content });
         } catch {}
       }
 
@@ -243,44 +241,69 @@ export class AgentOrchestrator {
           evidenceReport = await collectEvidence({
             cwd: workspace.workspacePath,
             testCommand: testCmd,
-            stressLoopCount: 3,
+            stressLoopCount: loopRuns,
             runFlakyBaseline: false,
           });
-          validationPassed = evidenceReport.stressLoopPassed;
-        } catch {
-          validationPassed = true;
+
+          if (evidenceReport.stressLoopPassed) {
+            validationStatus = 'VALIDATED';
+            validationPassed = true;
+          } else {
+            validationStatus = 'VALIDATION_FAILED';
+            validationPassed = false;
+            lastFailureOutput = `Stress loop failed on ${testCmd}. Total passing tests: ${evidenceReport.passedUnitTestsCount}`;
+          }
+        } catch (err: any) {
+          // P0: Do NOT swallow validation error as success!
+          validationStatus = 'VALIDATION_UNAVAILABLE';
+          validationPassed = false;
+          lastFailureOutput = `Validation execution error: ${err.message}`;
         }
       } else {
-        validationPassed = true;
+        // P0: Explicit NO_TEST_AVAILABLE status
+        validationStatus = 'NO_TEST_AVAILABLE';
+        validationPassed = true; // Proceed to human gate
       }
 
-      // 3. If failed and attempts remain, trigger LLM Replan & Repair
+      // 3. If failed and attempts remain, trigger LLM Diagnose & Repair with REAL failure trace
       if (!validationPassed && implementationAttempts < maxAttempts) {
-        const repairPrompt = `${prompt}\n\nThe previous patch failed sandbox test validation. Please diagnose the failure and provide an updated surgical patch.\nAdhere strictly to PatchDraftSchema.`;
+        const repairPrompt = `${prompt}
+
+### Sandboxed Validation Failure Trace (Attempt ${implementationAttempts}/${maxAttempts}):
+\`\`\`
+${lastFailureOutput.slice(-2000)}
+\`\`\`
+- **Test Command**: \`${testCmd}\`
+- **Failing Files Changed**: ${appliedFiles.map((f) => f.path).join(', ')}
+
+Please diagnose the exact failure reason above and generate a revised surgical patch conforming strictly to PatchDraftSchema JSON.`;
+
         try {
           const repairResult = await this.llmService.generateStructured({
             prompt: repairPrompt,
             schema: PatchDraftSchema,
           });
-          patchDraft = repairResult.data;
+          if (repairResult.data && repairResult.data.files && repairResult.data.files.length > 0) {
+            patchDraft = repairResult.data;
+          }
         } catch {}
       }
     }
 
-    this.stateMachine.setReproductionCaptured(true);
+    this.stateMachine.setReproductionCaptured(validationStatus === 'VALIDATED');
 
     // ─────────────────────────────────────────────────────────────
-    // Phase 5: Adversarial Subagent Multi-Persona LLM Review
+    // Phase 5: Adversarial Subagent Review & Evidence-Backed Quality Rubric
     // ─────────────────────────────────────────────────────────────
-    this.stateMachine.transition('SUBAGENT_REVIEW', 'Running Maintainer/Security/QA 7D evaluation');
+    this.stateMachine.transition('SUBAGENT_REVIEW', 'Running Maintainer/Security/QA evaluation');
     const reviewPrompt = generateSubagentReviewPrompt({
       repoFullName: selectedOpp.repoFullName,
       issueTitle: selectedOpp.title,
       issueBody: selectedOpp.body,
       diffText: patchDraft.files.map((f) => `--- ${f.path}\n+++ ${f.path}\n${f.content}`).join('\n\n'),
       testEvidence: evidenceReport
-        ? `Stress loop passed: ${evidenceReport.stressLoopPassed}, Total tests: ${evidenceReport.passedUnitTestsCount}`
-        : 'Empirical assertion verification executed in clean sandbox.',
+        ? `Validation status: ${validationStatus}, Stress loops passed: ${evidenceReport.stressLoopPassed}, Passed tests: ${evidenceReport.passedUnitTestsCount}`
+        : `Validation status: ${validationStatus} (No automated test detected)`,
     });
 
     let subagentReview: SubagentReviewEvaluation = {
@@ -316,14 +339,33 @@ export class AgentOrchestrator {
       subagentReview = reviewResult.data;
     } catch {}
 
-    const qualityRubric = calculate7DQualityRubric(subagentReview.confidenceBreakdown);
+    // Derive Evidence-Backed Quality Rubric
+    const { rubricResult: qualityRubric } = deriveEvidenceBackedQualityRubric({
+      hasReproductionAssertion: validationStatus === 'VALIDATED',
+      testsPassed: validationStatus === 'VALIDATED' || validationStatus === 'NO_TEST_AVAILABLE',
+      passedTestsCount: evidenceReport?.passedUnitTestsCount || (validationStatus === 'VALIDATED' ? 1 : 0),
+      diffLines: patchDraft.estimatedDiffLines,
+      styleScore: subagentReview.confidenceBreakdown.styleMatch,
+      securityScore: subagentReview.confidenceBreakdown.securityAudit,
+    });
+
     this.stateMachine.setConfidenceScore(qualityRubric.overallScore);
 
-    // Check 7D quality rubric gates (Overall >= 90 && Weakest >= 80)
-    if (!qualityRubric.isPassed) {
+    // ─────────────────────────────────────────────────────────────
+    // Phase 5.5: Unified Contribution Risk Engine Assessment
+    // ─────────────────────────────────────────────────────────────
+    const riskAssessment = assessContributionRisk({
+      repoFullName: selectedOpp.repoFullName,
+      diffLines: patchDraft.estimatedDiffLines,
+      filesCount: patchDraft.files.length,
+      validationStatus,
+      subagentQualityScore: qualityRubric.overallScore,
+    });
+
+    if (riskAssessment.riskLevel === 'CRITICAL' || !qualityRubric.isPassed) {
       this.stateMachine.transition(
         'BLOCKED',
-        `Subagent quality score ${qualityRubric.overallScore}% below threshold`,
+        `Contribution risk critical or quality score (${qualityRubric.overallScore}%) below threshold: ${riskAssessment.reasons.join(', ')}`,
       );
       return {
         status: 'BLOCKED',
@@ -332,9 +374,11 @@ export class AgentOrchestrator {
         workspacePath: workspace.workspacePath,
         patchDraft,
         implementationAttempts,
+        validationStatus,
         confidenceScore: qualityRubric.overallScore,
         subagentReview,
-        reportSummary: `Patch rejected by Subagent Quality Rubric (Overall: ${qualityRubric.overallScore}%, Weakest: ${qualityRubric.weakestDimension.score}% on ${qualityRubric.weakestDimension.dimension}).`,
+        riskAssessment,
+        reportSummary: `Patch rejected by Quality Rubric & Risk Engine (Overall: ${qualityRubric.overallScore}%, Risk: ${riskAssessment.riskLevel}). Reasons: ${riskAssessment.reasons.join('; ')}`,
       };
     }
 
@@ -346,13 +390,21 @@ export class AgentOrchestrator {
       attempts: implementationAttempts,
       durationMs,
       qualityScore: qualityRubric.overallScore,
+      riskScore: riskAssessment.riskScore,
+      riskLevel: riskAssessment.riskLevel,
       status: 'SUCCESS',
     };
 
     // ─────────────────────────────────────────────────────────────
     // Phase 6: Human Gate & Execution Policy Check
+    // (Mandate human approval if risk is MEDIUM/HIGH or in interactive mode)
     // ─────────────────────────────────────────────────────────────
-    if (policy.mode === 'interactive' && !input.humanApproved) {
+    const requiresHumanGate =
+      (policy.mode === 'interactive' && !input.humanApproved) ||
+      (riskAssessment.riskLevel !== 'LOW' && !input.humanApproved) ||
+      (validationStatus === 'NO_TEST_AVAILABLE' && !input.humanApproved);
+
+    if (requiresHumanGate) {
       this.stateMachine.transition('HUMAN_GATE', 'Awaiting human confirmation');
       return {
         status: 'HUMAN_APPROVAL_REQUIRED',
@@ -362,10 +414,12 @@ export class AgentOrchestrator {
         patchDraft,
         appliedFiles,
         implementationAttempts,
+        validationStatus,
         confidenceScore: qualityRubric.overallScore,
         subagentReview,
+        riskAssessment,
         telemetry,
-        reportSummary: `Candidate patch applied in sandbox after ${implementationAttempts} attempt(s) for #${selectedOpp.issueNumber}. Subagent quality score: ${qualityRubric.overallScore}%. Awaiting human confirmation before opening PR.`,
+        reportSummary: `Candidate patch applied in sandbox (${implementationAttempts} attempt(s)) for #${selectedOpp.issueNumber}. Risk Level: ${riskAssessment.riskLevel} (${riskAssessment.riskScore}/100). Validation: ${validationStatus}. Awaiting human review before opening PR.`,
       };
     }
 
@@ -383,8 +437,10 @@ export class AgentOrchestrator {
         patchDraft,
         appliedFiles,
         implementationAttempts,
+        validationStatus,
         confidenceScore: qualityRubric.overallScore,
         subagentReview,
+        riskAssessment,
         telemetry,
         reportSummary: `Dry run completed for #${selectedOpp.issueNumber} in ${durationMs}ms. Physical patch verified without opening live PR.`,
       };
@@ -431,14 +487,16 @@ export class AgentOrchestrator {
         patchDraft,
         appliedFiles,
         implementationAttempts,
+        validationStatus,
         confidenceScore: qualityRubric.overallScore,
         subagentReview,
+        riskAssessment,
         telemetry: { ...telemetry, status: 'FAILED' },
         reportSummary: `Failed to create real GitHub Pull Request: ${err.message}. Operation aborted; Flywheel not modified.`,
       };
     }
 
-    // Genuinely record success ONLY when PR submission succeeds
+    // Record success ONLY when PR submission succeeds
     this.memory.recordSuccess(selectedOpp.repoFullName, {
       title: selectedOpp.title,
       issueNumber: selectedOpp.issueNumber,
@@ -456,7 +514,7 @@ export class AgentOrchestrator {
       status: 'submitted',
       submittedAt: new Date().toISOString(),
       diffStat: `~${patchDraft.estimatedDiffLines} lines`,
-      evidenceSummary: `Verified across ${implementationAttempts} attempt(s) with ${qualityRubric.overallScore}% 7D quality score`,
+      evidenceSummary: `Verified across ${implementationAttempts} attempt(s) with ${qualityRubric.overallScore}% quality score (${validationStatus})`,
     });
 
     // Cleanup workspace if configured
@@ -474,8 +532,10 @@ export class AgentOrchestrator {
       patchDraft,
       appliedFiles,
       implementationAttempts,
+      validationStatus,
       confidenceScore: qualityRubric.overallScore,
       subagentReview,
+      riskAssessment,
       telemetry,
       prUrl,
       prNumber,

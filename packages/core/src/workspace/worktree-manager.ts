@@ -27,7 +27,12 @@ export class WorktreeManager {
       cwd,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 30000,
+      timeout: 8000,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_ASKPASS: 'echo',
+      },
     });
     return {
       success: result.status === 0,

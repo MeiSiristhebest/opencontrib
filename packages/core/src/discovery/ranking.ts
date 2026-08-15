@@ -51,11 +51,11 @@ export function computeFreshnessModifier(createdAtStr: string): number {
     const now = Date.now();
     const ageDays = (now - created) / (1000 * 60 * 60 * 24);
 
-    if (ageDays < 30) return 12; // Fresh
+    if (ageDays < 30) return 12; // Fresh (<1 mo)
     if (ageDays < 90) return 4;
-    if (ageDays < 180) return -12; // Stale > 3 months
-    if (ageDays < 365) return -25; // Stale > 6 months
-    return -35; // Stale > 1 year
+    if (ageDays < 180) return -12; // Stale (>3 mo)
+    if (ageDays < 365) return -25; // Stale (>6 mo)
+    return -35; // Stale (>1 yr)
   } catch {
     return 0;
   }
@@ -78,7 +78,12 @@ export function computeActionabilityModifier(body: string): number {
   return Math.min(14, modifier);
 }
 
-export class HybridIssueRanker {
+/**
+ * MultiSignalHeuristicRanker
+ * Calibrated deterministic opportunity ranking incorporating profile match,
+ * OS feasibility, community qualification, freshness decay, and 2-stage diversity reranking.
+ */
+export class MultiSignalHeuristicRanker {
   private profile: DeveloperProfile;
 
   constructor(profile: DeveloperProfile) {
@@ -86,8 +91,7 @@ export class HybridIssueRanker {
   }
 
   rankIssues(issues: RawIssueInput[], repoFullName: string): HybridRankedOpportunity[] {
-    const results: HybridRankedOpportunity[] = [];
-    const repoSeenCount = new Map<string, number>();
+    const scoredList: HybridRankedOpportunity[] = [];
 
     for (const issue of issues) {
       const fullText = `${issue.title} ${issue.body}`.toLowerCase();
@@ -157,11 +161,6 @@ export class HybridIssueRanker {
       const freshnessModifier = computeFreshnessModifier(issue.createdAt);
       const actionabilityModifier = computeActionabilityModifier(issue.body);
 
-      // 6. Cross-Repository Diversity Penalty
-      const count = repoSeenCount.get(repoFullName) || 0;
-      repoSeenCount.set(repoFullName, count + 1);
-      const diversityPenalty = count * 3;
-
       const qualificationScore = qualification.isQualified ? 100 : 0;
 
       const rawBase =
@@ -169,14 +168,13 @@ export class HybridIssueRanker {
         0.35 * domainMatchScore +
         0.30 * feasibility.feasibilityScore +
         freshnessModifier +
-        actionabilityModifier -
-        diversityPenalty;
+        actionabilityModifier;
 
       const finalScore = qualification.isQualified
         ? Math.max(0, Math.min(100, Math.round(rawBase)))
         : 0;
 
-      results.push({
+      scoredList.push({
         issueNumber: issue.number,
         title: issue.title,
         url: issue.htmlUrl,
@@ -196,9 +194,14 @@ export class HybridIssueRanker {
       });
     }
 
-    return results.sort((a, b) => b.finalScore - a.finalScore);
+    return scoredList.sort((a, b) => b.finalScore - a.finalScore);
   }
 
+  /**
+   * 2-Stage Opportunity Ranking & Diversified Reranking
+   * Stage 1: Computes raw multi-signal score without position bias.
+   * Stage 2: Applies diversity reranking based on repository distribution.
+   */
   rankOpportunities(opportunities: Array<{
     issueNumber: number;
     title: string;
@@ -209,56 +212,66 @@ export class HybridIssueRanker {
     labels?: string[];
     [key: string]: any;
   }>): Array<{ opportunity: any; finalScore: number }> {
+    // Stage 1: Pure Relevance Scoring
+    const rawScored = opportunities.map((opp) => {
+      const fullText = `${opp.title} ${opp.body || ''}`.toLowerCase();
+      let keywordHits = 0;
+      for (const tech of this.profile.techStack) {
+        if (fullText.includes(tech.toLowerCase())) keywordHits++;
+      }
+      for (const area of this.profile.focusAreas) {
+        if (fullText.includes(area.toLowerCase())) keywordHits++;
+      }
+      const profileKeywordScore = Math.min(100, 50 + keywordHits * 12);
+      const feasibility = calculateOsFeasibility(
+        {
+          os: this.profile.os,
+          hasDocker: this.profile.hasDocker,
+          hasWsl: this.profile.hasWsl || this.profile.os === 'wsl2',
+        },
+        opp.labels || [],
+        fullText,
+      );
+
+      let domainMatchScore = opp.matchScore || 80;
+      if (opp.labels && opp.labels.some((l: string) => /good first issue|starter/i.test(l))) {
+        domainMatchScore += 14;
+      }
+
+      const freshness = opp.createdAt ? computeFreshnessModifier(opp.createdAt) : 5;
+      const actionability = computeActionabilityModifier(opp.body || '');
+
+      const rawScore =
+        0.35 * profileKeywordScore +
+        0.35 * domainMatchScore +
+        0.30 * feasibility.feasibilityScore +
+        freshness +
+        actionability;
+
+      return {
+        opportunity: opp,
+        rawScore: Math.max(0, Math.min(100, Math.round(rawScore))),
+      };
+    });
+
+    // Sort by raw score descending
+    rawScored.sort((a, b) => b.rawScore - a.rawScore);
+
+    // Stage 2: Diversified Reranking
     const repoSeenCount = new Map<string, number>();
-
-    return opportunities
-      .map((opp) => {
-        const fullText = `${opp.title} ${opp.body || ''}`.toLowerCase();
-        let keywordHits = 0;
-        for (const tech of this.profile.techStack) {
-          if (fullText.includes(tech.toLowerCase())) keywordHits++;
-        }
-        for (const area of this.profile.focusAreas) {
-          if (fullText.includes(area.toLowerCase())) keywordHits++;
-        }
-        const profileKeywordScore = Math.min(100, 50 + keywordHits * 12);
-        const feasibility = calculateOsFeasibility(
-          {
-            os: this.profile.os,
-            hasDocker: this.profile.hasDocker,
-            hasWsl: this.profile.hasWsl || this.profile.os === 'wsl2',
-          },
-          opp.labels || [],
-          fullText,
-        );
-
-        let domainMatchScore = opp.matchScore || 80;
-        if (opp.labels && opp.labels.some((l: string) => /good first issue|starter/i.test(l))) {
-          domainMatchScore += 14;
-        }
-
-        const freshness = opp.createdAt ? computeFreshnessModifier(opp.createdAt) : 5;
-        const actionability = computeActionabilityModifier(opp.body || '');
-
-        const seen = repoSeenCount.get(opp.repoFullName) || 0;
-        repoSeenCount.set(opp.repoFullName, seen + 1);
-        const diversityPenalty = seen * 3;
-
-        const rawScore =
-          0.35 * profileKeywordScore +
-          0.35 * domainMatchScore +
-          0.30 * feasibility.feasibilityScore +
-          freshness +
-          actionability -
-          diversityPenalty;
-
-        const finalScore = Math.max(0, Math.min(100, Math.round(rawScore)));
-
+    return rawScored
+      .map(({ opportunity, rawScore }) => {
+        const seen = repoSeenCount.get(opportunity.repoFullName) || 0;
+        repoSeenCount.set(opportunity.repoFullName, seen + 1);
+        const diversityPenalty = seen * 4;
+        const finalScore = Math.max(0, rawScore - diversityPenalty);
         return {
-          opportunity: opp,
+          opportunity,
           finalScore,
         };
       })
       .sort((a, b) => b.finalScore - a.finalScore);
   }
 }
+
+export const HybridIssueRanker = MultiSignalHeuristicRanker;

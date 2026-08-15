@@ -7,6 +7,7 @@ export interface RunnableCommands {
   testCommand?: string;
   buildCommand?: string;
   lintCommand?: string;
+  packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun' | 'cargo' | 'go' | 'pytest' | 'cmake';
 }
 
 export interface AssembledContributionContext {
@@ -24,6 +25,7 @@ export interface AssembledContributionContext {
     testCommandHint?: string;
     runnableCommands: RunnableCommands;
     detectedSkeletonFiles: string[];
+    contributingGuidelinesSnippet?: string;
   };
   memoryContext: {
     pastFailures: string[];
@@ -40,7 +42,7 @@ export interface AssembledContributionContext {
 }
 
 /**
- * Detects runnable commands directly from repository files.
+ * Detects actual runnable commands by inspecting manifest files, package managers, and lockfiles.
  */
 export function detectRunnableCommandsFromDir(dirPath: string): RunnableCommands {
   const commands: RunnableCommands = {};
@@ -50,45 +52,102 @@ export function detectRunnableCommandsFromDir(dirPath: string): RunnableCommands
   try {
     const files = readdirSync(dirPath);
 
-    // Node.js / Bun / JS
+    // 1. Node.js / TypeScript Ecosystem
     if (files.includes('package.json')) {
       try {
         const pkg = JSON.parse(readFileSync(join(dirPath, 'package.json'), 'utf-8'));
         const scripts = pkg.scripts || {};
-        if (scripts.test) commands.testCommand = 'bun test';
-        if (scripts.build) commands.buildCommand = 'bun run build';
-        if (scripts.lint) commands.lintCommand = 'bun run lint';
+
+        // Detect package manager
+        let pm: 'npm' | 'pnpm' | 'yarn' | 'bun' = 'npm';
+        if (pkg.packageManager) {
+          if (pkg.packageManager.startsWith('pnpm')) pm = 'pnpm';
+          else if (pkg.packageManager.startsWith('yarn')) pm = 'yarn';
+          else if (pkg.packageManager.startsWith('bun')) pm = 'bun';
+        } else if (files.includes('pnpm-lock.yaml')) {
+          pm = 'pnpm';
+        } else if (files.includes('yarn.lock')) {
+          pm = 'yarn';
+        } else if (files.includes('bun.lock') || files.includes('bun.lockb')) {
+          pm = 'bun';
+        } else if (files.includes('package-lock.json')) {
+          pm = 'npm';
+        }
+
+        commands.packageManager = pm;
+
+        if (scripts.test) {
+          commands.testCommand = pm === 'npm' ? 'npm test' : `${pm} test`;
+        }
+        if (scripts.build) {
+          commands.buildCommand = pm === 'npm' ? 'npm run build' : `${pm} run build`;
+        }
+        if (scripts.lint) {
+          commands.lintCommand = pm === 'npm' ? 'npm run lint' : `${pm} run lint`;
+        }
       } catch {}
     }
 
-    // Rust
+    // 2. Rust Ecosystem
     if (files.includes('Cargo.toml')) {
+      commands.packageManager = 'cargo';
       commands.testCommand = 'cargo test';
       commands.buildCommand = 'cargo build';
       commands.lintCommand = 'cargo clippy';
     }
 
-    // Go
+    // 3. Go Ecosystem
     if (files.includes('go.mod')) {
+      commands.packageManager = 'go';
       commands.testCommand = 'go test ./...';
       commands.buildCommand = 'go build ./...';
       commands.lintCommand = 'golangci-lint run';
     }
 
-    // Python
+    // 4. Python Ecosystem
     if (files.includes('pyproject.toml') || files.includes('requirements.txt')) {
+      commands.packageManager = 'pytest';
       commands.testCommand = 'pytest';
       commands.lintCommand = 'ruff check .';
     }
 
-    // CMake / C++
+    // 5. C/C++ CMake Ecosystem
     if (files.includes('CMakeLists.txt')) {
-      commands.buildCommand = 'cmake --build build';
+      commands.packageManager = 'cmake';
+      commands.buildCommand = 'cmake -B build && cmake --build build';
       commands.testCommand = 'ctest --test-dir build';
     }
   } catch {}
 
   return commands;
+}
+
+/**
+ * Extracts key guidelines from CONTRIBUTING.md, CLAUDE.md, or AGENTS.md
+ */
+export function extractContributingGuidelines(dirPath: string): string | undefined {
+  if (!existsSync(dirPath)) return undefined;
+
+  const candidateFiles = [
+    'CONTRIBUTING.md',
+    '.github/CONTRIBUTING.md',
+    'AGENTS.md',
+    '.github/AGENTS.md',
+    'CLAUDE.md',
+    '.github/PULL_REQUEST_TEMPLATE.md',
+  ];
+
+  for (const rel of candidateFiles) {
+    const full = join(dirPath, rel);
+    if (existsSync(full)) {
+      try {
+        const content = readFileSync(full, 'utf-8');
+        return `[From ${rel}]\n${content.slice(0, 1000)}`;
+      } catch {}
+    }
+  }
+
+  return undefined;
 }
 
 export class ContextAssembler {
@@ -137,21 +196,28 @@ export class ContextAssembler {
 
     let testCommandHint = runnableCommands.testCommand;
     if (!testCommandHint && packageManifest) {
-      if (packageManifest.includes('"test":')) testCommandHint = 'bun test';
-      else if (packageManifest.includes('Cargo.toml')) testCommandHint = 'cargo test';
-      else if (packageManifest.includes('go.mod')) testCommandHint = 'go test ./...';
+      if (packageManifest.includes('"test":')) {
+        testCommandHint = packageManifest.includes('pnpm') ? 'pnpm test' : 'npm test';
+      } else if (packageManifest.includes('Cargo.toml')) {
+        testCommandHint = 'cargo test';
+      } else if (packageManifest.includes('go.mod')) {
+        testCommandHint = 'go test ./...';
+      }
     }
 
-    // 4. Detect skeleton files
+    // 4. Detect skeleton files & architecture
     const detectedSkeletonFiles: string[] = [];
+    let contributingGuidelinesSnippet: string | undefined;
+
     if (workspacePath && existsSync(workspacePath)) {
       try {
         const entries = readdirSync(workspacePath);
-        for (const e of entries.slice(0, 15)) {
+        for (const e of entries.slice(0, 20)) {
           if (!e.startsWith('.') && e !== 'node_modules' && e !== 'target' && e !== 'dist') {
             detectedSkeletonFiles.push(e);
           }
         }
+        contributingGuidelinesSnippet = extractContributingGuidelines(workspacePath);
       } catch {}
     }
 
@@ -170,6 +236,7 @@ export class ContextAssembler {
         testCommandHint,
         runnableCommands,
         detectedSkeletonFiles,
+        contributingGuidelinesSnippet,
       },
       memoryContext: {
         pastFailures,
@@ -203,11 +270,17 @@ export class ContextAssembler {
 
     sections.push(`\n### 2. Repository Infrastructure & Commands`);
     sections.push(`- **Primary Language**: ${ctx.repoContext.primaryLanguage}`);
+    if (ctx.repoContext.runnableCommands.packageManager) {
+      sections.push(`- **Package Manager**: ${ctx.repoContext.runnableCommands.packageManager}`);
+    }
     if (ctx.repoContext.runnableCommands.testCommand) {
       sections.push(`- **Test Command**: \`${ctx.repoContext.runnableCommands.testCommand}\``);
     }
     if (ctx.repoContext.detectedSkeletonFiles.length > 0) {
       sections.push(`- **Top-level Structure**: ${ctx.repoContext.detectedSkeletonFiles.join(', ')}`);
+    }
+    if (ctx.repoContext.contributingGuidelinesSnippet) {
+      sections.push(`- **Contributing Guidelines**:\n${ctx.repoContext.contributingGuidelinesSnippet}`);
     }
     if (ctx.repoContext.packageManifestSnippet) {
       sections.push(`- **Package Manifest**:\n\`\`\`\n${ctx.repoContext.packageManifestSnippet}\n\`\`\``);

@@ -16,6 +16,51 @@ export class MockOrDirectLLMProvider implements LLMProvider {
       return this.fallbackHandler(prompt);
     }
     // Return structured default if no live LLM key provided
+    if (prompt.includes('PatchDraftSchema') || prompt.includes('surgical patch') || prompt.includes('patch')) {
+      return JSON.stringify({
+        title: 'fix: address issue with surgical patch',
+        summary: 'Surgical bugfix addressing root cause.',
+        rationale: 'Minimal surgical patch adhering to style rules.',
+        targetFiles: [{ path: 'src/index.ts', reason: 'Primary implementation' }],
+        files: [
+          {
+            path: 'src/index.ts',
+            operation: 'MODIFY',
+            content: '// Surgical bugfix patch\n',
+            explanation: 'Surgical fix.',
+          },
+        ],
+        implementationSteps: ['Apply fix', 'Run tests'],
+        regressionTestPlan: ['Run regression tests'],
+        estimatedDiffLines: 12,
+      });
+    }
+    if (prompt.includes('SubagentReviewEvaluationSchema') || prompt.includes('Maintainer/Security/QA') || prompt.includes('evaluation')) {
+      return JSON.stringify({
+        maintainerPerspective: {
+          acceptanceLikelihood: 'HIGH',
+          styleConformance: 'Conforms to repository standards',
+          concerns: [],
+        },
+        securityPerspective: {
+          vulnerabilitiesDetected: false,
+          findings: [],
+        },
+        qaPerspective: {
+          testAdequacy: 'Comprehensive test plan',
+          flakyRisk: 'Low',
+        },
+        confidenceBreakdown: {
+          rootCause: 94,
+          implementation: 93,
+          regression: 91,
+          defensiveCoverage: 89,
+          testCoverage: 92,
+          styleMatch: 95,
+          securityAudit: 94,
+        },
+      });
+    }
     return '{}';
   }
 }

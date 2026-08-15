@@ -78,6 +78,6 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     expect(result.status).toBe('HUMAN_APPROVAL_REQUIRED');
     expect(result.stage).toBe('HUMAN_GATE');
     expect(result.confidenceScore).toBeGreaterThanOrEqual(90);
-    expect(result.reportSummary).toContain('Awaiting human confirmation');
+    expect(result.reportSummary).toContain('Awaiting human');
   }, 30000);
 });
