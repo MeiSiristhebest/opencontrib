@@ -5,7 +5,12 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "bin": {
-    "opencontrib-mcp": "./src/index.ts"
+    "opencontrib-mcp": "./src/index.ts",
+    "opencontrib": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --target=node --outfile=./dist/index.js",
+    "setup": "bun run ./src/index.ts setup"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",

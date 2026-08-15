@@ -77,12 +77,36 @@ bun test
 
 ## 🔌 Model Context Protocol (MCP) Setup
 
-OpenContrib supports two flexible operating modes:
+### ⚡ Option 1: One-Click Automatic Setup (Recommended)
+Run the auto-installer to automatically detect and configure **Claude Desktop, Cursor, Windsurf, Antigravity, and VS Code / Cline**:
 
-### Mode 1: Dual-MCP Architecture (Recommended for External Agents)
-- **GitHub MCP** handles remote GitHub platform I/O (issues, PRs, comments, forks).
-- **OpenContrib MCP** acts as the local engineering engine (sandboxing, empirical evidence, 7D rubric, memory ledger).
+```bash
+# Using NPX (Node.js)
+npx -y @opencontrib/mcp-server setup
 
+# Or using Bun
+bunx @opencontrib/mcp-server setup
+```
+
+---
+
+### 🛠️ Option 2: Manual Configuration (Universal `npx` / `bunx`)
+
+No need to clone or hardcode local folder paths! Simply add OpenContrib to your MCP client config (`claude_desktop_config.json`, `~/.cursor/mcp.json`, or `antigravity.json`):
+
+#### Standard Setup (Universal NPX):
+```json
+{
+  "mcpServers": {
+    "opencontrib": {
+      "command": "npx",
+      "args": ["-y", "@opencontrib/mcp-server"]
+    }
+  }
+}
+```
+
+#### Dual-MCP Setup (GitHub MCP + OpenContrib MCP):
 ```json
 {
   "mcpServers": {
@@ -94,25 +118,8 @@ OpenContrib supports two flexible operating modes:
       }
     },
     "opencontrib": {
-      "command": "bun",
-      "args": ["run", "/path/to/opencontrib/packages/mcp-server/src/index.ts"]
-    }
-  }
-}
-```
-
-### Mode 2: Direct / Standalone Setup (with `GITHUB_TOKEN`)
-If you want OpenContrib to directly query GitHub for opportunities (via `contrib_scout`) or run standalone without configuring GitHub MCP, supply `GITHUB_TOKEN` directly:
-
-```json
-{
-  "mcpServers": {
-    "opencontrib": {
-      "command": "bun",
-      "args": ["run", "/path/to/opencontrib/packages/mcp-server/src/index.ts"],
-      "env": {
-        "GITHUB_TOKEN": "your_github_token_here"
-      }
+      "command": "npx",
+      "args": ["-y", "@opencontrib/mcp-server"]
     }
   }
 }
