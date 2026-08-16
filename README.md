@@ -163,10 +163,15 @@ flowchart LR
 ```
 
 * **🚫 Anti-Farming Mandate**: Automated deduction (-35 points) and rejection of pure typos, spelling, and trivial list additions that trigger anti-spam penalties in modern reputation engines (such as `ghfind`).
-* **🌊 Deep-Water Engineering**: Priority bonus (+15 points) for complex system defects, including:
-  * **Numerical Bounds & Timeout Deadlocks**: `NaN`/`+Inf` timeouts (e.g. ByteDance `deer-flow` patch).
-  * **Cross-Platform Invariants**: Windows/Linux CRLF patch drift and path traversal (e.g. Alibaba `open-code-review` patch).
-  * **Concurrency & Resource Leaks**: Goroutine leaks, unclosed file/DB handles, and channel races.
+* **🌊 8 Deep-Water Engineering Archetypes (Up to +25 Points Bonus)**:
+  1. **Protocol & Serialization Drift**: Zero-value omission (`omitempty`), HTTP/2 header case normalization, SSE keepalive truncation.
+  2. **Lifecycle & Resource Leaks**: Registry Watcher/Listener duplicate registration on reconnect, Context cancellation orphan goroutines.
+  3. **Distributed Cache & Invalidation**: Falsy value cache penetration, out-of-order double write Cache Stampede.
+  4. **Memory Layout & Tensor Contiguity**: Non-contiguous strided Tensor C++/CUDA Kernel Segfaults (e.g. `vllm#50748`).
+  5. **ReDoS & Backpressure Collapse**: Catastrophic regex backtracking, thundering herd retry storms without full jitter.
+  6. **Time Monotonicity & Chrono Hazards**: Wall clock vs. Monotonic clock NTP rollback, DST day boundary jumps.
+  7. **Compiler / JIT Escape Invariants**: Hot-path dynamic interface dispatch breaking escape analysis stack allocations.
+  8. **Numerical Bounds & Cross-Platform Invariants**: `NaN`/`+Inf` timeouts (ByteDance `deer-flow`), Windows CRLF / `filepath.ToSlash` path traversal (Alibaba `open-code-review`).
 
 ---
 

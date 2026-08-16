@@ -128,6 +128,49 @@ export function computeActionabilityModifier(body?: string): number {
   return Math.min(6, modifier);
 }
 
+export const DEEP_WATER_ARCHETYPES = [
+  {
+    id: 'protocol_serialization',
+    name: 'Protocol & Serialization Contract Drift',
+    regex: /\b(falsy value|zero-value|omitempty|serialization drift|http2 case|chunked truncation|sse keepalive|unmarshal|deserialization)\b/i,
+  },
+  {
+    id: 'lifecycle_resource_leak',
+    name: 'Lifecycle, Watcher & Resource Leaks',
+    regex: /\b(goroutine leak|memory leak|handle leak|fd leak|unclosed fd|lsof|watcher leak|listener leak|context cancel|zombie process|dispose leak)\b/i,
+  },
+  {
+    id: 'distributed_cache_consistency',
+    name: 'Distributed Cache & Invalidation Hazards',
+    regex: /\b(cache stampede|cache dogpile|falsy cache|cache penetration|cache breakdown|idempotency|monotonicity break|dirty read)\b/i,
+  },
+  {
+    id: 'memory_tensor_abi',
+    name: 'Memory Layout & Tensor Contiguity',
+    regex: /\b(non-contiguous|strided tensor|tensor contiguity|segfault|cgo pointer|dangling pointer|memory alignment|cuda kernel crash)\b/i,
+  },
+  {
+    id: 'perf_redos_storm',
+    name: 'ReDoS, Retry Storms & Backpressure Collapse',
+    regex: /\b(redos|catastrophic backtracking|thundering herd|retry storm|exponential backoff|full jitter|backpressure collapse)\b/i,
+  },
+  {
+    id: 'chrono_time_monotonicity',
+    name: 'Time Monotonicity & Chrono Hazards',
+    regex: /\b(monotonic clock|wall clock|time rollback|ntp drift|dst jump|leap second|time inversion)\b/i,
+  },
+  {
+    id: 'compiler_escape_optimization',
+    name: 'Compiler / JIT Escape Analysis Violations',
+    regex: /\b(escape analysis|stack allocation|heap escape|inline failure|gc pressure|stw spike|branch prediction)\b/i,
+  },
+  {
+    id: 'numerical_crossplatform_bounds',
+    name: 'Numerical Bounds & Cross-Platform Invariants',
+    regex: /\b(nan|\+inf|-inf|deadlock|race condition|data race|crlf|path traversal|filepath\.toslash|fail-closed|overflow|timeout hang|process hang|panic)\b/i,
+  },
+] as const;
+
 /**
  * Single Source of Truth for Candidate Opportunity Scoring.
  * Mathematically calibrated to prevent score saturation:
@@ -167,7 +210,7 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
     profileKeywordScore = Math.min(100, 75 + (totalHits - 2) * 10);
   }
 
-  // 2. Domain & Label Heuristics (Base 25, Max 60)
+  // 2. Domain & Label Heuristics with 8-Dimensional Deep-Water Defect Detection
   let domainMatchScore = 25;
   const matchedLabels: string[] = [];
 
@@ -184,18 +227,24 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
     matchedLabels.push('bugfix');
   }
 
-  // Deep-Water Bugs & Cross-Platform Invariants Heuristics (+15 Bonus)
-  const deepWaterRegex = /\b(nan|\+inf|-inf|deadlock|race condition|data race|goroutine leak|memory leak|handle leak|crlf|path traversal|fail-closed|overflow|timeout hang|process hang|panic|segfault)\b/i;
+  // Evaluate against the 8 Deep-Water Archetypes
+  const matchedDeepWaterArchetypes: string[] = [];
+  for (const archetype of DEEP_WATER_ARCHETYPES) {
+    if (archetype.regex.test(fullText)) {
+      matchedDeepWaterArchetypes.push(archetype.id);
+      matchedLabels.push(`deep-water:${archetype.id}`);
+    }
+  }
+
   let deepWaterBonus = 0;
-  if (deepWaterRegex.test(fullText)) {
-    deepWaterBonus = 15;
-    matchedLabels.push('deep-water-bug');
+  if (matchedDeepWaterArchetypes.length > 0) {
+    deepWaterBonus = Math.min(25, 15 + (matchedDeepWaterArchetypes.length - 1) * 5);
   }
 
   // Low-SNR & Anti-Farming Filter (-35 Penalty)
   const lowSnrRegex = /\b(typo|misspelling|spelling mistake|awesome list|awesome-list|fix typo|readme typo)\b/i;
   let lowSnrPenalty = 0;
-  if (lowSnrRegex.test(fullText) && !deepWaterRegex.test(fullText)) {
+  if (lowSnrRegex.test(fullText) && matchedDeepWaterArchetypes.length === 0) {
     lowSnrPenalty = 35;
     matchedLabels.push('low-snr-warning');
   }
