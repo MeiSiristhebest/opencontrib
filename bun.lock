@@ -21,15 +21,28 @@
       },
     },
     "packages/mcp-server": {
-      "name": "@opencontrib/mcp-server",
+      "name": "opencontrib-mcp",
       "version": "1.0.0",
       "bin": {
-        "opencontrib-mcp": "./src/index.ts",
+        "opencontrib-mcp": "dist/index.js",
       },
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.6.1",
-        "@opencontrib/core": "workspace:*",
         "zod": "^3.24.2",
+      },
+      "devDependencies": {
+        "@types/node": "^22.13.4",
+        "typescript": "^5.7.3",
+      },
+    },
+    "packages/studio": {
+      "name": "@opencontrib/studio",
+      "version": "1.0.0",
+      "bin": {
+        "opencontrib-studio": "./src/server/index.ts",
+      },
+      "dependencies": {
+        "@opencontrib/core": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^22.13.4",
@@ -68,7 +81,7 @@
 
     "@opencontrib/core": ["@opencontrib/core@workspace:packages/core"],
 
-    "@opencontrib/mcp-server": ["@opencontrib/mcp-server@workspace:packages/mcp-server"],
+    "@opencontrib/studio": ["@opencontrib/studio@workspace:packages/studio"],
 
     "@types/node": ["@types/node@22.20.1", "https://registry.npmmirror.com/@types/node/-/node-22.20.1.tgz", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q=="],
 
@@ -195,6 +208,8 @@
     "on-finished": ["on-finished@2.4.1", "https://registry.npmmirror.com/on-finished/-/on-finished-2.4.1.tgz", { "dependencies": { "ee-first": "1.1.1" } }, "sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg=="],
 
     "once": ["once@1.4.0", "https://registry.npmmirror.com/once/-/once-1.4.0.tgz", { "dependencies": { "wrappy": "1" } }, "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=="],
+
+    "opencontrib-mcp": ["opencontrib-mcp@workspace:packages/mcp-server"],
 
     "parseurl": ["parseurl@1.3.3", "https://registry.npmmirror.com/parseurl/-/parseurl-1.3.3.tgz", {}, "sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ=="],
 
