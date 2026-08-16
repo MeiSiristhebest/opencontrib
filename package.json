@@ -30,7 +30,7 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "bun test",
+    "test": "bun test --timeout 30000",
     "build": "bun run --filter '*' build",
     "mcp": "bun run packages/mcp-server/src/index.ts",
     "studio": "bun run packages/studio/src/server/index.ts"

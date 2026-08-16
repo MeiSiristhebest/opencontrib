@@ -130,7 +130,11 @@ describe('Pre-Fix to Post-Fix Dual-Stage Empirical Verification', () => {
       expect(dualResult.stressLoopPassed).toBe(true);
       expect(dualResult.completedRuns).toBe(3);
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
+      try {
+        rmSync(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      } catch {
+        // Ignore EBUSY transient locking on Windows
+      }
     }
   });
 });
