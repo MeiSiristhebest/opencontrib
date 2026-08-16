@@ -155,23 +155,41 @@ OpenContrib explicitly enforces a **High-Signal-to-Noise Ratio (High-SNR)** stan
 
 ```mermaid
 flowchart LR
-    A[Deep-Water Bug Discovery<br>NaN/Inf · CRLF · Race · Leaks] --> B[Issue & Reproduction<br>Minimal Failing Test Baseline]
+    A[Deep-Water Defect Discovery<br>Serialization · Leaks · Race · Bounds] --> B[Issue & Reproduction<br>Minimal Failing Test Baseline]
     B --> C[Surgical Fix & 20x Stress Loop<br>Worktree Isolation & Proof]
-    C --> D[Merged PR to Upstream<br>ByteDance · Alibaba · Linux Ecosystem]
+    C --> D[Merged PR to Upstream<br>High-Impact Verified Repositories]
     D --> E[Profile Flywheel & Reputation<br>Telemetry Sync & Skill Matrix]
     E --> A
 ```
 
-* **🚫 Anti-Farming Mandate**: Automated deduction (-35 points) and rejection of pure typos, spelling, and trivial list additions that trigger anti-spam penalties in modern reputation engines (such as `ghfind`).
-* **🌊 8 Deep-Water Engineering Archetypes (Up to +25 Points Bonus)**:
+* **🚫 Anti-Farming Mandate**: Automated deduction (`-35` domain points) and rejection of pure typos, spelling, and trivial list additions that trigger anti-spam penalties in modern reputation engines (such as `ghfind`).
+* **🌊 8 Deep-Water Engineering Archetypes**:
   1. **Protocol & Serialization Drift**: Zero-value omission (`omitempty`), HTTP/2 header case normalization, SSE keepalive truncation.
-  2. **Lifecycle & Resource Leaks**: Registry Watcher/Listener duplicate registration on reconnect, Context cancellation orphan goroutines.
+  2. **Lifecycle & Resource Leaks**: Registry Watcher/Listener duplicate registration on reconnect, Context cancellation orphan goroutines, unclosed file descriptors.
   3. **Distributed Cache & Invalidation**: Falsy value cache penetration, out-of-order double write Cache Stampede.
-  4. **Memory Layout & Tensor Contiguity**: Non-contiguous strided Tensor C++/CUDA Kernel Segfaults (e.g. `vllm#50748`).
+  4. **Memory Layout & Tensor Contiguity**: Non-contiguous strided Tensor C++/CUDA Kernel Segfaults, FFI dangling pointers.
   5. **ReDoS & Backpressure Collapse**: Catastrophic regex backtracking, thundering herd retry storms without full jitter.
   6. **Time Monotonicity & Chrono Hazards**: Wall clock vs. Monotonic clock NTP rollback, DST day boundary jumps.
   7. **Compiler / JIT Escape Invariants**: Hot-path dynamic interface dispatch breaking escape analysis stack allocations.
-  8. **Numerical Bounds & Cross-Platform Invariants**: `NaN`/`+Inf` timeouts (ByteDance `deer-flow`), Windows CRLF / `filepath.ToSlash` path traversal (Alibaba `open-code-review`).
+  8. **Numerical Bounds & Cross-Platform Invariants**: `NaN`/`+Inf` and negative timeout hangs, Windows CRLF / `filepath.ToSlash` path traversal.
+
+### 📊 Scoring Engine Mathematical Model
+
+OpenContrib's opportunity ranking engine (`packages/core/src/discovery/scoring-engine.ts`) calculates candidate priority scores through a mathematically calibrated, multi-tier weighted formula:
+
+$$\text{FinalScore} = \text{clamp}\Big(0, 100, \text{round}\big(0.50 \cdot S_{\text{profile}} + 0.30 \cdot (S_{\text{domain}} + B_{\text{repo}} + B_{\text{deep}} - P_{\text{low\_snr}}) + 0.20 \cdot S_{\text{feasibility}} + M_{\text{freshness}} + M_{\text{actionability}}\big)\Big)$$
+
+#### Component Breakdown & Deep-Water Bonus Calibration:
+| Component | Range / Formula | Description |
+| :--- | :--- | :--- |
+| **$S_{\text{profile}}$ (50% Weight)** | $15 \to 100$ | Developer tech-stack and domain keyword alignment (1 hit = 45, 2 hits = 75, 3+ hits = $75 + (N-2) \times 10$). |
+| **$S_{\text{domain}}$ (30% Weight)** | $25 \to 60$ | Issue taxonomy and labels (`bugfix` +10, `help-wanted` +10, `good-first-issue` +15). |
+| **$B_{\text{deep}}$ (Deep-Water Bonus)** | **$+15 \to +25$** | **1 matched archetype = $+15$, multiple matched archetypes = $\min(25, 15 + (N - 1) \times 5)$**. Directly elevates deep architectural defects by **$+4.5 \to +7.5$ net points** in final ranking. |
+| **$P_{\text{low\_snr}}$ (Anti-Farming Penalty)** | **$-35$** | Applied when pure typo/whitespace is detected without deep-water signals (**$-10.5$ net points penalty**), suppressing low-SNR issues below threshold. |
+| **$B_{\text{repo}}$ (Popularity Bonus)** | $0 \to +6$ | Tiered repository popularity signal ($\ge 50$ stars = +3, $\ge 5000$ stars = +6). |
+| **$S_{\text{feasibility}}$ (20% Weight)** | $0 \to 100$ | Environment and toolchain execution feasibility ($100 - \text{penalty}$). |
+| **$M_{\text{freshness}}$ (Modifier)** | $-20 \to +6$ | Activity recency modifier based on exact max timestamp across creation, update, and comments. |
+| **$M_{\text{actionability}}$ (Modifier)** | $-6 \to +6$ | Evaluates presence of stack traces, code blocks, and deterministic reproduction steps. |
 
 ---
 

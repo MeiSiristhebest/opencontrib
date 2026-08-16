@@ -215,14 +215,14 @@ $ bun test test/mcp.test.ts
 
 Agent 在进行开源问题挖掘或自身架构审计时，优先识别并锁定以下 8 类深水区缺陷：
 
-| 序号 | 缺陷维度 | 核心隐患场景与识别特征 | 业界/上游典型范式 |
+| 序号 | 缺陷维度 | 核心隐患场景与识别特征 | 架构风险与工程影响 |
 | :---: | :--- | :--- | :--- |
-| **1** | **协议与序列化契约漂移** | `falsy value` / `0` / `false` 在 `omitempty` 下被吃掉导致下游缓存穿透或配置失效；HTTP/2 Header 大小写不兼容；SSE 截断。 | ByteDance `flowgram.ai#1161` |
-| **2** | **生命周期与资源泄露** | 向注册中心（ZK/Nacos）注册 Watcher 在重连时未注销导致翻倍膨胀；Context Cancellation 未传播产生僵尸协程；未关闭文件句柄 `lsof` 泄漏。 | Apache `dubbo-go#3635` |
-| **3** | **分布式缓存与一致性** | Falsy Value 缓存击穿；乱序双写导致的 Cache Stampede；重试幂等性被打破。 | 分布式 L2 缓存 / 幂等扣减 |
-| **4** | **内存布局与底层 ABI** | PyTorch/vLLM/CUDA 中非连续 Tensor (`permute`/`transpose`) 传入 C++/CUDA Kernel 导致段错误 (Segfault)；FFI 跨语言悬垂指针。 | vLLM `vllm-project/vllm#50748` |
-| **5** | **性能坍塌与反压失效** | ReDoS 正则灾难性回溯导致单核卡死；缺乏 Full Jitter 指数退避引发雷鸣群涌 (Thundering Herd)；背压丢失导致内存 OOM。 | 高并发网关 / 正则路由 |
-| **6** | **时间单调性与时钟回拨** | Wall Clock 计算耗时在 NTP 校时下出现负数；夏令时 (DST) / 闰秒导致调度任务跨日跳过或重复执行。 | 定时调度系统 / 指标采集器 |
-| **7** | **编译器优化假设破坏** | 高频热路径参数使用 `interface{}` 破坏逃逸分析导致栈上分配失效；GC STW 停顿从 1ms 飙升至 50ms。 | 高性能 RPC / 序列化框架 |
-| **8** | **数值边界与跨平台破坏** | `NaN`/`+Inf` 超时挂起（ByteDance `deer-flow`）；Windows/Linux CRLF 换行符与 `filepath.ToSlash` 路径遍历（Alibaba `open-code-review`）。 | ByteDance `deer-flow#4823` |
+| **1** | **协议与序列化契约漂移** | `falsy value` / `0` / `false` 在 `omitempty` 下被隐式擦除；HTTP/2 Header 大小写不兼容；SSE 截断。 | 下游反序列化为默认值导致配置失效或缓存穿透 |
+| **2** | **生命周期与资源泄露** | 注册中心 Watcher 重连未注销导致监听翻倍膨胀；Context Cancellation 未传播产生孤儿协程；文件句柄 `lsof` 泄漏。 | 广播风暴击垮服务端、内存单调上涨直至 OOM |
+| **3** | **分布式缓存与一致性** | Falsy Value 缓存击穿；乱序双写导致的 Cache Stampede；重试机制破坏幂等性。 | 存储层瞬时击穿、脏数据永久驻留缓存 |
+| **4** | **内存布局与底层 ABI** | 非连续内存/跨步 Tensor (`permute`/`transpose`) 传入底层 C++/CUDA Kernel；FFI 跨语言边界悬垂指针。 | 底层内存段错误 (Segfault)、偶发性内存崩溃 |
+| **5** | **性能坍塌与反压失效** | ReDoS 正则灾难性回溯；缺乏 Full Jitter 指数退避引发雷鸣群涌 (Thundering Herd)；背压丢失导致队列积压。 | 单核 CPU 100% 挂死、下游自愈失败、内存雪崩 |
+| **6** | **时间单调性与时钟回拨** | 使用 Wall Clock 计算耗时在 NTP 校时下产生负数；夏令时 (DST) / 闰秒导致调度跨日跳过或重复触发。 | 定时器永久阻塞、定时调度任务异常跳过 |
+| **7** | **编译器优化假设破坏** | 高频热路径参数使用动态接口断言破坏逃逸分析导致栈上分配失效；GC STW 停顿剧增。 | 高 QPS 网关吞吐骤降、GC 停顿从 1ms 飙升至 50ms |
+| **8** | **数值边界与跨平台破坏** | `NaN`/`+Inf` 及负数超时导致调度器挂死；Windows/Linux CRLF 换行符破坏 Patch 解析与 `filepath.ToSlash` 路径遍历。 | 跨平台 CI 崩溃、统一 Diff 解析损坏、路径越权 |
 
