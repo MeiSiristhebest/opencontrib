@@ -39,11 +39,12 @@ export function resolveTargetedTestPackage(modifiedFiles: string[]): string | un
 export function sanitizeTestCommand(
   command: string,
   args: string[] = [],
-  forceNoGcc = false
+  forceNoGcc = false,
+  targetPlatform?: NodeJS.Platform
 ): { sanitizedCommand: string; sanitizedArgs: string[]; warnings: string[] } {
   const warnings: string[] = [];
   let finalArgs = [...args];
-  const os = platform();
+  const os = targetPlatform || (forceNoGcc ? 'win32' : platform());
 
   // 1. Windows -race CGO trap detection
   if (os === 'win32' && (command.includes('-race') || finalArgs.includes('-race'))) {
