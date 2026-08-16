@@ -184,6 +184,22 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
     matchedLabels.push('bugfix');
   }
 
+  // Deep-Water Bugs & Cross-Platform Invariants Heuristics (+15 Bonus)
+  const deepWaterRegex = /\b(nan|\+inf|-inf|deadlock|race condition|data race|goroutine leak|memory leak|handle leak|crlf|path traversal|fail-closed|overflow|timeout hang|process hang|panic|segfault)\b/i;
+  let deepWaterBonus = 0;
+  if (deepWaterRegex.test(fullText)) {
+    deepWaterBonus = 15;
+    matchedLabels.push('deep-water-bug');
+  }
+
+  // Low-SNR & Anti-Farming Filter (-35 Penalty)
+  const lowSnrRegex = /\b(typo|misspelling|spelling mistake|awesome list|awesome-list|fix typo|readme typo)\b/i;
+  let lowSnrPenalty = 0;
+  if (lowSnrRegex.test(fullText) && !deepWaterRegex.test(fullText)) {
+    lowSnrPenalty = 35;
+    matchedLabels.push('low-snr-warning');
+  }
+
   // 3. Repository Popularity Signal (Stars: +3 to +6)
   let repoPopularityBonus = 0;
   const stars = issue.repoStars ?? 0;
@@ -204,10 +220,10 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
   const penalty = Math.max(0, feasibility.scorePenalty || 0);
   const feasibilityScore = Math.max(0, 100 - penalty);
 
-  // 7. Weighted Score Formula: Profile relevance dominates (50%), Domain (30%), Feasibility (20%)
+  // 7. Weighted Score Formula: Profile relevance dominates (50%), Domain & Deep Water (30%), Feasibility (20%)
   const baseWeightedScore =
     0.50 * profileKeywordScore +
-    0.30 * (domainMatchScore + repoPopularityBonus) +
+    0.30 * (domainMatchScore + repoPopularityBonus + deepWaterBonus - lowSnrPenalty) +
     0.20 * feasibilityScore;
 
   const rawScore = Math.max(0, Math.min(100, Math.round(baseWeightedScore + freshnessModifier + actionabilityModifier)));
@@ -218,7 +234,7 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
     adjustedScore,
     breakdown: {
       profileKeywordScore,
-      domainMatchScore,
+      domainMatchScore: domainMatchScore + deepWaterBonus - lowSnrPenalty,
       feasibilityScore,
       freshnessModifier,
       actionabilityModifier,

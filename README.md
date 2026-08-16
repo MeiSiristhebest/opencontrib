@@ -149,6 +149,28 @@ No need to clone or hardcode local folder paths! Simply add OpenContrib to your 
 
 ---
 
+## 💎 High-SNR & Deep-Water Contribution Flywheel
+
+OpenContrib explicitly enforces a **High-Signal-to-Noise Ratio (High-SNR)** standard to eliminate PR farming and maximize long-term maintainer trust:
+
+```mermaid
+flowchart LR
+    A[Deep-Water Bug Discovery<br>NaN/Inf · CRLF · Race · Leaks] --> B[Issue & Reproduction<br>Minimal Failing Test Baseline]
+    B --> C[Surgical Fix & 20x Stress Loop<br>Worktree Isolation & Proof]
+    C --> D[Merged PR to Upstream<br>ByteDance · Alibaba · Linux Ecosystem]
+    D --> E[Profile Flywheel & Reputation<br>Telemetry Sync & Skill Matrix]
+    E --> A
+```
+
+* **🚫 Anti-Farming Mandate**: Automated deduction (-35 points) and rejection of pure typos, spelling, and trivial list additions that trigger anti-spam penalties in modern reputation engines (such as `ghfind`).
+* **🌊 Deep-Water Engineering**: Priority bonus (+15 points) for complex system defects, including:
+  * **Numerical Bounds & Timeout Deadlocks**: `NaN`/`+Inf` timeouts (e.g. ByteDance `deer-flow` patch).
+  * **Cross-Platform Invariants**: Windows/Linux CRLF patch drift and path traversal (e.g. Alibaba `open-code-review` patch).
+  * **Concurrency & Resource Leaks**: Goroutine leaks, unclosed file/DB handles, and channel races.
+
+---
+
 ## 📄 License
 
 Distributed under the [MIT License](LICENSE). Copyright (c) 2026 OpenContrib Contributors.
+
