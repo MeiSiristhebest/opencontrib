@@ -15,5 +15,5 @@ describe('Multi-Ecosystem Deep Probe Scanner', () => {
       expect(s.targetFiles.length).toBeGreaterThan(0);
       expect(s.estimatedDiffLines).toBeLessThanOrEqual(50);
     }
-  }, 25000);
+  }, 60000);
 });

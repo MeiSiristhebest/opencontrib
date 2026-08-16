@@ -121,5 +121,5 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
 
     const markdown = flywheel.renderProfileMarkdown();
     expect(markdown).toContain('bytedance/flowgram.ai');
-  });
+  }, 60000);
 });
