@@ -1,0 +1,56 @@
+name: 🐛 Bug Report
+description: File a bug report with empirical evidence or reproduction steps
+title: "fix(<scope>): <summary>"
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue! Please ensure you have tested against the latest version and provide deterministic reproduction details.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      options:
+        - "packages/core (Engine, Worktree Sandbox, Evidence, Governance)"
+        - "packages/mcp-server (18 MCP Tools, Resources, Prompts)"
+        - "packages/studio (Web Control Dashboard)"
+        - "skills (Master Contributor Skill)"
+        - "CI/CD & Developer Tooling"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: Clear and concise description of what the bug is.
+      placeholder: "When running contrib_prepare_workspace on Windows..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps & Evidence
+      description: Provide the exact command line, MCP input, or reproduction test case.
+      placeholder: |
+        1. Run `bun test packages/core/test/sandbox.test.ts`
+        2. Execute `contrib_prepare_workspace` with repo "..."
+        3. See error: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Info
+      description: OS version, Bun/Node version, MCP client (Claude Desktop / Cursor / Antigravity / etc.)
+      placeholder: |
+        - OS: Windows 11 / macOS Sequoia / Ubuntu 24.04
+        - Bun Version: 1.2.x
+        - Node Version: 22.x
+        - MCP Client: Claude Desktop / Antigravity / Cursor
+    validations:
+      required: true

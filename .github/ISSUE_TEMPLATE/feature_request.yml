@@ -1,0 +1,49 @@
+name: 💡 Feature / Architecture RFC
+description: Suggest an enhancement or new MCP capability for OpenContrib
+title: "feat(<scope>): <summary>"
+labels: ["enhancement", "proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We welcome architectural proposals and capability expansions! Please detail the rationale and contract design.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature Area
+      options:
+        - "Agent Primitives & MCP Tools"
+        - "Sandbox & Execution Isolation"
+        - "Evidence Collection & CI Pre-flight"
+        - "Anti-AI Governance & Linters"
+        - "Studio Web UI"
+        - "Ecosystem Integration"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement / Motivation
+      description: Is your feature request related to a problem or limitation in existing Agent workflows?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution & Interface Design
+      description: Describe your proposed architecture, tool parameters, or data contracts.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: guidelines
+    attributes:
+      label: Alignment Checklist
+      options:
+        - label: "This feature adheres to the 'Separation of Concerns' philosophy (Engine, not giant blackbox agent)"
+          required: true
+        - label: "I am willing to submit a Pull Request with unit tests covering this feature"
+          required: false

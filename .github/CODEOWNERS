@@ -1,0 +1,8 @@
+# Global Codeowners
+* @MeiSiristhebest
+
+# Core & Governance rules
+/packages/core/ @MeiSiristhebest
+/packages/mcp-server/ @MeiSiristhebest
+/packages/studio/ @MeiSiristhebest
+/.github/workflows/ @MeiSiristhebest
