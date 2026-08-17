@@ -82,10 +82,10 @@ Run the auto-installer to automatically detect and configure **Claude Desktop, C
 
 ```bash
 # Using NPX (Node.js)
-npx -y @opencontrib/mcp-server setup
+npx -y opencontrib-mcp setup
 
 # Or using Bun
-bunx @opencontrib/mcp-server setup
+bunx opencontrib-mcp setup
 ```
 
 ---
@@ -100,7 +100,7 @@ No need to clone or hardcode local folder paths! Simply add OpenContrib to your 
   "mcpServers": {
     "opencontrib": {
       "command": "npx",
-      "args": ["-y", "@opencontrib/mcp-server"]
+      "args": ["-y", "opencontrib-mcp"]
     }
   }
 }
@@ -119,7 +119,7 @@ No need to clone or hardcode local folder paths! Simply add OpenContrib to your 
     },
     "opencontrib": {
       "command": "npx",
-      "args": ["-y", "@opencontrib/mcp-server"]
+      "args": ["-y", "opencontrib-mcp"]
     }
   }
 }
