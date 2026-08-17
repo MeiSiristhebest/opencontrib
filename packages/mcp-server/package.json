@@ -33,6 +33,10 @@
   ],
   "author": "OpenContrib Contributors",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MeiSiristhebest/opencontrib"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",
     "zod": "^3.24.2"
