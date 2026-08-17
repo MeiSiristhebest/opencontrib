@@ -5,6 +5,7 @@ import {
   configureMcpTarget,
   generateStandardMcpConfig,
   getKnownIdeTargets,
+  OPENCONTRIB_MCP_PACKAGE,
 } from './installer.js';
 
 async function main() {
@@ -24,7 +25,7 @@ async function main() {
     if (isHelp) {
       console.log(`
 Usage:
-  npx @opencontrib/mcp-server setup [options]
+  npx ${OPENCONTRIB_MCP_PACKAGE} setup [options]
 
 Options:
   --client=<name>    Configure a specific client (claude | cursor | windsurf | antigravity | vscode)
@@ -84,9 +85,9 @@ ${JSON.stringify(generateStandardMcpConfig('npx'), null, 2)}
     console.log(JSON.stringify(generateStandardMcpConfig(runner), null, 2));
 
     console.log('\n👉 Quick Actions:');
-    console.log(`  1. Configure specific IDE:  npx @opencontrib/mcp-server setup --client=cursor`);
-    console.log(`  2. Configure all IDEs:      npx @opencontrib/mcp-server setup --all`);
-    console.log(`  3. Preview without saving:  npx @opencontrib/mcp-server setup --dry-run`);
+    console.log(`  1. Configure specific IDE:  npx ${OPENCONTRIB_MCP_PACKAGE} setup --client=cursor`);
+    console.log(`  2. Configure all IDEs:      npx ${OPENCONTRIB_MCP_PACKAGE} setup --all`);
+    console.log(`  3. Preview without saving:  npx ${OPENCONTRIB_MCP_PACKAGE} setup --dry-run`);
     return;
   }
 

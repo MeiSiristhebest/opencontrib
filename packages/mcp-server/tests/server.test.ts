@@ -1,4 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import {
+  configureMcpTarget,
+  generateStandardMcpConfig,
+  OPENCONTRIB_MCP_PACKAGE,
+  type IdeConfigTarget,
+} from '../src/installer.js';
 import { createOpenContribMcpServer } from '../src/server.js';
 
 describe('OpenContrib MCP Server', () => {
@@ -31,5 +40,36 @@ describe('OpenContrib MCP Server', () => {
     // Verify prompt registration
     const prompts = (server as any)._registeredPrompts;
     expect(prompts['opencontrib_workflow_guide']).toBeDefined();
+  });
+});
+
+describe('OpenContrib MCP Installer', () => {
+  it('generates client configuration with the published npm package name', () => {
+    const npxConfig = generateStandardMcpConfig('npx');
+    const bunxConfig = generateStandardMcpConfig('bunx');
+
+    expect(OPENCONTRIB_MCP_PACKAGE).toBe('opencontrib-mcp');
+    expect(npxConfig.mcpServers.opencontrib.args).toEqual(['-y', 'opencontrib-mcp']);
+    expect(bunxConfig.mcpServers.opencontrib.args).toEqual(['opencontrib-mcp']);
+  });
+
+  it('writes client configuration with the published npm package name', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'opencontrib-installer-'));
+    const target: IdeConfigTarget = {
+      id: 'cursor',
+      name: 'Cursor IDE',
+      configPath: join(tempDir, 'mcp.json'),
+      format: 'cursor',
+    };
+
+    try {
+      const result = configureMcpTarget(target, { packageRunner: 'npx' });
+      const config = JSON.parse(readFileSync(target.configPath, 'utf-8'));
+
+      expect(result.success).toBe(true);
+      expect(config.mcpServers.opencontrib.args).toEqual(['-y', 'opencontrib-mcp']);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

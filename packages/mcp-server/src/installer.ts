@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { homedir, platform } from 'os';
 
+export const OPENCONTRIB_MCP_PACKAGE = 'opencontrib-mcp';
+
 export interface IdeConfigTarget {
   id: 'claude' | 'cursor' | 'windsurf' | 'antigravity' | 'vscode';
   name: string;
@@ -77,7 +79,7 @@ export function generateStandardMcpConfig(runner: 'npx' | 'bunx' = 'npx', github
     mcpServers: {
       opencontrib: {
         command: runner,
-        args: runner === 'npx' ? ['-y', '@opencontrib/mcp-server'] : ['@opencontrib/mcp-server'],
+        args: runner === 'npx' ? ['-y', OPENCONTRIB_MCP_PACKAGE] : [OPENCONTRIB_MCP_PACKAGE],
         ...(githubToken ? { env: { GITHUB_TOKEN: githubToken } } : {}),
       },
     },
@@ -95,7 +97,7 @@ export function configureMcpTarget(target: IdeConfigTarget, options: InstallOpti
   const runner = options.packageRunner || 'npx';
   const serverConfig = {
     command: runner,
-    args: runner === 'npx' ? ['-y', '@opencontrib/mcp-server'] : ['@opencontrib/mcp-server'],
+    args: runner === 'npx' ? ['-y', OPENCONTRIB_MCP_PACKAGE] : [OPENCONTRIB_MCP_PACKAGE],
     ...(options.githubToken ? { env: { GITHUB_TOKEN: options.githubToken } } : {}),
   };
 
