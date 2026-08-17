@@ -7,6 +7,7 @@ on:
       - '.github/workflows/publish.yml'
       - 'bun.lock'
       - 'package.json'
+      - 'packages/core/**'
       - 'packages/mcp-server/**'
   release:
     types: [ published ]
@@ -42,7 +43,9 @@ jobs:
 
           const packageJson = JSON.parse(readFileSync('packages/mcp-server/package.json', 'utf8'));
           const packageUrl = `https://registry.npmjs.org/${encodeURIComponent(packageJson.name)}/${encodeURIComponent(packageJson.version)}`;
-          const response = await fetch(packageUrl);
+          const response = await fetch(packageUrl, {
+            signal: AbortSignal.timeout(15_000),
+          });
 
           if (response.status !== 200 && response.status !== 404) {
             throw new Error(`npm registry returned HTTP ${response.status}`);
