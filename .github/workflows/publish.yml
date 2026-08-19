@@ -9,6 +9,7 @@ on:
       - 'package.json'
       - 'packages/core/**'
       - 'packages/mcp-server/**'
+      - 'packages/cli/**'
   release:
     types: [ published ]
   workflow_dispatch:
@@ -35,7 +36,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Check package version
-        id: package
+        id: mcp_pkg
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -56,35 +57,69 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT, `published=${response.status === 200}\n`);
           NODE
 
+      - name: Check CLI package version
+        id: cli_pkg
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+
+          const packageJson = JSON.parse(readFileSync('packages/cli/package.json', 'utf8'));
+          const packageUrl = `https://registry.npmjs.org/${encodeURIComponent(packageJson.name)}/${encodeURIComponent(packageJson.version)}`;
+          const response = await fetch(packageUrl, {
+            signal: AbortSignal.timeout(15_000),
+          });
+
+          if (response.status !== 200 && response.status !== 404) {
+            throw new Error(`npm registry returned HTTP ${response.status}`);
+          }
+
+          appendFileSync(process.env.GITHUB_OUTPUT, `name=${packageJson.name}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${packageJson.version}\n`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `published=${response.status === 200}\n`);
+          NODE
+
       - name: Setup Bun runtime
-        if: steps.package.outputs.published == 'false'
+        if: steps.mcp_pkg.outputs.published == 'false' || steps.cli_pkg.outputs.published == 'false'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Install dependencies
-        if: steps.package.outputs.published == 'false'
+        if: steps.mcp_pkg.outputs.published == 'false' || steps.cli_pkg.outputs.published == 'false'
         run: bun install --frozen-lockfile
 
       - name: Run tests before publish
-        if: steps.package.outputs.published == 'false'
+        if: steps.mcp_pkg.outputs.published == 'false' || steps.cli_pkg.outputs.published == 'false'
         run: bun test --timeout 60000
 
       - name: Build distribution bundles
-        if: steps.package.outputs.published == 'false'
+        if: steps.mcp_pkg.outputs.published == 'false' || steps.cli_pkg.outputs.published == 'false'
         run: bun run build
 
       - name: Publish MCP Server to NPM
-        if: steps.package.outputs.published == 'false'
+        if: steps.mcp_pkg.outputs.published == 'false'
         working-directory: packages/mcp-server
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish CLI to NPM
+        if: steps.cli_pkg.outputs.published == 'false'
+        working-directory: packages/cli
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish summary
         run: |
-          if [ "${{ steps.package.outputs.published }}" = "true" ]; then
-            echo "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }} is already published; skipping."
+          if [ "${{ steps.mcp_pkg.outputs.published }}" = "true" ]; then
+            echo "${{ steps.mcp_pkg.outputs.name }}@${{ steps.mcp_pkg.outputs.version }} is already published; skipping."
           else
-            echo "Published ${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}."
+            echo "Published ${{ steps.mcp_pkg.outputs.name }}@${{ steps.mcp_pkg.outputs.version }}."
+          fi
+          if [ "${{ steps.cli_pkg.outputs.published }}" = "true" ]; then
+            echo "${{ steps.cli_pkg.outputs.name }}@${{ steps.cli_pkg.outputs.version }} is already published; skipping."
+          else
+            echo "Published ${{ steps.cli_pkg.outputs.name }}@${{ steps.cli_pkg.outputs.version }}."
           fi
