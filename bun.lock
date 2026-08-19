@@ -10,13 +10,12 @@
       },
     },
     "packages/cli": {
-      "name": "@opencontrib/cli",
+      "name": "opencontrib-cli",
       "version": "1.0.0",
       "bin": {
         "opencontrib": "dist/index.js",
       },
       "dependencies": {
-        "@opencontrib/core": "workspace:*",
         "commander": "^12.1.0",
       },
       "devDependencies": {
@@ -94,8 +93,6 @@
     "@octokit/rest": ["@octokit/rest@21.1.1", "https://registry.npmmirror.com/@octokit/rest/-/rest-21.1.1.tgz", { "dependencies": { "@octokit/core": "^6.1.4", "@octokit/plugin-paginate-rest": "^11.4.2", "@octokit/plugin-request-log": "^5.3.1", "@octokit/plugin-rest-endpoint-methods": "^13.3.0" } }, "sha512-sTQV7va0IUVZcntzy1q3QqPm/r8rWtDCqpRAmb8eXXnKkjoQEtFe3Nt5GTVsHft+R6jJoHeSiVLcgcvhtue/rg=="],
 
     "@octokit/types": ["@octokit/types@14.1.0", "https://registry.npmmirror.com/@octokit/types/-/types-14.1.0.tgz", { "dependencies": { "@octokit/openapi-types": "^25.1.0" } }, "sha512-1y6DgTy8Jomcpu33N+p5w58l6xyt55Ar2I91RPiIA0xCJBXyUAhXCcmZaDWSANiha7R9a6qJJ2CRomGPZ6f46g=="],
-
-    "@opencontrib/cli": ["@opencontrib/cli@workspace:packages/cli"],
 
     "@opencontrib/core": ["@opencontrib/core@workspace:packages/core"],
 
@@ -228,6 +225,8 @@
     "on-finished": ["on-finished@2.4.1", "https://registry.npmmirror.com/on-finished/-/on-finished-2.4.1.tgz", { "dependencies": { "ee-first": "1.1.1" } }, "sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg=="],
 
     "once": ["once@1.4.0", "https://registry.npmmirror.com/once/-/once-1.4.0.tgz", { "dependencies": { "wrappy": "1" } }, "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=="],
+
+    "opencontrib-cli": ["opencontrib-cli@workspace:packages/cli"],
 
     "opencontrib-mcp": ["opencontrib-mcp@workspace:packages/mcp-server"],
 
