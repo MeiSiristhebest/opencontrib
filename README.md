@@ -2,16 +2,17 @@
 
 # 🚀 OpenContrib
 
-**The Agent-Native Open Source Contribution Engine & MCP Server**
+**The Agent-Native Open Source Contribution Engine — CLI & MCP Server**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP Native](https://img.shields.io/badge/Model%20Context%20Protocol-Compatible-8B5CF6)](https://modelcontextprotocol.io)
+[![CLI](https://img.shields.io/badge/CLI-20%20Commands-FF6B35)](https://github.com/MeiSiristhebest/opencontrib#cli-interface)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
 
 <p align="center">
-  <b>A composable, protocol-native contribution infrastructure providing autonomous Agents with discrete domain capabilities: Opportunity Signals, Worktree Isolation, Dual-Stage Evidence Verification, Anti-AI Governance, Run Persistence, and Profile Flywheel.</b>
+  <b>A composable contribution infrastructure providing autonomous Agents with discrete domain capabilities: Opportunity Signals, Worktree Isolation, Dual-Stage Evidence Verification, Anti-AI Governance, Run Persistence, and Profile Flywheel — available as both an MCP server and a lightweight CLI.</b>
 </p>
 
 </div>
@@ -32,16 +33,32 @@ OpenContrib does **not** attempt to replace the external reasoning AI (Claude Co
                                    │
                   ┌────────────────┴────────────────┐
                   │                                 │
-            GitHub MCP                       OpenContrib MCP
-                  │                                 │
-       Native GitHub API State              Contribution Engine
-  (Issues, PRs, Comments, Repo State)  (Sandbox, Evidence, Governance, Runs)
+            GitHub MCP         ┌─── OpenContrib ───┐
+                  │            │  CLI   MCP   Core  │
+       Native GitHub API State │  ◄────► ◄─────── │
+  (Issues, PRs, Comments,      │  Sandbox, Evidence │
+    Repo State)                │  Governance, Runs │
+                               └──────────────────┘
 ```
 
 - **External Agent**: Makes high-level decisions, reasons about code, and writes patches.
 - **GitHub MCP**: Reads and mutates GitHub repository state.
-- **OpenContrib MCP**: Supplies objective feasibility signals, isolated Git Worktree sandboxes, pre-fix to post-fix dual-stage empirical evidence verification, anti-AI governance linter, and structured run persistence.
+- **OpenContrib CLI**: Zero-token overhead subcommand interface — human & AI agents alike.
+- **OpenContrib MCP**: Same core, wrapped for MCP-native agents.
+- **Core**: Pure TypeScript domain logic — no MCP, no CLI — reused by both.
 - *(Internal Core retains a lightweight GitHub adapter strictly for standalone local workflow execution)*.
+
+### Why CLI Instead of MCP?
+
+| Dimension | MCP | CLI |
+|-----------|-----|-----|
+| **Context Token Cost** | 10,000+ tokens per session (all 18 tool schemas loaded) | 200-400 tokens per call (single subcommand help) |
+| **Human Usability** | None | `--help` instantly usable |
+| **Concurrency** | Single stdio connection, sequential | Multi-process, independent |
+| **Debuggability** | Needs MCP client | `npx opencontrib doctor` runs anywhere |
+| **Pipeline Friendliness** | JSON-RPC overhead | Native stdin/stdout piping |
+
+The CLI is the **primary interface** — the MCP server is a compatibility wrapper over the same core.
 
 ---
 
@@ -50,12 +67,15 @@ OpenContrib does **not** attempt to replace the external reasoning AI (Claude Co
 ```
 opencontrib/
 ├── packages/
-│   ├── core/           # 🧠 Domain logic: Runs, Artifacts, Sandbox, Evidence, Governance, Storage
-│   ├── mcp-server/     # 🔌 18 Tools + 3 Resources + 1 Prompt for MCP Clients
+│   ├── core/           # 🧠 Pure domain logic (13 modules, zero MCP/CLI deps)
+│   ├── cli/            # 🖥️ 20 subcommands via Commander.js (npm: @opencontrib/cli)
+│   ├── mcp-server/     # 🔌 MCP wrapper (18 tools, 3 resources, 1 prompt)
 │   └── studio/         # 🎨 Obsidian/Claude-themed Native Web Control Studio
 ├── skills/             # 📜 Master Open-Source Contributor Skill
 └── package.json        # 🛠️ Root Monorepo configuration
 ```
+
+> **Key property**: `packages/core/` has **zero** dependencies on MCP or CLI frameworks. Adding a new interface (gRPC, REST, TUI) only requires a new `packages/xxx/` that imports from `@opencontrib/core`.
 
 ---
 
@@ -75,7 +95,93 @@ bun test
 
 ---
 
+## 🖥️ CLI Interface (20 Subcommands)
+
+The CLI is the recommended way to interact with OpenContrib. It requires **zero token overhead** for help text and supports both interactive use and shell pipelines.
+
+### Installation
+
+```bash
+# From npm (after publishing)
+npm install -g @opencontrib/cli
+
+# Or run directly from source
+cd opencontrib
+bun run cli --help
+```
+
+### Quick Reference
+
+```bash
+# 1. Check environment health
+opencontrib doctor
+
+# 2. Discover opportunities
+opencontrib scout facebook/react --tech-stack typescript,react --limit 5
+opencontrib scout bytedance --focus bugfix,testing --min-stars 100
+
+# 3. Assess a specific issue
+opencontrib discovery feasibility --title "NPE in parser module" --labels bug,parser
+cat issue-data.json | opencontrib discovery qualify
+opencontrib discovery rank --input '{"issue":{...}, "repo":{...}}'
+
+# 4. Assemble context and prepare workspace
+cat context-input.json | opencontrib discovery context
+opencontrib workspace prepare --repo microsoft/vscode --issue 12345
+opencontrib workspace purge --clean-repos
+
+# 5. Collect evidence
+opencontrib evidence --cwd . --test-cmd "npm test" --assertion "expect.*toFail" --stress-loop 20
+
+# 6. Audit and render
+cat ci.log | opencontrib governance ci-diagnose
+opencontrib governance audit --patch diff.txt --pr-title "Fix parser" --pr-body "..."
+opencontrib governance pr-template --issue 42 --summary "Fixed null check" \
+  --validation-cmd "npm test" --validation-output "5 tests passed" \
+  --key-changes "fixed null check,added regression test"
+
+# 7. Manage run sessions
+opencontrib run create --repo facebook/react --issue 42 --title "fix NPE"
+opencontrib run get run_20260819195606_a_b_issue_1_umpc
+opencontrib run resume run_20260819195606_a_b_issue_1_umpc
+
+# 8. Sync flywheel and track PRs
+cat record.json | opencontrib flywheel sync --repo facebook/react
+cat pr-data.json | opencontrib flywheel pr-track
+```
+
+### Command Map
+
+| Category | CLI Command | MCP Tool |
+|----------|------------|----------|
+| **Run** | `run create` `run get` `run resume` `run save` | `contrib_create_run` `contrib_get_run` `contrib_resume_run` `contrib_save_artifact` |
+| **Discovery** | `scout` `discovery rank` `discovery qualify` `discovery feasibility` `discovery context` `discovery manifests` | `contrib_scout` `contrib_rank_opportunity` `contrib_qualify_issue` `contrib_assess_feasibility` `contrib_assemble_context` `contrib_diagnose_manifests` |
+| **Workspace** | `workspace prepare` `workspace purge` | `contrib_prepare_workspace` `contrib_purge_sandbox` |
+| **Evidence** | `evidence` | `contrib_collect_evidence` |
+| **Governance** | `governance audit` `governance impact` `governance ci-diagnose` `governance pr-template` | `contrib_audit_governance` `contrib_analyze_impact` `contrib_diagnose_ci` `contrib_render_pr_template` |
+| **Flywheel** | `flywheel sync` `flywheel pr-track` `doctor` | `contrib_sync_flywheel` `contrib_track_pr_status` `contrib_doctor` |
+
+### I/O Patterns
+
+```bash
+# Complex inputs via --input flag
+opencontrib discovery rank --input '{"issue":{"number":1,"title":"..."},...}'
+
+# Complex inputs via stdin (best for LLM pipelines)
+cat payload.json | opencontrib discovery rank
+
+# Log file inputs
+opencontrib governance ci-diagnose --log-file build.log
+
+# Pipeable compact output (no --pretty)
+opencontrib scout facebook/react | jq '.opportunities[0].title'
+```
+
+---
+
 ## 🔌 Model Context Protocol (MCP) Setup
+
+> **Note**: The MCP server exposes the same core logic as the CLI. If you're using a CLI-native agent or prefer shell scripts, use `@opencontrib/cli` instead.
 
 ### ⚡ Option 1: One-Click Automatic Setup (Recommended)
 Run the auto-installer to automatically detect and configure **Claude Desktop, Cursor, Windsurf, Antigravity, and VS Code / Cline**:
@@ -208,4 +314,3 @@ FinalScore = clamp(
 ## 📄 License
 
 Distributed under the [MIT License](LICENSE). Copyright (c) 2026 OpenContrib Contributors.
-

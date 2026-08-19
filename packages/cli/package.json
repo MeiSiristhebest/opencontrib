@@ -1,0 +1,41 @@
+{
+  "name": "@opencontrib/cli",
+  "version": "1.0.0",
+  "description": "Agent-Native Open Source Contribution Engine — CLI interface",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "opencontrib": "dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "bun build ./src/index.ts --target=node --outfile=./dist/index.js",
+    "prepublishOnly": "bun run build",
+    "dev": "bun ./src/index.ts"
+  },
+  "dependencies": {
+    "@opencontrib/core": "workspace:*",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.3"
+  },
+  "keywords": [
+    "open-source",
+    "cli",
+    "agentic-ai",
+    "github-contributions",
+    "developer-tools"
+  ],
+  "author": "OpenContrib Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MeiSiristhebest/opencontrib"
+  }
+}
