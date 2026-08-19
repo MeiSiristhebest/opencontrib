@@ -8,17 +8,20 @@
     "opencontrib": "dist/index.js"
   },
   "files": [
-    "dist/",
+    "dist/index.js",
     "README.md",
     "package.json"
   ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "scripts": {
     "build": "bun build ./src/index.ts --target=node --outfile=./dist/index.js",
     "prepublishOnly": "bun run build",
     "dev": "bun ./src/index.ts"
   },
   "dependencies": {
-    "@opencontrib/core": "workspace:*",
     "commander": "^12.1.0"
   },
   "devDependencies": {
@@ -30,7 +33,10 @@
     "cli",
     "agentic-ai",
     "github-contributions",
-    "developer-tools"
+    "developer-tools",
+    "autonomous-agent",
+    "governance",
+    "opencontrib"
   ],
   "author": "OpenContrib Contributors",
   "license": "MIT",
