@@ -68,7 +68,7 @@ The CLI is the **primary interface** — the MCP server is a compatibility wrapp
 opencontrib/
 ├── packages/
 │   ├── core/           # 🧠 Pure domain logic (13 modules, zero MCP/CLI deps)
-│   ├── cli/            # 🖥️ 20 subcommands via Commander.js (npm: @opencontrib/cli)
+│   ├── cli/            # 🖥️ 20 subcommands via Commander.js (npm: opencontrib-cli)
 │   ├── mcp-server/     # 🔌 MCP wrapper (18 tools, 3 resources, 1 prompt)
 │   └── studio/         # 🎨 Obsidian/Claude-themed Native Web Control Studio
 ├── skills/             # 📜 Master Open-Source Contributor Skill
@@ -103,7 +103,7 @@ The CLI is the recommended way to interact with OpenContrib. It requires **zero 
 
 ```bash
 # From npm (after publishing)
-npm install -g @opencontrib/cli
+npm install -g opencontrib-cli
 
 # Or run directly from source
 cd opencontrib
@@ -181,7 +181,7 @@ opencontrib scout facebook/react | jq '.opportunities[0].title'
 
 ## 🔌 Model Context Protocol (MCP) Setup
 
-> **Note**: The MCP server exposes the same core logic as the CLI. If you're using a CLI-native agent or prefer shell scripts, use `@opencontrib/cli` instead.
+> **Note**: The MCP server exposes the same core logic as the CLI. If you're using a CLI-native agent or prefer shell scripts, use `opencontrib-cli` instead.
 
 ### ⚡ Option 1: One-Click Automatic Setup (Recommended)
 Run the auto-installer to automatically detect and configure **Claude Desktop, Cursor, Windsurf, Antigravity, and VS Code / Cline**:

@@ -1,5 +1,5 @@
 {
-  "name": "@opencontrib/cli",
+  "name": "opencontrib-cli",
   "version": "1.0.0",
   "description": "Agent-Native Open Source Contribution Engine — CLI interface",
   "type": "module",
@@ -42,6 +42,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MeiSiristhebest/opencontrib"
+    "url": "git+https://github.com/MeiSiristhebest/opencontrib.git"
   }
 }
