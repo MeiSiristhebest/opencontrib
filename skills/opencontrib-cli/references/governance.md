@@ -97,6 +97,24 @@ opencontrib governance pr-template \
 
 ---
 
+## Review & Community Protocols
+
+### 1. Bot Review Handling
+- Automated bots (`[bot]` in author username, e.g. `coderabbitai[bot]`, `codecov[bot]`):
+  - Do **not** post conversational reply comments.
+  - Implement requested improvements in code, then `git push`. The bot will update checkmarks automatically on the next CI trigger.
+- Human reviewers:
+  - Respond concisely and politely in the review thread addressing specific design choices or technical points.
+
+### 2. Proactive Claim Template
+When creating an issue for an unfiled bug, post a claim statement:
+```markdown
+I have investigated this issue and have a reproducible test case and fix ready.
+Please assign this issue to me, I will submit a PR shortly.
+```
+
+---
+
 ## LLM Agent Tips
 
 - `governance audit` reads the patch diff as a string — use `$(cat diff.txt)` or stdin for large diffs.

@@ -1,94 +1,82 @@
 ---
 name: opencontrib-cli
-description: Use the `opencontrib` CLI to execute the 9-phase open source contribution engine. Activate when the user asks to find, develop, verify, or submit contributions/PRs to open source repositories using the OpenContrib CLI. This skill enforces a strict phase-gated workflow with mandatory user approval at key checkpoints — use it any time the user says "contribute to", "find a bug in", "submit a PR to", or "use opencontrib" for any open source project.
+description: Use the `opencontrib` CLI to execute the 9-phase open source contribution engine. Activate when the user asks to find, develop, verify, or submit contributions/PRs to open source repositories, audit open source code, fix upstream issues, or interact with GitHub projects using OpenContrib. This skill enforces a strict phase-gated workflow with mandatory human approval at key checkpoints, long-term craftsmanship, and open source community etiquette.
 ---
 
 # OpenContrib CLI
 
-OpenContrib is a 9-phase contribution engine that takes you from "find something to fix" all the way to "PR merged". The workflow is deliberately interactive: you stop at three checkpoints to get the user's eyes on things before moving forward. This matters because open source contribution is a judgment-intensive process — the maintainer relationship, the scope of the fix, and the framing of the PR all require human decisions that automation alone cannot make well.
+OpenContrib is a 9-phase contribution engine that guides you from opportunity discovery to merged pull request. The workflow balances autonomous code intelligence with human judgment. Open source contribution is fundamentally social and judgment-intensive: maintainer trust, patch scope, and communication etiquette determine whether a contribution is welcomed or rejected.
 
-Read `references/workflow.md` for the full phase-by-phase CLI reference. This document covers the principles, the checkpoint protocol, and the defect targeting strategy.
+Read `references/workflow.md` for the complete phase-by-phase reference. This document outlines the core principles, checkpoint rules, and contribution etiquette.
 
 ---
 
 ## The Three Checkpoints
 
-These are non-negotiable pauses. At each one, present findings clearly and wait for explicit approval before continuing. The goal is to keep the user informed and in control at every decision point that matters.
+Pause execution at these three critical junctures. Present clean, structured findings and wait for the user's explicit approval before proceeding.
 
-**Checkpoint 1 — After scouting:** Show the top candidate issues with their defect category, rationale, and score. Ask the user to pick one. Do not prepare a workspace or clone anything until they confirm.
+- **Checkpoint 1 (Post-Scout Opportunity Selection):** Present the top candidate issues with defect classification, technical rationale, and feasibility score. Do not clone repositories or prepare workspaces until the user selects a target.
 
-**Checkpoint 2 — After reproducing the bug:** Show the actual failing test output that proves the bug exists. Then present a concise implementation plan (the proposed fix in ≤100 lines). Wait for approval before touching any source files.
+- **Checkpoint 2 (Empirical Reproduction & Plan):** Present the concrete failing test output proving the bug exists before any fix is attempted. Share an idiomatic implementation plan. Wait for confirmation before modifying source files.
 
-**Checkpoint 3 — Before submitting:** Show the complete diff, the governance audit result, and the rendered PR description. For proactive discoveries, confirm the newly filed GitHub Issue number first. Only push and create the PR after explicit confirmation.
-
----
-
-## Long-Term Craftsmanship & Proactive Defense
-
-A high-quality contribution is never just a quick bandage. High-performing contributors practice **long-term holistic stewardship**:
-
-1. **Synchronized Documentation & Spec Updates:** Whenever changing function semantics, timeout behavior, or return types, update inline docstrings, comments, and relevant user-facing documentation (`docs/` or `README.md`) in the same PR.
-
-2. **360° Variant Sweeping:** When fixing a bug in one function, scan parallel modules, sister structs, and v1/v2 interfaces for identical defect copies across the repository. Fortify them together so maintainers get a complete, robust solution.
-
-3. **Proactive Defensive Tests:** Write tests that cover not only the specific bug, but also extreme edge cases: zero-values (`0`, `false`, `""`, `nil`), negative numbers, maximum bounds, and concurrency idempotency (e.g. calling dispose or close multiple times).
-
-4. **Issue-First Policy for Proactive Discoveries:** When fixing an existing issue, link `Fixes #<existing_id>`. When finding a new defect proactively (via probes or scanning), **always create a GitHub Issue first** (`gh issue create`) to establish a public discussion anchor, then link the PR with `Fixes #<new_id>`.
-
-5. **Workspace Progress Tracking:** Maintain `CONTRIBUTION_RUN.md` inside the workspace root to record phase status, checkpoint approvals, and artifact pointers across sessions.
+- **Checkpoint 3 (Governance Audit & PR Review):** Show the full patch diff, governance audit results, and rendered PR description. For proactive discoveries, verify that a tracking issue has been created first. Obtain approval before pushing to remotes or opening PRs.
 
 ---
 
-## Defect Targeting
+## Long-Term Craftsmanship & Scope Boundaries
 
-The contribution engine is designed for bugs that are genuinely hard to spot — the kind that have lurked in codebases for months because they only surface under specific conditions. Chasing these produces higher-quality PRs that maintainers actually want, versus surface-level changes that signal noise.
+Maintainers appreciate contributors who show holistic responsibility for the subsystem they touch, while disliking PRs that mix unrelated concerns.
 
-When evaluating candidates, score them against these eight defect archetypes. Issues that match one or more of these are worth pursuing:
+### 1. In-Domain Deep Defense vs. Cross-Domain Scope Creep
+- **In-Domain Deep Defense (Encouraged):** When fixing a defect in a module (e.g., timeout handling), sweep for identical bug patterns across parallel structs and sister functions in that same module. Synchronize inline docstrings, comments, and relevant documentation (`docs/` or `README.md`). Add defensive test cases covering boundary values (`0`, `-1`, `nil`, `NaN`, timeout limits) and concurrency idempotency.
+- **Cross-Domain Scope Creep (Strictly Avoided):** Never bundle unrelated fixes into a single PR (e.g., modifying filesystem mount logic while submitting a timeout patch). Unrelated changes muddy `git bisect`, complicate code review, and risk total PR rejection. Always isolate distinct concerns into separate PRs.
 
-1. **Protocol and serialization drift** — Encoding mismatches that are invisible until a client or downstream service interprets the data differently. Examples: `omitempty` dropping zero-value fields; HTTP/2 header casing; SSE connection state not tracked.
+### 2. Issue-First Policy for Proactive Discoveries
+- **Reactive Workflow (Existing Issue):** Directly link the existing issue (`Fixes #123`).
+- **Proactive Workflow (0-Day / Scanner Finding):** When discovering an unfiled defect, create a clear GitHub Issue first (`gh issue create`). Immediately include an explicit **Claim Statement** in the issue description or initial comment:
+  > *"I have reproduced this issue with a targeted test case and have an idiomatic fix prepared. Please assign this to me, I will submit a PR shortly."*
+  This establishes public context, prevents duplicate work from other contributors, and anchors the subsequent PR (`Fixes #<new_id>`).
 
-2. **Lifecycle and resource leaks** — Handles, goroutines, file descriptors, or event listeners that are opened but never closed. These compound over time and typically only appear in long-running production environments.
-
-3. **Distributed cache consistency** — Race conditions where two concurrent writers produce inconsistent state, or where a cache miss cascade causes a thundering herd. Falsy-value bypasses (treating a cached `false` or `0` as a miss) are a classic example.
-
-4. **Memory layout and ABI boundaries** — Non-contiguous tensor layouts passed across a language boundary (e.g., a `permute()`d tensor fed to a CUDA kernel expecting contiguous memory); FFI dangling pointers; struct alignment assumptions.
-
-5. **Performance collapse and backpressure** — Unbounded queues that cause OOM under load; missing exponential backoff causing thundering herds on retry; catastrophic regex backtracking (ReDoS) that pins CPU at 100%.
-
-6. **Time monotonicity** — Code that uses wall-clock time for elapsed duration, which goes negative during NTP sync or DST changes; cron schedulers that skip or double-fire around daylight saving transitions.
-
-7. **Escape analysis and GC pressure** — Hot-path interface assertions or closures that cause values to escape to the heap, turning what should be stack allocations into GC pressure and stop-the-world pauses.
-
-8. **Numerical and cross-platform bounds** — `NaN`/`+Inf` values in timeout or retry calculations; path separator assumptions (`\` vs `/`) that break on Windows; CRLF/LF mismatches in patch parsers.
-
-Avoid issues that are primarily cosmetic: typos, whitespace, comment rewrites, or README additions. These rarely get merged and signal to maintainers that you're not reading the code carefully.
+### 3. Review Etiquette: Automated Bots vs. Human Maintainers
+- **Automated Bots (`[bot]` accounts like `coderabbitai[bot]`, `codecov[bot]`):** Do not post conversational comment replies to automated bots. Doing so generates notification noise for all repository watchers. Instead, address valid bot feedback directly in code, commit, and push; the bot will automatically update its status on the next CI cycle.
+- **Human Maintainers:** Reply to human reviewers with courteous, concise technical explanations addressing their specific questions or concerns.
 
 ---
 
-## PR Governance Rules
+## Defect Targeting Archetypes
 
-These constraints protect the PR's chances of being accepted.
+Focus on deep-water defects that provide genuine value to maintainers:
 
-**Size limit:** Keep production code changes concise (aim under ~100 lines for logic, excluding tests and documentation). Larger changes require architectural discussion first.
+1. **Protocol & Serialization Drift:** Serialization omissions (`omitempty`), header casing, or protocol state desynchronization.
+2. **Lifecycle & Resource Leaks:** Unclosed file descriptors, runaway goroutines/threads, or missing event listener teardowns.
+3. **Distributed Cache Consistency:** Falsy-value cache bypasses (`false` or `0` treated as miss), concurrent writer stampedes, or stale invalidation.
+4. **Memory Layout & ABI Boundaries:** Non-contiguous memory passed across FFI/native boundaries, alignment traps, or struct layout mismatches.
+5. **Backpressure & Performance Collapse:** Unbounded queues causing OOM, missing retry backoff, or catastrophic regex backtracking (ReDoS).
+6. **Time Monotonicity:** Using wall-clock time for durations, breaking during NTP synchronization or daylight saving adjustments.
+7. **Escape Analysis & GC Pressure:** Hot-path interface boxing or closures forcing heap allocations.
+8. **Numerical & Cross-Platform Bounds:** Floating-point `NaN`/`+Inf` in scheduler math, CRLF vs LF line ending traps, or Windows path separator assumptions.
 
-**AI disclosure:** Do not include AI-generated badges, disclaimers, or any language that signals the patch was produced by a tool. Most maintainers react negatively to this. The only exception is if the repository's `CONTRIBUTING.md` or PR template explicitly asks for it.
-
-**Respect conventions:** Match the repository's existing commit format, branch naming, PR section headers, and any required trailers (DCO sign-off, changelog entries, etc.). Check `CONTRIBUTING.md` first.
-
-**Workspace location:** Clone and create worktrees directly inside the user's active workspace directory (e.g., alongside other projects they have open). Never write to system temp directories — files there are invisible in the IDE and hard to inspect.
-
-**Flywheel profile privacy:** Only officially merged contributions (`status: 'merged'`) should ever be synced to the public profile README. Unmerged or in-review PRs are tracked strictly in local ledger.
+Avoid trivial cosmetic edits (typo fixes, formatting, whitespace) unless explicitly requested in a repository issue.
 
 ---
 
-## CLI Reference
+## Operational Rules
 
-For full flag documentation and piping examples for each command, read the appropriate reference file when you reach that phase:
+- **Workspace Isolation:** Always create branches and worktrees inside the user's active workspace directory. Never write to system temporary directories.
+- **Progress Tracking:** Maintain `CONTRIBUTION_RUN.md` in the workspace root to record phase transitions, checkpoint approvals, and artifact pointers.
+- **Profile Privacy:** Only officially merged pull requests (`status: 'merged'`) may be synced to the public profile. In-flight PRs are tracked strictly in local ledger storage.
+- **Anti-AI Policy:** Omit robotic disclaimers, AI badges, and tool watermarks unless explicitly required by the repository's `CONTRIBUTING.md`.
 
-- `references/discovery.md` — `scout`, `discovery rank/qualify/context/manifests/feasibility`
-- `references/probe.md` — `probe plan/run/hotspot/fuzz`, `pointer list/resolve`, `plugin list/info`
-- `references/workspace.md` — `workspace prepare`, run creation
-- `references/evidence.md` — `evidence`, fail-first and stress-loop modes
-- `references/governance.md` — `governance audit/impact/ci-diagnose/pr-template`
-- `references/flywheel.md` — `flywheel sync`, `flywheel pr-track`
-- `references/workflow.md` — Full 9-phase walkthrough with example commands
+---
+
+## CLI Reference Navigation
+
+Consult these topic references for flag details and pipeline examples:
+
+- `references/discovery.md` — Scouting and issue qualification commands
+- `references/probe.md` — Microkernel probes, smart pointers (`ptr://`), and forensics
+- `references/workspace.md` — Workspace and run session management
+- `references/evidence.md` — Fail-first reproduction and bounded stress testing
+- `references/governance.md` — Quality audits, impact analysis, and PR templates
+- `references/flywheel.md` — PR lifecycle tracking and memory synchronization
+- `references/workflow.md` — End-to-end 9-phase execution walkthrough
