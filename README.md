@@ -118,6 +118,49 @@ opencontrib governance pr-template ... | jq -r '.prBody' > pr-body.md
 
 ---
 
+## MCP Compatibility
+
+An MCP server wrapper (`opencontrib-mcp`) exists for compatibility with MCP-native agents. It exposes the same core logic as the CLI through the MCP protocol.
+
+> **Positioning**: The CLI is the primary interface. Use the MCP server only if your agent environment requires MCP protocol and cannot execute shell commands directly.
+
+### Install
+
+```bash
+npx -y opencontrib-mcp setup     # auto-detect Claude/Cursor/Windsurf/Antigravity
+```
+
+Or manually add to your MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "opencontrib": {
+      "command": "npx",
+      "args": ["-y", "opencontrib-mcp"]
+    }
+  }
+}
+```
+
+### Capability: 18 Tools, 3 Resources, 1 Prompt
+
+| Category | MCP Tools | CLI Equivalents |
+|----------|-----------|----------------|
+| **Run** | `contrib_create_run` `contrib_get_run` `contrib_resume_run` `contrib_save_artifact` | `run create` `run get` `run resume` `run save` |
+| **Discovery** | `contrib_scout` `contrib_rank_opportunity` `contrib_qualify_issue` `contrib_assess_feasibility` `contrib_diagnose_manifests` | `scout` `discovery rank` `discovery qualify` `discovery feasibility` `discovery manifests` |
+| **Context** | `contrib_assemble_context` | `discovery context` |
+| **Workspace** | `contrib_prepare_workspace` `contrib_purge_sandbox` | `workspace prepare` `workspace purge` |
+| **Evidence** | `contrib_collect_evidence` | `evidence` |
+| **Governance** | `contrib_audit_governance` `contrib_analyze_impact` `contrib_diagnose_ci` `contrib_render_pr_template` | `governance audit` `governance impact` `governance ci-diagnose` `governance pr-template` |
+| **Flywheel** | `contrib_sync_flywheel` `contrib_track_pr_status` `contrib_doctor` | `flywheel sync` `flywheel pr-track` `doctor` |
+
+Resources: `opencontrib://doctor` `opencontrib://memory` `opencontrib://runs`
+
+Prompt: `opencontrib_workflow_guide` — standard 9-phase execution protocol
+
+---
+
 ## Contribution Pipeline (9 Phases)
 
 ```text
