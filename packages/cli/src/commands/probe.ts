@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { Command } from 'commander';
 import {
   extractRepoFingerprint,
@@ -6,6 +7,7 @@ import {
   analyzeGitHotspots,
   generatePropertyTest,
   ProbeRegistry,
+  createDefaultPluginHost,
   type ProbeCost,
   type DefectCategory,
 } from '@opencontrib/core';
@@ -63,29 +65,30 @@ probeCommand
   .option('--pretty', 'Pretty-print JSON output', false)
   .action(async (target = '.', opts) => {
     try {
-      const fingerprint = await extractRepoFingerprint(target);
+      const resolved = path.resolve(target);
+      const fingerprint = await extractRepoFingerprint(resolved);
+      const host = await createDefaultPluginHost({ workspacePath: resolved });
+      
       const only = opts.only ? opts.only.split(',').map((s: string) => s.trim()) : undefined;
       const skip = opts.skip ? opts.skip.split(',').map((s: string) => s.trim()) : undefined;
 
-      const plan = negotiateProbes(
-        fingerprint,
-        {
-          only,
-          skip,
-          maxCost: opts.maxCost as ProbeCost,
-        },
-        new ProbeRegistry(),
-      );
-
-      const result = await runProbes(plan, {
-        timeoutMs: parseInt(opts.timeout, 10),
-        minScore: parseInt(opts.minScore, 10),
+      // Negotiate active probes from both Microkernel Plugins and Probe Registry
+      const matchingProbes = host.listAll().filter((probe) => {
+        if (only && !only.includes(probe.id)) return false;
+        if (skip && skip.includes(probe.id)) return false;
+        return probe.match(fingerprint);
       });
+
+      // Execute full plugin scan through ProbeScanScheduler
+      const scanResult = await host.executeScan(resolved, matchingProbes);
 
       printJSON(
         {
           status: 'success',
-          result,
+          target: resolved,
+          executedProbes: scanResult.executedProbes,
+          pointersCount: scanResult.pointersCreated.length,
+          pointers: scanResult.pointersCreated,
         },
         opts.pretty,
       );
