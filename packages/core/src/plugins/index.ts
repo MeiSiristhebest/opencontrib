@@ -12,6 +12,8 @@ import { semgrepPlugin, semgrepCapabilityDescriptor } from './plugin-semgrep.js'
 import { ruffPlugin, ruffCapabilityDescriptor } from './plugin-ruff.js';
 import { goAnalyzersPlugin, goAnalyzersCapabilityDescriptor } from './plugin-go-analyzers.js';
 import { cargoDenyPlugin, cargoDenyCapabilityDescriptor } from './plugin-cargo-deny.js';
+import { cargoGeigerPlugin, cargoGeigerCapabilityDescriptor } from './plugin-cargo-geiger.js';
+import { eslintSecurityPlugin, eslintSecurityCapabilityDescriptor } from './plugin-eslint-security.js';
 
 export * from './plugin-ocr.js';
 export * from './plugin-piolium.js';
@@ -24,6 +26,8 @@ export * from './plugin-semgrep.js';
 export * from './plugin-ruff.js';
 export * from './plugin-go-analyzers.js';
 export * from './plugin-cargo-deny.js';
+export * from './plugin-cargo-geiger.js';
+export * from './plugin-eslint-security.js';
 
 export const BUILTIN_PLUGINS = [
   ocrPlugin,
@@ -37,6 +41,8 @@ export const BUILTIN_PLUGINS = [
   ruffPlugin,
   goAnalyzersPlugin,
   cargoDenyPlugin,
+  cargoGeigerPlugin,
+  eslintSecurityPlugin,
 ];
 
 export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
@@ -57,6 +63,8 @@ export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
   ruffCapabilityDescriptor,
   goAnalyzersCapabilityDescriptor,
   cargoDenyCapabilityDescriptor,
+  cargoGeigerCapabilityDescriptor,
+  eslintSecurityCapabilityDescriptor,
   {
     providerId: 'piolium',
     name: 'Piolium Autonomous PoC Constructor',

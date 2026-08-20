@@ -50,6 +50,13 @@ export class CapabilityRouter {
   }
 
   /**
+   * Retrieves all registered capability provider descriptors
+   */
+  public getAllProviders(): CapabilityProviderDescriptor[] {
+    return Array.from(this.providers.values());
+  }
+
+  /**
    * Capability Scoring Engine & Intelligent Route Planning
    * Evaluates language matching, cost profiles, and repository characteristics.
    */
