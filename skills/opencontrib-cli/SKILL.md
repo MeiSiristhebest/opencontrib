@@ -3,7 +3,7 @@ name: opencontrib-cli
 description: |
   Use the `opencontrib` CLI to execute the industrial-grade, 9-phase OpenContrib contribution engine.
   Activate when the user asks to scout, assess, develop, verify, audit, or submit open source contributions/PRs using the OpenContrib CLI.
-  Enforces a strict Phase-Gated State Machine with Interactive User Approvals: Environment Doctor → Opportunity Scouting & Qualification (8 Deep-Water Defect Types) [PAUSE FOR APPROVAL] → Context Assembly → Worktree Sandbox Isolation → Dual-Stage Empirical Evidence Verification (Fail-First & Stress Loop) [PAUSE FOR APPROVAL] → Governance Audit (<=100-line Gate & Anti-AI Fluff) → Subagent Code Review → PR Template Rendering [PAUSE BEFORE PUSH] → Flywheel Persistence.
+  Enforces a strict Phase-Gated State Machine with Interactive User Approvals: Environment Doctor → Opportunity Scouting & Qualification (8 Deep-Water Defect Types) [PAUSE FOR APPROVAL] → Context Assembly → Worktree Sandbox Isolation (strictly within active workspace directory) → Dual-Stage Empirical Evidence Verification (Fail-First & Stress Loop) [PAUSE FOR APPROVAL] → Governance Audit (<=100-line Gate & Anti-AI Fluff) → Subagent Code Review → PR Template Rendering [PAUSE BEFORE PUSH] → Flywheel Persistence.
 ---
 
 # OpenContrib CLI — Phase-Gated Contribution Protocol
@@ -15,6 +15,11 @@ description: |
 ---
 
 ## 💎 Core Governance & Engineering Rules (核心工程准则)
+
+### 📁 Rule 0: Active Workspace Colocation Policy (工作区目录强制就地对齐)
+- **Universal Rule**: Target repositories, clones, and isolated worktrees MUST be created **directly inside the user's active workspace directory** (e.g. `<workspace_root>/<repo_name>` or `<workspace_root>/.workspaces/<repo_name>`).
+- **Strictly Banned**: NEVER clone or checkout repositories into `C:\Users\...\AppData\Local\Temp` or hidden OS temporary paths.
+- **Rationale**: Keeps project files visible in the user's IDE file explorer, allows one-click file navigation, and prevents disk pollution.
 
 ### 🚨 Rule 1: Repository Convention Absolute Priority (仓库规范优先)
 - ALWAYS prioritize the target repository's established style guides, commit conventions, PR templates, and workflow rules.
@@ -50,7 +55,7 @@ You MUST pause execution and interact with the user at these 3 checkpoints:
 
 | Checkpoint | When to Pause | What to Present to the User | Action After Approval |
 | :--- | :--- | :--- | :--- |
-| **Checkpoint 1** | After Phase 2 (Scout & Rank) | Top opportunity candidates, defect category (from the 8 archetypes), score, and technical rationale. | Prepare worktree sandbox and assemble context. |
+| **Checkpoint 1** | After Phase 2 (Scout & Rank) | Top opportunity candidates, defect category (from the 8 archetypes), score, and technical rationale. | Prepare worktree sandbox in active workspace directory and assemble context. |
 | **Checkpoint 2** | After Phase 5 (Fail-First Evidence) | The exact failing test output (red error trace) proving the bug exists, plus proposed minimal fix design in `implementation_plan.md`. | Implement code patch and run stress verification loop. |
 | **Checkpoint 3** | Before Phase 8 (PR Submission) | Complete Git Diff (<=100 lines), Governance Audit results, Subagent review summary, and rendered PR description. | Push branch and create upstream GitHub PR. |
 
@@ -102,14 +107,15 @@ opencontrib discovery context --input '{"repo":"<owner/repo>","issueNumber":<num
 opencontrib discovery manifests --repo-path <path_to_repo>
 ```
 
-#### Phase 4: Worktree Sandbox Isolation
-**NEVER edit code in the main checkout.** Always isolate changes:
+#### Phase 4: Worktree Sandbox Isolation (In Active Workspace)
+**CLONE/WORKTREE DIRECTLY IN ACTIVE WORKSPACE DIRECTORY** (e.g. `./<repo_name>` or `./.workspaces/<repo_name>`):
 ```bash
 opencontrib workspace prepare \
   --repo <owner/repo> \
   --issue <issue_number> \
+  --dest "<active_workspace_dir>/<repo_name>" \
   --run-id "$RUN_ID"
-# → Sets $WORKSPACE_PATH
+# → Sets $WORKSPACE_PATH inside current workspace
 ```
 
 #### Phase 5: Pre-Fix Fail-First Baseline Evidence
