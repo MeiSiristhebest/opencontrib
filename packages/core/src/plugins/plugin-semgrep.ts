@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
@@ -23,6 +24,7 @@ export interface SemgrepResultItem {
       intermediate_vars?: unknown;
       sink?: unknown;
     };
+    fix?: string;
   };
 }
 
@@ -33,19 +35,19 @@ export interface SemgrepOutput {
 
 /**
  * Semgrep Universal SAST & Taint Analysis Adapter
- * Executes official `semgrep scan --json` and parses official Semgrep output schema.
+ * Supports project-native `.semgrep.yml` configuration passthrough and official OWASP Top 10 / Security-Audit rule packs.
  */
 export const semgrepPlugin: OpenContribPlugin = {
   name: '@opencontrib/plugin-semgrep',
   version: '1.0.0',
-  description: 'Semgrep multi-language semantic SAST and taint tracking scanner',
+  description: 'Semgrep multi-language semantic SAST and taint tracking scanner with config passthrough',
   permissions: ['fs:read', 'exec:binary'],
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'semgrep-sast',
-      name: 'Semgrep SAST Scanner',
+      name: 'Semgrep SAST & Taint Flow Scanner',
       category: 'security_cwe',
-      description: 'Discovers CWE security vulnerabilities, injection flaws, and taint flows',
+      description: 'Discovers CWE security vulnerabilities, injection flaws, and taint flows with native config passthrough',
       match: (fp) => {
         const langs = fp.languages.map((l) => l.language.toLowerCase());
         return (
@@ -67,10 +69,23 @@ export const semgrepPlugin: OpenContribPlugin = {
         }
 
         try {
-          // Run official Semgrep with auto rules and JSON output
-          const { stdout } = await host.exec('semgrep scan --json --config auto --quiet', {
+          // 1. Config Passthrough: check if project has native .semgrep.yml or semgrep.yaml
+          const customSemgrep1 = path.join(targetPath, '.semgrep.yml');
+          const customSemgrep2 = path.join(targetPath, 'semgrep.yaml');
+          const customSemgrepDir = path.join(targetPath, '.semgrep');
+
+          const hasCustomConfig =
+            fs.existsSync(customSemgrep1) ||
+            fs.existsSync(customSemgrep2) ||
+            fs.existsSync(customSemgrepDir);
+
+          const configArgs = hasCustomConfig
+            ? '--config auto --config .semgrep.yml'
+            : '--config p/security-audit --config p/secrets --config p/owasp-top-ten';
+
+          const { stdout } = await host.exec(`semgrep scan --json ${configArgs} --quiet`, {
             cwd: targetPath,
-            timeout: 45000,
+            timeout: 60000,
           });
 
           if (!stdout || !stdout.trim().startsWith('{')) return;
@@ -92,15 +107,18 @@ export const semgrepPlugin: OpenContribPlugin = {
                 severity: r.extra.severity === 'ERROR' ? 'high' : r.extra.severity === 'WARNING' ? 'medium' : 'low',
                 file: relFile,
                 line: r.start.line,
-                confidence: r.extra.metadata?.confidence === 'HIGH' ? 95 : 85,
+                confidence: r.extra.metadata?.confidence === 'HIGH' ? 95 : 88,
                 affectedSymbol: r.check_id,
                 callSite: r.extra.lines.trim(),
                 slice: {
                   codeSnippet: r.extra.lines,
                   ruleExplanation: `${r.extra.message} (${cweInfo})`,
-                  remediationSuggestion: `Inspect line ${r.start.line}:${r.start.col} to neutralize security risk.`,
+                  remediationSuggestion: r.extra.fix
+                    ? `Suggested Semgrep Auto-Fix:\n${r.extra.fix}`
+                    : `Inspect line ${r.start.line}:${r.start.col} to neutralize security risk.`,
                 },
                 evidence: {
+                  suggestedPatch: r.extra.fix,
                   astDataFlow: r.extra.dataflow_trace ? JSON.stringify(r.extra.dataflow_trace) : undefined,
                   rawPayload: r as any,
                 },

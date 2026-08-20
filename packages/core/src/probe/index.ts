@@ -9,3 +9,4 @@ export * from './probe-scanner.js';
 export * from './adapters/ocr.js';
 export * from './adapters/piolium.js';
 export * from './adapters/ast-grep.js';
+export * from './adapters/ast-grep-rules.js';
