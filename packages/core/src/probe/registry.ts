@@ -91,7 +91,7 @@ export const BUILTIN_PROBES: ProbeManifest[] = [
     execution: {
       cost: 'medium',
       stage: 'scout',
-      command: 'semgrep scan --json --quiet {target}',
+      command: 'semgrep scan --config auto --config p/security-audit --config p/owasp-top-ten --json --quiet {target}',
       timeoutMs: 30000,
       transformer: 'semgrep',
     },
