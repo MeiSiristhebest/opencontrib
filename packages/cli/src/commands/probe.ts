@@ -3,13 +3,16 @@ import {
   extractRepoFingerprint,
   negotiateProbes,
   runProbes,
+  analyzeGitHotspots,
+  generatePropertyTest,
   ProbeRegistry,
   type ProbeCost,
+  type DefectCategory,
 } from '@opencontrib/core';
 import { printJSON } from '../utils/output.js';
 
 export const probeCommand = new Command('probe')
-  .description('Progressive probe discovery, repository fingerprinting, and targeted scanning');
+  .description('Progressive probe discovery, repository fingerprinting, hotspot forensics, and targeted scanning');
 
 probeCommand
   .command('plan [target]')
@@ -88,6 +91,61 @@ probeCommand
       );
     } catch (err: any) {
       console.error(`❌ Probe execution failed: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+probeCommand
+  .command('hotspot [target]')
+  .description('Run Code as a Crime Scene Git churn and cyclomatic complexity hotspot analysis')
+  .option('--limit <number>', 'Number of top hotspot files to return', '5')
+  .option('--since-months <number>', 'Months of commit history to inspect', '6')
+  .option('--pretty', 'Pretty-print JSON output', false)
+  .action((target = '.', opts) => {
+    try {
+      const result = analyzeGitHotspots(target, {
+        limit: parseInt(opts.limit, 10),
+        sinceMonths: parseInt(opts.sinceMonths, 10),
+      });
+
+      printJSON(
+        {
+          status: 'success',
+          result,
+        },
+        opts.pretty,
+      );
+    } catch (err: any) {
+      console.error(`❌ Hotspot analysis failed: ${err.message}`);
+      process.exit(1);
+    }
+  });
+
+probeCommand
+  .command('fuzz [target]')
+  .description('Generate property-based boundary fuzzing test harness for target repo language & defect category')
+  .option('--category <category>', 'Target defect category (e.g. numerical_bounds, protocol_drift, distributed_cache)', 'numerical_bounds')
+  .option('--function-name <name>', 'Target function to fuzz', 'processInput')
+  .option('--pretty', 'Pretty-print JSON output', false)
+  .action(async (target = '.', opts) => {
+    try {
+      const fingerprint = await extractRepoFingerprint(target);
+      const langLower = fingerprint.primaryLanguage.toLowerCase();
+      const lang = ['typescript', 'javascript', 'python', 'rust', 'go'].includes(langLower)
+        ? (langLower as any)
+        : 'typescript';
+
+      const spec = generatePropertyTest(opts.category as DefectCategory, lang, opts.functionName);
+
+      printJSON(
+        {
+          status: 'success',
+          spec,
+        },
+        opts.pretty,
+      );
+    } catch (err: any) {
+      console.error(`❌ Fuzz harness generation failed: ${err.message}`);
       process.exit(1);
     }
   });

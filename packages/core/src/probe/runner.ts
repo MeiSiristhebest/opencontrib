@@ -9,6 +9,8 @@ import type {
   ProbeManifest,
   DefectCategory,
 } from './types.js';
+import { analyzeGitHotspots } from './forensics.js';
+import { generatePropertyTest } from './fuzz-generator.js';
 
 const execAsync = promisify(exec);
 
@@ -32,9 +34,42 @@ export async function runProbes(
   for (const probe of plan.selectedProbes) {
     executedProbes.push(probe.name);
     try {
-      if (probe.execution.transformer === 'builtin:workflow' || probe.name === 'workflow-linter') {
+      if (probe.name === 'workflow-linter' || probe.execution.transformer === 'builtin:workflow') {
         const wfFindings = await runBuiltinWorkflowLinter(targetPath);
         findings.push(...wfFindings);
+      } else if (probe.name === 'git-hotspot' || probe.execution.transformer === 'builtin:hotspot') {
+        const hotspotResult = analyzeGitHotspots(targetPath, { limit: 5 });
+        for (const h of hotspotResult.topHotspots) {
+          if (h.riskLevel === 'critical' || h.riskLevel === 'high') {
+            findings.push({
+              id: `hotspot-${h.file.replace(/[^a-zA-Z0-9]/g, '_')}`,
+              probeName: 'git-hotspot',
+              category: 'lifecycle_leak',
+              title: `High-Risk Defect Hotspot: ${h.file} (Score: ${h.hotspotScore})`,
+              description: `File has ${h.commitsCount} recent commits and cyclomatic complexity ${h.cyclomaticComplexity}. High likelihood (${h.defectLikelihood}%) of concurrency/boundary bugs.`,
+              file: h.file,
+              line: 1,
+              severity: h.riskLevel === 'critical' ? 'high' : 'medium',
+              remediation: `Focus exploration on '${h.file}', inspect recent diffs by ${h.topContributors.join(', ')}.`,
+              prPotentialScore: Math.min(80 + Math.round(h.hotspotScore / 10), 98),
+            });
+          }
+        }
+      } else if (probe.name === 'property-fuzz' || probe.execution.transformer === 'builtin:fuzz') {
+        const lang = (plan.fingerprint.primaryLanguage.toLowerCase() || 'typescript') as any;
+        const fuzzSpec = generatePropertyTest('numerical_bounds', ['typescript', 'javascript', 'python', 'rust', 'go'].includes(lang) ? lang : 'typescript');
+        findings.push({
+          id: `fuzz-numerical-bounds`,
+          probeName: 'property-fuzz',
+          category: 'numerical_bounds',
+          title: `Property-Based Invariant Verification: ${fuzzSpec.framework}`,
+          description: `Generated property fuzzing harness targeting NaN/-0.0/Inf boundary attacks.`,
+          file: 'tests/property_bounds.test',
+          line: 1,
+          severity: 'medium',
+          pocSnippet: fuzzSpec.codeSnippet,
+          prPotentialScore: 90,
+        });
       } else if (probe.execution.command) {
         // Execute external probe command
         const formattedCmd = probe.execution.command
@@ -51,7 +86,6 @@ export async function runProbes(
           const parsed = parseProbeOutput(probe, stdout, targetPath);
           findings.push(...parsed);
         } catch (err: any) {
-          // Many linters exit with code 1/2 when issues are found, but still output valid JSON
           if (err.stdout) {
             const parsed = parseProbeOutput(probe, err.stdout, targetPath);
             if (parsed.length > 0) {
@@ -127,7 +161,7 @@ async function runBuiltinWorkflowLinter(targetPath: string): Promise<NormalizedF
         });
       }
 
-      // Check actions/setup-node@v1 or v2
+      // Check actions/setup-node@v1, v2 or v3
       if (content.includes('actions/setup-node@v1') || content.includes('actions/setup-node@v2') || content.includes('actions/setup-node@v3')) {
         const line = findLineNumber(content, 'actions/setup-node@v');
         findings.push({
@@ -203,7 +237,46 @@ function parseProbeOutput(probe: ProbeManifest, stdout: string, targetPath: stri
       }
     }
 
-    // 3. Generic JSON with findings array
+    // 3. Knip transformer
+    else if (probe.name === 'knip' && (data.files || data.unused)) {
+      const unusedFiles = data.files || [];
+      for (const uf of unusedFiles) {
+        findings.push({
+          id: `knip-unused-${uf.replace(/[^a-zA-Z0-9]/g, '_')}`,
+          probeName: 'knip',
+          category: 'dead_code',
+          title: `Dead Code / Unused File: ${uf}`,
+          description: 'File is not imported by any entry point or module in project.',
+          file: uf,
+          line: 1,
+          severity: 'low',
+          remediation: `Remove dead file ${uf}`,
+          prPotentialScore: 82,
+        });
+      }
+    }
+
+    // 4. Ruff transformer
+    else if (probe.name === 'ruff' && Array.isArray(data)) {
+      for (const item of data) {
+        findings.push({
+          id: `ruff-${item.code}-${item.filename}-${item.location?.row || 1}`,
+          probeName: 'ruff',
+          category: mapToDefectCategory(item.code || 'protocol_drift'),
+          title: `[${item.code}] ${item.message}`,
+          description: item.message || '',
+          file: path.relative(targetPath, item.filename || ''),
+          line: item.location?.row || 1,
+          column: item.location?.column,
+          severity: 'medium',
+          ruleId: item.code,
+          remediation: item.fix?.message,
+          prPotentialScore: item.code.startsWith('B') || item.code.startsWith('ASYNC') ? 90 : 80,
+        });
+      }
+    }
+
+    // 5. Generic JSON with findings array
     else if (Array.isArray(data.findings)) {
       for (const f of data.findings) {
         findings.push({
@@ -245,14 +318,15 @@ function parseProbeOutput(probe: ProbeManifest, stdout: string, targetPath: stri
 
 function mapToDefectCategory(cat: string): DefectCategory {
   const lower = cat.toLowerCase();
-  if (lower.includes('leak') || lower.includes('resource')) return 'lifecycle_leak';
-  if (lower.includes('race') || lower.includes('concurrency')) return 'lifecycle_leak';
-  if (lower.includes('cache')) return 'distributed_cache';
-  if (lower.includes('abi') || lower.includes('memory')) return 'memory_abi';
-  if (lower.includes('performance') || lower.includes('dos')) return 'performance_backpressure';
-  if (lower.includes('time') || lower.includes('clock')) return 'time_monotonicity';
+  if (lower.includes('leak') || lower.includes('resource') || lower.includes('goroutine')) return 'lifecycle_leak';
+  if (lower.includes('race') || lower.includes('concurrency') || lower.includes('thread')) return 'lifecycle_leak';
+  if (lower.includes('cache') || lower.includes('stampede')) return 'distributed_cache';
+  if (lower.includes('abi') || lower.includes('memory') || lower.includes('unsafe') || lower.includes('ffi')) return 'memory_abi';
+  if (lower.includes('performance') || lower.includes('dos') || lower.includes('backpressure') || lower.includes('redos')) return 'performance_backpressure';
+  if (lower.includes('time') || lower.includes('clock') || lower.includes('dst')) return 'time_monotonicity';
   if (lower.includes('escape') || lower.includes('gc')) return 'escape_analysis';
-  if (lower.includes('bound') || lower.includes('overflow') || lower.includes('nan')) return 'numerical_bounds';
+  if (lower.includes('bound') || lower.includes('overflow') || lower.includes('nan') || lower.includes('crlf')) return 'numerical_bounds';
+  if (lower.includes('dead') || lower.includes('unused')) return 'dead_code';
   return 'security_cwe';
 }
 

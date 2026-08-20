@@ -1,15 +1,28 @@
-# Progressive Probe & Plugin System
+# Progressive Probe, Forensics & Plugin System
 
-OpenContrib includes a modular, progressive probe negotiation engine for proactive vulnerability discovery and deep-water defect hunting.
+OpenContrib provides an industrial-grade, 6-dimension probe and forensics engine for proactive vulnerability discovery, code forensics, and deep-water defect hunting.
 
 ---
 
 ## 🔍 Core Philosophy: Progressive Probe Negotiation
 
 Instead of blindly running dozens of heavy linters across every codebase, OpenContrib performs **Progressive Capability Negotiation**:
-1. **Fingerprint (0.05s)**: Instantly identifies primary/secondary languages, manifest files (`go.mod`, `package.json`, `Cargo.toml`, `pyproject.toml`), frameworks, and risk surface.
-2. **Negotiate (0.01s)**: Matches registered probe manifests against the fingerprint. Irrelevant languages and missing host binaries are cleanly filtered out.
+1. **Fingerprint (<50ms)**: Instantly identifies primary/secondary languages, manifest files (`go.mod`, `package.json`, `Cargo.toml`, `pyproject.toml`), frameworks, and risk surface.
+2. **Negotiate (10ms)**: Matches registered probe manifests against the fingerprint. Irrelevant languages and missing host binaries are cleanly filtered out.
 3. **Execute (Targeted)**: Runs only the 2-3 most relevant, high-SNR probes concurrently, normalizing all findings into the 8 Deep-Water Defect categories.
+
+---
+
+## 📊 The 6-Dimension Integrated Probe Matrix
+
+| Dimension | Integrated Probes & Engines | Target Defect / Value |
+| :--- | :--- | :--- |
+| **1. AI-Native Review & Audit** | `ocr` (Alibaba OpenCodeReview), `piolium` (Vigolium 17-Phase), `seclab` (GitHub Security Lab), `pr-agent` (Qodo) | NPE & concurrency rules, autonomous PoC construction (P13), false positive verification (P10), multi-agent security taskflows. |
+| **2. AST & Taint Engines** | `semgrep` (SAST), `ast-grep` (Tree-sitter structural search), `codeql` (Inter-procedural taint queries) | Instant structural pattern search, SQLi, path traversal, ReDoS, crypto flaws. |
+| **3. Deep-Water Defect Probes** | • **Go**: `nilaway`, `goleak`, `bodyclose`, `noctx`<br>• **Rust**: `cargo-geiger`, `miri`, `cargo-deny`<br>• **Python**: `ruff` (B, ASYNC), `pyright`<br>• **TypeScript**: `knip`, `eslint-security` | Nil panics, goroutine leaks, unclosed HTTP bodies, context loss, unsafe pointer derefs, UB, type contract drift, dead exports. |
+| **4. Property & Fuzzing** | `property-fuzz` (`fast-check`, `hypothesis`, `proptest`, `testing/quick`) | Generates property test harnesses for extreme floats (NaN/-0.0/Inf), CRLF newlines, and boundary edge cases. |
+| **5. Git Hotspot Forensics** | `git-hotspot` (Code as a Crime Scene) | Computes `Commit Churn × Cyclomatic Complexity` to pinpoint the top 3-5 high-risk files in <100ms. |
+| **6. Supply Chain & CI** | `osv-scanner` (Google OSV), `workflow-linter` | Known CVE vulnerability audit and GitHub Actions workflow modernization. |
 
 ---
 
@@ -38,32 +51,38 @@ opencontrib probe run .
 opencontrib probe run /path/to/repo --min-score 85 --pretty
 ```
 
-### 3. `opencontrib plugin list`
-List all registered builtin and custom probe plugins with their language targets, manifest triggers, and binary requirements:
+### 3. `opencontrib probe hotspot [target]`
+Run Code as a Crime Scene Git churn and cyclomatic complexity hotspot analysis:
+
+```bash
+opencontrib probe hotspot . --limit 5 --pretty
+```
+
+### 4. `opencontrib probe fuzz [target]`
+Generate a property-based boundary fuzz test harness for the target repository's primary language:
+
+```bash
+opencontrib probe fuzz . --category numerical_bounds --pretty
+opencontrib probe fuzz . --category protocol_drift --function-name sanitizePath
+```
+
+### 5. `opencontrib plugin list`
+List all registered builtin and custom probe plugins:
 
 ```bash
 opencontrib plugin list --pretty
 ```
 
-### 4. `opencontrib plugin add <manifestFileOrJson>`
+### 6. `opencontrib plugin add <manifestFileOrJson>`
 Register a custom probe manifest to `~/.opencontrib/plugins/<name>.json`:
 
 ```bash
 opencontrib plugin add ./my-custom-probe.json
 ```
 
-### 5. `opencontrib plugin remove <name>`
-Remove a custom probe plugin:
-
-```bash
-opencontrib plugin remove my-custom-probe
-```
-
 ---
 
-## 📦 Creating a Custom Probe Manifest
-
-Save a JSON file with the following schema:
+## 📦 Custom Probe Manifest Example
 
 ```json
 {
@@ -83,26 +102,5 @@ Save a JSON file with the following schema:
     "command": "slither {target} --json -",
     "timeoutMs": 30000
   }
-}
-```
-
----
-
-## 📊 Normalized Finding Schema
-
-All probes output normalized findings mapped directly to OpenContrib's 8 Deep-Water Defect archetypes:
-
-```json
-{
-  "id": "nilaway-pkg_server-42",
-  "probeName": "nilaway",
-  "category": "lifecycle_leak",
-  "title": "Potential nil pointer dereference on user context",
-  "description": "Field 'UserContext' can be nil when unauthenticated request reaches handler.",
-  "file": "pkg/server/handler.go",
-  "line": 42,
-  "severity": "high",
-  "cwe": "CWE-476",
-  "prPotentialScore": 94
 }
 ```
