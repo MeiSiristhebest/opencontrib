@@ -146,7 +146,7 @@ Or manually add to your MCP client config:
 ### Capability: 18 Tools, 3 Resources, 1 Prompt
 
 | Category | MCP Tools | CLI Equivalents |
-|----------|-----------|----------------|
+| ---------- | ----------- | ---------------- |
 | **Run** | `contrib_create_run` `contrib_get_run` `contrib_resume_run` `contrib_save_artifact` | `run create` `run get` `run resume` `run save` |
 | **Discovery** | `contrib_scout` `contrib_rank_opportunity` `contrib_qualify_issue` `contrib_assess_feasibility` `contrib_diagnose_manifests` | `scout` `discovery rank` `discovery qualify` `discovery feasibility` `discovery manifests` |
 | **Context** | `contrib_assemble_context` | `discovery context` |
@@ -158,6 +158,36 @@ Or manually add to your MCP client config:
 Resources: `opencontrib://doctor` `opencontrib://memory` `opencontrib://runs`
 
 Prompt: `opencontrib_workflow_guide` — standard 9-phase execution protocol
+
+---
+
+## Agent Skill
+
+An agent skill (`skills/opencontrib-cli/`) is included for AI agents that support skill loading. The skill provides a quick-reference index, LLM invocation patterns, stdin/JSON templates, and the full 9-phase pipeline walkthrough.
+
+```
+skills/opencontrib-cli/
+├── SKILL.md                         # Trigger conditions + quick reference + LLM patterns
+└── references/
+    ├── discovery.md                  # scout · rank · qualify · feasibility · context · manifests
+    ├── workspace.md                  # prepare · purge
+    ├── evidence.md                   # dual-stage verification
+    ├── governance.md                 # audit · impact · ci-diagnose · pr-template
+    ├── flywheel.md                   # sync · pr-track · doctor
+    └── workflow.md                   # 9-phase pipeline orchestration
+```
+
+### Install
+
+Copy to your agent's skills directory:
+
+```bash
+# Pi / Claude Code skill directory
+mkdir -p ~/.agents/skills/opencontrib-cli
+cp -r skills/opencontrib-cli/* ~/.agents/skills/opencontrib-cli/
+```
+
+The skill's `description` field handles automatic triggering when the agent encounters prompts mentioning "opencontrib", "contrib_", or contribution-pipeline tasks.
 
 ---
 
