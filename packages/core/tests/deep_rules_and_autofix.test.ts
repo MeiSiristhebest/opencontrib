@@ -30,6 +30,22 @@ describe('Deep Relational Rules, Auto-Rewrites & Native Config Passthrough', () 
     expect(yamlStr).toContain('language: go');
     expect(yamlStr).toContain('pattern: "$RESP, $ERR := http.Get($URL)"');
     expect(yamlStr).toContain('fix:');
+
+    // Go Redis ZRange pagination trap rule
+    const redisRule = STANDARD_AST_RELATIONAL_RULES.find((r) => r.id === 'go-redis-zrange-order-trap');
+    expect(redisRule).toBeDefined();
+    expect(redisRule!.language).toBe('go');
+    expect(redisRule!.metadata?.category).toBe('protocol_drift');
+
+    // Go Mutex in loop rule
+    const mutexLoopRule = STANDARD_AST_RELATIONAL_RULES.find((r) => r.id === 'go-mutex-defer-in-loop');
+    expect(mutexLoopRule).toBeDefined();
+    expect(mutexLoopRule!.language).toBe('go');
+
+    // Go Typed nil error rule
+    const typedNilRule = STANDARD_AST_RELATIONAL_RULES.find((r) => r.id === 'go-typed-nil-error-trap');
+    expect(typedNilRule).toBeDefined();
+    expect(typedNilRule!.language).toBe('go');
   });
 
   it('detects native sgconfig.yml and passes configuration transparently', async () => {

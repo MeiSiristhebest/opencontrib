@@ -75,7 +75,72 @@ export const STANDARD_AST_RELATIONAL_RULES: ASTGrepYamlRule[] = [
       impact: 'Permanent deadlock if function panics or returns via early error branch',
     },
   },
-  // 3. TypeScript: Floating Point Direct Equality Comparison
+  // 3. Go: Redis ZRange Ascending Order Pagination Trap
+  {
+    id: 'go-redis-zrange-order-trap',
+    language: 'go',
+    severity: 'warning',
+    message: 'ZRangeByScore returns ascending elements. For Before-time pagination, use ZRevRangeByScore / Rev: true to preserve descending order.',
+    rule: {
+      pattern: '$CLIENT.ZRangeByScore($CTX, $KEY, $OPT)',
+    },
+    fix: '$CLIENT.ZRevRangeByScore($CTX, $KEY, $OPT)',
+    metadata: {
+      cwe: 'CWE-682',
+      category: 'protocol_drift',
+      impact: 'Pagination state order inverted breaking chronological cursor continuation',
+    },
+  },
+  // 4. Go: Mutex defer Unlock in loop body
+  {
+    id: 'go-mutex-defer-in-loop',
+    language: 'go',
+    severity: 'error',
+    message: 'defer Mutex.Unlock() inside loop body holds lock until enclosing function returns',
+    rule: {
+      pattern: 'defer $MU.Unlock()',
+      inside: {
+        pattern: 'for $COND { $$$ }',
+      },
+    },
+    metadata: {
+      cwe: 'CWE-667',
+      category: 'concurrency_race',
+      impact: 'Delayed mutex release causes severe lock contention or deadlock',
+    },
+  },
+  // 5. Go: Goroutine channel leak without context check
+  {
+    id: 'go-goroutine-leak-unbuffered-channel',
+    language: 'go',
+    severity: 'error',
+    message: 'Goroutine sending to unbuffered channel without context cancellation causes permanent goroutine leak',
+    rule: {
+      pattern: 'go func() { $CH <- $VAL }()',
+    },
+    metadata: {
+      cwe: 'CWE-400',
+      category: 'lifecycle_leak',
+      impact: 'Runaway goroutines accumulate on blocked channel writes',
+    },
+  },
+  // 6. Go: Typed Nil Interface Trap
+  {
+    id: 'go-typed-nil-error-trap',
+    language: 'go',
+    severity: 'error',
+    message: 'Returning a typed nil pointer as error interface evaluates to non-nil (err != nil is true)',
+    rule: {
+      pattern: 'var $ERR *$TYPE = nil; return $ERR',
+    },
+    fix: 'return nil',
+    metadata: {
+      cwe: 'CWE-252',
+      category: 'protocol_drift',
+      impact: 'Callers receive non-nil error interface holding nil concrete pointer',
+    },
+  },
+  // 7. TypeScript: Floating Point Direct Equality Comparison
   {
     id: 'ts-float-direct-equality',
     language: 'typescript',
@@ -91,7 +156,7 @@ export const STANDARD_AST_RELATIONAL_RULES: ASTGrepYamlRule[] = [
       impact: 'Subtle boundary condition failures in decimal and timeout calculations',
     },
   },
-  // 4. TypeScript: Promise without catch or error handling
+  // 8. TypeScript: Promise without catch or error handling
   {
     id: 'ts-unhandled-promise-catch',
     language: 'typescript',

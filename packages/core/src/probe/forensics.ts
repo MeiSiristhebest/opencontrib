@@ -51,20 +51,8 @@ export function analyzeGitHotspots(
         currentAuthor = trimmed.substring(7);
       } else {
         const filePath = trimmed;
-        // Ignore assets, tests, markdown, lockfiles, node_modules, build artifacts
-        if (
-          filePath.endsWith('.md') ||
-          filePath.endsWith('.png') ||
-          filePath.endsWith('.svg') ||
-          filePath.endsWith('.json') ||
-          filePath.endsWith('.lock') ||
-          filePath.includes('.git') ||
-          filePath.includes('node_modules') ||
-          filePath.includes('dist/') ||
-          filePath.includes('dist\\') ||
-          filePath.includes('build/') ||
-          filePath.includes('vendor/')
-        ) {
+        const normalizedPath = filePath.replace(/\\/g, '/');
+        if (!isEligibleSourceCodeFile(normalizedPath)) {
           continue;
         }
 
@@ -163,3 +151,94 @@ function estimateCyclomaticComplexity(content: string): number {
 
   return complexity;
 }
+
+/**
+ * Filter out non-code assets, binaries, documentation, test fixtures, and vendor directories.
+ * Ensures forensics and churn analysis only target genuine application source code.
+ */
+export function isEligibleSourceCodeFile(normalizedPath: string): boolean {
+  // 1. Excluded directory segments
+  const excludedDirs = [
+    '.resource/',
+    '.resources/',
+    'resource/',
+    'resources/',
+    'docs/',
+    'doc/',
+    'documentation/',
+    'assets/',
+    'images/',
+    'image/',
+    'img/',
+    'static/',
+    'public/',
+    'examples/',
+    'example/',
+    'samples/',
+    'demo/',
+    'fixtures/',
+    'testdata/',
+    'mocks/',
+    'vendor/',
+    'third_party/',
+    'node_modules/',
+    '.git/',
+    '.github/',
+    '.vscode/',
+    '.idea/',
+    'dist/',
+    'build/',
+    'out/',
+    'target/',
+    'bin/',
+    'coverage/',
+    '.cache/',
+    '.next/',
+    '.nuxt/',
+  ];
+
+  for (const dir of excludedDirs) {
+    if (normalizedPath.startsWith(dir) || normalizedPath.includes(`/${dir}`) || normalizedPath.includes(`\\${dir}`)) {
+      return false;
+    }
+  }
+
+  // 2. Excluded non-source extensions (assets, media, binaries, logs, locks, etc.)
+  const excludedExtensions = [
+    '.md', '.markdown', '.mdown',
+    '.gif', '.png', '.jpg', '.jpeg', '.webp', '.svg', '.ico', '.bmp', '.tiff', '.psd',
+    '.mp4', '.mov', '.avi', '.webm', '.mkv', '.mp3', '.wav', '.ogg',
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    '.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.rar',
+    '.wasm', '.exe', '.dll', '.dylib', '.so', '.bin', '.obj', '.o', '.a',
+    '.map', '.min.js', '.min.css', '.bundle.js',
+    '.ttf', '.woff', '.woff2', '.eot', '.otf',
+    '.lock', '.sum', '.json', '.csv', '.tsv', '.txt', '.log', '.env',
+    '.yaml', '.yml', '.xml', '.html', '.htm', '.css', '.scss', '.less',
+  ];
+
+  for (const ext of excludedExtensions) {
+    if (normalizedPath.toLowerCase().endsWith(ext)) {
+      return false;
+    }
+  }
+
+  // 3. Must have standard programming language extension
+  const validSourceExtensions = [
+    '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+    '.go',
+    '.rs',
+    '.py', '.pyi',
+    '.java', '.kt', '.kts', '.scala',
+    '.c', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.hxx',
+    '.cs',
+    '.rb',
+    '.php',
+    '.swift',
+    '.zig',
+    '.dart',
+  ];
+
+  return validSourceExtensions.some((ext) => normalizedPath.toLowerCase().endsWith(ext));
+}
+

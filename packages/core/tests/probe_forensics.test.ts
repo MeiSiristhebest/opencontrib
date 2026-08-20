@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   analyzeGitHotspots,
+  isEligibleSourceCodeFile,
   generatePropertyTest,
   constructPoCForFinding,
   verifyFindingAdversarially,
@@ -119,5 +120,22 @@ describe('Advanced Probes, Forensics & Adversarial Adapters', () => {
     expect(names).toContain('git-hotspot');
     expect(names).toContain('osv-scanner');
     expect(names).toContain('workflow-linter');
+  });
+
+  it('filters out non-code assets, binaries, docs, and gif/png media files in forensics', () => {
+    // Media files and asset paths MUST be rejected
+    expect(isEligibleSourceCodeFile('.resource/images/examples/agui-report.gif')).toBe(false);
+    expect(isEligibleSourceCodeFile('docs/assets/banner.png')).toBe(false);
+    expect(isEligibleSourceCodeFile('examples/web/app.jsx')).toBe(false);
+    expect(isEligibleSourceCodeFile('testdata/mock.json')).toBe(false);
+    expect(isEligibleSourceCodeFile('vendor/github.com/pkg/errors/errors.go')).toBe(false);
+    expect(isEligibleSourceCodeFile('README.md')).toBe(false);
+    expect(isEligibleSourceCodeFile('package-lock.json')).toBe(false);
+
+    // Genuine application source files MUST be accepted
+    expect(isEligibleSourceCodeFile('graph/checkpoint/redis/saver.go')).toBe(true);
+    expect(isEligibleSourceCodeFile('packages/core/src/probe/forensics.ts')).toBe(true);
+    expect(isEligibleSourceCodeFile('src/kernel/state_machine.rs')).toBe(true);
+    expect(isEligibleSourceCodeFile('server/handlers/auth.py')).toBe(true);
   });
 });
