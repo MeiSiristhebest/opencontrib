@@ -1,32 +1,50 @@
-import type { EventBusApi, RepoFingerprint, PointerStoreApi } from './contract.js';
+import type { EventBusApi, KernelEvent } from './contract.js';
 
-type EventHandler = (payload: any) => Promise<void> | void;
+type KernelEventHandler<T = any> = (event: KernelEvent<T>) => Promise<void> | void;
 
 export class MicrokernelEventBus implements EventBusApi {
-  private handlers = new Map<string, EventHandler[]>();
+  private handlers = new Map<string, KernelEventHandler[]>();
+  private eventHistory: KernelEvent[] = [];
+  private maxHistory = 100;
 
-  public on(event: 'repo:fingerprint', handler: (fp: RepoFingerprint) => Promise<void> | void): void;
-  public on(event: 'scout:opportunity', handler: (ctx: { target: string; pointers: PointerStoreApi }) => Promise<void> | void): void;
-  public on(event: 'evidence:verify', handler: (ctx: { findingUri: string; pointers: PointerStoreApi }) => Promise<void> | void): void;
-  public on(event: string, handler: EventHandler): void {
-    if (!this.handlers.has(event)) {
-      this.handlers.set(event, []);
+  public on<T = unknown>(eventType: string, handler: (event: KernelEvent<T>) => Promise<void> | void): void {
+    if (!this.handlers.has(eventType)) {
+      this.handlers.set(eventType, []);
     }
-    this.handlers.get(event)!.push(handler);
+    this.handlers.get(eventType)!.push(handler as KernelEventHandler);
   }
 
-  public async emit(event: string, payload: unknown): Promise<void> {
-    const list = this.handlers.get(event) || [];
+  public async emit<T = unknown>(eventType: string, payload: T, source = 'kernel'): Promise<void> {
+    const event: KernelEvent<T> = {
+      id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      type: eventType,
+      timestamp: new Date().toISOString(),
+      source,
+      traceId: `trace_${Math.random().toString(36).slice(2, 9)}`,
+      payload,
+    };
+
+    this.eventHistory.push(event);
+    if (this.eventHistory.length > this.maxHistory) {
+      this.eventHistory.shift();
+    }
+
+    const list = this.handlers.get(eventType) || [];
     for (const fn of list) {
       try {
-        await fn(payload);
-      } catch (err) {
-        console.error(`[EventBus] Error in handler for event '${event}':`, err);
+        await fn(event);
+      } catch (err: any) {
+        console.error(`[EventBus] Error in handler for event '${eventType}' from source '${source}':`, err.message);
       }
     }
   }
 
+  public getHistory(limit = 20): KernelEvent[] {
+    return this.eventHistory.slice(-limit);
+  }
+
   public clear(): void {
     this.handlers.clear();
+    this.eventHistory = [];
   }
 }

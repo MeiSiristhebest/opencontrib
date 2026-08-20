@@ -23,7 +23,7 @@ export const hotspotPlugin: OpenContribPlugin = {
             severity: h.riskLevel === 'critical' ? 'high' : 'medium',
             file: h.file,
             line: 1,
-            confidence: h.defectLikelihood,
+            confidence: h.riskScore,
             slice: {
               codeSnippet: `// File: ${h.file} (LOC: ${h.linesOfCode}, Complexity: ${h.cyclomaticComplexity})`,
               ruleExplanation: `File modified ${h.commitsCount} times recently with cyclomatic complexity ${h.cyclomaticComplexity}. High probability of race conditions or state desynchronization.`,

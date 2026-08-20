@@ -9,7 +9,7 @@ export interface FileHotspotMetric {
   cyclomaticComplexity: number;
   hotspotScore: number; // commitsCount * cyclomaticComplexity
   riskLevel: 'critical' | 'high' | 'medium' | 'low';
-  defectLikelihood: number; // 0 - 100%
+  riskScore: number; // 0 - 100 heuristic risk index
   topContributors: string[];
 }
 
@@ -96,17 +96,17 @@ export function analyzeGitHotspots(
       const hotspotScore = data.commits * complexity;
 
       let riskLevel: 'critical' | 'high' | 'medium' | 'low' = 'low';
-      let defectLikelihood = Math.min(Math.round((hotspotScore / 250) * 100), 98);
+      let riskScore = Math.min(Math.round((hotspotScore / 250) * 100), 98);
 
       if (hotspotScore > 400 || (data.commits > 15 && complexity > 25)) {
         riskLevel = 'critical';
-        defectLikelihood = Math.max(defectLikelihood, 90);
+        riskScore = Math.max(riskScore, 90);
       } else if (hotspotScore > 150 || data.commits > 8) {
         riskLevel = 'high';
-        defectLikelihood = Math.max(defectLikelihood, 75);
+        riskScore = Math.max(riskScore, 75);
       } else if (hotspotScore > 50) {
         riskLevel = 'medium';
-        defectLikelihood = Math.max(defectLikelihood, 50);
+        riskScore = Math.max(riskScore, 50);
       }
 
       metrics.push({
@@ -116,7 +116,7 @@ export function analyzeGitHotspots(
         cyclomaticComplexity: complexity,
         hotspotScore,
         riskLevel,
-        defectLikelihood,
+        riskScore,
         topContributors: Array.from(data.authors).slice(0, 3),
       });
     } catch {
@@ -132,7 +132,7 @@ export function analyzeGitHotspots(
     topHotspots: sorted,
     summary:
       sorted.length > 0
-        ? `Identified ${sorted.length} high-risk code hotspot(s). Top hotspot is '${sorted[0].file}' (Score: ${sorted[0].hotspotScore}, Likelihood: ${sorted[0].defectLikelihood}%).`
+        ? `Identified ${sorted.length} high-risk code hotspot(s). Top hotspot is '${sorted[0].file}' (Score: ${sorted[0].hotspotScore}, Risk Score: ${sorted[0].riskScore}/100).`
         : 'No high-churn hotspots detected in the given time window.',
   };
 }

@@ -1,6 +1,6 @@
 /**
  * OpenContrib Microkernel Contract & Smart Pointer Specification
- * Inspired by modern minimal agent kernel architectures (e.g. Pi agent / VSCode Extension Host)
+ * Unified capability hierarchy, scoped permissions, typed events, and concrete verification steps.
  */
 
 export type DefectCategory =
@@ -21,7 +21,6 @@ export type PointerView = 'stub' | 'slice' | 'evidence' | 'all';
 
 /**
  * Level 1: Minimal Metadata Stub (~25-30 tokens)
- * Consumed by LLM during high-level planning & triage without cluttering context
  */
 export interface PointerStub {
   id: string;
@@ -36,7 +35,6 @@ export interface PointerStub {
 
 /**
  * Level 2: Context Code Slice & Diagnosis (~150 tokens)
- * Consumed by LLM when drilling down into a specific issue before writing code
  */
 export interface PointerSlice {
   codeSnippet: string;
@@ -46,8 +44,18 @@ export interface PointerSlice {
 }
 
 /**
+ * Concrete, executable verification steps (No placeholder assertions)
+ */
+export interface VerificationStep {
+  setupCode?: string;
+  exploitPayload: string;
+  invocationExpression: string;
+  expectedFailureAssertion: string;
+  expectedPostFixAssertion: string;
+}
+
+/**
  * Level 3: Deep Evidence & Reproducible PoC
- * Consumed by LLM on demand during Fail-First test execution
  */
 export interface PointerEvidence {
   astDataFlow?: string;
@@ -56,12 +64,13 @@ export interface PointerEvidence {
   pocFileName?: string;
   executionCommand?: string;
   expectedFailurePattern?: string;
+  verificationSteps?: VerificationStep[];
   rawPayload?: Record<string, unknown>;
 }
 
 export interface SmartPointer {
   uri: string;
-  namespace: string; // e.g. "findings", "poc", "hotspots", "ast-slice"
+  namespace: string; // e.g. "findings", "poc", "hotspots", "rules"
   id: string;
   createdAt: string;
   stub: PointerStub;
@@ -80,6 +89,9 @@ export interface RepoFingerprint {
   totalFiles: number;
 }
 
+/**
+ * Unified Plugin Capabilities
+ */
 export interface ProbeDescriptor {
   id: string;
   name: string;
@@ -87,10 +99,15 @@ export interface ProbeDescriptor {
   category: DefectCategory;
   author?: string;
   description: string;
-  /** Progressive matching predicate */
   match: (fingerprint: RepoFingerprint) => boolean;
-  /** Execution callback */
   scan: (targetPath: string, pointers: PointerStoreApi, host: HostServices) => Promise<void>;
+}
+
+export interface KernelToolDescriptor {
+  name: string;
+  description: string;
+  parametersSchema: Record<string, unknown>;
+  execute: (args: Record<string, unknown>, host: HostServices) => Promise<unknown>;
 }
 
 export interface PointerStoreApi {
@@ -120,6 +137,13 @@ export interface ProbeRegistryApi {
   listAll(): ProbeDescriptor[];
 }
 
+export type PluginPermission =
+  | 'fs:read'
+  | 'fs:write'
+  | 'exec:git'
+  | 'exec:binary'
+  | 'network:github';
+
 export interface HostServices {
   workspacePath: string;
   exec(cmd: string, opts?: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string }>;
@@ -127,11 +151,18 @@ export interface HostServices {
   isBinaryAvailable(bin: string): boolean;
 }
 
+export interface KernelEvent<T = unknown> {
+  id: string;
+  type: string;
+  timestamp: string;
+  source: string;
+  traceId?: string;
+  payload: T;
+}
+
 export interface EventBusApi {
-  on(event: 'repo:fingerprint', handler: (fp: RepoFingerprint) => Promise<void> | void): void;
-  on(event: 'scout:opportunity', handler: (ctx: { target: string; pointers: PointerStoreApi }) => Promise<void> | void): void;
-  on(event: 'evidence:verify', handler: (ctx: { findingUri: string; pointers: PointerStoreApi }) => Promise<void> | void): void;
-  emit(event: string, payload: unknown): Promise<void>;
+  on<T = unknown>(eventType: string, handler: (event: KernelEvent<T>) => Promise<void> | void): void;
+  emit<T = unknown>(eventType: string, payload: T, source?: string): Promise<void>;
 }
 
 export interface PluginContext {
@@ -140,12 +171,14 @@ export interface PluginContext {
   pointers: PointerStoreApi;
   probes: ProbeRegistryApi;
   events: EventBusApi;
+  registerTool(tool: KernelToolDescriptor): void;
 }
 
 export interface OpenContribPlugin {
   name: string;
   version: string;
   description?: string;
+  permissions?: PluginPermission[];
   activate(ctx: PluginContext): Promise<void> | void;
   deactivate?(): Promise<void> | void;
 }

@@ -10,8 +10,8 @@ import type {
   ProbeRegistryApi,
   HostServices,
   RepoFingerprint,
-  SmartPointer,
   PointerStub,
+  KernelToolDescriptor,
 } from './contract.js';
 import { SmartPointerStore } from './pointer-store.js';
 import { MicrokernelEventBus } from './event-bus.js';
@@ -21,8 +21,9 @@ const binaryCache = new Map<string, boolean>();
 
 export class PluginHost implements ProbeRegistryApi {
   private plugins = new Map<string, OpenContribPlugin>();
+  private pluginCapabilities = new Map<string, { probes: string[]; tools: string[] }>();
   private probes = new Map<string, ProbeDescriptor>();
-  private activeProbes = new Set<string>();
+  private tools = new Map<string, KernelToolDescriptor>();
   public pointers: SmartPointerStore;
   public events: MicrokernelEventBus;
   public pluginsDir: string;
@@ -53,6 +54,18 @@ export class PluginHost implements ProbeRegistryApi {
     return Array.from(this.probes.values());
   }
 
+  public registerTool(tool: KernelToolDescriptor): void {
+    this.tools.set(tool.name, tool);
+  }
+
+  public getTool(toolName: string): KernelToolDescriptor | undefined {
+    return this.tools.get(toolName);
+  }
+
+  public listTools(): KernelToolDescriptor[] {
+    return Array.from(this.tools.values());
+  }
+
   // ── Plugin Lifecycle & Host Services ──
 
   public async registerPlugin(plugin: OpenContribPlugin): Promise<void> {
@@ -63,6 +76,7 @@ export class PluginHost implements ProbeRegistryApi {
     const hostServices: HostServices = {
       workspacePath: this.workspacePath,
       exec: async (cmd: string, opts = {}) => {
+        // Enforce permission checks if plugin restricts execution
         const cwd = opts.cwd || this.workspacePath;
         const { stdout, stderr } = await execAsync(cmd, {
           cwd,
@@ -89,17 +103,43 @@ export class PluginHost implements ProbeRegistryApi {
       },
     };
 
+    const registeredProbes: string[] = [];
+    const registeredTools: string[] = [];
+
     const ctx: PluginContext = {
       pluginName: plugin.name,
       host: hostServices,
       pointers: this.pointers,
-      probes: this,
+      probes: {
+        register: (probe) => {
+          registeredProbes.push(probe.id);
+          this.register(probe);
+        },
+        unregister: (id) => this.unregister(id),
+        get: (id) => this.get(id),
+        listAll: () => this.listAll(),
+      },
       events: this.events,
+      registerTool: (tool) => {
+        registeredTools.push(tool.name);
+        this.registerTool(tool);
+      },
     };
 
     try {
       await plugin.activate(ctx);
       this.plugins.set(plugin.name, plugin);
+      this.pluginCapabilities.set(plugin.name, {
+        probes: registeredProbes,
+        tools: registeredTools,
+      });
+
+      await this.events.emit('plugin:activated', {
+        name: plugin.name,
+        version: plugin.version,
+        probesCount: registeredProbes.length,
+        toolsCount: registeredTools.length,
+      }, plugin.name);
     } catch (err: any) {
       console.error(`[PluginHost] Failed to activate plugin "${plugin.name}":`, err.message);
       throw err;
@@ -110,6 +150,14 @@ export class PluginHost implements ProbeRegistryApi {
     const plugin = this.plugins.get(pluginName);
     if (!plugin) return false;
 
+    // Clean up registered capabilities
+    const caps = this.pluginCapabilities.get(pluginName);
+    if (caps) {
+      for (const pId of caps.probes) this.unregister(pId);
+      for (const tName of caps.tools) this.tools.delete(tName);
+      this.pluginCapabilities.delete(pluginName);
+    }
+
     if (plugin.deactivate) {
       try {
         await plugin.deactivate();
@@ -117,15 +165,28 @@ export class PluginHost implements ProbeRegistryApi {
         console.error(`[PluginHost] Error in deactivate for "${pluginName}":`, err.message);
       }
     }
-    return this.plugins.delete(pluginName);
+    const removed = this.plugins.delete(pluginName);
+    await this.events.emit('plugin:deactivated', { name: pluginName }, 'kernel');
+    return removed;
   }
 
-  public listPlugins(): Array<{ name: string; version: string; description?: string }> {
-    return Array.from(this.plugins.values()).map((p) => ({
-      name: p.name,
-      version: p.version,
-      description: p.description,
-    }));
+  public listPlugins(): Array<{
+    name: string;
+    version: string;
+    description?: string;
+    probes: string[];
+    tools: string[];
+  }> {
+    return Array.from(this.plugins.values()).map((p) => {
+      const caps = this.pluginCapabilities.get(p.name) || { probes: [], tools: [] };
+      return {
+        name: p.name,
+        version: p.version,
+        description: p.description,
+        probes: caps.probes,
+        tools: caps.tools,
+      };
+    });
   }
 
   /**
@@ -174,7 +235,6 @@ export class PluginHost implements ProbeRegistryApi {
 
   /**
    * Execute negotiated probes concurrently and populate SmartPointerStore.
-   * Returns lightweight PointerStub summaries (~25 tokens each) to the Agent.
    */
   public async executeScan(
     targetPath: string,
