@@ -45,6 +45,30 @@ export class PluginHost implements ProbeRegistryApi {
 
   // ── ProbeRegistryApi Implementation ──
 
+  public isBinaryAvailable(bin: string): boolean {
+    if (binaryCache.has(bin)) return binaryCache.get(bin)!;
+    try {
+      const isWindows = process.platform === 'win32';
+      const checkCmd = isWindows ? `where.exe ${bin}` : `which ${bin}`;
+      execSync(checkCmd, { stdio: 'ignore' });
+      binaryCache.set(bin, true);
+      return true;
+    } catch {
+      binaryCache.set(bin, false);
+      return false;
+    }
+  }
+
+  public async exec(cmd: string, opts: { cwd?: string; timeout?: number } = {}): Promise<{ stdout: string; stderr: string }> {
+    const cwd = opts.cwd || this.workspacePath;
+    const { stdout, stderr } = await execAsync(cmd, {
+      cwd,
+      timeout: opts.timeout || 30000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return { stdout, stderr };
+  }
+
   public register(probe: ProbeDescriptor): void {
     this.probes.set(probe.id, probe);
   }

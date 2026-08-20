@@ -15,3 +15,7 @@ export * from './sandbox/index.js';
 export * from './run/index.js';
 export * from './storage/index.js';
 export * from './risk/index.js';
+export * from './bundle/index.js';
+export * from './testing/index.js';
+export * from './forensics/index.js';
+export * from './taskflow/index.js';
