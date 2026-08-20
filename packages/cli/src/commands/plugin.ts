@@ -1,35 +1,31 @@
 import { Command } from 'commander';
-import * as fs from 'fs';
-import { ProbeRegistry, type ProbeManifest } from '@opencontrib/core';
+import { createDefaultPluginHost } from '@opencontrib/core';
 import { printJSON } from '../utils/output.js';
 
 export const pluginCommand = new Command('plugin')
-  .description('Manage OpenContrib probe plugins, custom scanners, and external SAST adapters');
+  .description('Manage OpenContrib microkernel plugins, probe extensions, and SAST adapters');
 
 pluginCommand
   .command('list')
-  .description('List all registered builtin and custom probe plugins')
+  .description('List all active plugins and probes in the microkernel')
   .option('--pretty', 'Pretty-print JSON output', false)
-  .action((opts) => {
+  .action(async (opts) => {
     try {
-      const registry = new ProbeRegistry();
-      const plugins = registry.listAll();
+      const host = await createDefaultPluginHost();
+      const plugins = host.listPlugins();
+      const probes = host.listAll();
 
       printJSON(
         {
           status: 'success',
-          count: plugins.length,
-          plugins: plugins.map((p) => ({
+          pluginsCount: plugins.length,
+          probesCount: probes.length,
+          plugins,
+          probes: probes.map((p) => ({
+            id: p.id,
             name: p.name,
-            version: p.version,
-            description: p.description,
             category: p.category,
-            author: p.author || 'community',
-            languages: p.activation.languages,
-            manifests: p.activation.manifestFiles || [],
-            requiresBinaries: p.activation.requiresBinaries || [],
-            cost: p.execution.cost,
-            stage: p.execution.stage,
+            description: p.description,
           })),
         },
         opts.pretty,
@@ -41,59 +37,33 @@ pluginCommand
   });
 
 pluginCommand
-  .command('add <manifestFileOrJson>')
-  .description('Register a new custom probe plugin manifest')
+  .command('info <probeId>')
+  .description('Get detailed information for a specific active probe')
   .option('--pretty', 'Pretty-print JSON output', false)
-  .action((input, opts) => {
+  .action(async (probeId, opts) => {
     try {
-      let manifest: ProbeManifest;
-      if (fs.existsSync(input)) {
-        const content = fs.readFileSync(input, 'utf8');
-        manifest = JSON.parse(content);
-      } else {
-        manifest = JSON.parse(input);
-      }
+      const host = await createDefaultPluginHost();
+      const probe = host.get(probeId);
 
-      const registry = new ProbeRegistry();
-      registry.saveToDisk(manifest);
-
-      printJSON(
-        {
-          status: 'success',
-          message: `Probe plugin "${manifest.name}" registered successfully.`,
-          manifest,
-        },
-        opts.pretty,
-      );
-    } catch (err: any) {
-      console.error(`❌ Failed to add plugin: ${err.message}`);
-      process.exit(1);
-    }
-  });
-
-pluginCommand
-  .command('remove <name>')
-  .description('Remove a custom probe plugin by name')
-  .option('--pretty', 'Pretty-print JSON output', false)
-  .action((name, opts) => {
-    try {
-      const registry = new ProbeRegistry();
-      const removed = registry.unregister(name);
-
-      if (!removed) {
-        console.error(`❌ Cannot remove builtin probe or probe not found: "${name}"`);
+      if (!probe) {
+        console.error(`❌ Probe not found: "${probeId}"`);
         process.exit(1);
       }
 
       printJSON(
         {
           status: 'success',
-          message: `Probe plugin "${name}" removed successfully.`,
+          probe: {
+            id: probe.id,
+            name: probe.name,
+            category: probe.category,
+            description: probe.description,
+          },
         },
         opts.pretty,
       );
     } catch (err: any) {
-      console.error(`❌ Failed to remove plugin: ${err.message}`);
+      console.error(`❌ Failed to get probe info: ${err.message}`);
       process.exit(1);
     }
   });

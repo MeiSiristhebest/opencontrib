@@ -1,4 +1,6 @@
 export * from './contracts/index.js';
+export * from './kernel/index.js';
+export * from './plugins/index.js';
 export * from './discovery/index.js';
 export * from './probe/index.js';
 export * from './workspace/index.js';
@@ -13,6 +15,3 @@ export * from './sandbox/index.js';
 export * from './run/index.js';
 export * from './storage/index.js';
 export * from './risk/index.js';
-
-
-
