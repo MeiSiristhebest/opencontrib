@@ -1,209 +1,75 @@
 ---
 name: opencontrib-cli
-description: |
-  Use the `opencontrib` CLI to execute the industrial-grade, 9-phase OpenContrib contribution engine.
-  Activate when the user asks to scout, assess, develop, verify, audit, or submit open source contributions/PRs using the OpenContrib CLI.
-  Enforces a strict Phase-Gated State Machine with Interactive User Approvals: Environment Doctor → Opportunity Scouting & Qualification (8 Deep-Water Defect Types) [PAUSE FOR APPROVAL] → Context Assembly → Worktree Sandbox Isolation (strictly within active workspace directory) → Dual-Stage Empirical Evidence Verification (Fail-First & Stress Loop) [PAUSE FOR APPROVAL] → Governance Audit (<=100-line Gate & Anti-AI Fluff) → Subagent Code Review → PR Template Rendering [PAUSE BEFORE PUSH] → Flywheel Persistence.
+description: Use the `opencontrib` CLI to execute the 9-phase open source contribution engine. Activate when the user asks to find, develop, verify, or submit contributions/PRs to open source repositories using the OpenContrib CLI. This skill enforces a strict phase-gated workflow with mandatory user approval at key checkpoints — use it any time the user says "contribute to", "find a bug in", "submit a PR to", or "use opencontrib" for any open source project.
 ---
 
-# OpenContrib CLI — Phase-Gated Contribution Protocol
+# OpenContrib CLI
 
-> **Core Philosophy**: Open source contribution is an interactive, step-by-step engineering journey — NOT a runaway autonomous black-box script.
->
-> This skill enforces a **strict Phase-Gated State Machine with Mandatory Human Checkpoints**. You MUST pause and obtain user confirmation at critical milestones before proceeding to the next stage. Never rush through all phases in a single turn.
+OpenContrib is a 9-phase contribution engine that takes you from "find something to fix" all the way to "PR merged". The workflow is deliberately interactive: you stop at three checkpoints to get the user's eyes on things before moving forward. This matters because open source contribution is a judgment-intensive process — the maintainer relationship, the scope of the fix, and the framing of the PR all require human decisions that automation alone cannot make well.
+
+Read `references/workflow.md` for the full phase-by-phase CLI reference. This document covers the principles, the checkpoint protocol, and the defect targeting strategy.
 
 ---
 
-## 💎 Core Governance & Engineering Rules (核心工程准则)
+## The Three Checkpoints
 
-### 📁 Rule 0: Active Workspace Colocation Policy (工作区目录强制就地对齐)
-- **Universal Rule**: Target repositories, clones, and isolated worktrees MUST be created **directly inside the user's active workspace directory** (e.g. `<workspace_root>/<repo_name>` or `<workspace_root>/.workspaces/<repo_name>`).
-- **Strictly Banned**: NEVER clone or checkout repositories into `C:\Users\...\AppData\Local\Temp` or hidden OS temporary paths.
-- **Rationale**: Keeps project files visible in the user's IDE file explorer, allows one-click file navigation, and prevents disk pollution.
+These are non-negotiable pauses. At each one, present findings clearly and wait for explicit approval before continuing. The goal is to keep the user informed and in control at every decision point that matters.
 
-### 🚨 Rule 1: Repository Convention Absolute Priority (仓库规范优先)
-- ALWAYS prioritize the target repository's established style guides, commit conventions, PR templates, and workflow rules.
-- If a repo requires specific ticket prefixes, custom PR section headers, DCO trailers, or mandatory issue linking formats, enforce them strictly over defaults.
+**Checkpoint 1 — After scouting:** Show the top candidate issues with their defect category, rationale, and score. Ask the user to pick one. Do not prepare a workspace or clone anything until they confirm.
 
-### 🤫 Rule 2: Zero AI Disclosure by Default (默认隐藏 AI 痕迹)
-- **Default Policy**: **DO NOT include any AI badges, LLM disclaimers, or assistant chatter** in PR descriptions or commit messages. Explicit AI mentions trigger maintainer bias and lead to immediate PR rejection.
-- **Exception Policy**: Include AI disclosure **ONLY if the target repository's official documentation (`CONTRIBUTING.md`, `GOVERNANCE.md`, `SECURITY.md`, or PR template) explicitly mandates it**.
+**Checkpoint 2 — After reproducing the bug:** Show the actual failing test output that proves the bug exists. Then present a concise implementation plan (the proposed fix in ≤100 lines). Wait for approval before touching any source files.
 
-### 🛡️ Rule 3: 100-Line Size Gate & RFC Defense (100 行规模红线)
-- Proposed code changes MUST NOT exceed **100 lines** (excluding tests).
-- If an architectural change or public API modification is required, STOP and advise the user to submit an **RFC / Discussion Issue** first.
-
-### 🚫 Rule 4: Anti-Farming & Low-SNR Ban (坚决杜绝低信噪比刷分)
-- **Strictly Banned**: Typo fixes, whitespace tweaks, formatting rewrites, docstring rephrasing, or Awesome list submissions. These trigger anti-farming algorithm alarms and maintainer hostility.
-
-### 🌊 Rule 5: Focus on the 8 Deep-Water Defect Archetypes (八大深水区高价值缺陷全景图谱)
-Target issues matching these 8 high-signal categories:
-1. **Protocol & Serialization Drift (协议与序列化契约漂移)**: Zero-Value in `omitempty` erased causing downstream default value penetration; HTTP/2 header casing; SSE keepalive and half-closed connections.
-2. **Lifecycle, Watcher & Resource Leaks (生命周期与资源泄露)**: Registry watcher reconnect loop doubling listeners; Context Cancellation unpropagated causing orphan goroutines; unclosed fd / socket handle leaks (`lsof`).
-3. **Distributed Cache & Consistency (分布式缓存与时序一致性)**: Falsy value cache bypass in short cache; out-of-order dual write cache stampede; retry mechanisms breaking idempotency.
-4. **Memory Layout & Underlying ABI (内存布局与底层 ABI)**: Non-contiguous / strided tensor (`permute`/`transpose`) passed to C++/CUDA kernel causing Segfault; FFI cross-language dangling pointers.
-5. **Performance Collapse & Backpressure Loss (性能坍塌与反压失效)**: Catastrophic regex backtracking (ReDoS) hanging CPU at 100%; missing Full Jitter exponential backoff causing thundering herds; unbounded queues causing OOM.
-6. **Time Monotonicity & Chrono Hazards (时间单调性与时钟回拨)**: Wall Clock elapsed time calculation yielding negative values under NTP sync; DST / leap second skipping scheduled tasks.
-7. **Compiler / JIT Escape Analysis Invariants (逃逸分析与 GC 停顿)**: Hot-path dynamic interface assertions breaking escape analysis causing heap allocation explosions and GC STW spikes.
-8. **Numerical Bounds & Cross-Platform Invariants (数值边界与跨平台破坏)**: `NaN`/`+Inf` and negative timeout values causing scheduler lockup; Windows/Linux CRLF breaking patch parsers; `filepath.ToSlash` cross-platform path traversal vulnerabilities.
+**Checkpoint 3 — Before submitting:** Show the complete diff, the governance audit result, and the rendered PR description. Only push and create the PR after explicit confirmation.
 
 ---
 
-## 🚦 Mandatory Human-in-the-Loop Checkpoints (三大强制人机交互暂停点)
+## Defect Targeting
 
-You MUST pause execution and interact with the user at these 3 checkpoints:
+The contribution engine is designed for bugs that are genuinely hard to spot — the kind that have lurked in codebases for months because they only surface under specific conditions. Chasing these produces higher-quality PRs that maintainers actually want, versus surface-level changes that signal noise.
 
-| Checkpoint | When to Pause | What to Present to the User | Action After Approval |
-| :--- | :--- | :--- | :--- |
-| **Checkpoint 1** | After Phase 2 (Scout & Rank) | Top opportunity candidates, defect category (from the 8 archetypes), score, and technical rationale. | Prepare worktree sandbox in active workspace directory and assemble context. |
-| **Checkpoint 2** | After Phase 5 (Fail-First Evidence) | The exact failing test output (red error trace) proving the bug exists, plus proposed minimal fix design in `implementation_plan.md`. | Implement code patch and run stress verification loop. |
-| **Checkpoint 3** | Before Phase 8 (PR Submission) | Complete Git Diff (<=100 lines), Governance Audit results, Subagent review summary, and rendered PR description. | Push branch and create upstream GitHub PR. |
+When evaluating candidates, score them against these eight defect archetypes. Issues that match one or more of these are worth pursuing:
 
----
+1. **Protocol and serialization drift** — Encoding mismatches that are invisible until a client or downstream service interprets the data differently. Examples: `omitempty` dropping zero-value fields; HTTP/2 header casing; SSE connection state not tracked.
 
-## 🔄 9-Phase Step-by-Step Execution Protocol
+2. **Lifecycle and resource leaks** — Handles, goroutines, file descriptors, or event listeners that are opened but never closed. These compound over time and typically only appear in long-running production environments.
 
-### 🔹 Stage I: Opportunity Discovery & Alignment
+3. **Distributed cache consistency** — Race conditions where two concurrent writers produce inconsistent state, or where a cache miss cascade causes a thundering herd. Falsy-value bypasses (treating a cached `false` or `0` as a miss) are a classic example.
 
-#### Phase 1: Environment Health & Run Session Init
-```bash
-# Verify host environment
-opencontrib doctor
+4. **Memory layout and ABI boundaries** — Non-contiguous tensor layouts passed across a language boundary (e.g., a `permute()`d tensor fed to a CUDA kernel expecting contiguous memory); FFI dangling pointers; struct alignment assumptions.
 
-# Initialize run session
-opencontrib run create \
-  --repo <owner/repo> \
-  --issue <issue_number> \
-  --title "<issue_title>" \
-  --tags "bugfix,deep-water"
-```
+5. **Performance collapse and backpressure** — Unbounded queues that cause OOM under load; missing exponential backoff causing thundering herds on retry; catastrophic regex backtracking (ReDoS) that pins CPU at 100%.
 
-#### Phase 2: Opportunity Scouting & 8-Defect Ranking
-```bash
-# 1. Scout candidate opportunities
-opencontrib scout <owner/repo> --limit 10
+6. **Time monotonicity** — Code that uses wall-clock time for elapsed duration, which goes negative during NTP sync or DST changes; cron schedulers that skip or double-fire around daylight saving transitions.
 
-# 2. Author-first-right & anti-bandwagoning check
-printf '{"issue":{"number":<num>,"title":"<title>","comments_count":<c>,"labels":[]}}' | \
-  opencontrib discovery qualify
+7. **Escape analysis and GC pressure** — Hot-path interface assertions or closures that cause values to escape to the heap, turning what should be stack allocations into GC pressure and stop-the-world pauses.
 
-# 3. 8-Dimension deep-water probability ranking
-opencontrib discovery rank --input '{"issue":{"number":<num>,"title":"<title>","body":"..."}}'
-```
+8. **Numerical and cross-platform bounds** — `NaN`/`+Inf` values in timeout or retry calculations; path separator assumptions (`\` vs `/`) that break on Windows; CRLF/LF mismatches in patch parsers.
 
-🛑 **STOP & PAUSE (Checkpoint 1)**:
-Present the top opportunity candidates to the user with defect taxonomy, root cause hypothesis, and feasibility score. **Wait for the user to confirm the target issue before touching code or creating workspaces.**
+Avoid issues that are primarily cosmetic: typos, whitespace, comment rewrites, or README additions. These rarely get merged and signal to maintainers that you're not reading the code carefully.
 
 ---
 
-### 🔹 Stage II: Sandbox Isolation & Dual-Stage Evidence
+## PR Governance Rules
 
-#### Phase 3: Context Assembly & Manifest Diagnosis
-```bash
-# Assemble problem context and test targets
-opencontrib discovery context --input '{"repo":"<owner/repo>","issueNumber":<num>,"issueTitle":"...","issueBody":"..."}'
+These constraints protect the PR's chances of being accepted.
 
-# Diagnose repo manifests for <=100-line improvements
-opencontrib discovery manifests --repo-path <path_to_repo>
-```
+**Size limit:** Keep diffs under 100 lines of production code (tests excluded). Larger changes require architectural discussion first — suggest the user open a Discussion or RFC issue instead.
 
-#### Phase 4: Worktree Sandbox Isolation (In Active Workspace)
-**CLONE/WORKTREE DIRECTLY IN ACTIVE WORKSPACE DIRECTORY** (e.g. `./<repo_name>` or `./.workspaces/<repo_name>`):
-```bash
-opencontrib workspace prepare \
-  --repo <owner/repo> \
-  --issue <issue_number> \
-  --dest "<active_workspace_dir>/<repo_name>" \
-  --run-id "$RUN_ID"
-# → Sets $WORKSPACE_PATH inside current workspace
-```
+**AI disclosure:** Do not include AI-generated badges, disclaimers, or any language that signals the patch was produced by a tool. Most maintainers react negatively to this. The only exception is if the repository's `CONTRIBUTING.md` or PR template explicitly asks for it.
 
-#### Phase 5: Pre-Fix Fail-First Baseline Evidence
-You MUST reproduce the bug and show a failing test BEFORE writing any fix:
-```bash
-# Execute pre-fix test assertion: MUST fail cleanly
-opencontrib evidence \
-  --cwd "$WORKSPACE_PATH" \
-  --test-cmd "<test_command>" \
-  --assertion "<expected_failure_trace>" \
-  --run-id "$RUN_ID"
-```
+**Respect conventions:** Match the repository's existing commit format, branch naming, PR section headers, and any required trailers (DCO sign-off, changelog entries, etc.). Check `CONTRIBUTING.md` first.
 
-🛑 **STOP & PAUSE (Checkpoint 2)**:
-Present the failing test output to the user. Create/update `implementation_plan.md` with minimal patch design (<=100 lines). **Wait for user approval before writing fix code.**
+**Workspace location:** Clone and create worktrees directly inside the user's active workspace directory (e.g., alongside other projects they have open). Never write to system temp directories — files there are invisible in the IDE and hard to inspect.
 
 ---
 
-### 🔹 Stage III: Implementation, Verification & Audit
+## CLI Reference
 
-#### Phase 6: Code Implementation & Post-Fix Stress Loop
-1. Implement minimal, surgical changes in `$WORKSPACE_PATH` (strictly <= 100 lines).
-2. Verify deterministic 100% pass rate with a 20-cycle stress loop:
-```bash
-opencontrib evidence \
-  --cwd "$WORKSPACE_PATH" \
-  --test-cmd "<test_command>" \
-  --stress-loop 20 \
-  --run-id "$RUN_ID"
-```
+For full flag documentation and piping examples for each command, read the appropriate reference file when you reach that phase:
 
-#### Phase 7: Governance Audit & Independent Review
-```bash
-# 1. Run strict governance & size audit
-git -C "$WORKSPACE_PATH" diff | \
-  opencontrib governance audit \
-    --patch /dev/stdin \
-    --pr-title "<proposed_pr_title>" \
-    --pr-body "<proposed_pr_body>"
-
-# 2. Analyze impact surface
-opencontrib governance impact \
-  --cwd "$WORKSPACE_PATH" \
-  --modified-files "<comma_separated_files>"
-
-# 3. Simulate CI diagnosis
-opencontrib governance ci-diagnose --log-file <path_to_test_log>
-```
-
-🛑 **STOP & PAUSE (Checkpoint 3)**:
-Present the full Git Diff, Governance Audit score, and rendered PR description to the user. **Ask for explicit confirmation before pushing or submitting.**
-
----
-
-### 🔹 Stage IV: PR Submission & Flywheel
-
-#### Phase 8: PR Template Rendering & Submission
-```bash
-# 1. Render maintainer-friendly PR description (no AI fluff)
-opencontrib governance pr-template \
-  --issue <issue_number> \
-  --issue-title "<issue_title>" \
-  --summary "<concise_technical_summary>" \
-  --validation-cmd "<test_command>" \
-  --validation-output "20/20 stress tests passed, 0 flakes" \
-  --key-changes "<change_1>,<change_2>" \
-  | jq -r '.prBody' > pr_body.md
-
-# 2. Push branch and create PR
-git -C "$WORKSPACE_PATH" checkout -b fix/<short_issue_topic>
-git -C "$WORKSPACE_PATH" add <files>
-git -C "$WORKSPACE_PATH" commit -m "fix(<scope>): <concise_description> (#<issue_number>)"
-git -C "$WORKSPACE_PATH" push -u origin fix/<short_issue_topic>
-
-gh pr create \
-  --repo <owner/repo> \
-  --title "fix(<scope>): <concise_description> (#<issue_number>)" \
-  --body-file pr_body.md \
-  --head fix/<short_issue_topic>
-```
-
-#### Phase 9: Profile Flywheel Persistence
-```bash
-# Record contribution to local ledger
-opencontrib flywheel sync \
-  --run-id "$RUN_ID" \
-  --pr-url "<pr_html_url>"
-
-# Track PR lifecycle status
-opencontrib flywheel pr-track --repo <owner/repo> --pr-number <pr_number>
-```
+- `references/discovery.md` — `scout`, `discovery rank/qualify/context/manifests/feasibility`
+- `references/workspace.md` — `workspace prepare`, run creation
+- `references/evidence.md` — `evidence`, fail-first and stress-loop modes
+- `references/governance.md` — `governance audit/impact/ci-diagnose/pr-template`
+- `references/flywheel.md` — `flywheel sync`, `flywheel pr-track`
+- `references/workflow.md` — Full 9-phase walkthrough with example commands
