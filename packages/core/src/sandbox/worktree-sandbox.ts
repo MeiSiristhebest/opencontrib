@@ -1,4 +1,4 @@
-import { execSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -34,12 +34,12 @@ export class WorktreeSandbox {
     const base = options.baseCommit || 'HEAD';
 
     try {
-      execSync(`git worktree add -b ${this.branchName} "${this.sandboxPath}" ${base}`, {
+      execFileSync('git', ['worktree', 'add', '-b', this.branchName, this.sandboxPath, base], {
         cwd: this.repoPath,
         stdio: 'pipe',
         encoding: 'utf8',
       });
-    } catch (err: any) {
+    } catch {
       // Fallback: if not a full git repo or detached, create standalone directory copy
       if (!fs.existsSync(this.sandboxPath)) {
         fs.mkdirSync(this.sandboxPath, { recursive: true });
@@ -107,8 +107,8 @@ export class WorktreeSandbox {
    */
   public commit(message: string): boolean {
     try {
-      execSync('git add -A', { cwd: this.sandboxPath, stdio: 'pipe' });
-      execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
+      execFileSync('git', ['add', '-A'], { cwd: this.sandboxPath, stdio: 'pipe' });
+      execFileSync('git', ['commit', '-m', message], {
         cwd: this.sandboxPath,
         stdio: 'pipe',
       });
@@ -119,30 +119,37 @@ export class WorktreeSandbox {
   }
 
   /**
-   * Destroys the worktree and cleans up the temporary branch
+   * Cleans up the ephemeral worktree and deletes the sandbox branch
    */
   public cleanup(): void {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
 
     try {
-      execSync(`git worktree remove --force "${this.sandboxPath}"`, {
-        cwd: this.repoPath,
-        stdio: 'ignore',
-      });
-      execSync(`git branch -D ${this.branchName}`, {
+      if (fs.existsSync(this.sandboxPath)) {
+        execFileSync('git', ['worktree', 'remove', '--force', this.sandboxPath], {
+          cwd: this.repoPath,
+          stdio: 'ignore',
+        });
+      }
+    } catch {
+      // If git worktree cleanup fails, remove directory manually
+      try {
+        if (fs.existsSync(this.sandboxPath)) {
+          fs.rmSync(this.sandboxPath, { recursive: true, force: true });
+        }
+      } catch {
+        // Handled
+      }
+    }
+
+    try {
+      execFileSync('git', ['branch', '-D', this.branchName], {
         cwd: this.repoPath,
         stdio: 'ignore',
       });
     } catch {
-      // If git worktree cleanup fails, remove directory manually
-      if (fs.existsSync(this.sandboxPath)) {
-        try {
-          fs.rmSync(this.sandboxPath, { recursive: true, force: true });
-        } catch {
-          // Handled
-        }
-      }
+      // Handled
     }
   }
 
