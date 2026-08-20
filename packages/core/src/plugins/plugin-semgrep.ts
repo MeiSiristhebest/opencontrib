@@ -16,6 +16,7 @@ export interface SemgrepResultItem {
       category?: string;
       impact?: string;
       likelihood?: string;
+      source?: string;
     };
     severity: 'ERROR' | 'WARNING' | 'INFO';
     lines: string;
@@ -34,20 +35,35 @@ export interface SemgrepOutput {
 }
 
 /**
+ * Standard Multi-Sourced Semgrep Rule Packs:
+ * 1. OWASP Foundation Top 10 (p/owasp-top-ten)
+ * 2. MITRE CWE Top 25 Most Dangerous Weaknesses (p/cwe-top-25)
+ * 3. Trail of Bits Security Audit Pack (p/trailofbits)
+ * 4. Semgrep Official Security Audit & Secrets (p/security-audit, p/secrets)
+ */
+export const MULTI_SOURCE_SEMGREP_PACKS = [
+  '--config p/owasp-top-ten',
+  '--config p/cwe-top-25',
+  '--config p/trailofbits',
+  '--config p/security-audit',
+  '--config p/secrets',
+];
+
+/**
  * Semgrep Universal SAST & Taint Analysis Adapter
- * Supports project-native `.semgrep.yml` configuration passthrough and official OWASP Top 10 / Security-Audit rule packs.
+ * Combines multi-sourced authoritative security rulepacks (OWASP, MITRE, Trail of Bits) with project native configs.
  */
 export const semgrepPlugin: OpenContribPlugin = {
   name: '@opencontrib/plugin-semgrep',
   version: '1.0.0',
-  description: 'Semgrep multi-language semantic SAST and taint tracking scanner with config passthrough',
+  description: 'Semgrep multi-source SAST and taint tracking scanner (OWASP, MITRE CWE-25, Trail of Bits, Secrets)',
   permissions: ['fs:read', 'exec:binary'],
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'semgrep-sast',
-      name: 'Semgrep SAST & Taint Flow Scanner',
+      name: 'Semgrep Multi-Source SAST Scanner',
       category: 'security_cwe',
-      description: 'Discovers CWE security vulnerabilities, injection flaws, and taint flows with native config passthrough',
+      description: 'Discovers CWE security vulnerabilities, injection flaws, and taint flows from multiple authoritative sources',
       match: (fp) => {
         const langs = fp.languages.map((l) => l.language.toLowerCase());
         return (
@@ -81,7 +97,7 @@ export const semgrepPlugin: OpenContribPlugin = {
 
           const configArgs = hasCustomConfig
             ? '--config auto --config .semgrep.yml'
-            : '--config p/security-audit --config p/secrets --config p/owasp-top-ten';
+            : MULTI_SOURCE_SEMGREP_PACKS.join(' ');
 
           const { stdout } = await host.exec(`semgrep scan --json ${configArgs} --quiet`, {
             cwd: targetPath,
@@ -135,11 +151,11 @@ export const semgrepPlugin: OpenContribPlugin = {
 
 export const semgrepCapabilityDescriptor: CapabilityProviderDescriptor = {
   providerId: 'semgrep-sast',
-  name: 'Semgrep SAST & Taint Flow Scanner',
+  name: 'Semgrep Multi-Source SAST & Taint Flow Scanner',
   capability: 'security.static-analysis',
   defectCategory: 'security_cwe',
   languages: ['typescript', 'javascript', 'go', 'python', 'java', 'rust', 'c', 'cpp'],
-  detects: ['sql-injection', 'command-injection', 'path-traversal', 'xss', 'ssrf', 'insecure-crypto'],
+  detects: ['sql-injection', 'command-injection', 'path-traversal', 'xss', 'ssrf', 'insecure-crypto', 'trailofbits-cve'],
   cost: { cpu: 'medium', token: 'zero', typicalLatencyMs: 3500 },
   evidenceTier: 'reproducible_poc',
   isCore: true,

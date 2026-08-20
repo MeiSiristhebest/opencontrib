@@ -3,7 +3,7 @@ import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
 
 export interface RuffDiagnosticItem {
-  code: string; // e.g. "F841", "E711", "S101", "B008"
+  code: string;
   message: string;
   location: { row: number; column: number };
   end_location: { row: number; column: number };
@@ -17,20 +17,34 @@ export interface RuffDiagnosticItem {
 }
 
 /**
- * Ruff Python AST Quality & Security Analyzer
- * Executes official `ruff check --output-format json .` and parses official Ruff JSON diagnostic schema.
+ * Standard Multi-Suite Ruff Rule Selectors:
+ * - E, W: PEP 8 / pycodestyle standards
+ * - F: Pyflakes logical errors & undefined variables
+ * - B: Flake8-Bugbear logic flaws & subtle bugs
+ * - S: Flake8-Bandit automated security checks (CWE/OWASP)
+ * - ASYNC: Flake8-Async event loop & coroutine bugs
+ * - SIM: Flake8-Simplify code structure & cyclomatic reduction
+ * - UP: Pyupgrade modern syntax upgrades
+ * - DTZ: Flake8-Datetimez timezone bug prevention
+ * - LOG: Flake8-Logging-Format structured logging safety
+ */
+export const RUFF_RULE_SELECTORS = 'E,W,F,B,S,ASYNC,SIM,UP,DTZ,LOG';
+
+/**
+ * Ruff Python Multi-Suite Quality & Security Analyzer
+ * Executes official `ruff check --select ... --output-format json .` and parses official Ruff JSON diagnostic schema.
  */
 export const ruffPlugin: OpenContribPlugin = {
   name: '@opencontrib/plugin-ruff',
   version: '1.0.0',
-  description: 'Extremely fast Python AST linter, dead code, and security checker',
+  description: 'Multi-suite Python AST linter and security checker (Bugbear, Bandit, Async, Simplify, Pyupgrade)',
   permissions: ['fs:read', 'exec:binary'],
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'ruff-python',
-      name: 'Ruff Python AST Linter',
+      name: 'Ruff Python Multi-Suite Linter',
       category: 'protocol_drift',
-      description: 'Finds syntax bugs, dead variables, mutable default arguments, and security flaws in Python code',
+      description: 'Finds syntax bugs, dead code, mutable defaults, async concurrency traps, and Bandit security flaws',
       match: (fp) =>
         fp.primaryLanguage.toLowerCase() === 'python' ||
         fp.manifests.includes('pyproject.toml') ||
@@ -44,8 +58,8 @@ export const ruffPlugin: OpenContribPlugin = {
 
         try {
           const cmd = host.isBinaryAvailable('ruff')
-            ? 'ruff check --output-format json --no-fix .'
-            : 'uv run ruff check --output-format json --no-fix .';
+            ? `ruff check --select ${RUFF_RULE_SELECTORS} --output-format json --no-fix .`
+            : `uv run ruff check --select ${RUFF_RULE_SELECTORS} --output-format json --no-fix .`;
 
           const { stdout } = await host.exec(cmd, {
             cwd: targetPath,
@@ -57,8 +71,8 @@ export const ruffPlugin: OpenContribPlugin = {
           const diagnostics: RuffDiagnosticItem[] = JSON.parse(stdout);
           for (const item of diagnostics) {
             const relFile = path.relative(targetPath, item.filename);
-            const isSecurity = item.code.startsWith('S') || item.code.startsWith('B'); // Bandit or Bugbear rules
-            const isDeadCode = item.code === 'F841' || item.code === 'F401'; // Unused var / unused import
+            const isSecurity = item.code.startsWith('S') || item.code.startsWith('B');
+            const isDeadCode = item.code === 'F841' || item.code === 'F401' || item.code.startsWith('SIM');
 
             pointers.create({
               namespace: 'findings',
@@ -77,6 +91,7 @@ export const ruffPlugin: OpenContribPlugin = {
                 remediationSuggestion: item.fix?.message || `Refactor violation of rule ${item.code} at row ${item.location.row}.`,
               },
               evidence: {
+                suggestedPatch: item.fix?.message,
                 rawPayload: item as any,
               },
             });
@@ -91,11 +106,11 @@ export const ruffPlugin: OpenContribPlugin = {
 
 export const ruffCapabilityDescriptor: CapabilityProviderDescriptor = {
   providerId: 'ruff-python',
-  name: 'Ruff Python AST & Defect Engine',
+  name: 'Ruff Python Multi-Suite Defect Engine',
   capability: 'security.static-analysis',
   defectCategory: 'protocol_drift',
   languages: ['python'],
-  detects: ['unused-import', 'undefined-var', 'mutable-default-arg', 'insecure-eval', 'sql-injection-format'],
+  detects: ['bandit-cve', 'bugbear-logic-trap', 'async-event-loop-bug', 'mutable-default-arg', 'unused-import'],
   cost: { cpu: 'low', token: 'zero', typicalLatencyMs: 120 },
   evidenceTier: 'slice',
   isCore: true,
