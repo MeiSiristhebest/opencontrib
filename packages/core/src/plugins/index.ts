@@ -1,11 +1,13 @@
 import { PluginHost } from '../kernel/plugin-host.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
+import { loadWorkspaceConfig } from '../kernel/config.js';
 import { ocrPlugin } from './plugin-ocr.js';
 import { pioliumPlugin } from './plugin-piolium.js';
 import { astGrepPlugin } from './plugin-ast-grep.js';
 import { hotspotPlugin } from './plugin-hotspot.js';
 import { fuzzPlugin } from './plugin-fuzz.js';
 import { workflowPlugin } from './plugin-workflow.js';
+import { knipPlugin, knipCapabilityDescriptor } from './plugin-knip.js';
 
 export * from './plugin-ocr.js';
 export * from './plugin-piolium.js';
@@ -13,6 +15,7 @@ export * from './plugin-ast-grep.js';
 export * from './plugin-hotspot.js';
 export * from './plugin-fuzz.js';
 export * from './plugin-workflow.js';
+export * from './plugin-knip.js';
 
 export const BUILTIN_PLUGINS = [
   ocrPlugin,
@@ -21,6 +24,7 @@ export const BUILTIN_PLUGINS = [
   hotspotPlugin,
   fuzzPlugin,
   workflowPlugin,
+  knipPlugin,
 ];
 
 export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
@@ -34,7 +38,8 @@ export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
     cost: { cpu: 'low', token: 'zero', typicalLatencyMs: 150 },
     evidenceTier: 'slice',
     isCore: true,
-    scoreProvider: (fp) => (['typescript', 'javascript', 'go', 'rust', 'python'].includes(fp.primaryLanguage.toLowerCase()) ? 92 : 0),
+    scoreProvider: (fp) =>
+      ['typescript', 'javascript', 'go', 'rust', 'python'].includes(fp.primaryLanguage.toLowerCase()) ? 92 : 0,
   },
   {
     providerId: 'piolium',
@@ -94,8 +99,10 @@ export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
     cost: { cpu: 'medium', token: 'zero', typicalLatencyMs: 400 },
     evidenceTier: 'slice',
     isCore: true,
-    scoreProvider: (fp) => (['go', 'java', 'typescript', 'python'].includes(fp.primaryLanguage.toLowerCase()) ? 89 : 0),
+    scoreProvider: (fp) =>
+      ['go', 'java', 'typescript', 'python'].includes(fp.primaryLanguage.toLowerCase()) ? 89 : 0,
   },
+  knipCapabilityDescriptor,
   {
     providerId: 'codeql-deep',
     name: 'CodeQL Deep Taint Analyzer',
@@ -111,17 +118,26 @@ export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
 ];
 
 /**
- * Creates and initializes a PluginHost with all standard built-in plugins registered
+ * Creates and initializes a PluginHost with standard capabilities filtered by workspace configuration
  */
 export async function createDefaultPluginHost(
   options: { workspacePath?: string; pluginsDir?: string } = {},
 ): Promise<PluginHost> {
-  const host = new PluginHost(options);
+  const wsPath = options.workspacePath || process.cwd();
+  const config = loadWorkspaceConfig(wsPath);
+
+  const host = new PluginHost({ ...options, workspacePath: wsPath });
+
   for (const plugin of BUILTIN_PLUGINS) {
     await host.registerPlugin(plugin);
   }
+
+  // Register only capabilities enabled in configuration
   for (const cap of STANDARD_CAPABILITIES) {
-    host.router.registerProvider(cap);
+    if (config.enabledCapabilities.includes(cap.capability)) {
+      host.router.registerProvider(cap);
+    }
   }
+
   return host;
 }
