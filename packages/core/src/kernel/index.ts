@@ -2,3 +2,6 @@ export * from './contract.js';
 export * from './pointer-store.js';
 export * from './event-bus.js';
 export * from './plugin-host.js';
+export * from './capability.js';
+export * from './capability-router.js';
+export * from './evidence-graph.js';

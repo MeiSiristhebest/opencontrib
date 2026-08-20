@@ -16,6 +16,8 @@ import {
 } from './contract.js';
 import { SmartPointerStore } from './pointer-store.js';
 import { MicrokernelEventBus } from './event-bus.js';
+import { CapabilityRouter } from './capability-router.js';
+import { EvidenceGraph } from './evidence-graph.js';
 
 const execAsync = promisify(exec);
 const binaryCache = new Map<string, boolean>();
@@ -27,6 +29,8 @@ export class PluginHost implements ProbeRegistryApi {
   private tools = new Map<string, KernelToolDescriptor>();
   public pointers: SmartPointerStore;
   public events: MicrokernelEventBus;
+  public router: CapabilityRouter;
+  public evidenceGraph: EvidenceGraph;
   public pluginsDir: string;
   public workspacePath: string;
 
@@ -35,6 +39,8 @@ export class PluginHost implements ProbeRegistryApi {
     this.pluginsDir = options.pluginsDir || path.join(os.homedir(), '.opencontrib', 'plugins');
     this.pointers = new SmartPointerStore(path.join(this.workspacePath, '.opencontrib', 'pointers'));
     this.events = new MicrokernelEventBus();
+    this.router = new CapabilityRouter();
+    this.evidenceGraph = new EvidenceGraph(this.pointers);
   }
 
   // ── ProbeRegistryApi Implementation ──

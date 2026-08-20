@@ -56,7 +56,28 @@ opencontrib pointer resolve ptr://findings/ocr-auth-handler-42 --view slice
 opencontrib pointer resolve ptr://poc/repro-npe-auth --view evidence --pretty
 ```
 
-### 2. Plugin & Microkernel Commands (`opencontrib plugin`)
+### 2. Capability Router & Scoring Commands (`opencontrib capability` / `cap`)
+
+```bash
+# List available capability domains (Level 0) and capability types (Level 1)
+opencontrib capability list --pretty
+
+# Run Capability Scoring Engine against a repository to generate an optimal execution plan
+opencontrib capability plan . --pretty
+
+# Plan with explicit intent and optional heavy tools (e.g. CodeQL)
+opencontrib capability plan . --intent deep_security --enable-heavy --pretty
+```
+
+### 3. Plugin & Microkernel Commands (`opencontrib plugin`)
+
+```bash
+# List installed and active plugins
+opencontrib plugin list --pretty
+
+# Plan active capability negotiation based on repo fingerprint
+opencontrib probe plan . --pretty
+```
 
 ```bash
 # List all active plugins and probes in the microkernel

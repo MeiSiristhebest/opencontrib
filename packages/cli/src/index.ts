@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import { doctorCommand } from './commands/doctor.js';
 import { discoveryCommand } from './commands/discovery.js';
 import { probeCommand } from './commands/probe.js';
+import { capabilityCommand } from './commands/capability.js';
 import { pluginCommand } from './commands/plugin.js';
 import { pointerCommand } from './commands/pointer.js';
 import { evidenceCommand } from './commands/evidence.js';
@@ -28,6 +29,7 @@ program
 program.addCommand(doctorCommand);
 program.addCommand(discoveryCommand);
 program.addCommand(probeCommand);
+program.addCommand(capabilityCommand);
 program.addCommand(pluginCommand);
 program.addCommand(pointerCommand);
 program.addCommand(evidenceCommand);
