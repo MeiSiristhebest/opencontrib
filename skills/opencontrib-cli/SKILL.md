@@ -3,14 +3,14 @@ name: opencontrib-cli
 description: |
   Use the `opencontrib` CLI to execute the industrial-grade, 9-phase OpenContrib contribution engine.
   Activate when the user asks to scout, assess, develop, verify, audit, or submit open source contributions/PRs using the OpenContrib CLI.
-  Enforces a strict Phase-Gated State Machine: Environment Doctor → Opportunity Scouting & Qualification (8 Deep-Water Defect Types) → Context Assembly → Worktree Sandbox Isolation → Dual-Stage Empirical Evidence Verification (Fail-First & Stress Loop) → Governance Audit (<=100-line Gate & Anti-AI Fluff) → PR Template Rendering → Flywheel Persistence.
+  Enforces a strict Phase-Gated State Machine with Interactive User Approvals: Environment Doctor → Opportunity Scouting & Qualification (8 Deep-Water Defect Types) [PAUSE FOR APPROVAL] → Context Assembly → Worktree Sandbox Isolation → Dual-Stage Empirical Evidence Verification (Fail-First & Stress Loop) [PAUSE FOR APPROVAL] → Governance Audit (<=100-line Gate & Anti-AI Fluff) → Subagent Code Review → PR Template Rendering [PAUSE BEFORE PUSH] → Flywheel Persistence.
 ---
 
 # OpenContrib CLI — Phase-Gated Contribution Protocol
 
-> **Core Philosophy**: Open source contribution is not indiscriminate code generation — it is producing high-signal, empirically verified patches that maintainers want to merge.
+> **Core Philosophy**: Open source contribution is an interactive, step-by-step engineering journey — NOT a runaway autonomous black-box script.
 >
-> This skill enforces a **strict Phase-Gated State Machine**. Each phase MUST be executed via the corresponding `opencontrib` CLI command to produce structured JSON evidence BEFORE the next phase can begin. Skipping phases or executing ad-hoc scripts without CLI checkpoints is a **FATAL PROTOCOL VIOLATION**.
+> This skill enforces a **strict Phase-Gated State Machine with Mandatory Human Checkpoints**. You MUST pause and obtain user confirmation at critical milestones before proceeding to the next stage. Never rush through all phases in a single turn.
 
 ---
 
@@ -44,109 +44,96 @@ Target issues matching these 8 high-signal categories:
 
 ---
 
-## 🔄 9-Phase Mandatory Execution State Machine (9 阶段状态机)
+## 🚦 Mandatory Human-in-the-Loop Checkpoints (三大强制人机交互暂停点)
 
-```mermaid
-graph TD
-    P1[Phase 1: Doctor & Run Init\nopencontrib doctor + run create] --> P2[Phase 2: Scout & Qualification\nopencontrib scout + discovery qualify + rank]
-    P2 --> P3[Phase 3: Context & Manifests\nopencontrib discovery context + manifests]
-    P3 --> P4[Phase 4: Worktree Sandbox Isolation\nopencontrib workspace prepare]
-    P4 --> P5[Phase 5: Pre-Fix Baseline Evidence\nopencontrib evidence --fail-first]
-    P5 --> P6[Phase 6: Code Implementation & Stress Verification\nopencontrib evidence --stress-loop 20]
-    P6 --> P7[Phase 7: Governance & CI Pre-flight\nopencontrib governance audit + ci-diagnose]
-    P7 --> P8[Phase 8: PR Template & Submit\nopencontrib governance pr-template + gh pr create]
-    P8 --> P9[Phase 9: Flywheel Persistence\nopencontrib flywheel sync + pr-track]
-```
+You MUST pause execution and interact with the user at these 3 checkpoints:
+
+| Checkpoint | When to Pause | What to Present to the User | Action After Approval |
+| :--- | :--- | :--- | :--- |
+| **Checkpoint 1** | After Phase 2 (Scout & Rank) | Top opportunity candidates, defect category (from the 8 archetypes), score, and technical rationale. | Prepare worktree sandbox and assemble context. |
+| **Checkpoint 2** | After Phase 5 (Fail-First Evidence) | The exact failing test output (red error trace) proving the bug exists, plus proposed minimal fix design in `implementation_plan.md`. | Implement code patch and run stress verification loop. |
+| **Checkpoint 3** | Before Phase 8 (PR Submission) | Complete Git Diff (<=100 lines), Governance Audit results, Subagent review summary, and rendered PR description. | Push branch and create upstream GitHub PR. |
 
 ---
 
-## 🛠️ Phase-by-Phase CLI Execution Commands
+## 🔄 9-Phase Step-by-Step Execution Protocol
 
-### Phase 1: Environment Health & Run Session Initialization
+### 🔹 Stage I: Opportunity Discovery & Alignment
 
+#### Phase 1: Environment Health & Run Session Init
 ```bash
-# 1. Verify host environment (Git, Node/Bun, Docker, WSL, Ledger Storage)
+# Verify host environment
 opencontrib doctor
 
-# 2. Initialize an auditable contribution run session
+# Initialize run session
 opencontrib run create \
   --repo <owner/repo> \
   --issue <issue_number> \
   --title "<issue_title>" \
   --tags "bugfix,deep-water"
-# → Note the returned `runId` (e.g. run-1787...)
 ```
 
----
-
-### Phase 2: Opportunity Scouting, Qualification & 8-Defect Ranking
-
+#### Phase 2: Opportunity Scouting & 8-Defect Ranking
 ```bash
-# 1. Scout unclaimed, high-value opportunities
+# 1. Scout candidate opportunities
 opencontrib scout <owner/repo> --limit 10
 
-# 2. Author-first-right & anti-bandwagoning qualification check
-printf '{"issue":{"number":<issue_num>,"title":"<title>","comments_count":<count>,"labels":[]}}' | \
+# 2. Author-first-right & anti-bandwagoning check
+printf '{"issue":{"number":<num>,"title":"<title>","comments_count":<c>,"labels":[]}}' | \
   opencontrib discovery qualify
 
 # 3. 8-Dimension deep-water probability ranking
-opencontrib discovery rank --input '{"issue":{"number":<issue_num>,"title":"<title>","body":"..."}}'
+opencontrib discovery rank --input '{"issue":{"number":<num>,"title":"<title>","body":"..."}}'
 ```
-*Gate Condition*: If qualification fails (e.g., maintainer already assigned, author claims first-right, or score < 0.65), STOP and select another opportunity.
+
+🛑 **STOP & PAUSE (Checkpoint 1)**:
+Present the top opportunity candidates to the user with defect taxonomy, root cause hypothesis, and feasibility score. **Wait for the user to confirm the target issue before touching code or creating workspaces.**
 
 ---
 
-### Phase 3: Context Assembly & Manifest Diagnosis
+### 🔹 Stage II: Sandbox Isolation & Dual-Stage Evidence
 
+#### Phase 3: Context Assembly & Manifest Diagnosis
 ```bash
-# 1. Assemble multi-dimensional problem context and test targets
+# Assemble problem context and test targets
 opencontrib discovery context --input '{"repo":"<owner/repo>","issueNumber":<num>,"issueTitle":"...","issueBody":"..."}'
 
-# 2. Diagnose repo manifests (package.json, pyproject, go.mod, workflows) for ≤100-line improvements
+# Diagnose repo manifests for <=100-line improvements
 opencontrib discovery manifests --repo-path <path_to_repo>
-
-# 3. Assess toolchain execution feasibility (OS, Node/Go/Python versions)
-opencontrib discovery feasibility --title "<issue_title>" --labels "<labels_json>"
 ```
 
----
-
-### Phase 4: Worktree Sandbox Isolation
-
-**NEVER modify code directly in the main checkout.** Always isolate changes in a dedicated Git worktree:
-
+#### Phase 4: Worktree Sandbox Isolation
+**NEVER edit code in the main checkout.** Always isolate changes:
 ```bash
 opencontrib workspace prepare \
   --repo <owner/repo> \
   --issue <issue_number> \
   --run-id "$RUN_ID"
-# → Captures `workspacePath` (e.g. ~/.opencontrib/workspaces/owner-repo-issue-42)
+# → Sets $WORKSPACE_PATH
 ```
 
----
-
-### Phase 5: Dual-Stage Empirical Verification (Fail-First Baseline)
-
-Before writing the fix, you MUST prove the bug exists with a reproducible failing test:
-
+#### Phase 5: Pre-Fix Fail-First Baseline Evidence
+You MUST reproduce the bug and show a failing test BEFORE writing any fix:
 ```bash
-# Execute pre-fix test assertion: MUST fail before the fix
+# Execute pre-fix test assertion: MUST fail cleanly
 opencontrib evidence \
   --cwd "$WORKSPACE_PATH" \
-  --test-cmd "<test_command_e.g._npm_test_or_pytest>" \
-  --assertion "<expected_failure_pattern>" \
+  --test-cmd "<test_command>" \
+  --assertion "<expected_failure_trace>" \
   --run-id "$RUN_ID"
 ```
 
+🛑 **STOP & PAUSE (Checkpoint 2)**:
+Present the failing test output to the user. Create/update `implementation_plan.md` with minimal patch design (<=100 lines). **Wait for user approval before writing fix code.**
+
 ---
 
-### Phase 6: Code Implementation & Post-Fix Stress Loop
+### 🔹 Stage III: Implementation, Verification & Audit
 
-1. Implement minimal, surgical changes in `$WORKSPACE_PATH` (strictly ≤ 100 lines).
-2. Execute post-fix stress loop verification (ensure 100% pass rate with 0 flakes):
-
+#### Phase 6: Code Implementation & Post-Fix Stress Loop
+1. Implement minimal, surgical changes in `$WORKSPACE_PATH` (strictly <= 100 lines).
+2. Verify deterministic 100% pass rate with a 20-cycle stress loop:
 ```bash
-# Stress-test the patch across 20 iterations
 opencontrib evidence \
   --cwd "$WORKSPACE_PATH" \
   --test-cmd "<test_command>" \
@@ -154,10 +141,7 @@ opencontrib evidence \
   --run-id "$RUN_ID"
 ```
 
----
-
-### Phase 7: Governance Audit, Impact Analysis & CI Pre-Flight
-
+#### Phase 7: Governance Audit & Independent Review
 ```bash
 # 1. Run strict governance & size audit
 git -C "$WORKSPACE_PATH" diff | \
@@ -166,22 +150,25 @@ git -C "$WORKSPACE_PATH" diff | \
     --pr-title "<proposed_pr_title>" \
     --pr-body "<proposed_pr_body>"
 
-# 2. Analyze impact surface (exported API symbols, breaking change risk)
+# 2. Analyze impact surface
 opencontrib governance impact \
   --cwd "$WORKSPACE_PATH" \
   --modified-files "<comma_separated_files>"
 
-# 3. Simulate and diagnose CI log health
-opencontrib governance ci-diagnose --log-file <path_to_ci_or_test_log>
+# 3. Simulate CI diagnosis
+opencontrib governance ci-diagnose --log-file <path_to_test_log>
 ```
-*Gate Condition*: `governance audit` MUST output `"status": "PASSED"`. If warnings exist (e.g., >100 lines, AI fluff detected, missing test evidence), resolve them immediately.
+
+🛑 **STOP & PAUSE (Checkpoint 3)**:
+Present the full Git Diff, Governance Audit score, and rendered PR description to the user. **Ask for explicit confirmation before pushing or submitting.**
 
 ---
 
-### Phase 8: PR Template Rendering & Submission
+### 🔹 Stage IV: PR Submission & Flywheel
 
+#### Phase 8: PR Template Rendering & Submission
 ```bash
-# 1. Render clean, maintainer-friendly PR description (no AI fluff)
+# 1. Render maintainer-friendly PR description (no AI fluff)
 opencontrib governance pr-template \
   --issue <issue_number> \
   --issue-title "<issue_title>" \
@@ -191,7 +178,7 @@ opencontrib governance pr-template \
   --key-changes "<change_1>,<change_2>" \
   | jq -r '.prBody' > pr_body.md
 
-# 2. Push branch and create PR via GitHub CLI
+# 2. Push branch and create PR
 git -C "$WORKSPACE_PATH" checkout -b fix/<short_issue_topic>
 git -C "$WORKSPACE_PATH" add <files>
 git -C "$WORKSPACE_PATH" commit -m "fix(<scope>): <concise_description> (#<issue_number>)"
@@ -204,28 +191,13 @@ gh pr create \
   --head fix/<short_issue_topic>
 ```
 
----
-
-### Phase 9: Profile Flywheel Persistence & Lifecycle Tracking
-
+#### Phase 9: Profile Flywheel Persistence
 ```bash
-# 1. Sync verified contribution into the developer's OpenContrib Ledger & Flywheel
+# Record contribution to local ledger
 opencontrib flywheel sync \
   --run-id "$RUN_ID" \
   --pr-url "<pr_html_url>"
 
-# 2. Track PR merge status and maintainer comments
+# Track PR lifecycle status
 opencontrib flywheel pr-track --repo <owner/repo> --pr-number <pr_number>
 ```
-
----
-
-## ⚡ Agent Quick Troubleshooting
-
-| Failure Symptom | Cause | CLI Remedy |
-| :--- | :--- | :--- |
-| `Git is not installed or not in PATH` | Doctor health check failed | Run `opencontrib doctor` to inspect missing toolchains. |
-| `author-first-right violation` | Issue author explicitly said "I will submit a PR" | `opencontrib discovery qualify` outputs rejection; pick next issue. |
-| `Score < 0.65` | Low-value typo/comment issue | `opencontrib discovery rank` penalizes; reject farming attempt. |
-| `Audit FAILED: Diff exceeds 100 lines` | Patch is too invasive | Scope down the patch or propose an RFC Discussion first. |
-| `CI diagnosis detects Flaky Test` | Race condition in test case | Run `opencontrib evidence --stress-loop 20` to verify determinism. |
