@@ -72,11 +72,14 @@ export class CapabilityRouter {
 
     let totalEstimatedMs = 0;
 
+    const repoLangs = (fingerprint?.languages || []).map((l) => l.language.toLowerCase());
+    if (primaryLang && !repoLangs.includes(primaryLang)) repoLangs.push(primaryLang);
+
     for (const [capType, providerList] of byCapability.entries()) {
       for (const provider of providerList) {
         const langMatch =
           provider.languages.includes('*') ||
-          provider.languages.map((l) => l.toLowerCase()).includes(primaryLang);
+          provider.languages.some((l) => repoLangs.includes(l.toLowerCase()));
 
         if (!langMatch) continue;
 

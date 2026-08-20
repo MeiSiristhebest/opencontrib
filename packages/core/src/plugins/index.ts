@@ -8,6 +8,10 @@ import { hotspotPlugin } from './plugin-hotspot.js';
 import { fuzzPlugin } from './plugin-fuzz.js';
 import { workflowPlugin } from './plugin-workflow.js';
 import { knipPlugin, knipCapabilityDescriptor } from './plugin-knip.js';
+import { semgrepPlugin, semgrepCapabilityDescriptor } from './plugin-semgrep.js';
+import { ruffPlugin, ruffCapabilityDescriptor } from './plugin-ruff.js';
+import { goAnalyzersPlugin, goAnalyzersCapabilityDescriptor } from './plugin-go-analyzers.js';
+import { cargoDenyPlugin, cargoDenyCapabilityDescriptor } from './plugin-cargo-deny.js';
 
 export * from './plugin-ocr.js';
 export * from './plugin-piolium.js';
@@ -16,6 +20,10 @@ export * from './plugin-hotspot.js';
 export * from './plugin-fuzz.js';
 export * from './plugin-workflow.js';
 export * from './plugin-knip.js';
+export * from './plugin-semgrep.js';
+export * from './plugin-ruff.js';
+export * from './plugin-go-analyzers.js';
+export * from './plugin-cargo-deny.js';
 
 export const BUILTIN_PLUGINS = [
   ocrPlugin,
@@ -25,6 +33,10 @@ export const BUILTIN_PLUGINS = [
   fuzzPlugin,
   workflowPlugin,
   knipPlugin,
+  semgrepPlugin,
+  ruffPlugin,
+  goAnalyzersPlugin,
+  cargoDenyPlugin,
 ];
 
 export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
@@ -41,6 +53,10 @@ export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
     scoreProvider: (fp) =>
       ['typescript', 'javascript', 'go', 'rust', 'python'].includes(fp.primaryLanguage.toLowerCase()) ? 92 : 0,
   },
+  semgrepCapabilityDescriptor,
+  ruffCapabilityDescriptor,
+  goAnalyzersCapabilityDescriptor,
+  cargoDenyCapabilityDescriptor,
   {
     providerId: 'piolium',
     name: 'Piolium Autonomous PoC Constructor',
