@@ -92,8 +92,10 @@ export async function scoutOpportunities(
     return [];
   }
 
-  // 2. Tier 1: Cheap Local Pre-Filtering (High Recall: Top 40)
-  // Uses token-aware `matchesProfileTerm` so Tier 1 matcher matches Tier 2 formal scorer
+  // 2. Tier 1: Cheap Local Pre-Filtering (Bounded Recall Window)
+  // For targeted repo exploration, bound recall to (limit * 2) to eliminate 100+ slow network HTTP calls
+  const maxRecall = discoveryMode === 'targeted_repo' ? Math.min(limit * 2, 15) : Math.min(limit * 3, 30);
+
   const preFiltered = rawItems
     .filter((item) => !item.pull_request && !item.locked)
     .map((item) => {
@@ -112,7 +114,7 @@ export async function scoutOpportunities(
       return { item, labels, cheapRelevance };
     })
     .sort((a, b) => b.cheapRelevance - a.cheapRelevance)
-    .slice(0, 40); // Expanded recall window
+    .slice(0, maxRecall); // Strictly bounded recall window to guarantee sub-3s response
 
   // 3. Tier 2: Bounded Parallel Enrichment (Concurrency = 5)
   const repoDetailsCache = new Map<string, any>();

@@ -155,13 +155,24 @@ export class ArtifactBundleManager {
   appendEvent(runId: string, event: Omit<RunEvent, 'runId' | 'timestamp' | 'eventId'>): RunEvent {
     const runDir = this.ensureRunDir(runId);
     const eventsPath = join(runDir, 'events.jsonl');
+    const timelogPath = join(runDir, 'timelog.md');
+    const now = new Date().toISOString();
+
     const fullEvent: RunEvent = {
       eventId: randomUUID(),
       runId,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       ...event,
     };
     appendFileSync(eventsPath, JSON.stringify(fullEvent) + '\n', 'utf-8');
+
+    // Automatically maintain human-readable timelog.md
+    if (!existsSync(timelogPath)) {
+      writeFileSync(timelogPath, `# Contribution Run Timelog: ${runId}\n\n| Timestamp | Phase | Event Type | Details |\n| :--- | :--- | :--- | :--- |\n`, 'utf-8');
+    }
+    const details = event.payload ? JSON.stringify(event.payload).replace(/\|/g, '\\|') : '-';
+    appendFileSync(timelogPath, `| \`${now}\` | **${event.phase}** | \`${event.eventType}\` | ${details} |\n`, 'utf-8');
+
     return fullEvent;
   }
 
