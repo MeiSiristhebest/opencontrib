@@ -31,9 +31,8 @@ export function runDoctorAudit(): DoctorReport {
   // 1. Check Git
   let gitVersion: string | undefined;
   try {
-    const gitRes = spawnSync('git', ['--version'], { encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] });
-    const gitOut = (gitRes.stdout || '').trim();
-    if (gitRes.status === 0 && gitOut) {
+    const gitOut = execSync('git --version', { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (gitOut) {
       gitVersion = gitOut;
       checks.push({
         category: 'VCS',
@@ -60,10 +59,8 @@ export function runDoctorAudit(): DoctorReport {
 
   // 2. Check Git User Identity
   try {
-    const nameRes = spawnSync('git', ['config', 'user.name'], { encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] });
-    const emailRes = spawnSync('git', ['config', 'user.email'], { encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] });
-    const userName = (nameRes.stdout || '').trim();
-    const userEmail = (emailRes.stdout || '').trim();
+    const userName = execSync('git config user.name', { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const userEmail = execSync('git config user.email', { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     if (userName && userEmail) {
       checks.push({
         category: 'VCS',
@@ -158,10 +155,40 @@ export function runDoctorAudit(): DoctorReport {
     }
   }
 
-  // 6. Check Local OpenContrib Storage Directories
+  // 6. Check Static Analysis Toolchains
+  const toolchains = [
+    { name: 'GitHub CLI (gh)', bin: 'gh', verCmd: 'gh --version', cat: 'VCS' },
+    { name: 'ast-grep (sg)', bin: 'ast-grep', verCmd: 'ast-grep --version', cat: 'Analyzers', altBin: 'sg' },
+    { name: 'Knip Dead Code Analyzer', bin: 'knip', verCmd: 'knip --version', cat: 'Analyzers' },
+    { name: 'Semgrep SAST Scanner', bin: 'semgrep', verCmd: 'semgrep --version', cat: 'Analyzers' },
+    { name: 'Go Compiler Toolchain', bin: 'go', verCmd: 'go version', cat: 'Compilers' },
+    { name: 'Rust Compiler Toolchain', bin: 'rustc', verCmd: 'rustc --version', cat: 'Compilers' },
+    { name: 'Python / UV Toolchain', bin: 'uv', verCmd: 'uv --version', cat: 'Compilers', altBin: 'python' },
+  ];
+
+  for (const tc of toolchains) {
+    try {
+      const out = execSync(tc.verCmd, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const firstLine = out.split('\n')[0].trim();
+      checks.push({
+        category: tc.cat,
+        name: tc.name,
+        status: 'PASSED',
+        message: `${tc.name} is installed: ${firstLine}`,
+      });
+    } catch {
+      checks.push({
+        category: tc.cat,
+        name: tc.name,
+        status: 'WARNING',
+        message: `${tc.name} not found in PATH (Optional analyzer capability)`,
+      });
+    }
+  }
+
+  // 7. Check Local OpenContrib Storage Directories
   const opencontribDir = join(homedir(), '.opencontrib');
   const workspacesDir = join(opencontribDir, 'workspaces');
-  const memoryFile = join(opencontribDir, 'repo-memory.json');
   checks.push({
     category: 'Storage',
     name: 'OpenContrib Ledger & Sandboxes',
