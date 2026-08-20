@@ -119,7 +119,23 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
       evidenceSummary: 'Passed all CI schema checks, 0 AI smell',
     });
 
-    const markdown = flywheel.renderProfileMarkdown();
-    expect(markdown).toContain('bytedance/flowgram.ai');
+    // Unmerged/submitted PRs must NOT pollute the public profile
+    const submittedMarkdown = flywheel.renderProfileMarkdown();
+    expect(submittedMarkdown).not.toContain('bytedance/flowgram.ai');
+
+    // Merged PRs are displayed in the profile
+    flywheel.saveRecord({
+      id: 'bytedance/flowgram.ai#999',
+      repoFullName: 'bytedance/flowgram.ai',
+      issueTitle: 'ci: upgrade checkout and setup-node to v4',
+      prUrl: 'https://github.com/bytedance/flowgram.ai/pull/999',
+      status: 'merged',
+      submittedAt: new Date().toISOString(),
+      diffStat: '+14 -14 (2 files)',
+      evidenceSummary: 'Passed all CI schema checks, 0 AI smell',
+    });
+
+    const mergedMarkdown = flywheel.renderProfileMarkdown();
+    expect(mergedMarkdown).toContain('bytedance/flowgram.ai');
   }, 60000);
 });
