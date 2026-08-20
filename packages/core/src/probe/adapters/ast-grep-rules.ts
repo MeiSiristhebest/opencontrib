@@ -80,14 +80,11 @@ export const STANDARD_AST_RELATIONAL_RULES: ASTGrepYamlRule[] = [
     id: 'ts-float-direct-equality',
     language: 'typescript',
     severity: 'warning',
-    message: 'Direct equality comparison on floating point expressions causes precision drift',
+    message: 'Direct equality comparison on floating point calculations causes precision drift',
     rule: {
-      pattern: '$A === $B',
-      inside: {
-        pattern: 'if ($$$COND) { $$$BODY }',
-      },
+      pattern: 'parseFloat($A) === $B',
     },
-    fix: 'Math.abs($A - $B) < Number.EPSILON',
+    fix: 'Math.abs(parseFloat($A) - $B) < Number.EPSILON',
     metadata: {
       cwe: 'CWE-682',
       category: 'numerical_bounds',
