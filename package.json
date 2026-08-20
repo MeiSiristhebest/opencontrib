@@ -1,30 +1,28 @@
 {
   "name": "opencontrib-monorepo",
   "version": "1.0.0",
-  "description": "Agent-Native Open Source Contribution Engine, MCP Server, and Visual Studio",
+  "description": "Agent-Native Open Source Contribution Engine — CLI interface and domain core",
   "author": "OpenContrib Contributors",
   "license": "MIT",
   "private": true,
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/opencontrib/opencontrib.git"
+    "url": "git+https://github.com/MeiSiristhebest/opencontrib.git"
   },
   "bugs": {
-    "url": "https://github.com/opencontrib/opencontrib/issues"
+    "url": "https://github.com/MeiSiristhebest/opencontrib/issues"
   },
-  "homepage": "https://github.com/opencontrib/opencontrib#readme",
+  "homepage": "https://github.com/MeiSiristhebest/opencontrib#readme",
   "keywords": [
     "open-source",
+    "cli",
     "agentic-ai",
-    "mcp",
-    "mcp-server",
     "autonomous-agent",
     "developer-tools",
     "github-contributions",
     "governance",
-    "flaky-test-isolation",
-    "model-context-protocol"
+    "opencontrib"
   ],
   "workspaces": [
     "packages/*"

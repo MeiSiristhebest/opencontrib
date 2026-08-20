@@ -2,315 +2,246 @@
 
 # 🚀 OpenContrib
 
-**The Agent-Native Open Source Contribution Engine — CLI & MCP Server**
+**The Agent-Native Open Source Contribution Engine**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![MCP Native](https://img.shields.io/badge/Model%20Context%20Protocol-Compatible-8B5CF6)](https://modelcontextprotocol.io)
-[![CLI](https://img.shields.io/badge/CLI-20%20Commands-FF6B35)](https://github.com/MeiSiristhebest/opencontrib#cli-interface)
+[![CLI](https://img.shields.io/badge/CLI-20%20Commands-FF6B35)](https://github.com/MeiSiristhebest/opencontrib#quick-start)
+[![npm](https://img.shields.io/npm/v/opencontrib-cli.svg)](https://www.npmjs.com/package/opencontrib-cli)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
 
 <p align="center">
-  <b>A composable contribution infrastructure providing autonomous Agents with discrete domain capabilities: Opportunity Signals, Worktree Isolation, Dual-Stage Evidence Verification, Anti-AI Governance, Run Persistence, and Profile Flywheel — available as both an MCP server and a lightweight CLI.</b>
+  <b>A contribution infrastructure that provides autonomous agents with discrete, composable domain capabilities: opportunity signals, isolated worktree sandboxes, dual-stage evidence verification, anti-AI governance, structured run persistence, and a profile flywheel — all exposed through a lightweight CLI.</b>
 </p>
 
 </div>
 
 ---
 
-## 🌟 Philosophy: Contribution Engine, Not Giant Agent
+## What is OpenContrib?
 
-OpenContrib does **not** attempt to replace the external reasoning AI (Claude Code, Cursor, Codex, Devin, Antigravity). Instead, it follows a strict separation of concerns:
+OpenContrib is a **Contribution Engine**, not a Giant Agent. It does not attempt to replace Claude Code, Cursor, Codex, Devin, or any external reasoning AI. Instead, it provides that AI with the structured primitives it needs to make high-quality open-source contributions.
 
 ```text
-                       External AI Agent (Brain)
-        ┌───────────────────────────────────────────────────────┐
-        │ Claude Code / Cursor / Codex / Devin / Antigravity    │
-        └──────────────────────────┬────────────────────────────┘
-                                   │
-                   Autonomous Reasoning & Decisions
-                                   │
-                  ┌────────────────┴────────────────┐
-                  │                                 │
-            GitHub MCP         ┌─── OpenContrib ───┐
-                  │            │  CLI   MCP   Core  │
-       Native GitHub API State │  ◄────► ◄─────── │
-  (Issues, PRs, Comments,      │  Sandbox, Evidence │
-    Repo State)                │  Governance, Runs │
-                               └──────────────────┘
+    ┌──────────────────────────────────────────────────────────────────┐
+    │              External AI Agent (Brain)                            │
+    │    Claude Code · Cursor · Codex · Devin · Antigravity            │
+    │                                                                  │
+    │  Autonomous Reasoning · Decision Making · Code Writing            │
+    └───────────────────────────┬──────────────────────────────────────┘
+                                │ Shell / CLI calls
+                                ▼
+    ┌──────────────────────────────────────────────────────────────────┐
+    │                  OpenContrib CLI (Tool Layer)                     │
+    │                                                                  │
+    │  scout · rank · qualify · feasibility · context · manifests       │
+    │  prepare · purge · evidence · audit · impact · pr-template       │
+    │  run create/get/resume · flywheel sync/pr-track · doctor          │
+    └───────────────────────────┬──────────────────────────────────────┘
+                                │ Pure TypeScript imports
+                                ▼
+    ┌──────────────────────────────────────────────────────────────────┐
+    │                @opencontrib/core (Domain Logic)                   │
+    │                                                                  │
+    │  13 modules · 0 MCP dependencies · 0 CLI framework dependencies  │
+    │  Discovery · Sandbox · Evidence · Governance · Flywheel · Run     │
+    │  Storage · GitHub · Probe · Risk · Orchestration · LLM · Memory   │
+    └──────────────────────────────────────────────────────────────────┘
 ```
 
-- **External Agent**: Makes high-level decisions, reasons about code, and writes patches.
-- **GitHub MCP**: Reads and mutates GitHub repository state.
-- **OpenContrib CLI**: Zero-token overhead subcommand interface — human & AI agents alike.
-- **OpenContrib MCP**: Same core, wrapped for MCP-native agents.
-- **Core**: Pure TypeScript domain logic — no MCP, no CLI — reused by both.
-- *(Internal Core retains a lightweight GitHub adapter strictly for standalone local workflow execution)*.
-
-### Why CLI Instead of MCP?
-
-| Dimension | MCP | CLI |
-|-----------|-----|-----|
-| **Context Token Cost** | 10,000+ tokens per session (all 18 tool schemas loaded) | 200-400 tokens per call (single subcommand help) |
-| **Human Usability** | None | `--help` instantly usable |
-| **Concurrency** | Single stdio connection, sequential | Multi-process, independent |
-| **Debuggability** | Needs MCP client | `npx opencontrib doctor` runs anywhere |
-| **Pipeline Friendliness** | JSON-RPC overhead | Native stdin/stdout piping |
-
-The CLI is the **primary interface** — the MCP server is a compatibility wrapper over the same core.
+**Key property**: `packages/core/` has zero dependencies on any interface layer. The CLI (`opencontrib-cli`) is the primary interface. An MCP server wrapper exists for compatibility with MCP-native agents, but the core is pure TypeScript and can power any future interface (REST, gRPC, TUI).
 
 ---
 
-## 📦 Monorepo Architecture
+## Quick Start
 
-```
-opencontrib/
-├── packages/
-│   ├── core/           # 🧠 Pure domain logic (13 modules, zero MCP/CLI deps)
-│   ├── cli/            # 🖥️ 20 subcommands via Commander.js (npm: opencontrib-cli)
-│   ├── mcp-server/     # 🔌 MCP wrapper (18 tools, 3 resources, 1 prompt)
-│   └── studio/         # 🎨 Obsidian/Claude-themed Native Web Control Studio
-├── skills/             # 📜 Master Open-Source Contributor Skill
-└── package.json        # 🛠️ Root Monorepo configuration
-```
-
-> **Key property**: `packages/core/` has **zero** dependencies on MCP or CLI frameworks. Adding a new interface (gRPC, REST, TUI) only requires a new `packages/xxx/` that imports from `@opencontrib/core`.
-
----
-
-## ⚡ Quick Start
+### Install
 
 ```bash
-# Clone the repository
+# One-shot (no install needed)
+npx -y opencontrib-cli doctor
+
+# Global install
+npm install -g opencontrib-cli
+```
+
+### Run from source (development)
+
+```bash
 git clone https://github.com/MeiSiristhebest/opencontrib.git
 cd opencontrib
-
-# Install dependencies via Bun
 bun install
-
-# Run full test suite (16 test suites, 78 tests)
-bun test
-```
-
----
-
-## 🖥️ CLI Interface (20 Subcommands)
-
-The CLI is the recommended way to interact with OpenContrib. It requires **zero token overhead** for help text and supports both interactive use and shell pipelines.
-
-### Installation
-
-```bash
-# From npm (after publishing)
-npm install -g opencontrib-cli
-
-# Or run directly from source
-cd opencontrib
 bun run cli --help
 ```
 
-### Quick Reference
+### Test
 
 ```bash
-# 1. Check environment health
-opencontrib doctor
-
-# 2. Discover opportunities
-opencontrib scout facebook/react --tech-stack typescript,react --limit 5
-opencontrib scout bytedance --focus bugfix,testing --min-stars 100
-
-# 3. Assess a specific issue
-opencontrib discovery feasibility --title "NPE in parser module" --labels bug,parser
-cat issue-data.json | opencontrib discovery qualify
-opencontrib discovery rank --input '{"issue":{...}, "repo":{...}}'
-
-# 4. Assemble context and prepare workspace
-cat context-input.json | opencontrib discovery context
-opencontrib workspace prepare --repo microsoft/vscode --issue 12345
-opencontrib workspace purge --clean-repos
-
-# 5. Collect evidence
-opencontrib evidence --cwd . --test-cmd "npm test" --assertion "expect.*toFail" --stress-loop 20
-
-# 6. Audit and render
-cat ci.log | opencontrib governance ci-diagnose
-opencontrib governance audit --patch diff.txt --pr-title "Fix parser" --pr-body "..."
-opencontrib governance pr-template --issue 42 --summary "Fixed null check" \
-  --validation-cmd "npm test" --validation-output "5 tests passed" \
-  --key-changes "fixed null check,added regression test"
-
-# 7. Manage run sessions
-opencontrib run create --repo facebook/react --issue 42 --title "fix NPE"
-opencontrib run get run_20260819195606_a_b_issue_1_umpc
-opencontrib run resume run_20260819195606_a_b_issue_1_umpc
-
-# 8. Sync flywheel and track PRs
-cat record.json | opencontrib flywheel sync --repo facebook/react
-cat pr-data.json | opencontrib flywheel pr-track
+bun test   # 16 test suites, 78 tests
 ```
 
-### Command Map
+---
 
-| Category | CLI Command | MCP Tool |
-|----------|------------|----------|
-| **Run** | `run create` `run get` `run resume` `run save` | `contrib_create_run` `contrib_get_run` `contrib_resume_run` `contrib_save_artifact` |
-| **Discovery** | `scout` `discovery rank` `discovery qualify` `discovery feasibility` `discovery context` `discovery manifests` | `contrib_scout` `contrib_rank_opportunity` `contrib_qualify_issue` `contrib_assess_feasibility` `contrib_assemble_context` `contrib_diagnose_manifests` |
-| **Workspace** | `workspace prepare` `workspace purge` | `contrib_prepare_workspace` `contrib_purge_sandbox` |
-| **Evidence** | `evidence` | `contrib_collect_evidence` |
-| **Governance** | `governance audit` `governance impact` `governance ci-diagnose` `governance pr-template` | `contrib_audit_governance` `contrib_analyze_impact` `contrib_diagnose_ci` `contrib_render_pr_template` |
-| **Flywheel** | `flywheel sync` `flywheel pr-track` `doctor` | `contrib_sync_flywheel` `contrib_track_pr_status` `contrib_doctor` |
+## Command Map
+
+All 20 subcommands across 8 domains:
+
+| Domain | Commands | Purpose |
+| -------- | ---------- | --------- |
+| **Run** | `run create` `run get` `run resume` `run save` | Session tracking under `~/.opencontrib/runs/` |
+| **Discovery** | `scout` `discovery rank` `discovery qualify` `discovery feasibility` `discovery context` `discovery manifests` | Opportunity signals, scoring, and context assembly |
+| **Workspace** | `workspace prepare` `workspace purge` | Isolated Git worktree sandbox management |
+| **Evidence** | `evidence` | Dual-stage empirical verification |
+| **Governance** | `governance audit` `governance impact` `governance ci-diagnose` `governance pr-template` | Patch quality, CI diagnosis, PR template rendering |
+| **Flywheel** | `flywheel sync` `flywheel pr-track` `doctor` | Profile persistence, PR lifecycle, environment diagnostics |
 
 ### I/O Patterns
 
 ```bash
+# Compact JSON output by default (best for pipelines)
+opencontrib scout facebook/react --limit 3
+
+# Pretty-print for debugging
+opencontrib doctor --pretty
+
 # Complex inputs via --input flag
 opencontrib discovery rank --input '{"issue":{"number":1,"title":"..."},...}'
 
-# Complex inputs via stdin (best for LLM pipelines)
-cat payload.json | opencontrib discovery rank
+# Complex inputs via stdin (best for LLM agents)
+cat payload.json | opencontrib discovery qualify
 
-# Log file inputs
-opencontrib governance ci-diagnose --log-file build.log
-
-# Pipeable compact output (no --pretty)
+# Shell pipelines
 opencontrib scout facebook/react | jq '.opportunities[0].title'
+opencontrib governance pr-template ... | jq -r '.prBody' > pr-body.md
 ```
 
 ---
 
-## 🔌 Model Context Protocol (MCP) Setup
+## Contribution Pipeline (9 Phases)
 
-> **Note**: The MCP server exposes the same core logic as the CLI. If you're using a CLI-native agent or prefer shell scripts, use `opencontrib-cli` instead.
-
-### ⚡ Option 1: One-Click Automatic Setup (Recommended)
-Run the auto-installer to automatically detect and configure **Claude Desktop, Cursor, Windsurf, Antigravity, and VS Code / Cline**:
+```text
+Phase 1:  INITIALIZED          → run create
+Phase 2:  OPPORTUNITY_SCOUTED  → scout + discovery rank
+Phase 3:  CONTEXT_ASSEMBLED    → discovery context
+Phase 4:  WORKSPACE_PREPARED   → workspace prepare
+Phase 5:  PATCH_DRAFTED        → (external: agent writes patch)
+Phase 6:  EVIDENCE_COLLECTED   → evidence
+Phase 7:  GOVERNANCE_AUDITED   → governance audit
+Phase 8:  PR_SUBMITTED         → governance pr-template + gh pr create
+Phase 9:  COMPLETED            → flywheel sync
+```
 
 ```bash
-# Using NPX (Node.js)
-npx -y opencontrib-mcp setup
+# Full pipeline example
+opencontrib run create --repo facebook/react --issue 42 --title "fix NPE"
+# → captures runId
 
-# Or using Bun
-bunx opencontrib-mcp setup
+opencontrib workspace prepare --repo facebook/react --issue 42 --run-id "$RUN_ID"
+# → captures workspacePath
+
+# [agent writes patch]
+
+opencontrib evidence --cwd "$WORKSPACE_PATH" --test-cmd "npm test" --run-id "$RUN_ID"
+opencontrib governance audit --patch "$DIFF" --pr-title "Fix NPE" --pr-body "..."
+opencontrib governance pr-template --issue 42 --summary "Fixed null check" \
+  --validation-cmd "npm test" --validation-output "5 tests passed" \
+  --key-changes "fixed null check,added regression test" | jq -r '.prBody' > pr-body.md
+
+gh pr create --repo facebook/react --title "Fix NPE" --body-file pr-body.md --draft
+opencontrib flywheel sync --repo facebook/react
+```
+
+### Resume from interruption
+
+```bash
+opencontrib run resume "$RUN_ID"
+# → shows suggestedNextAction and availableArtifacts
 ```
 
 ---
 
-### 🛠️ Option 2: Manual Configuration (Universal `npx` / `bunx`)
+## Core Principles
 
-No need to clone or hardcode local folder paths! Simply add OpenContrib to your MCP client config (`claude_desktop_config.json`, `~/.cursor/mcp.json`, or `antigravity.json`):
-
-#### Standard Setup (Universal NPX):
-```json
-{
-  "mcpServers": {
-    "opencontrib": {
-      "command": "npx",
-      "args": ["-y", "opencontrib-mcp"]
-    }
-  }
-}
-```
-
-#### Dual-MCP Setup (GitHub MCP + OpenContrib MCP):
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "your_github_token_here"
-      }
-    },
-    "opencontrib": {
-      "command": "npx",
-      "args": ["-y", "opencontrib-mcp"]
-    }
-  }
-}
-```
-
-### Protocol Capabilities: 18 Tools, 3 Resources, 1 Prompt
-
-| Category | Primitives | Description |
-| :--- | :--- | :--- |
-| **Run & Session** | `contrib_create_run`<br>`contrib_save_artifact`<br>`contrib_get_run`<br>`contrib_resume_run` | Structured session tracking under `~/.opencontrib/runs/<runId>/` with full crash resume. |
-| **Discovery & Feasibility** | `contrib_scout`<br>`contrib_rank_opportunity`<br>`contrib_qualify_issue`<br>`contrib_assess_feasibility`<br>`contrib_diagnose_manifests` | Objective multi-dimensional probability signals (skill, OS feasibility, actionability) without prescribing decisions. |
-| **Context & Workspace** | `contrib_assemble_context`<br>`contrib_prepare_workspace`<br>`contrib_purge_sandbox` | Problem skeleton + reading order + target tests + isolated Git worktree sandbox. |
-| **Evidence & Governance** | `contrib_collect_evidence`<br>`contrib_audit_governance`<br>`contrib_render_pr_template` | Pre-fix failure assertion + post-fix 20x stress loop; 100-line gate + anti-AI audit. |
-| **Flywheel & Lifecycle** | `contrib_sync_flywheel`<br>`contrib_track_pr_status`<br>`contrib_doctor` | Memory ledger, PR lifecycle tracking, and host environment diagnostic. |
-| **Resources** | `opencontrib://doctor`<br>`opencontrib://memory`<br>`opencontrib://runs` | Zero-token instant context injection for host health, repo pitfalls, and run history. |
-| **Prompts** | `opencontrib_workflow_guide` | Standard 9-step Phase-Gated execution protocol for autonomous Agents. |
-
----
-
-## 🛡️ Core Verification & Governance Principles
-
-1. **Credential-Isolated Local Execution Environment**: Test and benchmark execution runs with stripped credentials (`~/.ssh`, `~/.aws`, `~/.npmrc`, `GH_TOKEN` purged), redirected `HOME`/`TMPDIR`, and restricted working-directory boundaries.
-2. **Dual-Stage Empirical Verification**: Contributions require capturing pre-fix failure baseline assertions and verifying clean 20x stress loop execution post-fix.
-3. **100-Line RFC Gate**: Surgical minimal bugfixes; patches exceeding 100 lines require explicit human/RFC approval.
-4. **Anti-Bandwagoning & Author Rights**: Enforces 7-day original author priority rights and blocks claiming already assigned issues.
+1. **Credential-Isolated Execution**: Tests run with `~/.ssh`, `~/.aws`, `~/.npmrc`, and `GH_TOKEN` purged; `HOME`/`TMPDIR` redirected; working-directory boundaries restricted.
+2. **Dual-Stage Empirical Verification**: Contributions require a pre-fix failure baseline + a clean 20× post-fix stress loop.
+3. **100-Line RFC Gate**: Surgical minimal bugfixes. Patches exceeding 100 lines require explicit human/RFC approval.
+4. **Anti-Bandwagoning & Author Rights**: Enforces 7-day original-author priority and blocks claiming already-assigned issues.
 5. **Human-in-the-Loop Gate**: All submissions remain draft-safe until explicit user confirmation.
 
 ---
 
-## 💎 High-SNR & Deep-Water Contribution Flywheel
+## Profile Flywheel
 
-OpenContrib explicitly enforces a **High-Signal-to-Noise Ratio (High-SNR)** standard to eliminate PR farming and maximize long-term maintainer trust:
-
-```mermaid
-flowchart LR
-    A[Deep-Water Defect Discovery<br>Serialization · Leaks · Race · Bounds] --> B[Issue & Reproduction<br>Minimal Failing Test Baseline]
-    B --> C[Surgical Fix & 20x Stress Loop<br>Worktree Isolation & Proof]
-    C --> D[Merged PR to Upstream<br>High-Impact Verified Repositories]
-    D --> E[Profile Flywheel & Reputation<br>Telemetry Sync & Skill Matrix]
-    E --> A
-```
-
-* **🚫 Anti-Farming Mandate**: Automated deduction (`-35` domain points) and rejection of pure typos, spelling, and trivial list additions that trigger anti-spam penalties in modern reputation engines (such as `ghfind`).
-* **🌊 8 Deep-Water Engineering Archetypes**:
-  1. **Protocol & Serialization Drift**: Zero-value omission (`omitempty`), HTTP/2 header case normalization, SSE keepalive truncation.
-  2. **Lifecycle & Resource Leaks**: Registry Watcher/Listener duplicate registration on reconnect, Context cancellation orphan goroutines, unclosed file descriptors.
-  3. **Distributed Cache & Invalidation**: Falsy value cache penetration, out-of-order double write Cache Stampede.
-  4. **Memory Layout & Tensor Contiguity**: Non-contiguous strided Tensor C++/CUDA Kernel Segfaults, FFI dangling pointers.
-  5. **ReDoS & Backpressure Collapse**: Catastrophic regex backtracking, thundering herd retry storms without full jitter.
-  6. **Time Monotonicity & Chrono Hazards**: Wall clock vs. Monotonic clock NTP rollback, DST day boundary jumps.
-  7. **Compiler / JIT Escape Invariants**: Hot-path dynamic interface dispatch breaking escape analysis stack allocations.
-  8. **Numerical Bounds & Cross-Platform Invariants**: `NaN`/`+Inf` and negative timeout hangs, Windows CRLF / `filepath.ToSlash` path traversal.
-
-### 📊 Scoring Engine Mathematical Model
-
-OpenContrib's opportunity ranking engine (`packages/core/src/discovery/scoring-engine.ts`) calculates candidate priority scores through a mathematically calibrated, multi-tier weighted formula:
+OpenContrib enforces a **High-Signal-to-Noise Ratio** standard to eliminate PR farming and maximize long-term maintainer trust:
 
 ```text
-FinalScore = clamp(
-  0,
-  100,
-  round(
-    0.50 * S_profile
-    + 0.30 * (S_domain + B_repo + B_deep - P_low_snr)
-    + 0.20 * S_feasibility
-    + M_freshness
-    + M_actionability
-  )
+Deep-Water Defect Discovery → Issue & Reproduction → Surgical Fix & 20x Stress Loop
+     → Merged PR → Profile Flywheel & Reputation → back to Deep-Water Discovery
+```
+
+### 8 Deep-Water Engineering Archetypes
+
+1. **Protocol & Serialization Drift** — `omitempty` zero-value, HTTP/2 header case, SSE truncation
+2. **Lifecycle & Resource Leaks** — duplicate watcher registration, orphan goroutines, unclosed FDs
+3. **Distributed Cache & Invalidation** — falsy value penetration, out-of-order stampede
+4. **Memory Layout & Tensor Contiguity** — non-contiguous strided tensors, FFI dangling pointers
+5. **ReDoS & Backpressure Collapse** — catastrophic regex backtracking, thundering herd retries
+6. **Time Monotonicity & Chrono Hazards** — wall clock vs monotonic NTP rollback, DST boundary jumps
+7. **Compiler / JIT Escape Invariants** — dynamic interface dispatch breaking escape analysis
+8. **Numerical Bounds & Cross-Platform Invariants** — NaN/Inf, negative timeout hangs, CRLF traversal
+
+### Scoring Engine
+
+```text
+FinalScore = clamp(0, 100,
+  0.50 * S_profile
+  + 0.30 * (S_domain + B_repo + B_deep - P_low_snr)
+  + 0.20 * S_feasibility
+  + M_freshness
+  + M_actionability
 )
 ```
 
-#### Component Breakdown & Deep-Water Bonus Calibration:
-| Component | Range / Formula | Description |
-| :--- | :--- | :--- |
-| **`S_profile` (50% Weight)** | 15 → 100 | Developer tech-stack and domain keyword alignment (1 hit = 45, 2 hits = 75, 3+ hits = `75 + (N - 2) * 10`). |
-| **`S_domain` (30% Weight)** | 25 → 60 | Issue taxonomy and labels (`bugfix` +10, `help-wanted` +10, `good-first-issue` +15). |
-| **`B_deep` (Deep-Water Bonus)** | **+15 → +25** | **1 matched archetype = +15, multiple matched archetypes = `min(25, 15 + (N - 1) * 5)`**. Directly elevates deep architectural defects by **+4.5 → +7.5 net points** in final ranking. |
-| **`P_low_snr` (Anti-Farming Penalty)** | **-35** | Applied when pure typo/whitespace is detected without deep-water signals (**-10.5 net points penalty**), suppressing low-SNR issues below threshold. |
-| **`B_repo` (Popularity Bonus)** | 0 → +6 | Tiered repository popularity signal (≥ 50 stars = +3, ≥ 5000 stars = +6). |
-| **`S_feasibility` (20% Weight)** | 0 → 100 | Environment and toolchain execution feasibility (`100 - penalty`). |
-| **`M_freshness` (Modifier)** | -20 → +6 | Activity recency modifier based on exact max timestamp across creation, update, and comments. |
-| **`M_actionability` (Modifier)** | -6 → +6 | Evaluates presence of stack traces, code blocks, and deterministic reproduction steps. |
+| Component | Range | Role |
+| ----------- | ------- | ------ |
+| `S_profile` (50%) | 15→100 | Tech-stack + domain keyword alignment |
+| `S_domain` (30%) | 25→60 | Issue labels and taxonomy |
+| `B_deep` | +15→+25 | Deep-water archetype match bonus |
+| `P_low_snr` | -35 | Anti-farming penalty for trivial changes |
+| `B_repo` | 0→+6 | Repository popularity tier |
+| `S_feasibility` (20%) | 0→100 | Environment/toolchain match |
+| `M_freshness` | -20→+6 | Activity recency modifier |
+| `M_actionability` | -6→+6 | Stack trace + repro steps presence |
 
 ---
 
-## 📄 License
+## Architecture
+
+```
+opencontrib/
+├── packages/
+│   ├── core/           # 🧠 Pure domain logic (13 modules)
+│   ├── cli/            # 🖥️ 20 subcommands (npm: opencontrib-cli)
+│   ├── mcp-server/     # 🔌 MCP compatibility wrapper
+│   └── studio/         # 🎨 Web control studio
+├── skills/
+│   └── opencontrib-cli/# 📜 Agent skill for CLI usage
+└── package.json
+```
+
+---
+
+## Monorepo Packages
+
+| Package | npm | Description |
+| --------- | ----- | ------------- |
+| `@opencontrib/core` | — | Pure domain logic — 13 modules, no interface dependencies |
+| `opencontrib-cli` | `npm install opencontrib-cli` | CLI interface — 20 subcommands via Commander.js |
+| `opencontrib-mcp` | `npm install opencontrib-mcp` | MCP compatibility wrapper — 18 tools, 3 resources, 1 prompt |
+
+---
+
+## License
 
 Distributed under the [MIT License](LICENSE). Copyright (c) 2026 OpenContrib Contributors.
