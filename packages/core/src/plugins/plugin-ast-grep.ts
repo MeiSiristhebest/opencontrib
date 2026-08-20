@@ -47,7 +47,7 @@ export const astGrepPlugin: OpenContribPlugin = {
             try {
               // Pass pattern directly with JSON output
               const langFlag = rule.language === 'typescript' ? '--lang ts' : rule.language === 'go' ? '--lang go' : '';
-              const cmd = `${bin} scan -p "${rule.pattern}" ${langFlag} --json`;
+              const cmd = `${bin} run -p "${rule.pattern}" ${langFlag} --json=compact`;
 
               const { stdout } = await host.exec(cmd, {
                 cwd: targetPath,
