@@ -9,9 +9,10 @@ export interface IssueClaimPayload {
 }
 
 /**
- * Open Source Proactive Issue Claim & Bot Etiquette Engine
+ * Claim Protocol (Community Issue Claim & Bot Etiquette Standard)
+ * Clean semantic naming replacing fuzzy 'Engine' suffixes.
  */
-export class IssueClaimEngine {
+export class ClaimProtocol {
   /**
    * Generates the authoritative Proactive Issue Claim Statement:
    * "I have investigated this issue and have a reproducible test case and fix ready. Please assign this issue to me, I will submit a PR shortly."
@@ -38,10 +39,8 @@ export class IssueClaimEngine {
 
   /**
    * Discriminate automated Bot accounts vs human maintainers:
-   * - Bots (e.g. `github-actions[bot]`, `codecov[bot]`, `dependabot[bot]`, `sonarcloud[bot]`):
-   *   Do NOT reply with text comments; address solely by pushing code to trigger CI re-evaluation.
-   * - Human Maintainers:
-   *   Reply with concise, technical, and respectful explanations.
+   * - Bots: Do NOT reply with comments; address solely via commits & CI re-evaluation.
+   * - Human Maintainers: Reply with technical explanations.
    */
   public static isBotAuthor(authorName: string, authorType?: string): boolean {
     const lowerName = (authorName || '').toLowerCase();
@@ -60,3 +59,6 @@ export class IssueClaimEngine {
     );
   }
 }
+
+// Backward Compatibility Alias
+export const IssueClaimEngine = ClaimProtocol;

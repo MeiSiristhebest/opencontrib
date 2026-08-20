@@ -18,6 +18,7 @@ import { SmartPointerStore } from './pointer-store.js';
 import { MicrokernelEventBus } from './event-bus.js';
 import { CapabilityRouter } from './capability-router.js';
 import { EvidenceGraph } from './evidence-graph.js';
+import { ProbeScanScheduler } from './scan-scheduler.js';
 
 const execAsync = promisify(exec);
 const binaryCache = new Map<string, boolean>();
@@ -278,6 +279,7 @@ export class PluginHost implements ProbeRegistryApi {
 
   /**
    * Execute negotiated probes concurrently and populate SmartPointerStore.
+   * Delegated to ProbeScanScheduler (SRP separation).
    */
   public async executeScan(
     targetPath: string,
@@ -288,53 +290,6 @@ export class PluginHost implements ProbeRegistryApi {
     executedProbes: string[];
     pointersCreated: PointerStub[];
   }> {
-    const executed: string[] = [];
-    const beforeCount = this.pointers.list().length;
-
-    const hostServices: HostServices = {
-      workspacePath: targetPath,
-      exec: async (cmd: string, opts = {}) => {
-        const cwd = opts.cwd || targetPath;
-        const { stdout, stderr } = await execAsync(cmd, {
-          cwd,
-          timeout: opts.timeout || 30000,
-          maxBuffer: 10 * 1024 * 1024,
-        });
-        return { stdout, stderr };
-      },
-      log: () => {},
-      isBinaryAvailable: (bin: string) => {
-        if (binaryCache.has(bin)) return binaryCache.get(bin)!;
-        try {
-          const isWindows = process.platform === 'win32';
-          const checkCmd = isWindows ? `where.exe ${bin}` : `which ${bin}`;
-          execSync(checkCmd, { stdio: 'ignore' });
-          binaryCache.set(bin, true);
-          return true;
-        } catch {
-          binaryCache.set(bin, false);
-          return false;
-        }
-      },
-    };
-
-    for (const probe of probesToRun) {
-      executed.push(probe.id);
-      try {
-        await probe.scan(targetPath, this.pointers, hostServices);
-      } catch (err: any) {
-        console.error(`[PluginHost] Probe "${probe.id}" scan error:`, err.message);
-      }
-    }
-
-    const allPointers = this.pointers.list();
-    const newPointers = allPointers.slice(beforeCount);
-
-    return {
-      target: targetPath,
-      timestamp: new Date().toISOString(),
-      executedProbes: executed,
-      pointersCreated: newPointers.map((p) => p.stub),
-    };
+    return ProbeScanScheduler.executeScan(targetPath, probesToRun, this.pointers);
   }
 }

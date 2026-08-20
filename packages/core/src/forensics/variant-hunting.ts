@@ -11,12 +11,11 @@ export interface DiscoveredVariant {
 }
 
 /**
- * Variant Hunting Engine (Inspired by Vigolium Piolium P12)
- * When a high-confidence defect is found in a specific file/function,
- * automatically extracts its AST structural pattern and scans the entire repository
- * to uncover parallel duplicated bugs or anti-pattern variants across all modules.
+ * Variant Hunter (Inspired by Vigolium Piolium P12)
+ * Clean domain semantic naming replacing fuzzy 'Engine' suffixes.
+ * Scans the entire repository for parallel duplicated bugs or anti-pattern variants.
  */
-export class VariantHuntingEngine {
+export class VariantHunter {
   /**
    * Hunts for variants of a given finding across the entire repository
    */
@@ -43,7 +42,7 @@ export class VariantHuntingEngine {
           : 'ts';
 
         const pattern = `${finding.affectedSymbol}($$$ARGS)`;
-        const { stdout } = await host.exec(`${bin} run -p "${pattern}" --lang ${lang} --json=compact`, {
+        const { stdout } = await (host as any).exec(`${bin} run -p "${pattern}" --lang ${lang} --json=compact`, {
           cwd: repoPath,
           timeout: 20000,
         });
@@ -123,3 +122,6 @@ export class VariantHuntingEngine {
     }
   }
 }
+
+// Backward Compatibility Alias
+export const VariantHuntingEngine = VariantHunter;

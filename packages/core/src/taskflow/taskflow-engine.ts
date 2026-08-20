@@ -1,11 +1,12 @@
 import type { PointerStub, PluginHostContract } from '../kernel/contract.js';
+import { defaultTaskActionRegistry, TaskActionRegistry } from './taskflow-registry.js';
 
 export type TaskflowStepStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
 
 export interface TaskflowStepSpec {
   id: string;
   name: string;
-  action: 'probe_scan' | 'context_bundle' | 'variant_hunt' | 'generate_3d_tests' | 'verify_sandbox';
+  action: string;
   parameters?: Record<string, any>;
 }
 
@@ -26,10 +27,10 @@ export interface TaskflowExecutionReport {
 }
 
 /**
- * Taskflow Orchestrator Engine (Inspired by GitHub Security Lab Taskflow Agent)
- * Executes declarative multi-step security and contribution auditing pipelines with strict state transition.
+ * Taskflow Runner (Declarative Multi-Agent Workflow Orchestrator)
+ * Uses Strategy Pattern (TaskActionRegistry) conforming to OCP.
  */
-export class TaskflowEngine {
+export class TaskflowRunner {
   /**
    * Executes a declarative taskflow pipeline against a repository
    */
@@ -39,6 +40,7 @@ export class TaskflowEngine {
     steps: TaskflowStepSpec[],
     host: PluginHostContract,
     initialFinding?: PointerStub,
+    registry: TaskActionRegistry = defaultTaskActionRegistry,
   ): Promise<TaskflowExecutionReport> {
     const startTime = Date.now();
     const stepResults: TaskflowStepResult[] = [];
@@ -47,46 +49,27 @@ export class TaskflowEngine {
     for (const step of steps) {
       const stepStart = Date.now();
       try {
-        let stepOutput: any = null;
+        const handler = registry.get(step.action);
+        if (!handler) {
+          throw new Error(`Unregistered task action: "${step.action}"`);
+        }
 
-        switch (step.action) {
-          case 'probe_scan': {
-            const allProbes = typeof (host as any).listAll === 'function' ? (host as any).listAll() : [];
-            const scanRes = typeof (host as any).executeScan === 'function'
-              ? await (host as any).executeScan(repoPath, allProbes)
-              : { pointersCreated: [] };
-            stepOutput = { findingsCount: scanRes.pointersCreated.length };
-            if (!currentFinding && scanRes.pointersCreated.length > 0) {
-              currentFinding = scanRes.pointersCreated[0];
-            }
-            break;
-          }
-          case 'context_bundle': {
-            if (currentFinding) {
-              stepOutput = { bundleId: `bundle-${currentFinding.id}`, targetFile: currentFinding.file };
-            } else {
-              stepOutput = { skipped: true, reason: 'No finding to bundle' };
-            }
-            break;
-          }
-          case 'variant_hunt': {
-            stepOutput = { variantsSearched: true };
-            break;
-          }
-          case 'generate_3d_tests': {
-            stepOutput = { suiteGenerated: true };
-            break;
-          }
-          case 'verify_sandbox': {
-            stepOutput = { verified: true };
-            break;
-          }
+        const res = await handler.execute({
+          flowId,
+          repoPath,
+          host,
+          currentFinding,
+          parameters: step.parameters,
+        });
+
+        if (res.updatedFinding) {
+          currentFinding = res.updatedFinding;
         }
 
         stepResults.push({
           stepId: step.id,
           status: 'SUCCESS',
-          output: stepOutput,
+          output: res.output,
           durationMs: Date.now() - stepStart,
         });
       } catch (err: any) {
@@ -109,3 +92,6 @@ export class TaskflowEngine {
     };
   }
 }
+
+// Backward Compatibility Alias
+export const TaskflowEngine = TaskflowRunner;

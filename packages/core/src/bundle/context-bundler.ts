@@ -2,6 +2,30 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { PointerStub } from '../kernel/contract.js';
 
+export interface FileSystemPort {
+  readFile(relPath: string): string;
+  readDir(relPath: string): string[];
+  exists(relPath: string): boolean;
+}
+
+export class DefaultNodeFileSystemAdapter implements FileSystemPort {
+  constructor(private basePath: string) {}
+
+  public readFile(relPath: string): string {
+    return fs.readFileSync(path.join(this.basePath, relPath), 'utf8');
+  }
+
+  public readDir(relPath: string): string[] {
+    const target = path.join(this.basePath, relPath);
+    if (!fs.existsSync(target)) return [];
+    return fs.readdirSync(target);
+  }
+
+  public exists(relPath: string): boolean {
+    return fs.existsSync(path.join(this.basePath, relPath));
+  }
+}
+
 export interface ContextSnippet {
   filePath: string;
   role: 'target' | 'caller' | 'type_definition' | 'dependency';
@@ -22,26 +46,27 @@ export interface ContextBundle {
 
 /**
  * Context Bundler (Inspired by Alibaba OpenCodeReview)
- * Implements divide-and-conquer context bundling.
- * Extracts minimal, high-precision cross-file AST dependencies (Target + Caller + Struct/Interface Definition)
- * to eliminate LLM hallucination and context noise while keeping token footprint extremely small (<2KB).
+ * Adheres strictly to DIP (Dependency Inversion Principle) and Ports & Adapters Architecture.
+ * Relies on abstract FileSystemPort rather than concrete disk I/O.
  */
 export class ContextBundler {
   /**
    * Bundles minimal deterministic context for a specific finding
    */
   public static createBundle(
-    repoPath: string,
+    fsOrPath: FileSystemPort | string,
     finding: PointerStub,
     options: { radiusLines?: number } = {},
   ): ContextBundle {
+    const fsPort: FileSystemPort =
+      typeof fsOrPath === 'string' ? new DefaultNodeFileSystemAdapter(fsOrPath) : fsOrPath;
+
     const radius = options.radiusLines || 15;
     const snippets: ContextSnippet[] = [];
     let totalChars = 0;
 
-    const absTarget = path.join(repoPath, finding.file);
-    if (fs.existsSync(absTarget)) {
-      const fileContent = fs.readFileSync(absTarget, 'utf8');
+    if (fsPort.exists(finding.file)) {
+      const fileContent = fsPort.readFile(finding.file);
       const lines = fileContent.split('\n');
       const startLine = Math.max(1, finding.line - radius);
       const endLine = Math.min(lines.length, finding.line + radius);
@@ -57,9 +82,9 @@ export class ContextBundler {
         content,
       });
 
-      // Search for imported types or callers in nearby directories if symbol is known
+      // Search for imported types or struct definitions in nearby directory
       if (finding.affectedSymbol) {
-        const typeSnippet = this.extractRelatedTypeSnippet(repoPath, finding.file, finding.affectedSymbol);
+        const typeSnippet = this.extractRelatedTypeSnippet(fsPort, finding.file, finding.affectedSymbol);
         if (typeSnippet) {
           totalChars += typeSnippet.content.length;
           snippets.push(typeSnippet);
@@ -88,30 +113,30 @@ export class ContextBundler {
   }
 
   private static extractRelatedTypeSnippet(
-    repoPath: string,
+    fsPort: FileSystemPort,
     currentFile: string,
     symbol: string,
   ): ContextSnippet | null {
     try {
-      const dir = path.dirname(path.join(repoPath, currentFile));
-      if (!fs.existsSync(dir)) return null;
-
-      const files = fs.readdirSync(dir);
+      const dir = path.dirname(currentFile);
+      const files = fsPort.readDir(dir);
       for (const f of files) {
         if (f.endsWith('.ts') || f.endsWith('.go') || f.endsWith('.py')) {
-          const full = path.join(dir, f);
-          if (full === path.join(repoPath, currentFile)) continue;
+          const relCandidate = path.join(dir, f).replace(/\\/g, '/');
+          if (relCandidate === currentFile.replace(/\\/g, '/')) continue;
 
-          const content = fs.readFileSync(full, 'utf8');
-          if (content.includes(`interface ${symbol}`) || content.includes(`type ${symbol} struct`)) {
-            const lines = content.split('\n');
-            return {
-              filePath: path.relative(repoPath, full),
-              role: 'type_definition',
-              startLine: 1,
-              endLine: Math.min(30, lines.length),
-              content: lines.slice(0, 30).join('\n'),
-            };
+          if (fsPort.exists(relCandidate)) {
+            const content = fsPort.readFile(relCandidate);
+            if (content.includes(`interface ${symbol}`) || content.includes(`type ${symbol} struct`)) {
+              const lines = content.split('\n');
+              return {
+                filePath: relCandidate,
+                role: 'type_definition',
+                startLine: 1,
+                endLine: Math.min(30, lines.length),
+                content: lines.slice(0, 30).join('\n'),
+              };
+            }
           }
         }
       }
