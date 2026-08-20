@@ -104,6 +104,9 @@ export interface NormalizedFinding {
   severity: FindingSeverity;
   cwe?: string;
   ruleId?: string;
+  affectedSymbol?: string;
+  callSite?: string;
+  dataFlow?: string;
   remediation?: string;
   pocSnippet?: string;
   prPotentialScore: number;

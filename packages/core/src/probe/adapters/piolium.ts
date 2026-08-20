@@ -34,7 +34,7 @@ export function constructPoCForFinding(finding: NormalizedFinding): PoCArtifact 
   const isConcurrency = finding.category === 'lifecycle_leak';
 
   const cleanId = finding.id.replace(/[^a-zA-Z0-9]/g, '_');
-  const targetSymbol = finding.title.match(/in\s+([a-zA-Z0-9_]+)/i)?.[1] || 'targetFunction';
+  const targetSymbol = finding.affectedSymbol || finding.title.match(/in\s+([a-zA-Z0-9_]+)/i)?.[1] || 'targetFunction';
 
   const verificationSteps: VerificationStep[] = [];
 

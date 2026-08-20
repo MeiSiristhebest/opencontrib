@@ -3,15 +3,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { promisify } from 'util';
-import type {
-  OpenContribPlugin,
-  PluginContext,
-  ProbeDescriptor,
-  ProbeRegistryApi,
-  HostServices,
-  RepoFingerprint,
-  PointerStub,
-  KernelToolDescriptor,
+import {
+  PluginPermissionError,
+  type OpenContribPlugin,
+  type PluginContext,
+  type ProbeDescriptor,
+  type ProbeRegistryApi,
+  type HostServices,
+  type RepoFingerprint,
+  type PointerStub,
+  type KernelToolDescriptor,
 } from './contract.js';
 import { SmartPointerStore } from './pointer-store.js';
 import { MicrokernelEventBus } from './event-bus.js';
@@ -76,7 +77,19 @@ export class PluginHost implements ProbeRegistryApi {
     const hostServices: HostServices = {
       workspacePath: this.workspacePath,
       exec: async (cmd: string, opts = {}) => {
-        // Enforce permission checks if plugin restricts execution
+        // Enforce runtime permission checks if permissions are declared
+        if (plugin.permissions) {
+          const isGitCmd = cmd.trim().startsWith('git ') || cmd.trim() === 'git';
+          const hasGitPerm = plugin.permissions.includes('exec:git') || plugin.permissions.includes('exec:binary');
+          const hasBinPerm = plugin.permissions.includes('exec:binary');
+
+          if (isGitCmd && !hasGitPerm) {
+            throw new PluginPermissionError(plugin.name, 'exec:git', cmd);
+          } else if (!isGitCmd && !hasBinPerm) {
+            throw new PluginPermissionError(plugin.name, 'exec:binary', cmd);
+          }
+        }
+
         const cwd = opts.cwd || this.workspacePath;
         const { stdout, stderr } = await execAsync(cmd, {
           cwd,

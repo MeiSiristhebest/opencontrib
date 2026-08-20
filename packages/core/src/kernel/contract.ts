@@ -1,6 +1,6 @@
 /**
  * OpenContrib Microkernel Contract & Smart Pointer Specification
- * Unified capability hierarchy, scoped permissions, typed events, and concrete verification steps.
+ * Unified capability hierarchy, runtime-enforced scoped permissions, typed KernelEventMap, and runtime verification steps.
  */
 
 export type DefectCategory =
@@ -21,16 +21,20 @@ export type PointerView = 'stub' | 'slice' | 'evidence' | 'all';
 
 /**
  * Level 1: Minimal Metadata Stub (~25-30 tokens)
+ * Structured symbols, call sites, and data flows (No heuristic title-guessing)
  */
 export interface PointerStub {
   id: string;
-  uri: string; // e.g. "ptr://findings/ocr-npe-42"
+  uri: string; // e.g. "ptr://findings/sec-path-traversal-42"
   title: string;
   category: DefectCategory;
   severity: FindingSeverity;
   file: string;
   line: number;
   confidence: number; // 0 - 100%
+  affectedSymbol?: string;
+  callSite?: string;
+  dataFlow?: string;
 }
 
 /**
@@ -44,14 +48,19 @@ export interface PointerSlice {
 }
 
 /**
- * Concrete, executable verification steps (No placeholder assertions)
+ * Concrete, executable verification steps with optional runtime evaluators
  */
 export interface VerificationStep {
   setupCode?: string;
   exploitPayload: string;
-  invocationExpression: string;
+  targetCall: string;
   expectedFailureAssertion: string;
   expectedPostFixAssertion: string;
+  evaluator?: {
+    runExploit: (context?: unknown) => Promise<{ output: string; error?: Error }>;
+    isFailureConfirmed: (result: { output: string; error?: Error }) => boolean;
+    isFixConfirmed: (result: { output: string; error?: Error }) => boolean;
+  };
 }
 
 /**
@@ -120,6 +129,9 @@ export interface PointerStoreApi {
     file: string;
     line: number;
     confidence?: number;
+    affectedSymbol?: string;
+    callSite?: string;
+    dataFlow?: string;
     slice?: PointerSlice;
     evidence?: PointerEvidence;
   }): SmartPointer;
@@ -144,6 +156,13 @@ export type PluginPermission =
   | 'exec:binary'
   | 'network:github';
 
+export class PluginPermissionError extends Error {
+  constructor(public pluginName: string, public requestedPermission: PluginPermission, public action: string) {
+    super(`[Security Sandbox] Plugin "${pluginName}" denied permission "${requestedPermission}" for action: ${action}`);
+    this.name = 'PluginPermissionError';
+  }
+}
+
 export interface HostServices {
   workspacePath: string;
   exec(cmd: string, opts?: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string }>;
@@ -151,17 +170,34 @@ export interface HostServices {
   isBinaryAvailable(bin: string): boolean;
 }
 
+/**
+ * Type-Safe Kernel Event Map
+ */
+export interface KernelEventMap {
+  'plugin:activated': { name: string; version: string; probesCount: number; toolsCount: number };
+  'plugin:deactivated': { name: string };
+  'finding:created': { uri: string; id: string; category: DefectCategory; severity: FindingSeverity };
+  'repo:fingerprint': RepoFingerprint;
+  'scout:opportunity': { target: string };
+  'evidence:verify': { findingUri: string };
+}
+
 export interface KernelEvent<T = unknown> {
   id: string;
   type: string;
   timestamp: string;
   source: string;
-  traceId?: string;
+  traceId: string;
   payload: T;
 }
 
 export interface EventBusApi {
+  on<K extends keyof KernelEventMap>(
+    eventType: K,
+    handler: (event: KernelEvent<KernelEventMap[K]>) => Promise<void> | void,
+  ): void;
   on<T = unknown>(eventType: string, handler: (event: KernelEvent<T>) => Promise<void> | void): void;
+  emit<K extends keyof KernelEventMap>(eventType: K, payload: KernelEventMap[K], source?: string): Promise<void>;
   emit<T = unknown>(eventType: string, payload: T, source?: string): Promise<void>;
 }
 
