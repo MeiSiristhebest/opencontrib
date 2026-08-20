@@ -105,23 +105,34 @@ export function recordFlakyBaseline(
 export function runStressLoop(
   cwd: string,
   testCommand: string,
-  count: number = 20,
+  count?: number,
   workspaceRoot?: string,
 ): { passed: boolean; completedRuns: number; lastOutput: string } {
   let completedRuns = 0;
   let lastOutput = '';
 
+  const isBroadSuite =
+    testCommand.includes('./...') ||
+    testCommand.includes('npm test') ||
+    testCommand.includes('bun test') ||
+    testCommand.trim() === 'pytest' ||
+    testCommand.trim() === 'cargo test';
+
+  // Broad suites run once to avoid minutes of redundant computation.
+  // Specific unit tests run 3 times to verify stability.
+  const targetCount = count !== undefined ? count : isBroadSuite ? 1 : 3;
+
   const parts = testCommand.split(' ');
   const cmd = parts[0];
   const args = parts.slice(1);
 
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < targetCount; i++) {
     const res = defaultSandboxRuntime.executeInSandbox({
       cwd,
       workspaceRoot,
       command: cmd,
       args,
-      timeoutMs: 25000,
+      timeoutMs: 30000,
     });
 
     lastOutput = res.output;

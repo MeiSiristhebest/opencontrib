@@ -19,7 +19,23 @@ These are non-negotiable pauses. At each one, present findings clearly and wait 
 
 **Checkpoint 2 — After reproducing the bug:** Show the actual failing test output that proves the bug exists. Then present a concise implementation plan (the proposed fix in ≤100 lines). Wait for approval before touching any source files.
 
-**Checkpoint 3 — Before submitting:** Show the complete diff, the governance audit result, and the rendered PR description. Only push and create the PR after explicit confirmation.
+**Checkpoint 3 — Before submitting:** Show the complete diff, the governance audit result, and the rendered PR description. For proactive discoveries, confirm the newly filed GitHub Issue number first. Only push and create the PR after explicit confirmation.
+
+---
+
+## Long-Term Craftsmanship & Proactive Defense
+
+A high-quality contribution is never just a quick bandage. High-performing contributors practice **long-term holistic stewardship**:
+
+1. **Synchronized Documentation & Spec Updates:** Whenever changing function semantics, timeout behavior, or return types, update inline docstrings, comments, and relevant user-facing documentation (`docs/` or `README.md`) in the same PR.
+
+2. **360° Variant Sweeping:** When fixing a bug in one function, scan parallel modules, sister structs, and v1/v2 interfaces for identical defect copies across the repository. Fortify them together so maintainers get a complete, robust solution.
+
+3. **Proactive Defensive Tests:** Write tests that cover not only the specific bug, but also extreme edge cases: zero-values (`0`, `false`, `""`, `nil`), negative numbers, maximum bounds, and concurrency idempotency (e.g. calling dispose or close multiple times).
+
+4. **Issue-First Policy for Proactive Discoveries:** When fixing an existing issue, link `Fixes #<existing_id>`. When finding a new defect proactively (via probes or scanning), **always create a GitHub Issue first** (`gh issue create`) to establish a public discussion anchor, then link the PR with `Fixes #<new_id>`.
+
+5. **Workspace Progress Tracking:** Maintain `CONTRIBUTION_RUN.md` inside the workspace root to record phase status, checkpoint approvals, and artifact pointers across sessions.
 
 ---
 
@@ -53,13 +69,15 @@ Avoid issues that are primarily cosmetic: typos, whitespace, comment rewrites, o
 
 These constraints protect the PR's chances of being accepted.
 
-**Size limit:** Keep diffs under 100 lines of production code (tests excluded). Larger changes require architectural discussion first — suggest the user open a Discussion or RFC issue instead.
+**Size limit:** Keep production code changes concise (aim under ~100 lines for logic, excluding tests and documentation). Larger changes require architectural discussion first.
 
 **AI disclosure:** Do not include AI-generated badges, disclaimers, or any language that signals the patch was produced by a tool. Most maintainers react negatively to this. The only exception is if the repository's `CONTRIBUTING.md` or PR template explicitly asks for it.
 
 **Respect conventions:** Match the repository's existing commit format, branch naming, PR section headers, and any required trailers (DCO sign-off, changelog entries, etc.). Check `CONTRIBUTING.md` first.
 
 **Workspace location:** Clone and create worktrees directly inside the user's active workspace directory (e.g., alongside other projects they have open). Never write to system temp directories — files there are invisible in the IDE and hard to inspect.
+
+**Flywheel profile privacy:** Only officially merged contributions (`status: 'merged'`) should ever be synced to the public profile README. Unmerged or in-review PRs are tracked strictly in local ledger.
 
 ---
 
@@ -68,7 +86,7 @@ These constraints protect the PR's chances of being accepted.
 For full flag documentation and piping examples for each command, read the appropriate reference file when you reach that phase:
 
 - `references/discovery.md` — `scout`, `discovery rank/qualify/context/manifests/feasibility`
-- `references/probe.md` — `probe plan/run`, `plugin list/add/remove` (progressive capability negotiation)
+- `references/probe.md` — `probe plan/run/hotspot/fuzz`, `pointer list/resolve`, `plugin list/info`
 - `references/workspace.md` — `workspace prepare`, run creation
 - `references/evidence.md` — `evidence`, fail-first and stress-loop modes
 - `references/governance.md` — `governance audit/impact/ci-diagnose/pr-template`

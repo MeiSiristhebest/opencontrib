@@ -33,30 +33,28 @@ export class ProfileFlywheel {
   }
 
   renderProfileMarkdown(records: ContributionRecord[] = this.loadRecords()): string {
-    if (records.length === 0) {
+    const mergedRecords = records.filter((r) => r.status === 'merged');
+
+    if (mergedRecords.length === 0) {
       return `<!-- START_OPENCONTRIB_SECTION -->
 ### 🚀 Open Source Contributions
-*No contributions recorded yet. Run \`contrib_scout\` or \`contrib_probe\` to begin!*
+*Active contributions are tracked in local ledger. Merged contributions will be displayed here.*
 <!-- END_OPENCONTRIB_SECTION -->`;
     }
-
-    const mergedCount = records.filter((r) => r.status === 'merged').length;
-    const activeCount = records.filter((r) => r.status === 'in_review' || r.status === 'submitted').length;
 
     let md = `<!-- START_OPENCONTRIB_SECTION -->
 ### 🚀 Open Source Contributions (Live Flywheel)
 
-> **Total PRs**: ${records.length} | **Merged**: 🌟 ${mergedCount} | **Active**: ⏳ ${activeCount}
+> **Merged Contributions**: 🌟 ${mergedRecords.length}
 
-| Repository | Issue / Contribution | PR | Status | Submitted |
+| Repository | Issue / Contribution | PR | Status | Merged Date |
 | :--- | :--- | :--- | :--- | :--- |
 `;
 
-    for (const r of records.slice(0, 10)) {
-      const statusIcon = r.status === 'merged' ? '🟣 **Merged**' : r.status === 'in_review' ? '🟡 **In Review**' : '🟢 **Open**';
+    for (const r of mergedRecords.slice(0, 10)) {
       const issueText = r.issueNumber ? `#${r.issueNumber} ${r.issueTitle}` : r.issueTitle;
       const prText = r.prNumber ? `#${r.prNumber}` : 'View PR';
-      md += `| [\`${r.repoFullName}\`](https://github.com/${r.repoFullName}) | ${issueText} | [${prText}](${r.prUrl}) | ${statusIcon} | \`${r.submittedAt.split('T')[0]}\` |\n`;
+      md += `| [\`${r.repoFullName}\`](https://github.com/${r.repoFullName}) | ${issueText} | [${prText}](${r.prUrl}) | 🟣 **Merged** | \`${r.submittedAt.split('T')[0]}\` |\n`;
     }
 
     md += `\n*Updated automatically via [OpenContrib Engine](https://github.com/opencontrib/opencontrib)*\n<!-- END_OPENCONTRIB_SECTION -->`;
