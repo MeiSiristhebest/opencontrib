@@ -177,6 +177,127 @@ export const STANDARD_AST_RELATIONAL_RULES: ASTGrepYamlRule[] = [
       impact: 'Unhandled promise rejection in asynchronous event loop',
     },
   },
+  // 9. TypeScript: Silent Error Swallowing in Catch Block
+  {
+    id: 'ts-empty-catch-swallow',
+    language: 'typescript',
+    severity: 'warning',
+    message: 'Empty catch block completely swallows exceptions and masks fatal runtime defects',
+    rule: {
+      pattern: 'catch ($ERR) {}',
+    },
+    fix: 'catch ($ERR) { console.warn("Caught error:", $ERR); }',
+    metadata: {
+      cwe: 'CWE-391',
+      category: 'protocol_drift',
+      impact: 'Silent failures leaving system in corrupted or non-recoverable state',
+    },
+  },
+  // 10. Python: Unclosed File Handle without Context Manager
+  {
+    id: 'py-unclosed-file-handle',
+    language: 'python',
+    severity: 'warning',
+    message: 'File opened with open() without using with context manager causes file descriptor leaks',
+    rule: {
+      pattern: '$F = open($PATH, $MODE)',
+      not: {
+        inside: {
+          pattern: 'with open($$$) as $$$:',
+        },
+      },
+    },
+    metadata: {
+      cwe: 'CWE-400',
+      category: 'lifecycle_leak',
+      impact: 'OS file descriptor exhaustion on long-running worker processes',
+    },
+  },
+  // 11. Python: Mutable Default Argument
+  {
+    id: 'py-mutable-default-argument',
+    language: 'python',
+    severity: 'error',
+    message: 'Mutable default argument (list/dict) retains mutated state across repeated calls',
+    rule: {
+      pattern: 'def $FUNC($ARG=[]): $$$',
+    },
+    metadata: {
+      cwe: 'CWE-665',
+      category: 'protocol_drift',
+      impact: 'Shared state accumulation across requests leading to data pollution',
+    },
+  },
+  // 12. Python: Bare Except Block
+  {
+    id: 'py-bare-except',
+    language: 'python',
+    severity: 'error',
+    message: 'Bare except: catches SystemExit and KeyboardInterrupt, preventing graceful shutdown',
+    rule: {
+      pattern: 'except:',
+    },
+    fix: 'except Exception:',
+    metadata: {
+      cwe: 'CWE-391',
+      category: 'protocol_drift',
+      impact: 'Process cannot be terminated or handled gracefully by orchestrator',
+    },
+  },
+  // 13. Rust: Unchecked unwrap() on Fallible Results
+  {
+    id: 'rs-unchecked-unwrap',
+    language: 'rust',
+    severity: 'warning',
+    message: 'Calling .unwrap() on Result/Option can trigger sudden panic in production',
+    rule: {
+      pattern: '$EXPR.unwrap()',
+    },
+    fix: '$EXPR.unwrap_or_default()',
+    metadata: {
+      cwe: 'CWE-754',
+      category: 'protocol_drift',
+      impact: 'Unrecoverable thread panic bringing down entire service instance',
+    },
+  },
+  // 14. Go: SQL Rows Leak without Close
+  {
+    id: 'go-unclosed-sql-rows',
+    language: 'go',
+    severity: 'error',
+    message: 'Database query rows must be closed with defer rows.Close() to return connection to pool',
+    rule: {
+      pattern: '$ROWS, $ERR := $DB.Query($QUERY)',
+      not: {
+        inside: {
+          pattern: 'defer $ROWS.Close()',
+        },
+      },
+    },
+    metadata: {
+      cwe: 'CWE-400',
+      category: 'lifecycle_leak',
+      impact: 'Database connection pool starvation blocking all subsequent queries',
+    },
+  },
+  // 15. Go: time.After Memory Leak inside Select Loop
+  {
+    id: 'go-time-after-in-select-loop',
+    language: 'go',
+    severity: 'error',
+    message: 'time.After inside for-select loop allocates a new timer per iteration until duration fires',
+    rule: {
+      pattern: 'case <-time.After($D):',
+      inside: {
+        pattern: 'for { select { $$$ } }',
+      },
+    },
+    metadata: {
+      cwe: 'CWE-400',
+      category: 'lifecycle_leak',
+      impact: 'Rapid heap memory accumulation and GC pressure under high event rates',
+    },
+  },
 ];
 
 /**
