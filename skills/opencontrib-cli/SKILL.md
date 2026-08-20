@@ -68,6 +68,7 @@ These constraints protect the PR's chances of being accepted.
 For full flag documentation and piping examples for each command, read the appropriate reference file when you reach that phase:
 
 - `references/discovery.md` — `scout`, `discovery rank/qualify/context/manifests/feasibility`
+- `references/probe.md` — `probe plan/run`, `plugin list/add/remove` (progressive capability negotiation)
 - `references/workspace.md` — `workspace prepare`, run creation
 - `references/evidence.md` — `evidence`, fail-first and stress-loop modes
 - `references/governance.md` — `governance audit/impact/ci-diagnose/pr-template`

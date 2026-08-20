@@ -4,6 +4,8 @@ import { Command } from 'commander';
 
 import { doctorCommand } from './commands/doctor.js';
 import { discoveryCommand } from './commands/discovery.js';
+import { probeCommand } from './commands/probe.js';
+import { pluginCommand } from './commands/plugin.js';
 import { evidenceCommand } from './commands/evidence.js';
 import { flywheelCommand } from './commands/flywheel.js';
 import { governanceCommand } from './commands/governance.js';
@@ -24,6 +26,8 @@ program
 
 program.addCommand(doctorCommand);
 program.addCommand(discoveryCommand);
+program.addCommand(probeCommand);
+program.addCommand(pluginCommand);
 program.addCommand(evidenceCommand);
 program.addCommand(flywheelCommand);
 program.addCommand(governanceCommand);

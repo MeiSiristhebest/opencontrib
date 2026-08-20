@@ -91,6 +91,8 @@ All 20 subcommands across 8 domains:
 | -------- | ---------- | --------- |
 | **Run** | `run create` `run get` `run resume` `run save` | Session tracking under `~/.opencontrib/runs/` |
 | **Discovery** | `scout` `discovery rank` `discovery qualify` `discovery feasibility` `discovery context` `discovery manifests` | Opportunity signals, scoring, and context assembly |
+| **Probe** | `probe plan` `probe run` | Progressive probe negotiation, repo fingerprinting & targeted scanning |
+| **Plugin** | `plugin list` `plugin add` `plugin remove` | Manage SAST plugins, custom scanners, and probe manifests |
 | **Workspace** | `workspace prepare` `workspace purge` | Isolated Git worktree sandbox management |
 | **Evidence** | `evidence` | Dual-stage empirical verification |
 | **Governance** | `governance audit` `governance impact` `governance ci-diagnose` `governance pr-template` | Patch quality, CI diagnosis, PR template rendering |
