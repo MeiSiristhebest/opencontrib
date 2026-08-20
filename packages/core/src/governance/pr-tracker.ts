@@ -7,15 +7,36 @@ export interface PrLifecycleStatus {
   recommendedAction: 'CELEBRATE_AND_SYNC_FLYWHEEL' | 'REPLY_AND_REPAIR' | 'WAIT_PATIENTLY' | 'RETRY_CI';
 }
 
-export function analyzePrLifecycle(input: {
-  prNumber: number;
-  isMerged: boolean;
-  isOpen: boolean;
-  checkRuns?: Array<{ name: string; conclusion: string | null; status: string }>;
-  reviews?: Array<{ state: string; author: string; body?: string }>;
+export interface AnalyzePrInput {
+  prNumber?: number;
+  isMerged?: boolean;
+  isOpen?: boolean;
+  pr?: {
+    number: number;
+    state?: string;
+    merged?: boolean;
+    mergeable?: boolean | null;
+    mergeableState?: string;
+    draft?: boolean;
+    headSha?: string;
+  };
+  checkRuns?: Array<{ name: string; conclusion: string | null; status: string; id?: number; detailsUrl?: string }>;
+  reviews?: Array<{ state: string; author?: string; user?: { login: string }; body?: string; id?: number; submittedAt?: string }>;
+  comments?: Array<{ id?: number; user?: { login: string }; body?: string; createdAt?: string }>;
   commentsCount?: number;
-}): PrLifecycleStatus {
-  const { prNumber, isMerged, isOpen, checkRuns = [], reviews = [], commentsCount = 0 } = input;
+}
+
+export function analyzePrLifecycle(input: AnalyzePrInput): PrLifecycleStatus {
+  const prNumber = input.prNumber ?? input.pr?.number ?? 1;
+  const isMerged = input.isMerged ?? input.pr?.merged ?? (input.pr?.state === 'closed' && Boolean(input.pr?.merged));
+  const isOpen = input.isOpen ?? (input.pr?.state === 'open');
+  const checkRuns = input.checkRuns ?? [];
+  const reviews = (input.reviews ?? []).map((r) => ({
+    state: r.state,
+    author: r.author || r.user?.login || 'maintainer',
+    body: r.body,
+  }));
+  const commentsCount = input.commentsCount ?? (input.comments ? input.comments.length : 0);
 
   if (isMerged) {
     return {
@@ -77,3 +98,6 @@ I've addressed the feedback:
 
 All tests and lint checks have been updated and verified. Let me know if anything else is needed.`;
 }
+
+// Backward Compatibility Alias for MCP & External tools
+export const trackPrStatus = analyzePrLifecycle;

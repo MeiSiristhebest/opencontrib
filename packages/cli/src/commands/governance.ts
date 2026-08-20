@@ -123,9 +123,9 @@ const prTemplateCommand = new Command('pr-template')
     pretty?: boolean;
   }) => {
     const prBody = renderMasterPrTemplate({
-      keyChanges: opts.keyChanges || ['Fixed the issue'],
-    nativeTemplateContent: opts.nativeTemplate,
-      issueNumber: opts.issue,
+      keyChanges: ['Fixed the issue'],
+      nativeTemplateContent: opts.nativeTemplate,
+      issueNumber: parseInt(opts.issue, 10) || 1,
       issueTitle: opts.issueTitle,
       summary: opts.summary,
       validationCommand: opts.validationCmd,

@@ -36,6 +36,8 @@ export interface RepoDetails {
   description: string;
 }
 
+export type IssueOrOpportunity = any;
+
 export class GitHubClient {
   private octokit: Octokit;
   private cacheDir: string;

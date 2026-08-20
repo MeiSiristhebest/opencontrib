@@ -51,13 +51,19 @@ describe('Intelligence & Orchestration Upgrades', () => {
   });
 
   it('ranks issues with hybrid profile matching, feasibility, and real linked PR gates', () => {
-    const ranker = new HybridIssueRanker({
-      techStack: ['typescript', 'react'],
-      focusAreas: ['tooling', 'dx'],
-      proficiency: 'intermediate',
-      os: 'windows',
-      hasDocker: false,
-    });
+    const ranker = new HybridIssueRanker(
+      {
+        techStack: ['typescript', 'react'],
+        focusAreas: ['tooling', 'dx'],
+        proficiency: 'intermediate',
+        minMatchScore: 50,
+      },
+      {
+        os: 'windows',
+        hasDocker: false,
+        hasWsl: false,
+      },
+    );
 
     const issues = [
       {

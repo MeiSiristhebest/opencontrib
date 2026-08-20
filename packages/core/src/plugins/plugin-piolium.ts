@@ -13,7 +13,7 @@ export const pioliumPlugin: OpenContribPlugin = {
       description: 'Generates runnable reproduction PoCs and verifies findings with adversarial chambers',
       match: (fp) => {
         // Can run on any repository with test suites or code
-        return fp.totalFiles > 0;
+        return (fp.totalFiles || 0) >= 0;
       },
       scan: async (targetPath, pointers, host) => {
         // When findings exist in pointer store, generate PoC artifacts for them

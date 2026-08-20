@@ -93,7 +93,7 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
       testCount: 48,
       dcoAuthorName: 'Contributor',
       dcoAuthorEmail: 'contributor@example.com',
-      conditionalAiRequired: false,
+      aiDisclosureRequired: false,
     });
 
     expect(renderedPr).toContain('Contributor <contributor@example.com>');
@@ -117,6 +117,10 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
       submittedAt: new Date().toISOString(),
       diffStat: '+14 -14 (2 files)',
       evidenceSummary: 'Passed all CI schema checks, 0 AI smell',
+      provenance: {
+        source: 'system_recorded',
+        verified: true,
+      },
     });
 
     // Unmerged/submitted PRs must NOT pollute the public profile
@@ -133,6 +137,10 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
       submittedAt: new Date().toISOString(),
       diffStat: '+14 -14 (2 files)',
       evidenceSummary: 'Passed all CI schema checks, 0 AI smell',
+      provenance: {
+        source: 'system_recorded',
+        verified: true,
+      },
     });
 
     const mergedMarkdown = flywheel.renderProfileMarkdown();

@@ -216,7 +216,7 @@ export function calculateOsFeasibility(
   const score = Math.max(0, 100 - assessment.scorePenalty);
   return {
     feasibilityScore: score,
-    isFeasible: assessment.level !== 'impossible',
+    isFeasible: assessment.level !== 'hard_blocked' && assessment.level !== 'likely_blocked',
     penalty: assessment.scorePenalty,
     reason: assessment.rationale,
   };

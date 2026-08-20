@@ -75,7 +75,7 @@ export class ContributionPrService {
 
     // 1. Get base default branch and Base Commit & Tree SHA
     const repoDetails = await this.client.getRepoDetails(upstreamOwner, upstreamRepo);
-    const baseBranch = repoDetails.defaultBranch;
+    const baseBranch = repoDetails.data?.defaultBranch || 'main';
 
     const baseRef = await this.octokit.rest.git.getRef({
       owner: upstreamOwner,

@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ESNext", "DOM"],
+    "types": ["bun"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -11,5 +12,17 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true
-  }
+  },
+  "include": [
+    "packages/core/src/**/*",
+    "packages/core/tests/**/*",
+    "packages/cli/src/**/*",
+    "packages/mcp-server/src/**/*",
+    "packages/mcp-server/tests/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "packages/studio"
+  ]
 }

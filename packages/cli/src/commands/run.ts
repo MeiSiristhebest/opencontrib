@@ -78,14 +78,14 @@ const runSave = new Command('save')
   .action(async (runId: string, opts: { type: string; content?: string; phase?: string; pretty?: boolean }) => {
     let payload: string | Record<string, unknown>;
     if (opts.content) {
-      payload = parseJSON(opts.content, '--content') || '';
+      payload = (parseJSON(opts.content, '--content') as Record<string, unknown>) || {};
     } else {
       const stdinData = await readStdin();
       if (!stdinData) {
         console.error('❌ No content provided. Use --content <json> or pipe via stdin');
         process.exit(1);
       }
-      payload = parseJSON(stdinData, 'stdin') || '';
+      payload = (parseJSON(stdinData, 'stdin') as Record<string, unknown>) || {};
     }
     try {
       const saved = runManager.saveArtifact(

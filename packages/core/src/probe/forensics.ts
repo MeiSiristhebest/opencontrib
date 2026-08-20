@@ -10,6 +10,7 @@ export interface FileHotspotMetric {
   hotspotScore: number; // commitsCount * cyclomaticComplexity
   riskLevel: 'critical' | 'high' | 'medium' | 'low';
   riskScore: number; // 0 - 100 heuristic risk index
+  defectLikelihood?: number;
   topContributors: string[];
 }
 

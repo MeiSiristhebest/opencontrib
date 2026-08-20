@@ -1,23 +1,12 @@
 /**
  * OpenContrib Progressive Probe & Plugin System Types
  */
+import type { DefectCategory, FindingSeverity, RepoFingerprint } from '../kernel/contract.js';
 
-export type DefectCategory =
-  | 'protocol_drift'
-  | 'lifecycle_leak'
-  | 'distributed_cache'
-  | 'memory_abi'
-  | 'performance_backpressure'
-  | 'time_monotonicity'
-  | 'escape_analysis'
-  | 'numerical_bounds'
-  | 'security_cwe'
-  | 'ci_workflow'
-  | 'dead_code';
+export type { DefectCategory, FindingSeverity, RepoFingerprint };
 
 export type ProbeCost = 'fast' | 'medium' | 'deep';
 export type ProbeStage = 'scout' | 'audit' | 'evidence';
-export type FindingSeverity = 'low' | 'medium' | 'high' | 'critical';
 
 export interface ProbeActivation {
   /** Target programming languages (e.g. ['go'], ['rust'], ['typescript', 'javascript'], ['*']) */
@@ -64,17 +53,6 @@ export interface RepoLanguageInfo {
   language: string;
   percentage: number;
   filesCount: number;
-}
-
-export interface RepoFingerprint {
-  repoPath: string;
-  primaryLanguage: string;
-  languages: RepoLanguageInfo[];
-  manifests: string[];
-  frameworks: string[];
-  hasTests: boolean;
-  hasWorkflows: boolean;
-  totalFiles: number;
 }
 
 export interface SkippedProbeInfo {

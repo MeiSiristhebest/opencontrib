@@ -1,12 +1,7 @@
 import type { NormalizedFinding } from '../types.js';
+import type { VerificationStep } from '../../kernel/contract.js';
 
-export interface VerificationStep {
-  setupCode?: string;
-  exploitPayload: string;
-  targetCall: string;
-  expectedFailureAssertion: string;
-  expectedPostFixAssertion: string;
-}
+export type { VerificationStep };
 
 export interface PoCArtifact {
   findingId: string;

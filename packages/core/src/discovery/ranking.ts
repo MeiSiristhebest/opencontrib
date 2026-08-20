@@ -264,7 +264,7 @@ export function rankOpportunitySignals(input: RankOpportunitySignalsInput): Oppo
   const profile: UserProfile = {
     techStack: input.developerProfile?.techStack ?? ['typescript', 'javascript'],
     focusAreas: input.developerProfile?.focusAreas ?? ['bugfix', 'testing', 'docs'],
-    proficiency: input.developerProfile?.proficiency ?? 'intermediate',
+    proficiency: input.developerProfile?.proficiency === 'expert' ? 'advanced' : (input.developerProfile?.proficiency ?? 'intermediate'),
     minMatchScore: input.developerProfile?.minMatchScore ?? 60,
   };
 
@@ -346,7 +346,7 @@ export function rankOpportunitySignals(input: RankOpportunitySignalsInput): Oppo
     reasons.push(`Environment feasibility constraint: ${osFeasibility.reason || 'Compatibility inspection recommended'}`);
   }
   if (!qualification.isQualified) {
-    reasons.push(`Disqualification flag: ${qualification.disqualificationReason || 'Blocked by qualification rules'}`);
+    reasons.push(`Disqualification flag: ${qualification.disqualifyReason || 'Blocked by qualification rules'}`);
   }
 
   return {
@@ -356,7 +356,7 @@ export function rankOpportunitySignals(input: RankOpportunitySignalsInput): Oppo
       environmentFeasibility,
       issueActionability,
       maintenanceRisk,
-      isAuthorClaimed: qualification.disqualificationReason?.includes('Author-first-right') ?? false,
+      isAuthorClaimed: qualification.disqualifyReason?.includes('Author-first-right') ?? false,
       isQualified: qualification.isQualified,
     },
     reasons,

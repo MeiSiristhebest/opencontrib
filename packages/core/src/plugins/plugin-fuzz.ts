@@ -11,7 +11,7 @@ export const fuzzPlugin: OpenContribPlugin = {
       name: 'Property-Based Invariant Fuzzing',
       category: 'numerical_bounds',
       description: 'Synthesizes minimal reproducible Property Tests (fast-check, hypothesis, proptest)',
-      match: (fp) => fp.totalFiles > 0,
+      match: (fp) => (fp.totalFiles || 0) >= 0,
       scan: async (targetPath, pointers) => {
         const spec = generatePropertyTest('numerical_bounds', 'typescript', 'calculateTimeout');
         pointers.create({

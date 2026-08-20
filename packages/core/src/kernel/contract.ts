@@ -25,7 +25,8 @@ export type PointerView = 'stub' | 'slice' | 'evidence' | 'all';
  */
 export interface PointerStub {
   id: string;
-  uri: string; // e.g. "ptr://findings/sec-path-traversal-42"
+  uri?: string; // e.g. "ptr://findings/sec-path-traversal-42"
+  namespace?: string;
   title: string;
   category: DefectCategory;
   severity: FindingSeverity;
@@ -35,6 +36,9 @@ export interface PointerStub {
   affectedSymbol?: string;
   callSite?: string;
   dataFlow?: string;
+  slice?: PointerSlice;
+  evidence?: PointerEvidence;
+  verificationStep?: any;
 }
 
 /**
@@ -53,7 +57,8 @@ export interface PointerSlice {
 export interface VerificationStep {
   setupCode?: string;
   exploitPayload: string;
-  targetCall: string;
+  targetCall?: string;
+  invocationExpression?: string;
   expectedFailureAssertion: string;
   expectedPostFixAssertion: string;
   evaluator?: {
@@ -71,6 +76,7 @@ export interface PointerEvidence {
   taintTrace?: string[];
   pocCode?: string;
   pocFileName?: string;
+  suggestedPatch?: string;
   executionCommand?: string;
   expectedFailurePattern?: string;
   verificationSteps?: VerificationStep[];
@@ -94,8 +100,26 @@ export interface RepoFingerprint {
   manifests: string[];
   frameworks: string[];
   hasTests: boolean;
-  hasWorkflows: boolean;
-  totalFiles: number;
+  hasWorkflows?: boolean;
+  totalFiles?: number;
+  activeWorkflows?: string[];
+  hasDocker?: boolean;
+}
+
+export interface PointerCreateOptions {
+  namespace?: string;
+  id: string;
+  title: string;
+  category: DefectCategory;
+  severity: FindingSeverity;
+  file: string;
+  line: number;
+  confidence?: number;
+  affectedSymbol?: string;
+  callSite?: string;
+  dataFlow?: string;
+  slice?: PointerSlice;
+  evidence?: PointerEvidence;
 }
 
 /**
@@ -104,9 +128,7 @@ export interface RepoFingerprint {
 export interface ProbeDescriptor {
   id: string;
   name: string;
-  version?: string;
   category: DefectCategory;
-  author?: string;
   description: string;
   match: (fingerprint: RepoFingerprint) => boolean;
   scan: (targetPath: string, pointers: PointerStoreApi, host: HostServices) => Promise<void>;
@@ -120,22 +142,7 @@ export interface KernelToolDescriptor {
 }
 
 export interface PointerStoreApi {
-  create(params: {
-    namespace?: string;
-    id: string;
-    title: string;
-    category: DefectCategory;
-    severity: FindingSeverity;
-    file: string;
-    line: number;
-    confidence?: number;
-    affectedSymbol?: string;
-    callSite?: string;
-    dataFlow?: string;
-    slice?: PointerSlice;
-    evidence?: PointerEvidence;
-  }): SmartPointer;
-
+  create(options: PointerCreateOptions): SmartPointer;
   get(uri: string): SmartPointer | undefined;
   resolve(uri: string, view?: PointerView): unknown;
   list(namespace?: string): SmartPointer[];
@@ -148,6 +155,8 @@ export interface ProbeRegistryApi {
   get(probeId: string): ProbeDescriptor | undefined;
   listAll(): ProbeDescriptor[];
 }
+
+export type PluginHostContract = any;
 
 export type PluginPermission =
   | 'fs:read'

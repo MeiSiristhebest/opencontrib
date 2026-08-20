@@ -51,6 +51,11 @@ describe('Memory & Profile Flywheel Engine', () => {
         mergedAt: '2026-08-15T01:00:00Z',
         diffStat: '3 files changed, +45 -12',
         evidenceSummary: '20/20 stress loop clean, lsof clean',
+        provenance: {
+          source: 'system_recorded' as const,
+          verified: true,
+          verifiedAt: '2026-08-15T01:00:00Z',
+        },
       },
     ];
 

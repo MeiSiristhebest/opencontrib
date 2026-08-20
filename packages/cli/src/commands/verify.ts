@@ -19,18 +19,20 @@ export const verifyCommand = new Command('verify')
       const host = await createDefaultPluginHost({ workspacePath: resolved });
 
       // Dereference pointer from store or construct synthetic verification target
-      const stub = host.pointers.resolve(pointerUri);
+      const stub = host.pointers.resolve(pointerUri) as PointerStub | undefined;
 
-      const targetFinding: PointerStub = stub || {
-        namespace: 'findings',
-        id: pointerUri.replace(/^ptr:\/\/[^/]+\//, ''),
-        title: `Verification target: ${pointerUri}`,
-        category: 'protocol_drift',
-        severity: 'medium',
-        file: 'src/index.ts',
-        line: 1,
-        confidence: 90,
-      };
+      const targetFinding: PointerStub = (stub && stub.id)
+        ? stub
+        : {
+            namespace: 'findings',
+            id: pointerUri.replace(/^ptr:\/\/[^/]+\//, ''),
+            title: `Verification target: ${pointerUri}`,
+            category: 'protocol_drift',
+            severity: 'medium',
+            file: 'src/index.ts',
+            line: 1,
+            confidence: 90,
+          };
 
       console.log(`🧪 Initiating clean-room verification for ${pointerUri}...`);
 

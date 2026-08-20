@@ -395,5 +395,23 @@ export class ContextAssembler {
     return sections.join('\n');
   }
 
+  public async assembleContext(input: any): Promise<AssembledContributionContext> {
+    const issue = input.issue || {};
+    const repoDetails = input.repoDetails || {};
+    const manifests = input.manifests || {};
+    const repoFullName = repoDetails.fullName || `${repoDetails.owner}/${repoDetails.repo}` || 'unknown/repo';
+
+    return this.assemble({
+      repoFullName,
+      issueTitle: issue.title || '',
+      issueBody: issue.body || '',
+      issueNumber: issue.number,
+      linkedComments: (issue.comments || []).map((c: any) => (typeof c === 'string' ? c : c.body || '')),
+      packageManifest: manifests.packageJson || manifests.cargoToml || manifests.goMod,
+      ciWorkflow: manifests.ciWorkflow,
+      primaryLanguage: repoDetails.primaryLanguage || 'TypeScript',
+      workspacePath: input.workspacePath,
+    });
+  }
 }
 

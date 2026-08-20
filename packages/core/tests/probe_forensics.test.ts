@@ -71,7 +71,7 @@ describe('Advanced Probes, Forensics & Adversarial Adapters', () => {
       prPotentialScore: 85,
     };
 
-    const verification = verifyFindingAdversarially(testFinding, 'const mockSecret = "12345";');
+    const verification = verifyFindingAdversarially(testFinding);
     expect(verification.isFalsePositive).toBe(true);
     expect(verification.verdict).toBe('PROBABLE_FALSE_POSITIVE');
   });

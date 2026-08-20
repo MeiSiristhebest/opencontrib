@@ -22,6 +22,7 @@ describe('Phase-Gated State Machine & Lifecycle Lock', () => {
       artifacts: {
         workspace: { worktreePath: '/tmp/worktree' },
       },
+      availableArtifactFiles: ['workspace.json'],
     };
 
     const res = validatePhaseGate(summary, 'GOVERNANCE_AUDITED');
@@ -47,6 +48,7 @@ describe('Phase-Gated State Machine & Lifecycle Lock', () => {
         evidence: { passedTestsCount: 5, stressLoopPassed: true },
         governance: { score: 95 },
       },
+      availableArtifactFiles: ['workspace.json', 'evidence.json', 'governance.json'],
     };
 
     const res = validatePhaseGate(summary, 'GOVERNANCE_AUDITED');

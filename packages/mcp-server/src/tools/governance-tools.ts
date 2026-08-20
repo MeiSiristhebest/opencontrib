@@ -165,7 +165,7 @@ export function registerGovernanceTools(
     async (args) => {
       const prBody = renderMasterPrTemplate({
         nativeTemplateContent: args.nativeTemplateContent,
-        issueNumber: args.issueNumber,
+        issueNumber: typeof args.issueNumber === 'string' ? parseInt(args.issueNumber, 10) || 1 : args.issueNumber,
         issueTitle: args.issueTitle,
         summary: args.summary,
         validationCommand: args.validationCommand,
@@ -214,20 +214,18 @@ export function registerGovernanceTools(
       }),
     },
     async (args) => {
-      const contributionRecord: ContributionRecord = {
+      const result = flywheel.recordContribution(args.repoFullName, {
         runId: args.record.runId,
         repoFullName: args.repoFullName,
         issueNumber: args.record.issueNumber,
         prNumber: args.record.prNumber,
-        status: args.record.status,
+        status: args.record.status === 'merged' ? 'merged' : 'submitted',
         techStack: args.record.techStack,
         qualityRubricScore: args.record.qualityRubricScore,
         maintainerFeedback: args.record.maintainerFeedback,
         failureLessons: args.record.failureLessons,
         timestamp: new Date().toISOString(),
-      };
-
-      const result = await flywheel.recordContribution(args.repoFullName, contributionRecord);
+      });
 
       return {
         content: [

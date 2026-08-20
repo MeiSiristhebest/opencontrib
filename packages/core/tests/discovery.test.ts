@@ -345,6 +345,7 @@ describe('Discovery & Qualification Engine', () => {
     const ranker = new MultiSignalHeuristicRanker({
       techStack: ['typescript'],
       focusAreas: ['tooling'],
+      proficiency: 'intermediate',
       minMatchScore: 50,
     });
 
@@ -396,6 +397,8 @@ describe('Discovery & Qualification Engine', () => {
         os: 'win32',
         hasDocker: false,
         hasWsl: false,
+        hasHyperV: false,
+        toolchains: { node: false, bun: false, python: false, go: false, rust: false },
       },
     );
 

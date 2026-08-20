@@ -59,9 +59,9 @@ export class AutonomousPoCVerifier {
       // Check if pre-fix failed (or output matches expected failure assertion)
       const preMatched =
         preResult.exitCode !== 0 ||
-        (step.expectedFailureAssertion && report.logs.preFixOutput.includes(step.expectedFailureAssertion));
+        Boolean(step.expectedFailureAssertion && report.logs.preFixOutput.includes(step.expectedFailureAssertion));
 
-      report.exploitSucceeded = preMatched;
+      report.exploitSucceeded = Boolean(preMatched);
 
       if (!preMatched && !finding.evidence?.suggestedPatch) {
         report.status = 'FALSE_POSITIVE';
@@ -90,9 +90,9 @@ export class AutonomousPoCVerifier {
 
       const postMatched =
         postResult.exitCode === 0 ||
-        (step.expectedPostFixAssertion && report.logs.postFixOutput.includes(step.expectedPostFixAssertion));
+        Boolean(step.expectedPostFixAssertion && report.logs.postFixOutput.includes(step.expectedPostFixAssertion));
 
-      report.fixVerified = postMatched;
+      report.fixVerified = Boolean(postMatched);
 
       if (!postMatched) {
         report.status = 'FIX_FAILED';

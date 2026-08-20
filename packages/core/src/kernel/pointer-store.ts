@@ -4,8 +4,7 @@ import type {
   SmartPointer,
   PointerStoreApi,
   PointerView,
-  DefectCategory,
-  FindingSeverity,
+  PointerCreateOptions,
   PointerSlice,
   PointerEvidence,
 } from './contract.js';
@@ -21,18 +20,7 @@ export class SmartPointerStore implements PointerStoreApi {
     }
   }
 
-  public create(params: {
-    namespace?: string;
-    id: string;
-    title: string;
-    category: DefectCategory;
-    severity: FindingSeverity;
-    file: string;
-    line: number;
-    confidence?: number;
-    slice?: PointerSlice;
-    evidence?: PointerEvidence;
-  }): SmartPointer {
+  public create(params: PointerCreateOptions): SmartPointer {
     const namespace = params.namespace || 'findings';
     const cleanId = params.id.replace(/[^a-zA-Z0-9_-]/g, '_');
     const uri = `ptr://${namespace}/${cleanId}`;

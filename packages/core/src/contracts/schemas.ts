@@ -116,6 +116,7 @@ export const FlakyTestRecordSchema = z.object({
   failCount: z.number(),
   isFlakyOnBaseline: z.boolean(),
 });
+export type FlakyTestRecord = z.infer<typeof FlakyTestRecordSchema>;
 
 export const EvidenceReportSchema = z.object({
   baselineTestedAt: z.string(),

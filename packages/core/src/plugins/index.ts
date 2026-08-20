@@ -87,7 +87,7 @@ export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
     cost: { cpu: 'low', token: 'zero', typicalLatencyMs: 200 },
     evidenceTier: 'stub',
     isCore: true,
-    scoreProvider: (fp) => (fp.totalFiles > 0 ? 90 : 0),
+    scoreProvider: (fp) => ((fp.totalFiles || 0) > 0 ? 90 : 0),
   },
   {
     providerId: 'property-fuzz',
@@ -111,7 +111,7 @@ export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
     cost: { cpu: 'low', token: 'zero', typicalLatencyMs: 50 },
     evidenceTier: 'slice',
     isCore: true,
-    scoreProvider: (fp) => (fp.hasWorkflows ? 96 : 0),
+    scoreProvider: (fp) => (Boolean(fp.hasWorkflows || (fp.activeWorkflows && fp.activeWorkflows.length > 0)) ? 96 : 0),
   },
   {
     providerId: 'ocr-npe',
