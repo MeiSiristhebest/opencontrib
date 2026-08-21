@@ -2,15 +2,15 @@
 
 # 🚀 OpenContrib
 
-**Agent 原生的开源贡献工业级引擎**
+**面向自主编程 AI Agent 的确定性开源贡献工业级引擎**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/Tests-29%20Suites%20%7C%20134%20Pass%20%7C%20908%20Expects-success)](https://github.com/MeiSiristhebest/opencontrib)
-[![CLI](https://img.shields.io/badge/CLI-24%20Commands-FF6B35)](https://github.com/MeiSiristhebest/opencontrib/blob/main/README_zh.md#-%E5%AD%90%E5%91%BD%E4%BB%A4%E5%85%A8%E6%99%AF%E6%8B%93%E6%89%91)
+[![Tests](https://img.shields.io/badge/Tests-29%20Suites%20%7C%20134%20Pass%20%7C%20908%20Assertions-success)](https://github.com/MeiSiristhebest/opencontrib)
+[![CLI](https://img.shields.io/badge/CLI-24%20Commands-FF6B35)](https://github.com/MeiSiristhebest/opencontrib/blob/main/README_zh.md#-%E5%AD%90%E5%91%BD%E4%BB%A4%E5%85%A8%E6%99%AF%E9%80%9F%E6%9F%A5%E8%A1%A8)
 [![npm](https://img.shields.io/npm/v/opencontrib-cli.svg)](https://www.npmjs.com/package/opencontrib-cli)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md)
 
 <p align="center">
   <b>[ <a href="./README.md">English</a> | 简体中文 ]</b>
@@ -24,9 +24,40 @@
 
 ---
 
-## 💡 什么是 OpenContrib？
+## 📑 目录
 
-OpenContrib 是一套**贡献引擎（Contribution Engine）**，而非一个简单的聊天机器人或庞大的单体 Agent。它不试图替代 Claude Code、Cursor、Codex、Devin 或 Google Antigravity 的通用推理能力，而是**为推理大脑提供一套结构化、可复用、确定性的深水区工程武器库与贡献原语**。
+- [💡 项目定位与概览](#-项目定位与概览)
+  - [什么是 OpenContrib？](#什么是-opencontrib)
+  - [OpenContrib 不是什么？](#opencontrib-不是什么)
+  - [分层解耦架构](#分层解耦架构)
+- [✨ 核心武器与关键特性](#-核心武器与关键特性)
+  - [1. 6 维深水区武器库矩阵](#1-6-维深水区武器库矩阵)
+  - [2. Top-K 智能指针收敛与 1-Click 切片读取](#2-top-k-智能指针收敛与-1-click-切片读取)
+  - [3. 并发抢占风暴与混沌抖动物证](#3-并发抢占风暴与混沌抖动物证)
+  - [4. 领域内姊妹模块变种猎杀](#4-领域内姊妹模块变种猎杀)
+- [⚙️ 环境依赖](#️-环境依赖)
+- [📦 安装指南](#-安装指南)
+- [🚀 5 分钟端到端快速上手](#-5-分钟端到端快速上手)
+- [🗺️ 子命令全景速查表](#️-子命令全景速查表)
+- [🔌 MCP 协议集成配置](#-mcp-协议集成配置)
+- [🛡️ 5 大绝对工程防线（零容忍红线）](#️-5-大绝对工程防线零容忍红线)
+- [🤝 参与贡献](#-参与贡献)
+- [📜 开源协议](#-开源协议)
+
+---
+
+## 💡 项目定位与概览
+
+### 什么是 OpenContrib？
+
+OpenContrib 是一套**开源贡献领域专用引擎**。它不试图替代大模型本身的通用推理能力，而是为外部推理 Agent（如 Google Antigravity、Claude Code、Cursor、Codex 或 Devin）提供一套**确定性、可复用、深水区的工程武器库与贡献原语**，帮助 Agent 挖掘真实缺陷、在沙盒中双阶段经验性复现、通过 RFC 质量门禁并交付高赞合入 PR。
+
+### OpenContrib 不是什么？
+
+- **不是单体黑盒聊天 Agent**：它不捆绑特定 LLM，而是通过纯命令行与 MCP 向外部大脑提供标准化工程工具。
+- **不是 AI 垃圾 PR 刷分器**：内置防跟风抢占排他性认领协议、100 行 RFC 补丁限制与反 AI 机械式行话检测，坚决捍卫开源维护者信任。
+
+### 分层解耦架构
 
 ```text
     ┌──────────────────────────────────────────────────────────────────┐
@@ -54,58 +85,13 @@ OpenContrib 是一套**贡献引擎（Contribution Engine）**，而非一个简
     └──────────────────────────────────────────────────────────────────┘
 ```
 
-**核心架构不变式**：`packages/core/` 对上层接口完全解耦。CLI（`opencontrib-cli`）作为无摩擦的第一类公民接口；同时提供标准 MCP 服务（`opencontrib-mcp`）以无缝接入 MCP 原生 Agent。
+> **设计原则**：`packages/core/` 对上层接口完全解耦。CLI（`opencontrib-cli`）作为无摩擦的第一类公民接口；同时提供标准 MCP 服务（`opencontrib-mcp`）以无缝接入 MCP 原生 Agent。
 
 ---
 
-## ⚡ 快速开始
+## ✨ 核心武器与关键特性
 
-### 全局安装
-
-```bash
-# 通过 npm 全局安装 CLI
-npm install -g opencontrib-cli
-
-# 运行环境自检（检查宿主已安装的 SAST 探针与工具链）
-opencontrib doctor --pretty
-```
-
-### 源码运行与本地开发
-
-```bash
-git clone https://github.com/MeiSiristhebest/opencontrib.git
-cd opencontrib
-bun install
-
-# 运行全量测试矩阵（29 个测试套件，134 个用例，908 个断言，100% 通过）
-bun test
-
-# 静态类型检查（0 错误）
-bun x tsc --noEmit
-```
-
----
-
-## 🗺️ 子命令全景拓扑
-
-涵盖 10 大核心能力域的 24 个子命令：
-
-| 领域 | 核心子命令 | 功能说明 |
-| :--- | :--- | :--- |
-| **Probe（探针）** | `probe run` `probe plan` `probe hotspot` `probe fuzz` | Top-K 聚合多探针扫描、代码热点分析、属性模糊测试脚手架 |
-| **Pointer（智能指针）**| `pointer resolve` `pointer list` | 3 级渐进式切片解引用（`ptr://...` $\rightarrow$ 摘要、代码切片、完整证据） |
-| **Capability（微内核）**| `capability list` `capability route` `capability score` | 动态能力路由与多维置信度打分 |
-| **Evidence（物证）** | `evidence` | 并发抢占风暴混沌验证、延迟抖动与双阶段红绿断言物证收集 |
-| **Workspace（沙盒）**| `workspace prepare` `workspace purge` | Git Worktree 物理隔离沙盒创建与临时环境安全销毁 |
-| **Governance（治理）**| `governance audit` `governance impact` `governance ci-diagnose` `governance pr-template` | RFC-100 行限制审计、反 AI 噪音检测、姊妹模块变种排查、原生 PR 模板合并 |
-| **Discovery（发现）** | `scout` `discovery rank` `discovery qualify` `discovery feasibility` `discovery context` `discovery manifests` | 机会多信号发现、防抢占资格判定、跨文件上下文智能打包 |
-| **Plugin（插件）** | `plugin list` `plugin add` `plugin remove` | SAST/AST 插件热插拔与探针清单管理 |
-| **Run（会话）** | `run create` `run get` `run resume` `run save` | 在 `~/.opencontrib/runs/` 下持久化完整的可审计贡献流水线状态 |
-| **Flywheel（飞轮）** | `flywheel sync` `flywheel pr-track` `doctor` | 仓库画像沉淀、长期维护者信任飞轮、环境依赖诊断 |
-
----
-
-## 🗡️ 6 维深水区武器库
+### 1. 6 维深水区武器库矩阵
 
 OpenContrib 开箱集成了 6 大维度的专业分析武器：
 
@@ -121,57 +107,192 @@ graph TD
     end
 ```
 
-### 🎯 Top-K 智能指针收敛与 1-Click 切片读取
+### 2. Top-K 智能指针收敛与 1-Click 切片读取
 
-执行 `opencontrib probe run` 时，系统会自动按照 `危害等级 x 类别权重 x 置信度` 进行高阶聚合，**默认只输出最具真实利用价值的 Top 5 缺陷候选**，并在每条下方附带一键解引用指令，彻底避免海量日志淹没上下文：
+执行 `opencontrib probe run` 时，系统自动按照 `危害等级 x 类别权重 x 置信度` 进行加权打分，**默认仅输出 Top 5 核心高价值缺陷候选**，并在每条下方附带一键解引用命令：
 
 ```bash
-# 运行探针扫描，自动获得 Top-K 聚合摘要
-opencontrib probe run ./target-repo --pretty
-
-# 秒级读取 150-token 黄金代码切片（零多余上下文污染）
+# Level 2: 秒级读取 150-token 黄金代码切片（彻底避免上下文淹没）
 opencontrib pointer resolve ptr://findings/ast-ts-unhandled-promise-catch-foo-108 --view slice
+```
+
+### 3. 并发抢占风暴与混沌抖动物证
+
+废除无意义的单线程简单重跑，引入真正的多并发抢占风暴：
+- **`concurrencyWorkers`**：多线程/协程并发抢占共享资源；
+- **`raceCollisionsDetected`**：捕获竞态碰撞、主键冲突绕过与死锁；
+- **`latencyJitterMs`**：记录并发执行延迟方差与抖动；
+- **`zeroAssertionWarning`**：自动识别并拦截 0 断言的空跑测试。
+
+### 4. 领域内姊妹模块变种猎杀
+
+当修复了某一适配器（如 `mongodb-adapter.ts`）的并发缺陷时，治理审计会自动审查同目录下的姊妹组件（`sqlite-adapter.ts`、`pg-adapter.ts`）是否同步完成同类反模式排查。
+
+---
+
+## ⚙️ 环境依赖
+
+| 工具链 | 最低版本要求 | 用途说明 |
+| :--- | :--- | :--- |
+| **Bun** | `v1.2.0+` | 核心单测运行与快速构建 |
+| **Node.js** | `v22.0.0+` | CLI 与 MCP 运行时环境 |
+| **Git** | `v2.38.0+` | 支持 `git worktree` 沙盒隔离 |
+
+---
+
+## 📦 安装指南
+
+```bash
+# 通过 npm 全局安装
+npm install -g opencontrib-cli
+
+# 运行环境自检（检查宿主已安装的 SAST 探针与工具链）
+opencontrib doctor --pretty
+```
+
+也可以免安装通过 `npx` 直接运行：
+
+```bash
+npx -y opencontrib-cli doctor
 ```
 
 ---
 
-## 🔄 双轨执行工作流
+## 🚀 5 分钟端到端快速上手
 
-```text
-Track A: 主动 0-Day 扫描模式（Proactive 0-Day Scanner）
-  多维探针扫描 → Top-K 智能指针解引用 → Worktree 沙盒隔离 → 构造 Red 失败用例 → Green 最小化补丁
-  → 20 轮并发抢占物证收集 → 姊妹模块变种猎杀排查 → Issue-First 声明登记 → 提交合入 PR
+### 第 1 步：主动探针扫描与 Top-K 收敛（Track A 主动模式）
 
-Track B: 被动 Issue 猎取模式（Reactive Issue Scout）
-  多源检索 Issue → 多维信号打分 → 防抢占排他性甄别 → 环境可行性评估 
-  → 跨文件上下文打包 → 沙盒验证修复 → 双阶段经验物证 → 治理审计门禁 → 提交合入 PR
+```bash
+opencontrib probe run ./target-repo --pretty
 ```
+
+### 第 2 步：一键解引用目标缺陷黄金代码切片
+
+```bash
+opencontrib pointer resolve ptr://findings/<pointer_id> --view slice
+```
+
+### 第 3 步：建立 Clean-Room 隔离沙盒
+
+```bash
+opencontrib workspace prepare --repo owner/repo --issue 0 --run-id "$RUN_ID"
+# 获取返回的独立隔离 workspacePath
+```
+
+### 第 4 步：编写失败用例 (RED) 并实施最小化修复 (GREEN)
+
+编写针对性复现测试并运行确认其**失败（RED）**；随后实施精简的符合项目风格的代码修复（严格 $\le 100$ 行），再次运行确认其**通过（GREEN）**。
+
+### 第 5 步：收集并发抢占风暴物证
+
+```bash
+opencontrib evidence   --cwd "$WORKSPACE_PATH"   --test-cmd "bun test src/specific.test.ts"   --concurrency 10   --stress-loop 20   --run-id "$RUN_ID"
+```
+
+### 第 6 步：治理审计与提交 PR
+
+```bash
+# 验证 RFC-100 行限制、反 AI 行话与 7 维质量得分 >= 90
+git -C "$WORKSPACE_PATH" diff | opencontrib governance audit --line-count 40 --subagent-score 95
+
+# 0-Day 缺陷必须先创建带有认领声明的 GitHub Issue
+gh issue create --repo owner/repo --body-file issue_body.md
+
+# 渲染原生 PR 模板并提交 Draft PR
+opencontrib governance pr-template --issue 42 --summary "..." | jq -r '.prBody' > pr-body.md
+gh pr create --repo owner/repo --title "fix: ..." --body-file pr-body.md --draft
+```
+
+---
+
+## 🗺️ 子命令全景速查表
+
+涵盖 10 大核心能力域的 24 个子命令：
+
+| 领域 | 核心子命令 | 功能说明 |
+| :--- | :--- | :--- |
+| **Probe（探针）** | `probe run [target]` | Top-K 聚合多探针扫描（支持 `--limit`, `--min-confidence`） |
+| | `probe plan [target]` | 提取仓库指纹并协商探针执行规划 |
+| | `probe hotspot [target]`| 运行 Code as a Crime Scene 代码犯罪现场热点分析 |
+| | `probe fuzz [target]` | 自动生成针对特定缺陷类别的属性模糊测试脚手架 |
+| **Pointer（智能指针）**| `pointer resolve <uri>` | 3 级渐进式切片解引用（`--view summary\|slice\|evidence`） |
+| | `pointer list` | 列出当前会话存储的指针清单 |
+| **Capability（微内核）**| `capability list` | 列出微内核已注册的能力适配器 |
+| | `capability route` | 基于仓库技术栈指纹动态路由能力 |
+| | `capability score` | 计算多信号加权能力匹配分 |
+| **Evidence（物证）** | `evidence` | 并发抢占风暴混沌验证、延迟抖动与双阶段红绿断言物证收集 |
+| **Workspace（沙盒）**| `workspace prepare` | 创建 Clean-Room Git Worktree 物理隔离沙盒 |
+| | `workspace purge` | 安全销毁临时沙盒工作区 |
+| **Governance（治理）**| `governance audit` | RFC-100 行限制审计、反 AI 噪音检测、姊妹模块变种排查 |
+| | `governance impact` | 360° 跨平台路径/换行符/姊妹模块风险检测 |
+| | `governance ci-diagnose`| GitHub Actions CI 原始日志根因诊断与失败用例提取 |
+| | `governance pr-template`| 合并贡献数据至目标仓库原生 PR 模板 |
+| **Discovery（发现）** | `scout <repo>` | 多源检索机会 Issue 与意图分析 |
+| | `discovery rank` | 多维机会加权排序 |
+| | `discovery qualify` | 防跟风抢占排他性认领资格判定 |
+| | `discovery feasibility`| 环境与工具链可行性评估 |
+| | `discovery context` | 跨文件上下文打包与最优阅读链提取 |
+| | `discovery manifests` | 诊断仓库依赖清单 |
+| **Plugin（插件）** | `plugin list` | 列出已注册的 SAST 与 AST 扫描插件 |
+| **Run（会话）** | `run create` | 在 `~/.opencontrib/runs/` 下初始化审计会话 |
+| | `run resume` | 恢复被中断的贡献流水线会话 |
+| **Flywheel（飞轮）** | `flywheel sync` | 同步仓库贡献记忆账本与维护者信任飞轮 |
+| | `doctor` | 诊断本地环境、探针二进制可执行性与系统健康度 |
+
+---
+
+## 🔌 MCP 协议集成配置
+
+针对 MCP 原生 Agent 环境（Claude Desktop、Cursor、Antigravity 等）：
+
+```bash
+# 自动探测并写入配置文件
+npx -y opencontrib-mcp setup
+```
+
+或手动添加到客户端 MCP 配置：
+
+```json
+{
+  "mcpServers": {
+    "opencontrib": {
+      "command": "npx",
+      "args": ["-y", "opencontrib-mcp"]
+    }
+  }
+}
+```
+
+**MCP 能力清单**：20 个工具（`contrib_scout`、`contrib_prepare_workspace`、`contrib_collect_evidence`、`contrib_audit_governance` 等）、3 个资源（`opencontrib://doctor`、`opencontrib://memory`、`opencontrib://runs`）以及 1 个工作流指导 Prompt（`opencontrib_workflow_guide`）。
 
 ---
 
 ## 🛡️ 5 大绝对工程防线（零容忍红线）
 
 1. **防脱轨熔断机制（严禁超过 3 次盲目 view_file）**：
-   - 杜绝连续盲看文件。定位代码必须通过 Smart Pointer 切片（`ptr://...`）或 `grep_search` 精准查找。
+   杜绝连续盲读文件。定位代码必须通过 Smart Pointer 切片（`ptr://...`）或 `grep_search` 精准查找。
 2. **0-Day 漏洞 Issue-First 铁律（严禁裸提 PR）**：
-   - 对于主动挖掘的缺陷，**必须先创建带有 Claim 认领声明的 GitHub Issue**（`gh issue create --body-file ...`），并在随后的 PR 中强绑定 `Fixes #<id>`。
+   对于主动挖掘的缺陷，**必须先创建带有 Claim 认领声明的 GitHub Issue**（`gh issue create --body-file ...`），并在随后的 PR 中强绑定 `Fixes #<id>`。
 3. **单测子包精准隔离（严禁全仓盲跑 Flaky 测试）**：
-   - 严禁在仓库根目录下运行宽泛的全局测试（如 `go test ./...` 或 `npm test`）。测试必须严格限定在修改的最小子包路径内。
+   严禁在仓库根目录下运行宽泛的全局测试（如 `go test ./...` 或 `npm test`）。测试必须严格限定在修改的最小子包路径内。
 4. **终端防卡死路径规约**：
-   - 执行 `rg` 或 `fd` 搜索时**必须显式提供搜索目标目录**（如 `rg "pattern" .`），严禁缺省路径导致 stdin 永久阻塞。
+   执行 `rg` 或 `fd` 搜索时**必须显式提供搜索目标目录**（如 `rg "pattern" .`），严禁缺省路径导致 stdin 永久阻塞。
 5. **GitHub CLI 本地 Markdown 规约**：
-   - Issue 与 PR 正文必须先写入本地 `.md` 文件并使用 `--body-file <file>` 传入，杜绝 PowerShell 转义字符导致的乱码或中断。
+   Issue 与 PR 正文必须先写入本地 `.md` 文件并使用 `--body-file <file>` 传入，杜绝 PowerShell 转义字符导致的乱码或中断。
 
 ---
 
-## 📦 Monorepo 模块架构
+## 🤝 参与贡献
 
-| 模块包 | npm 发布名 | 职能描述 |
-| :--- | :--- | :--- |
-| `@opencontrib/core` | — | 纯领域微内核 —— 13 个领域模块，29 个测试套件，0 外部接口依赖 |
-| `opencontrib-cli` | `npm install -g opencontrib-cli` | CLI 命令行接口 —— 24 个子命令（基于 Commander.js） |
-| `opencontrib-mcp` | `npm install opencontrib-mcp` | MCP 协议适配器 —— 20 个工具、3 个资源、1 个工作流 Prompt |
-| `opencontrib-studio`| — | 本地 Web 可视化工作台与贡献生命周期看板 |
+欢迎参与 OpenContrib 建设！提交代码前请仔细阅读 [`CONTRIBUTING.md`](./CONTRIBUTING.md) 与 [`DEVELOPMENT_SOP.md`](./DEVELOPMENT_SOP.md)。
+
+```bash
+# 运行全量测试矩阵（29 个套件全部通过）
+bun test
+
+# 静态类型检查
+bun x tsc --noEmit
+```
 
 ---
 
