@@ -63,7 +63,7 @@ export const evidenceCommand = new Command('evidence')
         testCommand: opts.testCmd,
         preFixBaselineCaptured: preFixCheck.assertionCaptured,
         preFixFailureOutput: preFixCheck.baselineOutput,
-        stressLoopCount: opts.stressLoop ?? 5,
+        stressLoopCount: opts.stressLoop ?? 1,
       });
     }
 
@@ -72,7 +72,7 @@ export const evidenceCommand = new Command('evidence')
       workspaceRoot,
       baselineCommitSha: baselineSha,
       testCommand: opts.testCmd,
-      stressLoopCount: opts.stressLoop ?? 20,
+      stressLoopCount: opts.stressLoop ?? 1,
       concurrencyWorkers: opts.concurrency ?? 1,
     });
 

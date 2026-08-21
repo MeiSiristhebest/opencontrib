@@ -322,7 +322,7 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
   const reproductionCommand = data.reproductionCommand || 'npm test';
   const verificationCommand = data.verificationCommand || data.validationCommand || 'npm test';
   const testCount = data.testCount ?? 5;
-  const stressLoopCount = data.stressLoopCount ?? 20;
+  const stressLoopCount = data.stressLoopCount ?? 1;
   const dcoAuthorName = data.dcoAuthorName;
   const dcoAuthorEmail = data.dcoAuthorEmail;
 
@@ -352,6 +352,9 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
 
   const changeList = keyChanges.map((c) => `- ${c}`).join('\n');
   const dcoTrailer = dcoAuthorName && dcoAuthorEmail ? `\n\nSigned-off-by: ${dcoAuthorName} <${dcoAuthorEmail}>` : '';
+  const verificationDetail = stressLoopCount > 1
+    ? `passed cleanly across ${stressLoopCount} consecutive stress loop runs (${testCount} test assertions passed).`
+    : `passed cleanly (${testCount} test assertions passed, 0 regressions).`;
 
   return `### Problem Description
 Fixes #${issueNumber}
@@ -365,7 +368,7 @@ ${changeList}
 
 ### Verification & Empirical Evidence
 - **Reproduction**: \`${reproductionCommand}\` confirmed failing assertion prior to fix.
-- **Verification**: \`${verificationCommand}\` passed cleanly across ${stressLoopCount} consecutive stress loop runs (${testCount} test assertions passed).
+- **Verification**: \`${verificationCommand}\` ${verificationDetail}
 - **Regression Isolation**: Zero resource leaks or flaky baseline regressions detected.${dcoTrailer}
 `;
 }

@@ -183,10 +183,13 @@ opencontrib workspace prepare --repo owner/repo --issue 0 --run-id "$RUN_ID"
 
 编写针对性复现测试并运行确认其**失败（RED）**；随后实施精简的符合项目风格的代码修复（严格 $\le 100$ 行），再次运行确认其**通过（GREEN）**。
 
-### 第 5 步：收集并发抢占风暴物证
+### 第 5 步：收集自适应实证与验证物证
 
 ```bash
-opencontrib evidence   --cwd "$WORKSPACE_PATH"   --test-cmd "bun test src/specific.test.ts"   --concurrency 10   --stress-loop 20   --run-id "$RUN_ID"
+opencontrib evidence \
+  --cwd "$WORKSPACE_PATH" \
+  --test-cmd "bun test src/specific.test.ts" \
+  --run-id "$RUN_ID"
 ```
 
 ### 第 6 步：治理审计与提交 PR

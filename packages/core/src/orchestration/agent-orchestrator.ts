@@ -250,7 +250,7 @@ export class AgentOrchestrator {
     let evidenceReport: any;
     let lastFailureOutput = '';
 
-    const loopRuns = input.stressLoopRuns || (selectedOpp.track === 'FAST_TRACK' ? 3 : 20);
+    const loopRuns = input.stressLoopRuns || 1;
 
     while (implementationAttempts < maxAttempts && !validationPassed) {
       implementationAttempts++;

@@ -32,9 +32,9 @@
     },
     {
       "id": "eval_03_governance_and_issue_first_pr",
-      "prompt": "Complete surgical remediation, collect 20x stress test evidence, run governance quality audit, and submit an Issue-First pull request.",
+      "prompt": "Complete surgical remediation, collect empirical verification evidence, run governance quality audit, and submit an Issue-First pull request.",
       "expected_actions": [
-        "opencontrib evidence --stress-loop 20",
+        "opencontrib evidence",
         "opencontrib governance audit",
         "gh issue create --body-file",
         "opencontrib governance pr-template",

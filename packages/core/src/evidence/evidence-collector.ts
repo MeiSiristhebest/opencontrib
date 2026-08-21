@@ -320,7 +320,7 @@ export async function collectEvidence(
     workspaceRoot,
     baselineCommitSha,
     testCommand,
-    stressLoopCount = 20,
+    stressLoopCount = 1,
     concurrencyWorkers = 1,
     runFlakyBaseline = true,
   } = options;

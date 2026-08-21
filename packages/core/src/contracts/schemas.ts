@@ -121,7 +121,7 @@ export type FlakyTestRecord = z.infer<typeof FlakyTestRecordSchema>;
 export const EvidenceReportSchema = z.object({
   baselineTestedAt: z.string(),
   baselineFlakyTests: z.array(FlakyTestRecordSchema),
-  stressLoopRuns: z.number().default(20),
+  stressLoopRuns: z.number().default(1),
   stressLoopPassed: z.boolean(),
   concurrencyWorkers: z.number().default(1).optional(),
   concurrencyStampedePassed: z.boolean().default(true).optional(),

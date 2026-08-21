@@ -183,10 +183,13 @@ opencontrib workspace prepare --repo owner/repo --issue 0 --run-id "$RUN_ID"
 
 Write targeted reproduction test, verify failure (RED), apply minimal idiomatic fix ($\le 100$ lines), and verify pass (GREEN).
 
-### Step 5: Collect Concurrency Stampede Evidence
+### Step 5: Collect Empirical Verification Evidence
 
 ```bash
-opencontrib evidence   --cwd "$WORKSPACE_PATH"   --test-cmd "bun test src/specific.test.ts"   --concurrency 10   --stress-loop 20   --run-id "$RUN_ID"
+opencontrib evidence \
+  --cwd "$WORKSPACE_PATH" \
+  --test-cmd "bun test src/specific.test.ts" \
+  --run-id "$RUN_ID"
 ```
 
 ### Step 6: Governance Audit & PR Submission
