@@ -11,28 +11,48 @@ export const fuzzPlugin: OpenContribPlugin = {
       name: 'Property-Based Invariant Fuzzing',
       category: 'numerical_bounds',
       description: 'Synthesizes minimal reproducible Property Tests (fast-check, hypothesis, proptest)',
-      match: (fp) => (fp.totalFiles || 0) >= 0,
+      match: (fp) =>
+        fp.languages.some((l) =>
+          ['typescript', 'javascript', 'python', 'rust', 'go'].includes(l.language.toLowerCase())
+        ),
       scan: async (targetPath, pointers) => {
-        const spec = generatePropertyTest('numerical_bounds', 'typescript', 'calculateTimeout');
-        pointers.create({
-          namespace: 'fuzz',
-          id: 'fuzz-numerical-invariants',
-          title: `Property-Based Invariant Test (${spec.framework})`,
-          category: 'numerical_bounds',
-          severity: 'medium',
-          file: 'tests/property_bounds.test.ts',
-          line: 1,
-          confidence: 90,
-          slice: {
-            codeSnippet: spec.codeSnippet,
-            ruleExplanation: 'Targeted boundary attack generating NaN, -0.0, and Infinite floats to test scheduler robustness.',
-            remediationSuggestion: 'Ensure Number.isFinite() guards or fallback handling is enforced.',
-          },
-          evidence: {
-            pocCode: spec.codeSnippet,
-            expectedFailurePattern: spec.reproAssertion,
-          },
-        });
+        // Inspect registered findings: if numerical or invariant findings are detected, generate matching harness
+        const numericalFindings = pointers.list('findings').filter(
+          (p) => p.category === 'numerical_bounds' || p.category === 'protocol_drift'
+        );
+
+        for (const finding of numericalFindings) {
+          const lang = finding.file.endsWith('.go')
+            ? 'go'
+            : finding.file.endsWith('.py')
+            ? 'python'
+            : finding.file.endsWith('.rs')
+            ? 'rust'
+            : 'typescript';
+
+          const targetSymbol = finding.affectedSymbol || 'processInput';
+          const spec = generatePropertyTest(finding.category as any, lang, targetSymbol);
+
+          pointers.create({
+            namespace: 'fuzz',
+            id: `fuzz-${finding.id}`,
+            title: `Property-Based Invariant Test for ${targetSymbol} (${spec.framework})`,
+            category: 'numerical_bounds',
+            severity: 'medium',
+            file: finding.file,
+            line: finding.line,
+            confidence: 90,
+            slice: {
+              codeSnippet: spec.codeSnippet,
+              ruleExplanation: `Targeted property-based fuzz attack against ${targetSymbol} testing invariant edge cases.`,
+              remediationSuggestion: `Review ${targetSymbol} behavior with property-based test harness:\n${spec.codeSnippet}`,
+            },
+            evidence: {
+              pocCode: spec.codeSnippet,
+              expectedFailurePattern: spec.reproAssertion,
+            },
+          });
+        }
       },
     });
   },

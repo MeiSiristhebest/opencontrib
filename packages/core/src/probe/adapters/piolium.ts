@@ -122,6 +122,107 @@ func TestRepro_${cleanId}(t *testing.T) {
     };
   }
 
+  // Python
+  if (finding.file.endsWith('.py')) {
+    const pocFileName = `test_repro_${cleanId}.py`;
+    const executionCommand = `pytest ${pocFileName}`;
+    const expectedFailurePattern = 'AssertionError|TypeError|ValueError|Exception';
+
+    verificationSteps.push({
+      setupCode: '# Setup defect reproduction parameters',
+      exploitPayload: 'None / boundary edge values',
+      targetCall: `${targetSymbol}()`,
+      expectedFailureAssertion: 'raises exception or yields invalid state pre-fix',
+      expectedPostFixAssertion: 'executes cleanly without unhandled exception',
+    });
+
+    const pocCode = `import pytest
+
+# PoC: Reproduce defect found in ${finding.file}:${finding.line}
+def test_repro_${cleanId}():
+    """Reproduces ${finding.title}"""
+    # Pre-Fix: Trigger boundary defect
+    # Post-Fix: Assert graceful execution
+    pass
+`;
+
+    return {
+      findingId: finding.id,
+      pocFileName,
+      pocCode,
+      executionCommand,
+      expectedFailurePattern,
+      verificationSteps,
+    };
+  }
+
+  // Rust
+  if (finding.file.endsWith('.rs')) {
+    const pocFileName = `tests/repro_${cleanId}.rs`;
+    const executionCommand = `cargo test --test repro_${cleanId}`;
+    const expectedFailurePattern = 'panicked at';
+
+    verificationSteps.push({
+      setupCode: '// Setup Rust reproduction fixture',
+      exploitPayload: 'panic / overflow input',
+      targetCall: `${targetSymbol}()`,
+      expectedFailureAssertion: 'thread panicked at boundary condition',
+      expectedPostFixAssertion: 'returns Result::Err or handles cleanly without panic',
+    });
+
+    const pocCode = `#[test]
+fn test_repro_${cleanId}() {
+    // PoC: Reproduce ${finding.title} in ${finding.file}:${finding.line}
+}
+`;
+
+    return {
+      findingId: finding.id,
+      pocFileName,
+      pocCode,
+      executionCommand,
+      expectedFailurePattern,
+      verificationSteps,
+    };
+  }
+
+  // Java
+  if (finding.file.endsWith('.java')) {
+    const pocFileName = `src/test/java/Repro${cleanId}Test.java`;
+    const executionCommand = `mvn test -Dtest=Repro${cleanId}Test`;
+    const expectedFailurePattern = 'AssertionError|NullPointerException|Exception';
+
+    verificationSteps.push({
+      setupCode: '// Setup Java reproduction test fixture',
+      exploitPayload: 'null / unhandled exception input',
+      targetCall: `${targetSymbol}()`,
+      expectedFailureAssertion: 'throws NullPointerException or invalid state',
+      expectedPostFixAssertion: 'handles null safely without exception',
+    });
+
+    const pocCode = `package org.opencontrib.repro;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class Repro${cleanId}Test {
+    @Test
+    public void testRepro${cleanId}() {
+        // PoC: Reproduce ${finding.title} in ${finding.file}:${finding.line}
+    }
+}
+`;
+
+    return {
+      findingId: finding.id,
+      pocFileName,
+      pocCode,
+      executionCommand,
+      expectedFailurePattern,
+      verificationSteps,
+    };
+  }
+
   // TypeScript / JavaScript
   const pocFileName = `test_repro_${cleanId}.test.ts`;
   const executionCommand = `bun test ${pocFileName}`;

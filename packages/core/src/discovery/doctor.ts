@@ -173,7 +173,7 @@ export function runDoctorAudit(): DoctorReport {
     }
   }
 
-  // 6. Check Static Analysis Toolchains
+  // 6. Check Static Analysis & Multi-Language Toolchains
   const toolchains = [
     { name: 'GitHub CLI (gh)', bin: 'gh', verCmd: 'gh --version', cat: 'VCS' },
     { name: 'ast-grep (sg)', bin: 'ast-grep', verCmd: 'ast-grep --version', cat: 'Analyzers', altBin: 'sg' },
@@ -182,6 +182,11 @@ export function runDoctorAudit(): DoctorReport {
     { name: 'Go Compiler Toolchain', bin: 'go', verCmd: 'go version', cat: 'Compilers' },
     { name: 'Rust Compiler Toolchain', bin: 'rustc', verCmd: 'rustc --version', cat: 'Compilers' },
     { name: 'Python / UV Toolchain', bin: 'uv', verCmd: 'uv --version', cat: 'Compilers', altBin: 'python' },
+    { name: 'Java JDK / Maven Toolchain', bin: 'javac', verCmd: 'javac -version', cat: 'Compilers', altBin: 'mvn' },
+    { name: 'C/C++ CMake Toolchain', bin: 'cmake', verCmd: 'cmake --version', cat: 'Compilers', altBin: 'gcc' },
+    { name: '.NET / C# SDK', bin: 'dotnet', verCmd: 'dotnet --version', cat: 'Compilers' },
+    { name: 'PHP / Composer Toolchain', bin: 'php', verCmd: 'php -v', cat: 'Compilers', altBin: 'composer' },
+    { name: 'Ruby Toolchain', bin: 'ruby', verCmd: 'ruby -v', cat: 'Compilers', altBin: 'bundle' },
   ];
 
   for (const tc of toolchains) {

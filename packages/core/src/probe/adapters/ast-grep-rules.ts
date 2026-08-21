@@ -340,10 +340,67 @@ export const STANDARD_AST_RELATIONAL_RULES: ASTGrepYamlRule[] = [
     rule: {
       pattern: 'ipaddress.ip_address($PARSED.hostname)',
     },
+  },
+  // 19. Java: Unclosed InputStream / AutoCloseable in raw try block without try-with-resources
+  {
+    id: 'java-unclosed-stream',
+    language: 'java' as any,
+    severity: 'error',
+    message: 'InputStream or AutoCloseable opened without try-with-resources or explicit close in finally block',
+    rule: {
+      pattern: 'InputStream $IN = new FileInputStream($PATH);',
+    },
     metadata: {
-      cwe: 'CWE-918',
-      category: 'security_sandbox',
-      impact: 'SSRF bypass permitting requests to private IPv6 subnets',
+      cwe: 'CWE-775',
+      category: 'lifecycle_leak',
+      impact: 'Operating system file descriptor leak under heavy concurrent I/O',
+    },
+  },
+  // 20. C/C++: Dangerous sprintf without buffer boundary check
+  {
+    id: 'cpp-sprintf-overflow',
+    language: 'c' as any,
+    severity: 'error',
+    message: 'Unbounded sprintf() allows buffer overflow. Use snprintf($BUF, sizeof($BUF), ...) instead.',
+    rule: {
+      pattern: 'sprintf($BUF, $FMT, $$$ARGS)',
+    },
+    fix: 'snprintf($BUF, sizeof($BUF), $FMT, $$$ARGS)',
+    metadata: {
+      cwe: 'CWE-120',
+      category: 'security_cwe',
+      impact: 'Stack buffer overflow leading to memory corruption or remote code execution',
+    },
+  },
+  // 21. C#: async void event handler anti-pattern
+  {
+    id: 'csharp-async-void',
+    language: 'csharp' as any,
+    severity: 'warning',
+    message: 'async void methods cannot be awaited and unhandled exceptions crash the process. Use async Task instead.',
+    rule: {
+      pattern: 'async void $METHOD($$$ARGS)',
+    },
+    fix: 'async Task $METHOD($$$ARGS)',
+    metadata: {
+      cwe: 'CWE-703',
+      category: 'protocol_drift',
+      impact: 'Unhandled asynchronous exceptions escaping caller context leading to fatal process abort',
+    },
+  },
+  // 22. PHP: md5/sha1 loose hash equality comparison
+  {
+    id: 'php-loose-hash-compare',
+    language: 'php' as any,
+    severity: 'warning',
+    message: 'Loose equality (==) on hash digests is vulnerable to type juggling / magic hash collisions. Use hash_equals().',
+    rule: {
+      pattern: '$HASH == $INPUT',
+    },
+    metadata: {
+      cwe: 'CWE-208',
+      category: 'security_cwe',
+      impact: 'Authentication bypass via PHP type juggling on 0e... hash digests',
     },
   },
 ];

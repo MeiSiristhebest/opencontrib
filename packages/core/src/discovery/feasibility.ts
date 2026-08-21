@@ -13,6 +13,11 @@ export interface SystemCapabilities {
     python: boolean;
     go: boolean;
     rust: boolean;
+    java: boolean;
+    cpp: boolean;
+    dotnet: boolean;
+    ruby: boolean;
+    php: boolean;
   };
 }
 
@@ -68,7 +73,12 @@ export function detectSystemCapabilities(): SystemCapabilities {
       bun: checkCommand('bun'),
       python: checkCommand('python') || checkCommand('python3'),
       go: checkCommand('go'),
-      rust: checkCommand('cargo'),
+      rust: checkCommand('cargo') || checkCommand('rustc'),
+      java: checkCommand('javac') || checkCommand('java'),
+      cpp: checkCommand('cmake') || checkCommand('gcc') || checkCommand('clang'),
+      dotnet: checkCommand('dotnet'),
+      ruby: checkCommand('ruby'),
+      php: checkCommand('php'),
     },
   };
 }

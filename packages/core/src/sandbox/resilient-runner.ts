@@ -71,17 +71,27 @@ export function sanitizeTestCommand(
 export function runResilientCommand(options: ResilientRunOptions): ResilientRunResult {
   const { cwd, command, args = [], timeoutMs = 30000, modifiedFiles = [], allowFullScan = false } = options;
   const warnings: string[] = [];
+  let currentArgs = [...args];
+  let targetedPackage: string | undefined;
 
-  // Check if someone is running blind full repo tests
-  const fullCmdStr = `${command} ${args.join(' ')}`;
-  if (!allowFullScan && (fullCmdStr.includes('go test ./...') || fullCmdStr.includes('pytest .'))) {
+  // Check and rewrite broad full repo tests into targeted package tests
+  const fullCmdStr = `${command} ${currentArgs.join(' ')}`;
+  if (!allowFullScan) {
     const targeted = resolveTargetedTestPackage(modifiedFiles);
-    if (targeted) {
-      warnings.push(`Targeted test optimization applied: focused on '${targeted}' instead of scanning entire repository.`);
+    if (targeted && targeted !== '.') {
+      targetedPackage = targeted;
+      if (fullCmdStr.includes('go test ./...')) {
+        currentArgs = currentArgs.map((a) => (a === './...' ? `${targeted}/...` : a));
+        warnings.push(`Targeted test optimization applied: rewritten to '${targeted}/...' instead of scanning entire repository.`);
+      } else if (fullCmdStr.includes('pytest .') || fullCmdStr === 'pytest') {
+        currentArgs = currentArgs.map((a) => (a === '.' ? targeted : a));
+        if (!currentArgs.includes(targeted)) currentArgs.push(targeted);
+        warnings.push(`Targeted test optimization applied: focused on '${targeted}' instead of scanning entire repository.`);
+      }
     }
   }
 
-  const { sanitizedCommand, sanitizedArgs, warnings: sanitizeWarnings } = sanitizeTestCommand(command, args);
+  const { sanitizedCommand, sanitizedArgs, warnings: sanitizeWarnings } = sanitizeTestCommand(command, currentArgs);
   warnings.push(...sanitizeWarnings);
 
   const startTime = Date.now();

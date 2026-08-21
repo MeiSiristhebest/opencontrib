@@ -5,5 +5,9 @@ export * from './parsers/node-parser.js';
 export * from './parsers/pytest-parser.js';
 export * from './parsers/go-parser.js';
 export * from './parsers/cargo-parser.js';
+export * from './parsers/junit-parser.js';
+export * from './parsers/gtest-parser.js';
+export * from './parsers/dotnet-parser.js';
+export * from './parsers/rspec-parser.js';
+export * from './parsers/phpunit-parser.js';
 export * from './vcs-delta.port.js';
-

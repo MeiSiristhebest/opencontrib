@@ -45,14 +45,16 @@ export class AutonomousPoCVerifier {
     try {
       // 1. Resolve Verification Step or synthesize one from finding metadata
       const step: VerificationStep = finding.verificationStep || AutonomousPoCVerifier.synthesizeStep(finding);
+      const defaultCmd = AutonomousPoCVerifier.resolveDefaultTestCommand(finding.file);
 
       // Write exploit/harness code if provided
       if (step.setupCode) {
-        sandbox.writeFile('.opencontrib_repro_setup.js', step.setupCode);
+        const ext = finding.file.endsWith('.py') ? '.py' : finding.file.endsWith('.go') ? '_test.go' : '.js';
+        sandbox.writeFile(`.opencontrib_repro_setup${ext}`, step.setupCode);
       }
 
       // Phase 1: Pre-Fix Exploit Execution (Must fail according to expectedFailureAssertion)
-      const preFixCmd = step.invocationExpression || options.testCommand || 'bun test';
+      const preFixCmd = step.invocationExpression || options.testCommand || defaultCmd;
       const preResult = sandbox.exec(preFixCmd, options.timeoutMs || 30000);
       report.logs.preFixOutput = (preResult.stdout + '\n' + preResult.stderr).trim();
 
@@ -102,7 +104,7 @@ export class AutonomousPoCVerifier {
       }
 
       // Phase 4: Full Regression Suite Check
-      const regCmd = options.testCommand || 'bun test';
+      const regCmd = options.testCommand || defaultCmd;
       const regResult = sandbox.exec(regCmd, options.timeoutMs || 45000);
       report.logs.regressionOutput = (regResult.stdout + '\n' + regResult.stderr).trim();
       report.regressionPassed = regResult.exitCode === 0;
@@ -123,14 +125,27 @@ export class AutonomousPoCVerifier {
     return report;
   }
 
+  public static resolveDefaultTestCommand(filePath = ''): string {
+    if (filePath.endsWith('.go')) return 'go test ./...';
+    if (filePath.endsWith('.py')) return 'pytest';
+    if (filePath.endsWith('.rs')) return 'cargo test';
+    if (filePath.endsWith('.java') || filePath.endsWith('.kt')) return 'mvn test';
+    if (filePath.endsWith('.cs')) return 'dotnet test';
+    if (filePath.endsWith('.rb')) return 'bundle exec rspec';
+    if (filePath.endsWith('.php')) return 'vendor/bin/phpunit';
+    if (filePath.endsWith('.cpp') || filePath.endsWith('.c')) return 'ctest';
+    return 'npm test';
+  }
+
   /**
    * Synthesizes a VerificationStep from finding metadata
    */
   private static synthesizeStep(finding: PointerStub): VerificationStep {
+    const defaultCmd = AutonomousPoCVerifier.resolveDefaultTestCommand(finding.file);
     return {
       setupCode: `// Reproduction harness for ${finding.id}`,
       exploitPayload: finding.callSite || finding.slice?.codeSnippet || '',
-      invocationExpression: 'bun test',
+      invocationExpression: defaultCmd,
       expectedFailureAssertion: finding.affectedSymbol || finding.id,
       expectedPostFixAssertion: 'pass',
     };

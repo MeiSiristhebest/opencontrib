@@ -288,10 +288,20 @@ export async function verifyDualStageReproduction(input: {
 export function parseAddedTestCasesFromDiffText(diffText: string): number {
   if (!diffText || typeof diffText !== 'string') return 0;
   const addedLines = diffText.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'));
-  // Match test case definitions, strictly excluding suites (describe) and comments (//, *, #, /*)
+  // Comprehensive multi-language test case pattern:
+  // - JS/TS: it(...), test(...)
+  // - Python: def test_...(...)
+  // - Go: func Test...(...)
+  // - Rust: #[test], #[tokio::test]
+  // - Java/Kotlin: @Test, @ParameterizedTest, fun test...(...)
+  // - C#: [Fact], [Theory], [Test]
+  // - C/C++: TEST(...), TEST_F(...)
+  // - Ruby: it "...", specify "...", test "..."
+  // - PHP: public function test...(...), #[Test]
+  // - Swift: func test...(...)
   const testCasePattern =
-    /^\+\s*(?:(?:it|test)(?:\.(?:skip|only|concurrent|todo|each))?\s*\(|def\s+test_[a-zA-Z0-9_]+\s*\(|func\s+Test[a-zA-Z0-9_]+\s*\(|#\[test\])/;
-  // Comment pattern excludes //, /*, *, and # (except Rust #[test] attributes)
+    /^\+\s*(?:(?:it|test)(?:\.(?:skip|only|concurrent|todo|each))?\s*\(|def\s+test_[a-zA-Z0-9_]+\s*\(|func\s+Test[a-zA-Z0-9_]+\s*\(|#\[(?:tokio::)?test\]|@(?:Parameterized|Repeated)?Test\b|fun\s+test[a-zA-Z0-9_]*\s*\(|\[(?:Fact|Theory|Test|TestCase)\]|TEST(?:_[FP])?\s*\(|BOOST_AUTO_TEST_CASE\s*\(|(?:it|specify|test)\s+['"][^'"]+['"]|public\s+function\s+test[a-zA-Z0-9_]+\s*\(|func\s+test[a-zA-Z0-9_]+\s*\()/;
+  // Comment pattern excludes //, /*, *, and # (except Rust/PHP attribute syntax #[...])
   const commentPattern = /^\+\s*(?:\/\/|\/\*|\*|#(?!\[))/;
 
   const matches = addedLines.filter((l) => !commentPattern.test(l) && testCasePattern.test(l));
