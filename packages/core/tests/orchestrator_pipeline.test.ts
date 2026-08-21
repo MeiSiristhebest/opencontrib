@@ -11,15 +11,20 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
   beforeAll(() => {
     // Seed cached repo for bytedance/flowgram.ai so tests run completely offline and network-resilient
     const storage = OpenContribStorage.getInstance();
-    const cachedDir = join(storage.getHomeDir(), 'repos', 'bytedance__flowgram.ai');
-    if (!existsSync(join(cachedDir, '.git')) && !existsSync(join(cachedDir, 'HEAD'))) {
-      mkdirSync(cachedDir, { recursive: true });
-      spawnSync('git', ['init', '-b', 'main'], { cwd: cachedDir });
-      spawnSync('git', ['config', 'user.name', 'Tester'], { cwd: cachedDir });
-      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: cachedDir });
-      writeFileSync(join(cachedDir, 'package.json'), JSON.stringify({ name: 'flowgram.ai', version: '1.0.0' }));
-      spawnSync('git', ['add', '.'], { cwd: cachedDir });
-      spawnSync('git', ['commit', '-m', 'Initial commit'], { cwd: cachedDir });
+    const dirs = [
+      join(storage.getHomeDir(), 'repos', 'bytedance__flowgram.ai'),
+      join(storage.getHomeDir(), 'repos', 'bytedance/flowgram.ai'),
+    ];
+    for (const cachedDir of dirs) {
+      if (!existsSync(join(cachedDir, '.git')) && !existsSync(join(cachedDir, 'HEAD'))) {
+        mkdirSync(cachedDir, { recursive: true });
+        spawnSync('git', ['init', '-b', 'main'], { cwd: cachedDir });
+        spawnSync('git', ['config', 'user.name', 'Tester'], { cwd: cachedDir });
+        spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: cachedDir });
+        writeFileSync(join(cachedDir, 'package.json'), JSON.stringify({ name: 'flowgram.ai', version: '1.0.0' }));
+        spawnSync('git', ['add', '.'], { cwd: cachedDir });
+        spawnSync('git', ['commit', '-m', 'Initial commit'], { cwd: cachedDir });
+      }
     }
   });
 
