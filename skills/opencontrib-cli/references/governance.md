@@ -4,13 +4,13 @@ Commands for patch quality auditing, impact analysis, CI diagnosis, and PR templ
 
 ## `governance audit`
 
-Audit a patch for anti-AI patterns, diff size limits, and quality confidence rubric.
+Audit a patch for anti-AI patterns, diff size limits, markdown encoding integrity (\uFFFD check), and quality confidence rubric.
 
 ```bash
 opencontrib governance audit \
   --patch diff.txt \
   --pr-title "Fix null pointer in parser" \
-  --pr-body "Root cause: missing null check on input validation..." \
+  --pr-body-file pr_body.md \
   --evidence '{"stressLoopPassed":true,"passedTestsCount":42}' \
   --subagent-score 85 \
   --is-autonomous
@@ -18,15 +18,16 @@ opencontrib governance audit \
 
 | Flag | Type | Required | Description |
 | ------ | ------ | ---------- | ------------- |
-| `--patch` | string | ✓ | Git unified diff content |
+| `--patch` | string | ✓ | Git unified diff content or path to diff file |
 | `--pr-title` | string | ✓ | Proposed PR title |
-| `--pr-body` | string | ✓ | Proposed PR body text |
+| `--pr-body` | string | — | Proposed PR body text |
+| `--pr-body-file` | string | — | Path to clean markdown file (prevents shell escaping corruption) |
 | `--evidence` | string | — | JSON evidence from `evidence` command |
 | `--subagent-score` | number | — | External review score (0-100) |
 | `--is-autonomous` | flag | — | Mark as autonomous PR submission |
 | `--pretty` | flag | — | Pretty-print output |
 
-**Output**: `{"status":"passed","audit":{"overallConfidence":{...},"rfcGatePassed":true,...}}` or `{"status":"failed",...}`
+**Output**: `{"status":"passed","audit":{"overallConfidence":{...},"markdownIntegrityPassed":true,"rfcGatePassed":true,...}}` or `{"status":"failed",...}`
 
 ---
 

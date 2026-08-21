@@ -298,6 +298,54 @@ export const STANDARD_AST_RELATIONAL_RULES: ASTGrepYamlRule[] = [
       impact: 'Rapid heap memory accumulation and GC pressure under high event rates',
     },
   },
+  // 16. TypeScript/JavaScript: SSRF IP Regex bypass on Bracketed IPv6 Hostnames
+  {
+    id: 'ts-ssrf-bracketed-ipv6-bypass',
+    language: 'typescript',
+    severity: 'error',
+    message: 'WHATWG URL parser preserves brackets on IPv6 hostnames (e.g. "[::1]"). Regex testing against hostname without stripping brackets allows SSRF bypass.',
+    rule: {
+      pattern: '$RE.test($HOST)',
+      inside: {
+        pattern: 'function $FN($$$) { $$$ }',
+      },
+    },
+    metadata: {
+      cwe: 'CWE-918',
+      category: 'security_sandbox',
+      impact: 'SSRF filter bypass allowing requests to internal loopback or metadata endpoints via [::1] or [fe80::1]',
+    },
+  },
+  // 17. Go: SSRF Validation Bypass on Bracketed IPv6 URL Host
+  {
+    id: 'go-ssrf-url-hostname-bracket',
+    language: 'go',
+    severity: 'error',
+    message: 'URL Hostname with IPv6 retains brackets; net.ParseIP or regex matching without strings.Trim(host, "[]") allows SSRF filter bypass.',
+    rule: {
+      pattern: 'net.ParseIP($U.Host)',
+    },
+    metadata: {
+      cwe: 'CWE-918',
+      category: 'security_sandbox',
+      impact: 'SSRF bypass to internal loopback or cloud metadata services via bracketed IPv6 addresses',
+    },
+  },
+  // 18. Python: SSRF Regex Bypass on URL Netloc Bracketed IPv6
+  {
+    id: 'py-ssrf-bracketed-ipv6-bypass',
+    language: 'python',
+    severity: 'error',
+    message: 'urllib.parse.urlparse hostname for IPv6 includes square brackets; ipaddress.ip_address() or regex requires stripping brackets.',
+    rule: {
+      pattern: 'ipaddress.ip_address($PARSED.hostname)',
+    },
+    metadata: {
+      cwe: 'CWE-918',
+      category: 'security_sandbox',
+      impact: 'SSRF bypass permitting requests to private IPv6 subnets',
+    },
+  },
 ];
 
 /**

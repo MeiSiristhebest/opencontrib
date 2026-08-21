@@ -147,4 +147,36 @@ describe('Governance & Anti-AI Audit Engine', () => {
     });
     expect(cleanTemplate).not.toContain('Signed-off-by');
   });
+
+  it('detects corrupted Unicode replacement characters and malformed headers', () => {
+    const corruptedPr = `
+### Problem Description
+Fixes #1106
+
+3## Key Implementation Changes
+- Normalization: Strip enclosing brackets \uFFFD\uFFFD\uFFFD
+`;
+    const auditCorrupted = auditGovernance({
+      patchContent: 'diff --git a/foo b/foo\n+const a = 1;',
+      prTitle: 'fix(knowledge): normalize IPv6 SSRF',
+      prBody: corruptedPr,
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      lineCount: 20,
+      humanApproved: true,
+    });
+
+    expect(auditCorrupted.isGatedPassed).toBe(false);
+    expect(auditCorrupted.markdownIntegrityPassed).toBe(false);
+    expect(auditCorrupted.corruptedMarkdownIssues?.length).toBeGreaterThanOrEqual(2);
+    expect(auditCorrupted.remediationSuggestions.some(s => s.includes('Markdown encoding/corruption'))).toBe(true);
+  });
 });
+

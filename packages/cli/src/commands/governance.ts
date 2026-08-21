@@ -9,12 +9,15 @@ import {
 } from '@opencontrib/core';
 import { printJSON, parseJSON, readStdin } from '../utils/output.js';
 
+import fs from 'node:fs';
+
 // ─── governance audit ─────────────────────────────────────────────────────────
 const auditCommand = new Command('audit')
-  .description('Audit patch for anti-AI patterns, diff size, and quality confidence rubric')
-  .requiredOption('--patch <file-or-text>', 'Git unified diff content')
+  .description('Audit patch for anti-AI patterns, diff size, markdown integrity, and quality confidence rubric')
+  .requiredOption('--patch <file-or-text>', 'Git unified diff content or path to .diff/.patch file')
   .requiredOption('--pr-title <text>', 'Proposed PR title')
-  .requiredOption('--pr-body <text>', 'Proposed PR body text')
+  .option('--pr-body <text>', 'Proposed PR body text')
+  .option('--pr-body-file <path>', 'Path to markdown file containing proposed PR body')
   .option('--evidence <json>', 'Evidence JSON from collect_evidence')
   .option('--subagent-score <n>', 'External subagent quality score (0-100)', (v) => Number(v))
   .option('--is-autonomous', 'Whether preparing for autonomous PR submission', false)
@@ -22,19 +25,34 @@ const auditCommand = new Command('audit')
   .action(async (opts: {
     patch: string;
     prTitle: string;
-    prBody: string;
+    prBody?: string;
+    prBodyFile?: string;
     evidence?: string;
     subagentScore?: number;
     isAutonomous?: boolean;
     pretty?: boolean;
   }) => {
+    let patchContent = opts.patch;
+    if (fs.existsSync(opts.patch)) {
+      try {
+        patchContent = fs.readFileSync(opts.patch, 'utf-8');
+      } catch {}
+    }
+
+    let prBodyContent = opts.prBody || '';
+    if (opts.prBodyFile && fs.existsSync(opts.prBodyFile)) {
+      try {
+        prBodyContent = fs.readFileSync(opts.prBodyFile, 'utf-8');
+      } catch {}
+    }
+
     const evidence = opts.evidence
       ? (parseJSON(opts.evidence, '--evidence') as any) || undefined
       : undefined;
     const audit = auditGovernance({
-      patchContent: opts.patch,
+      patchContent,
       prTitle: opts.prTitle,
-      prBody: opts.prBody,
+      prBody: prBodyContent,
       evidence,
       subagentQualityScore: opts.subagentScore,
       isAutonomousPrSubmission: opts.isAutonomous ?? false,

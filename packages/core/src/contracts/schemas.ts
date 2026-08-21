@@ -164,6 +164,8 @@ export const GovernanceAuditResultSchema = z.object({
   diffLineCount: z.number(),
   antiAiCheckPassed: z.boolean(),
   flaggedAiPhrases: z.array(z.string()),
+  markdownIntegrityPassed: z.boolean().default(true).optional(),
+  corruptedMarkdownIssues: z.array(z.string()).default([]).optional(),
   remediationSuggestions: z.array(z.string()),
 });
 export type GovernanceAuditResult = z.infer<typeof GovernanceAuditResultSchema>;

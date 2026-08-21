@@ -166,6 +166,39 @@ export function deriveEvidenceBackedQualityRubric(input: {
   return { breakdown, rubricResult };
 }
 
+export function lintMarkdownIntegrity(text: string): {
+  isClean: boolean;
+  corruptedIssues: string[];
+} {
+  const issues: string[] = [];
+
+  // 1. Check for Unicode replacement characters (\uFFFD / )
+  if (/\uFFFD/.test(text)) {
+    issues.push('Contains corrupted Unicode replacement characters (\\uFFFD / ) caused by terminal encoding errors.');
+  }
+
+  // 2. Check for malformed markdown headers like "3##" or "2#"
+  if (/(?:^|\n)\s*\d+#{1,6}\s+/i.test(text)) {
+    issues.push('Contains malformed numbered markdown headers (e.g. "3##").');
+  }
+
+  // 3. Check for raw broken base64 payload fragments leaking into markdown
+  if (/Buffer\.from\(['"][A-Za-z0-9+/=]{40,}['"]\)/.test(text)) {
+    issues.push('Contains raw Buffer.from base64 code snippets instead of clean markdown text.');
+  }
+
+  // 4. Check for unclosed backticks in single line contexts
+  const codeBlockCount = (text.match(/```/g) || []).length;
+  if (codeBlockCount % 2 !== 0) {
+    issues.push('Contains unclosed multi-line code blocks (odd count of triple backticks).');
+  }
+
+  return {
+    isClean: issues.length === 0,
+    corruptedIssues: issues,
+  };
+}
+
 export interface AuditGovernanceInput {
   diffText?: string;
   patchContent?: string;
@@ -214,18 +247,31 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
   const flaggedAiPhrases = [...aiDiffCheck.flaggedPhrases, ...aiPrCheck.flaggedPhrases];
   const antiAiCheckPassed = flaggedAiPhrases.length === 0;
 
-  // 2. RFC 100-line Gate Check
+  // 2. Markdown Integrity & Encoding Check
+  const integrityCheck = lintMarkdownIntegrity(prBody);
+  const markdownIntegrityPassed = integrityCheck.isClean;
+  const corruptedMarkdownIssues = integrityCheck.corruptedIssues;
+
+  // 3. RFC 100-line Gate Check
   const rfcGatePassed = lines <= 100;
 
-  // 3. Mathematical Quality Rubric Calculation
+  // 4. Mathematical Quality Rubric Calculation
   const confidence = calculateConfidenceScore(breakdown!);
 
-  // 4. Human-in-the-Loop Pre-flight Gate
+  // 5. Human-in-the-Loop Pre-flight Gate
   const requiresHumanApproval = !humanApproved;
 
-  const isGatedPassed = antiAiCheckPassed && rfcGatePassed && confidence.isPassed && humanApproved;
+  const isGatedPassed =
+    antiAiCheckPassed &&
+    markdownIntegrityPassed &&
+    rfcGatePassed &&
+    confidence.isPassed &&
+    humanApproved;
 
   const remediationSuggestions: string[] = [];
+  if (!markdownIntegrityPassed) {
+    remediationSuggestions.push(`Fix Markdown encoding/corruption issues: ${corruptedMarkdownIssues.join('; ')}`);
+  }
   if (!antiAiCheckPassed) {
     remediationSuggestions.push(`Remove flagged robotic/AI phrases: ${flaggedAiPhrases.join(', ')}`);
   }
@@ -253,6 +299,8 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
     diffLineCount: lines,
     antiAiCheckPassed,
     flaggedAiPhrases,
+    markdownIntegrityPassed,
+    corruptedMarkdownIssues,
     remediationSuggestions,
     overallConfidence: {
       isPassed: isGatedPassed,
