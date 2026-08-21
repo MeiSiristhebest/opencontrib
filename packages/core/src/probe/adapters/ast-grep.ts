@@ -56,8 +56,15 @@ export const DEEP_WATER_AST_RULES: ASTGrepPatternRule[] = [
 ];
 
 export function getASTGrepRulesForLanguage(language: string): ASTGrepPatternRule[] {
-  const langLower = language.toLowerCase();
+  const raw = language.toLowerCase().trim();
+  const normalized =
+    raw === 'ts' || raw === 'tsx' ? 'typescript' :
+    raw === 'js' || raw === 'jsx' ? 'javascript' :
+    raw === 'golang' ? 'go' :
+    raw === 'py' ? 'python' :
+    raw === 'rs' ? 'rust' : raw;
+
   return DEEP_WATER_AST_RULES.filter(
-    (r) => r.language.toLowerCase() === langLower || r.language === '*',
+    (r) => r.language.toLowerCase() === normalized || r.language === '*',
   );
 }

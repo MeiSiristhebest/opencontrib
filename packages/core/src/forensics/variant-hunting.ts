@@ -35,10 +35,21 @@ export class VariantHunter {
     if (hasAstGrep && finding.affectedSymbol && typeof (host as any).exec === 'function') {
       const bin = (host as any).isBinaryAvailable('ast-grep') ? 'ast-grep' : 'sg';
       try {
-        const lang = finding.file.endsWith('.go')
+        const ext = path.extname(finding.file).toLowerCase();
+        const lang = ext === '.go'
           ? 'go'
-          : finding.file.endsWith('.py')
+          : ext === '.py'
           ? 'python'
+          : ext === '.rs'
+          ? 'rust'
+          : ext === '.js' || ext === '.jsx' || ext === '.mjs' || ext === '.cjs'
+          ? 'js'
+          : ext === '.c' || ext === '.h'
+          ? 'c'
+          : ext === '.cpp' || ext === '.cc' || ext === '.cxx' || ext === '.hpp'
+          ? 'cpp'
+          : ext === '.java'
+          ? 'java'
           : 'ts';
 
         const pattern = `${finding.affectedSymbol}($$$ARGS)`;

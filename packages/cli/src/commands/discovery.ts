@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import {
   assessFeasibility,
   detectSystemCapabilities,
+  diagnoseManifests,
   qualifyIssue,
   rankOpportunitySignals,
 } from '@opencontrib/core';
@@ -125,39 +126,8 @@ const manifestsCommand = new Command('manifests')
   .action(async (opts: { pretty?: boolean }, cmd: Command) => {
     const input = (opts as any).input ?? await readStdin();
     const parsed = parseJSON(input, 'stdin') as any;
-    const suggestions: any[] = [];
-    for (const wf of parsed.workflows || []) {
-      const content = wf.content || '';
-      if (content.includes('actions/checkout@v2') || content.includes('actions/checkout@v3')) {
-        suggestions.push({
-          id: `ci-upgrade-checkout-${(wf.path || '').replace(/[^a-zA-Z0-9]/g, '_')}`,
-          title: `Upgrade deprecated actions/checkout to v4 in ${wf.path}`,
-          category: 'ci_workflow',
-          prPotentialScore: 92,
-        });
-      }
-    }
-    if (parsed.pyprojectContent && !parsed.pyprojectContent.includes('[tool.ruff]')) {
-      suggestions.push({
-        id: 'python-add-ruff-linter',
-        title: 'Configure Ruff linter in pyproject.toml',
-        category: 'code_hygiene',
-        prPotentialScore: 85,
-      });
-    }
-    if (!parsed.dependabotContent) {
-      suggestions.push({
-        id: 'security-enable-dependabot',
-        title: 'Add automated Dependabot config',
-        category: 'security',
-        prPotentialScore: 91,
-      });
-    }
-    printJSON({
-      status: 'success',
-      suggestionsCount: suggestions.length,
-      suggestions: suggestions.sort((a, b) => b.prPotentialScore - a.prPotentialScore),
-    }, opts.pretty);
+    const result = diagnoseManifests(parsed || {});
+    printJSON(result, opts.pretty);
   });
 
 // ─── Top-level command ────────────────────────────────────────────────────────

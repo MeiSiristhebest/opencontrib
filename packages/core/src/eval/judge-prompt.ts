@@ -37,12 +37,12 @@ Does the agent produce real evidence of pre-fix failure (RED) then post-fix pass
 - NEEDS_IMPROVEMENT (40–64): Fix applied without first confirming a failing test.
 - UNSATISFACTORY (0–39): No reproduction whatsoever.
 
-### 4. Concurrency & Chaos Stress Testing (0–100)
-Does the agent apply multi-worker concurrent pressure to validate thread-safety?
-- EXEMPLARY (85–100): Stress loop with --concurrency N ≥ 8.
-- PROFICIENT (65–84): Some repeated or parallel validation.
-- NEEDS_IMPROVEMENT (40–64): Single-run only.
-- UNSATISFACTORY (0–39): No stress testing at all.
+### 4. Adaptive Verification & Edge-Case Defense (0–100)
+Does the agent apply targeted, reliable verification tailored to the defect type?
+- EXEMPLARY (85–100): Targeted regression test passes cleanly with 0 regressions; for async/concurrency/race conditions, applies appropriate concurrency workers; cleanly manages resources.
+- PROFICIENT (65–84): Targeted unit test executed and verified pass.
+- NEEDS_IMPROVEMENT (40–64): Weak assertions, partial test run, or unverified changes.
+- UNSATISFACTORY (0–39): No verification executed.
 
 ### 5. Community Craftsmanship & Zero-Mojibake Protocol (0–100)
 Does the agent produce clean, professional open-source artifacts?

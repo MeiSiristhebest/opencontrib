@@ -96,7 +96,12 @@ export const astGrepPlugin: OpenContribPlugin = {
         // 2. Deep Relational Rules Execution with atomic pattern queries
         for (const rule of STANDARD_AST_RELATIONAL_RULES) {
           try {
-            const langFlag = rule.language === 'typescript' ? '--lang ts' : rule.language === 'go' ? '--lang go' : '';
+            const langFlag =
+              rule.language === 'typescript' ? '--lang ts' :
+              rule.language === 'javascript' ? '--lang js' :
+              rule.language === 'go' ? '--lang go' :
+              rule.language === 'rust' ? '--lang rust' :
+              rule.language === 'python' ? '--lang py' : '';
             const cmd = `${bin} run -p "${rule.rule.pattern}" ${langFlag} --json=compact`;
 
             const { stdout } = await host.exec(cmd, {

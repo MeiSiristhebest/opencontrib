@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   assessFeasibility,
   detectSystemCapabilities,
+  diagnoseManifests,
   qualifyIssue,
   rankOpportunitySignals,
   runDoctorAudit,
@@ -18,12 +19,17 @@ export function registerDiscoveryTools(server: McpServer): void {
     'Assess OS and toolchain execution feasibility for an issue against local machine (Windows/WSL/Docker/Mac)',
     {
       issueTitle: z.string().describe('Title of the issue'),
-      issueBody: z.string().describe('Body of the issue'),
-      labels: z.array(z.string()).describe('List of issue label names'),
+      issueBody: z.string().optional().describe('Body of the issue'),
+      labels: z.array(z.string()).optional().describe('Labels attached to the issue'),
     },
     async (args) => {
       const capabilities = detectSystemCapabilities();
-      const assessment = assessFeasibility(args.issueTitle, args.issueBody, args.labels, capabilities);
+      const assessment = assessFeasibility(
+        args.issueTitle,
+        args.issueBody || '',
+        args.labels || [],
+        capabilities,
+      );
 
       return {
         content: [
@@ -49,41 +55,34 @@ export function registerDiscoveryTools(server: McpServer): void {
   );
 
   // -------------------------------------------------------------
-  // Tool 2: contrib_qualify_issue (纯门禁：作者优先权与反跟风检查)
+  // Tool 2: contrib_qualify_issue (纯算法：议题前置资格筛查)
   // -------------------------------------------------------------
   server.tool(
     'contrib_qualify_issue',
-    'Check 7-day author-first-right, anti-bandwagoning, and blocking labels using issue & comments data from GitHub MCP',
+    'Verify if an issue is safe and qualified for external contribution (checks author-first-right, anti-bandwagoning, and blocking labels)',
     {
       issueNumber: z.number().describe('GitHub issue number'),
-      issueTitle: z.string().describe('Title of the issue'),
-      issueBody: z.string().describe('Body text of the issue'),
-      labels: z.array(z.string()).describe('Labels of the issue'),
-      isOpen: z.boolean().describe('Whether state is open'),
-      assignees: z.array(z.string()).describe('List of assigned usernames'),
-      createdAt: z.string().describe('ISO timestamp of issue creation date'),
+      issueTitle: z.string().describe('GitHub issue title'),
+      issueBody: z.string().optional().describe('GitHub issue body'),
+      author: z.string().optional().describe('Issue author username'),
+      assignees: z.array(z.string()).optional().describe('Current assignees'),
+      commentsCount: z.number().optional().describe('Number of comments'),
+      hasPrLinked: z.boolean().optional().describe('Whether a PR is already linked to this issue'),
+      labels: z.array(z.string()).optional().describe('Array of issue label names'),
+      createdAt: z.string().optional().describe('ISO timestamp of issue creation'),
       comments: z
         .array(
           z.object({
-            id: z.number(),
-            body: z.string().optional(),
-            user: z.object({ login: z.string().optional() }).nullish(),
-            created_at: z.string(),
+            author: z.string(),
+            body: z.string(),
+            createdAt: z.string(),
           }),
         )
-        .describe('List of issue comments fetched via GitHub MCP get_issue_comments'),
+        .optional()
+        .describe('Recent issue comments for bandwagoning check'),
     },
     async (args) => {
-      const qualification = qualifyIssue({
-        issueNumber: args.issueNumber,
-        issueTitle: args.issueTitle,
-        issueBody: args.issueBody,
-        labels: args.labels,
-        isOpen: args.isOpen,
-        assignees: args.assignees,
-        createdAt: args.createdAt,
-        comments: args.comments,
-      });
+      const qualification = qualifyIssue(args as any);
 
       return {
         content: [
@@ -119,69 +118,13 @@ export function registerDiscoveryTools(server: McpServer): void {
       dependabotContent: z.string().optional().describe('Content of .github/dependabot.yml from GitHub MCP'),
     },
     async (args) => {
-      const suggestions: any[] = [];
-      const workflows = args.workflows || [];
-
-      // Scan Workflows
-      for (const wf of workflows) {
-        if (wf.content.includes('actions/checkout@v2') || wf.content.includes('actions/checkout@v3')) {
-          suggestions.push({
-            id: `ci-upgrade-checkout-${wf.path.replace(/[^a-zA-Z0-9]/g, '_')}`,
-            title: `Upgrade deprecated actions/checkout to v4 in ${wf.path}`,
-            category: 'ci_workflow',
-            summary: 'Repository uses deprecated actions/checkout version in CI workflows.',
-            rationale: 'Upgrading to v4 ensures compatibility with modern GitHub Actions runners and improves security.',
-            targetFiles: [{ path: wf.path, reason: 'Target CI workflow file' }],
-            proposedChanges: ['Replace actions/checkout@v2 or @v3 with actions/checkout@v4'],
-            estimatedDiffLines: 6,
-            prPotentialScore: 92,
-          });
-        }
-      }
-
-      // Scan Python
-      if (args.pyprojectContent && !args.pyprojectContent.includes('[tool.ruff]')) {
-        suggestions.push({
-          id: 'python-add-modern-linter',
-          title: 'Configure Ruff linter in pyproject.toml',
-          category: 'code_hygiene',
-          summary: 'Python project is missing modern unified linter/formatter configurations.',
-          rationale: 'Ruff provides 10-100x faster linting for open source contributors.',
-          targetFiles: [{ path: 'pyproject.toml', reason: 'Python project manifest' }],
-          proposedChanges: ['Add standard [tool.ruff] configuration with target-version and line-length'],
-          estimatedDiffLines: 12,
-          prPotentialScore: 85,
-        });
-      }
-
-      // Scan Dependabot
-      if (!args.dependabotContent) {
-        suggestions.push({
-          id: 'security-enable-dependabot',
-          title: 'Add automated Dependabot config for GitHub Actions & packages',
-          category: 'security',
-          summary: 'Repository is missing automated weekly dependency security maintenance.',
-          rationale: 'Dependabot ensures GitHub Actions and project dependencies stay up-to-date.',
-          targetFiles: [{ path: '.github/dependabot.yml', reason: 'Security maintenance workflow' }],
-          proposedChanges: ['Add standard .github/dependabot.yml with weekly interval'],
-          estimatedDiffLines: 14,
-          prPotentialScore: 91,
-        });
-      }
+      const result = diagnoseManifests(args);
 
       return {
         content: [
           {
             type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                suggestionsCount: suggestions.length,
-                suggestions: suggestions.sort((a, b) => b.prPotentialScore - a.prPotentialScore),
-              },
-              null,
-              2,
-            ),
+            text: JSON.stringify(result, null, 2),
           },
         ],
       };

@@ -5,3 +5,4 @@ export * from './github-client.js';
 export * from './doctor.js';
 export * from './context-assembler.js';
 export * from './ranking.js';
+export * from './manifest-diagnostics.js';

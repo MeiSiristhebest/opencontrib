@@ -406,4 +406,25 @@ describe('Discovery & Qualification Engine', () => {
     expect(assessment.scorePenalty).toBeGreaterThanOrEqual(30);
     expect(assessment.detectedRisks).toContain('macos_specific');
   });
+
+  it('diagnoses manifests and suggests <=100 line modernizations', async () => {
+    const { diagnoseManifests } = await import('../src/discovery/manifest-diagnostics.js');
+    const result = diagnoseManifests({
+      workflows: [
+        { path: '.github/workflows/ci.yml', content: 'uses: actions/checkout@v3\nuses: actions/setup-node@v2\npull_request:\n' },
+      ],
+      pyprojectContent: '[project]\nname = "demo"\n',
+      packageJsonContent: JSON.stringify({ name: 'demo', scripts: {} }),
+      cargoContent: '[package]\nname = "demo"\n',
+      gitignoreContent: 'node_modules\n',
+    });
+
+    expect(result.status).toBe('success');
+    expect(result.suggestionsCount).toBeGreaterThan(0);
+    const titles = result.suggestions.map((s) => s.title);
+    expect(titles.some((t) => t.includes('actions/checkout'))).toBe(true);
+    expect(titles.some((t) => t.includes('Ruff'))).toBe(true);
+    expect(titles.some((t) => t.includes('Dependabot'))).toBe(true);
+    expect(titles.some((t) => t.includes('LTO'))).toBe(true);
+  });
 });

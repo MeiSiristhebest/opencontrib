@@ -67,7 +67,7 @@ describe('buildJudgePrompt — prompt construction (pure function, zero LLM call
     expect(systemPrompt).toContain('Problem Formulation');
     expect(systemPrompt).toContain('Context Economy');
     expect(systemPrompt).toContain('Empirical Rigor');
-    expect(systemPrompt).toContain('Concurrency');
+    expect(systemPrompt).toContain('Adaptive Verification');
     expect(systemPrompt).toContain('Craftsmanship');
   });
 
