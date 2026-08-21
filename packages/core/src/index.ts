@@ -19,3 +19,5 @@ export * from './bundle/index.js';
 export * from './testing/index.js';
 export * from './forensics/index.js';
 export * from './taskflow/index.js';
+export * from './eval/index.js';
+

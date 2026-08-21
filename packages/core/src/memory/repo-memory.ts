@@ -76,6 +76,18 @@ export class RepoMemoryLedger {
     this.save();
   }
 
+  recordReflexionInsight(repoFullName: string, insight: { failureMode: string; rootCause: string; lessonsLearned: string[] }): void {
+    const entry = this.getMemory(repoFullName);
+    entry.pastFailures.push({
+      date: new Date().toISOString(),
+      reason: insight.failureMode,
+      context: `${insight.rootCause} | Lessons: ${insight.lessonsLearned.join('; ')}`,
+    });
+    this.cache.set(repoFullName, entry);
+    this.save();
+  }
+
+
   /**
    * Record that a PR has been opened/submitted.
    * Differentiates unverified agent claim vs verified fact.
