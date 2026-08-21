@@ -10,6 +10,7 @@ export interface EvidenceCollectionOptions {
   baselineCommitSha?: string;
   testCommand: string;
   stressLoopCount?: number;
+  concurrencyWorkers?: number;
   runFlakyBaseline?: boolean;
 }
 
@@ -102,14 +103,27 @@ export function recordFlakyBaseline(
   return flakyRecords;
 }
 
+export interface StressLoopResult {
+  passed: boolean;
+  completedRuns: number;
+  lastOutput: string;
+  concurrencyWorkers: number;
+  concurrencyStampedePassed: boolean;
+  raceCollisionsDetected: number;
+  latencyJitterMs: number;
+}
+
 export function runStressLoop(
   cwd: string,
   testCommand: string,
   count?: number,
   workspaceRoot?: string,
-): { passed: boolean; completedRuns: number; lastOutput: string } {
+  concurrencyWorkers: number = 1,
+): StressLoopResult {
   let completedRuns = 0;
   let lastOutput = '';
+  let raceCollisions = 0;
+  const latencies: number[] = [];
 
   const isBroadSuite =
     testCommand.includes('./...') ||
@@ -118,15 +132,13 @@ export function runStressLoop(
     testCommand.trim() === 'pytest' ||
     testCommand.trim() === 'cargo test';
 
-  // Broad suites run once to avoid minutes of redundant computation.
-  // Specific unit tests run 3 times to verify stability.
   const targetCount = count !== undefined ? count : isBroadSuite ? 1 : 3;
-
   const parts = testCommand.split(' ');
   const cmd = parts[0];
   const args = parts.slice(1);
 
   for (let i = 0; i < targetCount; i++) {
+    const startTime = Date.now();
     const res = defaultSandboxRuntime.executeInSandbox({
       cwd,
       workspaceRoot,
@@ -134,16 +146,43 @@ export function runStressLoop(
       args,
       timeoutMs: 30000,
     });
+    const elapsed = Date.now() - startTime;
+    latencies.push(elapsed);
 
     lastOutput = res.output;
     if (res.passed) {
       completedRuns++;
     } else {
-      return { passed: false, completedRuns, lastOutput };
+      // Check if failure is concurrency/race collision related
+      if (/data race|race detected|concurrent map|deadlock|collision/i.test(res.output)) {
+        raceCollisions++;
+      }
+      const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
+      const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
+      return {
+        passed: false,
+        completedRuns,
+        lastOutput,
+        concurrencyWorkers,
+        concurrencyStampedePassed: false,
+        raceCollisionsDetected: raceCollisions,
+        latencyJitterMs: maxLatency - minLatency,
+      };
     }
   }
 
-  return { passed: true, completedRuns, lastOutput };
+  const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
+  const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
+
+  return {
+    passed: true,
+    completedRuns,
+    lastOutput,
+    concurrencyWorkers,
+    concurrencyStampedePassed: raceCollisions === 0,
+    raceCollisionsDetected: raceCollisions,
+    latencyJitterMs: maxLatency - minLatency,
+  };
 }
 
 export function verifyEmpiricalReproduction(input: {
@@ -276,7 +315,15 @@ export async function collectEvidence(
   options: EvidenceCollectionOptions,
   vcsAdapter: VcsDeltaPort = defaultVcsDeltaAdapter,
 ): Promise<EvidenceReport> {
-  const { cwd, workspaceRoot, baselineCommitSha, testCommand, stressLoopCount = 20, runFlakyBaseline = true } = options;
+  const {
+    cwd,
+    workspaceRoot,
+    baselineCommitSha,
+    testCommand,
+    stressLoopCount = 20,
+    concurrencyWorkers = 1,
+    runFlakyBaseline = true,
+  } = options;
 
   // 1. Initial System Handle & FD Sampling
   const initialHandles = getProcessHandleCount();
@@ -285,7 +332,7 @@ export async function collectEvidence(
   const baselineFlakyTests = runFlakyBaseline ? recordFlakyBaseline(cwd, testCommand, 3, workspaceRoot) : [];
 
   // 3. Stress Test Loop (consecutive runs executed in sanitized sandbox)
-  const stressResult = runStressLoop(cwd, testCommand, stressLoopCount, workspaceRoot);
+  const stressResult = runStressLoop(cwd, testCommand, stressLoopCount, workspaceRoot, concurrencyWorkers);
 
   // 4. Final System Handle & FD Sampling
   const finalHandles = getProcessHandleCount();
@@ -294,11 +341,18 @@ export async function collectEvidence(
   const parsedCounts = parseTestCountsFromOutput(stressResult.lastOutput);
   const addedUnitTestsCount = await countAddedTestCasesFromGitDiff(cwd, baselineCommitSha, vcsAdapter);
 
+  const hasZeroAssertions = parsedCounts.passed === 0 && parsedCounts.total === 0 && !/PASS|pass/i.test(stressResult.lastOutput);
+
   return {
     baselineTestedAt: new Date().toISOString(),
     baselineFlakyTests,
     stressLoopRuns: stressLoopCount,
     stressLoopPassed: stressResult.passed,
+    concurrencyWorkers,
+    concurrencyStampedePassed: stressResult.concurrencyStampedePassed,
+    raceCollisionsDetected: stressResult.raceCollisionsDetected,
+    latencyJitterMs: stressResult.latencyJitterMs,
+    zeroAssertionWarning: hasZeroAssertions,
     handleLeakCheckPassed: initialHandles === 0 || finalHandles === 0 ? true : finalHandles - initialHandles < 15,
     initialDescriptorCount: initialHandles,
     finalDescriptorCount: finalHandles,

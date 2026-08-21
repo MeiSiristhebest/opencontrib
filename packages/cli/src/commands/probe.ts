@@ -61,6 +61,9 @@ probeCommand
   .option('--skip <probes>', 'Comma-separated probe names to ignore')
   .option('--max-cost <cost>', 'Maximum allowed execution cost: fast, medium, deep', 'medium')
   .option('--min-score <score>', 'Minimum PR potential score threshold (0-100)', '0')
+  .option('--min-confidence <confidence>', 'Minimum finding confidence threshold (0-100)', '80')
+  .option('--limit <n>', 'Maximum number of top high-value Smart Pointers to output (default: 5)', '5')
+  .option('--all', 'Output all raw pointers without top-K triage', false)
   .option('--timeout <ms>', 'Per-probe execution timeout in ms', '30000')
   .option('--pretty', 'Pretty-print JSON output', false)
   .action(async (target = '.', opts) => {
@@ -82,13 +85,51 @@ probeCommand
       // Execute full plugin scan through ProbeScanScheduler
       const scanResult = await host.executeScan(resolved, matchingProbes);
 
+      // Rank and triage pointers
+      const minConfidence = parseInt(opts.minConfidence ?? '80', 10);
+      const limit = parseInt(opts.limit ?? '5', 10);
+
+      const severityWeights: Record<string, number> = {
+        critical: 100,
+        high: 85,
+        medium: 60,
+        low: 30,
+      };
+
+      const categoryMultipliers: Record<string, number> = {
+        lifecycle_leak: 1.2,
+        concurrency_race: 1.2,
+        protocol_drift: 1.15,
+        security_cwe: 1.1,
+        numerical_bounds: 1.05,
+      };
+
+      const scoredPointers = scanResult.pointersCreated.map((ptr) => {
+        const sevWeight = severityWeights[ptr.severity] || 50;
+        const catMult = categoryMultipliers[ptr.category] || 1.0;
+        const conf = typeof ptr.confidence === 'number' ? ptr.confidence : 80;
+        const triageScore = Math.round(sevWeight * catMult * (conf / 100));
+
+        return {
+          ...ptr,
+          triageScore,
+          resolveCommand: `opencontrib pointer resolve ${ptr.uri} --view slice`,
+        };
+      });
+
+      const filtered = scoredPointers.filter((p) => (p.confidence ?? 80) >= minConfidence);
+      const sorted = filtered.sort((a, b) => b.triageScore - a.triageScore);
+      const topPointers = opts.all ? sorted : sorted.slice(0, limit);
+
       printJSON(
         {
           status: 'success',
           target: resolved,
           executedProbes: scanResult.executedProbes,
-          pointersCount: scanResult.pointersCreated.length,
-          pointers: scanResult.pointersCreated,
+          totalPointersCount: scanResult.pointersCreated.length,
+          triagedPointersCount: topPointers.length,
+          triageSummary: `Identified ${scanResult.pointersCreated.length} raw findings across ${scanResult.executedProbes.length} probes. Triaged to top ${topPointers.length} actionable high-value defect pointers.`,
+          topPointers,
         },
         opts.pretty,
       );

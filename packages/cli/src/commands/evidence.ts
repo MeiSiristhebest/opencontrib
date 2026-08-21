@@ -18,6 +18,7 @@ export const evidenceCommand = new Command('evidence')
   .option('--pre-fix-cmd <cmd>', 'Separate command to trigger pre-fix failure baseline')
   .option('--assertion <regex>', 'Expected failure assertion regex before fix')
   .option('--stress-loop <n>', 'Stress loop iterations', (v) => Number(v), 20)
+  .option('--concurrency <n>', 'Concurrent stampede worker threads', (v) => Number(v), 1)
   .option('--workspace-root <path>', 'Root workspace for security boundary')
   .option('--baseline-sha <sha>', 'Baseline commit SHA before changes')
   .option('--run-id <id>', 'Auto-resolve workspace from run and save evidence artifact')
@@ -28,6 +29,7 @@ export const evidenceCommand = new Command('evidence')
     preFixCmd?: string;
     assertion?: string;
     stressLoop?: number;
+    concurrency?: number;
     workspaceRoot?: string;
     baselineSha?: string;
     runId?: string;
@@ -71,6 +73,7 @@ export const evidenceCommand = new Command('evidence')
       baselineCommitSha: baselineSha,
       testCommand: opts.testCmd,
       stressLoopCount: opts.stressLoop ?? 20,
+      concurrencyWorkers: opts.concurrency ?? 1,
     });
 
     const fullReport = { ...evidence, dualStage };

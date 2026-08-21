@@ -178,6 +178,8 @@ export interface AuditGovernanceInput {
   evidence?: any;
   subagentQualityScore?: number;
   isAutonomousPrSubmission?: boolean;
+  variantHuntConducted?: boolean;
+  impactAnalysisConducted?: boolean;
 }
 
 export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditResult & {
@@ -200,6 +202,10 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
       subagentReviewAvailable: typeof input.subagentQualityScore === 'number',
     });
     breakdown = calibrated.breakdown;
+    // Reward in-domain deep defense if variant hunt was conducted
+    if (input.variantHuntConducted) {
+      breakdown.defensiveCoverage = Math.max(breakdown.defensiveCoverage, 96);
+    }
   }
 
   // 1. Anti-AI & Anti-Robotic Linting
@@ -230,6 +236,9 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
     remediationSuggestions.push(
       `Confidence score requirement not met (Overall: ${confidence.overallScore}%, Weakest: ${confidence.weakestDimension.dimension} at ${confidence.weakestDimension.score}%). Must reach >=90% overall and >=80% on all dimensions.`,
     );
+  }
+  if (!input.variantHuntConducted) {
+    remediationSuggestions.push('In-Domain Defense Recommendation: Run Variant Hunting sweep across sister modules to ensure zero parallel structural defects.');
   }
   if (requiresHumanApproval) {
     remediationSuggestions.push('Pre-flight Human Gate: Draft requires explicit user preview and approval before submission.');
