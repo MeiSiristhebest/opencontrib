@@ -27,30 +27,40 @@ export const PHASE_REQUIREMENTS: Record<ContributionRunPhase, PhaseTransitionReq
   INITIALIZED: {
     fromPhases: [],
     requiredArtifacts: [],
-    suggestedAction: 'Call contrib_scout or contrib_qualify_issue to identify contribution target.',
+    suggestedAction: 'Call contrib_scout, contrib_probe_run, or contrib_qualify_issue to identify contribution target.',
   },
   OPPORTUNITY_SCOUTED: {
     fromPhases: ['INITIALIZED'],
     requiredArtifacts: ['opportunity'],
     suggestedAction: 'Call contrib_assemble_context or contrib_prepare_workspace.',
   },
-  CONTEXT_ASSEMBLED: {
+  PROBE_COMPLETED: {
     fromPhases: ['INITIALIZED', 'OPPORTUNITY_SCOUTED'],
+    requiredArtifacts: ['probe'],
+    suggestedAction: 'Call contrib_assemble_context or contrib_prepare_workspace.',
+  },
+  CONTEXT_ASSEMBLED: {
+    fromPhases: ['INITIALIZED', 'OPPORTUNITY_SCOUTED', 'PROBE_COMPLETED'],
     requiredArtifacts: ['context'],
     suggestedAction: 'Call contrib_prepare_workspace to create isolated sandbox.',
   },
   WORKSPACE_PREPARED: {
-    fromPhases: ['INITIALIZED', 'OPPORTUNITY_SCOUTED', 'CONTEXT_ASSEMBLED'],
+    fromPhases: ['INITIALIZED', 'OPPORTUNITY_SCOUTED', 'PROBE_COMPLETED', 'CONTEXT_ASSEMBLED'],
     requiredArtifacts: ['workspace'],
     suggestedAction: 'Develop reproduction test and capture pre-fix failure baseline.',
   },
-  PATCH_DRAFTED: {
+  POC_GENERATED: {
     fromPhases: ['WORKSPACE_PREPARED'],
+    requiredArtifacts: ['workspace', 'poc'],
+    suggestedAction: 'Execute failing PoC and capture RED baseline evidence.',
+  },
+  PATCH_DRAFTED: {
+    fromPhases: ['WORKSPACE_PREPARED', 'POC_GENERATED'],
     requiredArtifacts: ['workspace'],
     suggestedAction: 'Run verification tests and call contrib_collect_evidence.',
   },
   EVIDENCE_COLLECTED: {
-    fromPhases: ['WORKSPACE_PREPARED', 'PATCH_DRAFTED'],
+    fromPhases: ['WORKSPACE_PREPARED', 'POC_GENERATED', 'PATCH_DRAFTED'],
     requiredArtifacts: ['workspace', 'evidence'],
     suggestedAction: 'Call contrib_collect_evidence to capture reproduction baseline.',
   },
@@ -73,8 +83,10 @@ export const PHASE_REQUIREMENTS: Record<ContributionRunPhase, PhaseTransitionReq
     fromPhases: [
       'INITIALIZED',
       'OPPORTUNITY_SCOUTED',
+      'PROBE_COMPLETED',
       'CONTEXT_ASSEMBLED',
       'WORKSPACE_PREPARED',
+      'POC_GENERATED',
       'PATCH_DRAFTED',
       'EVIDENCE_COLLECTED',
       'GOVERNANCE_AUDITED',

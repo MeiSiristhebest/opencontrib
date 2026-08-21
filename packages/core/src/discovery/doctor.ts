@@ -30,25 +30,43 @@ export function runDoctorAudit(): DoctorReport {
 
   // 1. Check Git
   let gitVersion: string | undefined;
-  try {
-    const gitOut = execSync('git --version', { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    if (gitOut) {
-      gitVersion = gitOut;
-      checks.push({
-        category: 'VCS',
-        name: 'Git Binary',
-        status: 'PASSED',
-        message: `Git is installed: ${gitOut}`,
-      });
-    } else {
-      checks.push({
-        category: 'VCS',
-        name: 'Git Binary',
-        status: 'FAILED',
-        message: 'Git is not installed or not in PATH',
-      });
+  let gitCmd = 'git';
+
+  // Cross-platform fallback check for Windows
+  if (currentOs === 'win32') {
+    const candidatePaths = [
+      'git',
+      'git.exe',
+      'C:\\Program Files\\Git\\cmd\\git.exe',
+      'C:\\Program Files\\Git\\bin\\git.exe',
+      'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
+      join(homedir(), 'AppData', 'Local', 'Programs', 'Git', 'cmd', 'git.exe'),
+    ];
+    for (const p of candidatePaths) {
+      try {
+        const out = execSync(`"${p}" --version`, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        if (out) {
+          gitCmd = p;
+          gitVersion = out;
+          break;
+        }
+      } catch {}
     }
-  } catch (err: any) {
+  } else {
+    try {
+      const gitOut = execSync('git --version', { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      if (gitOut) gitVersion = gitOut;
+    } catch {}
+  }
+
+  if (gitVersion) {
+    checks.push({
+      category: 'VCS',
+      name: 'Git Binary',
+      status: 'PASSED',
+      message: `Git is installed: ${gitVersion}`,
+    });
+  } else {
     checks.push({
       category: 'VCS',
       name: 'Git Binary',
@@ -59,8 +77,8 @@ export function runDoctorAudit(): DoctorReport {
 
   // 2. Check Git User Identity
   try {
-    const userName = execSync('git config user.name', { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const userEmail = execSync('git config user.email', { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const userName = execSync(`"${gitCmd}" config user.name`, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const userEmail = execSync(`"${gitCmd}" config user.email`, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     if (userName && userEmail) {
       checks.push({
         category: 'VCS',

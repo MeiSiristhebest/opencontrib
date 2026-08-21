@@ -11,7 +11,7 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
   const resources = (server as any)._registeredResources;
   const prompts = (server as any)._registeredPrompts;
 
-  it('verifies all 20 MCP tools have well-defined input schemas and handler functions', () => {
+  it('verifies all registered MCP tools have well-defined input schemas and handler functions', () => {
     const expectedTools = [
       'contrib_scout',
       'contrib_rank_opportunity',
@@ -25,6 +25,7 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
       'contrib_analyze_impact',
       'contrib_diagnose_ci',
       'contrib_render_pr_template',
+      'contrib_render_issue_claim',
       'contrib_sync_flywheel',
       'contrib_track_pr_status',
       'contrib_purge_sandbox',
@@ -33,9 +34,19 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
       'contrib_save_artifact',
       'contrib_get_run',
       'contrib_resume_run',
+      'contrib_eval_prepare_judge',
+      'contrib_eval_parse_judgment',
+      'contrib_resolve_pointer',
+      'contrib_list_pointers',
+      'contrib_probe_plan',
+      'contrib_probe_run',
+      'contrib_probe_hotspot',
+      'contrib_probe_fuzz',
+      'contrib_plan_capabilities',
+      'contrib_list_plugins',
     ];
 
-    expect(Object.keys(tools).length).toBe(20);
+    expect(Object.keys(tools).length).toBe(expectedTools.length);
     for (const toolName of expectedTools) {
       expect(tools[toolName]).toBeDefined();
       expect(tools[toolName].handler).toBeFunction();

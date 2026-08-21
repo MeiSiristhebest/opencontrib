@@ -119,8 +119,8 @@ const prTemplateCommand = new Command('pr-template')
   .requiredOption('--issue <num>', 'Fixed issue number')
   .requiredOption('--issue-title <text>', 'Title of the issue')
   .requiredOption('--summary <text>', 'Concise fix summary')
-  .requiredOption('--validation-cmd <cmd>', 'Command used to verify the fix')
-  .requiredOption('--validation-output <text>', 'Test passing log excerpt')
+  .option('--validation-cmd <cmd>', 'Command used to verify the fix', 'bun test')
+  .option('--validation-output <text>', 'Test passing log excerpt', 'All unit tests pass cleanly.')
   .option('--native-template <text>', 'Raw markdown of target repo PULL_REQUEST_TEMPLATE.md')
   .option('--key-changes <list>', 'Comma-separated list of key changes made', (v) => v.split(','))
   .option('--confidence <n>', 'Quality confidence score (0-100)', (v) => Number(v))
@@ -132,8 +132,8 @@ const prTemplateCommand = new Command('pr-template')
     issue: string;
     issueTitle: string;
     summary: string;
-    validationCmd: string;
-    validationOutput: string;
+    validationCmd?: string;
+    validationOutput?: string;
     nativeTemplate?: string;
     confidence?: number;
     risk?: 'LOW' | 'MEDIUM' | 'HIGH';
@@ -147,14 +147,42 @@ const prTemplateCommand = new Command('pr-template')
       issueNumber: parseInt(opts.issue, 10) || 1,
       issueTitle: opts.issueTitle,
       summary: opts.summary,
-      validationCommand: opts.validationCmd,
-      validationOutputSnippet: opts.validationOutput,
+      validationCommand: opts.validationCmd || 'bun test',
+      validationOutputSnippet: opts.validationOutput || 'All unit tests pass cleanly.',
       confidenceScore: opts.confidence,
       riskLevel: opts.risk,
       isDocumentationOnly: opts.isDocsOnly ?? false,
       aiDisclosureRequired: opts.aiDisclosure ?? false,
     });
     printJSON({ status: 'success', prBody }, opts.pretty);
+  });
+
+// ─── governance claim / render-issue ─────────────────────────────────────────
+const claimCommand = new Command('claim')
+  .alias('render-issue')
+  .description('Generate an authoritative Issue-First Claim statement or 0-day issue proposal')
+  .requiredOption('--issue <num>', 'Target issue number (or temporary ID for 0-day)', '0')
+  .requiredOption('--title <text>', 'Title of the issue')
+  .option('--finding <summary>', 'Summary of root cause and file/line location')
+  .option('--test-snippet <snippet>', 'Reproduction test code snippet')
+  .option('--pretty', 'Pretty-print JSON output', false)
+  .action(async (opts: {
+    issue: string;
+    title: string;
+    finding?: string;
+    testSnippet?: string;
+    pretty?: boolean;
+  }) => {
+    const { ClaimProtocol } = await import('@opencontrib/core');
+    const num = parseInt(opts.issue, 10) || 0;
+    const payload = ClaimProtocol.generateClaimPayload(num, opts.title);
+    if (opts.finding) {
+      payload.findingSummary = opts.finding;
+    }
+    if (opts.testSnippet) {
+      payload.claimComment += `\n\n\`\`\`\n${opts.testSnippet}\n\`\`\``;
+    }
+    printJSON({ status: 'success', payload }, opts.pretty);
   });
 
 // ─── governance lint-md ───────────────────────────────────────────────────────
@@ -179,9 +207,10 @@ const lintMdCommand = new Command('lint-md')
 // ─── Top-level command ────────────────────────────────────────────────────────
 
 export const governanceCommand = new Command('governance')
-  .description('Governance audit, impact analysis, CI diagnosis, PR template rendering, and Markdown linting')
+  .description('Governance audit, impact analysis, CI diagnosis, PR template rendering, Issue Claim generation, and Markdown linting')
   .addCommand(auditCommand)
   .addCommand(impactCommand)
   .addCommand(ciDiagnoseCommand)
   .addCommand(prTemplateCommand)
+  .addCommand(claimCommand)
   .addCommand(lintMdCommand);

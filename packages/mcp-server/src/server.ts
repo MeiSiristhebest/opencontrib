@@ -11,6 +11,9 @@ import { registerEvidenceTools } from './tools/evidence-tools.js';
 import { registerGovernanceTools } from './tools/governance-tools.js';
 import { registerRunTools } from './tools/run-tools.js';
 import { registerEvalTools } from './tools/eval-tools.js';
+import { registerPointerTools } from './tools/pointer-tools.js';
+import { registerProbeTools } from './tools/probe-tools.js';
+import { registerCapabilityTools } from './tools/capability-tools.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
 
@@ -34,6 +37,9 @@ export function createOpenContribMcpServer(): McpServer {
   registerGovernanceTools(server, memory, flywheel);
   registerRunTools(server, runManager);
   registerEvalTools(server);
+  registerPointerTools(server);
+  registerProbeTools(server);
+  registerCapabilityTools(server);
 
   // Register resources and workflow prompts
   registerResources(server, memory, runManager);

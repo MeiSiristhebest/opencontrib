@@ -218,8 +218,13 @@ export class WorktreeManager {
       } catch {}
     }
 
-    // 3. Clean temporary scratch directory if specified
+    // 3. Clean temporary scratch directory if specified (with strict boundary safety check)
     if (cleanScratchDir && existsSync(cleanScratchDir)) {
+      if (!this.isSafeScratchDirectory(cleanScratchDir)) {
+        throw new Error(
+          `Security boundary violation: cleanScratchDir "${cleanScratchDir}" is not a permitted scratch location. Path must reside within ~/.opencontrib/, system temp, or be named "scratch".`,
+        );
+      }
       const { readdirSync } = require('fs');
       const scratchItems = readdirSync(cleanScratchDir);
       for (const item of scratchItems) {
@@ -236,6 +241,39 @@ export class WorktreeManager {
       purgedScratchFiles,
       cleanedRepos,
     };
+  }
+
+  /**
+   * Validates whether a directory is safe to purge as a scratch space.
+   * Disallows system roots, home directory, and uncontained paths.
+   */
+  isSafeScratchDirectory(dirPath: string): boolean {
+    const resolved = resolve(dirPath);
+    const opencontribHome = resolve(homedir(), '.opencontrib');
+    const { tmpdir } = require('os');
+    const tempDir = resolve(tmpdir());
+
+    // Explicitly disallow filesystem roots and user home directory
+    if (resolved === '/' || /^[a-zA-Z]:\\?$/.test(resolved) || resolved === resolve(homedir())) {
+      return false;
+    }
+
+    // Must be inside ~/.opencontrib, temp directory, or an explicitly named scratch folder
+    if (resolved.startsWith(opencontribHome + sep) || resolved === opencontribHome) {
+      return true;
+    }
+
+    if (resolved.startsWith(tempDir + sep) || resolved === tempDir) {
+      return true;
+    }
+
+    const parts = resolved.split(sep);
+    const lastPart = parts[parts.length - 1]?.toLowerCase() || '';
+    if (lastPart === 'scratch' || lastPart === '.scratch' || parts.includes('.opencontrib')) {
+      return true;
+    }
+
+    return false;
   }
 
   /**

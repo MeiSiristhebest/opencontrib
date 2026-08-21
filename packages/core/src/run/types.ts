@@ -1,8 +1,10 @@
 export type ContributionRunPhase =
   | 'INITIALIZED'
   | 'OPPORTUNITY_SCOUTED'
+  | 'PROBE_COMPLETED'
   | 'CONTEXT_ASSEMBLED'
   | 'WORKSPACE_PREPARED'
+  | 'POC_GENERATED'
   | 'PATCH_DRAFTED'
   | 'EVIDENCE_COLLECTED'
   | 'GOVERNANCE_AUDITED'
@@ -25,8 +27,10 @@ export interface ContributionRunManifest {
 
 export type ArtifactType =
   | 'opportunity'
+  | 'probe'
   | 'context'
   | 'workspace'
+  | 'poc'
   | 'patch'
   | 'evidence'
   | 'governance'

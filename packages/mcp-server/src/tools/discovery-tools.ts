@@ -110,7 +110,7 @@ export function registerDiscoveryTools(server: McpServer): void {
     'contrib_diagnose_manifests',
     'Diagnose repo workflows, package.json, pyproject.toml, and Cargo.toml for <=100 line PR improvement suggestions',
     {
-      workflows: z.array(z.object({ path: z.string(), content: z.string() })).describe('List of workflow files and contents from GitHub MCP'),
+      workflows: z.array(z.object({ path: z.string(), content: z.string() })).optional().default([]).describe('Optional list of workflow files and contents from GitHub MCP'),
       readmeContent: z.string().optional().describe('Content of README.md from GitHub MCP'),
       packageJsonContent: z.string().optional().describe('Content of package.json from GitHub MCP'),
       pyprojectContent: z.string().optional().describe('Content of pyproject.toml from GitHub MCP'),
@@ -120,9 +120,10 @@ export function registerDiscoveryTools(server: McpServer): void {
     },
     async (args) => {
       const suggestions: any[] = [];
+      const workflows = args.workflows || [];
 
       // Scan Workflows
-      for (const wf of args.workflows) {
+      for (const wf of workflows) {
         if (wf.content.includes('actions/checkout@v2') || wf.content.includes('actions/checkout@v3')) {
           suggestions.push({
             id: `ci-upgrade-checkout-${wf.path.replace(/[^a-zA-Z0-9]/g, '_')}`,
@@ -223,7 +224,7 @@ export function registerDiscoveryTools(server: McpServer): void {
     'Extract objective multi-dimensional probability signals (skill match, feasibility, issue clarity, actionability, repo health) without prescribing binary decisions',
     {
       issue: z.object({
-        number: z.number().describe('GitHub issue number'),
+        number: z.union([z.number(), z.string()]).transform((v) => (typeof v === 'string' ? parseInt(v, 10) : v)).describe('GitHub issue number'),
         title: z.string().describe('Title of the issue'),
         body: z.string().describe('Body text of the issue'),
         labels: z.array(z.string()).describe('Labels attached to the issue'),
@@ -237,7 +238,6 @@ export function registerDiscoveryTools(server: McpServer): void {
         .object({
           fullName: z.string().describe('Full name of repository, e.g. "facebook/react"'),
           stars: z.number().optional().describe('Repository star count'),
-          starsCount: z.number().optional().describe('Repository star count'),
           forksCount: z.number().optional().describe('Repository fork count'),
           openIssuesCount: z.number().optional().describe('Total open issues'),
           primaryLanguage: z.string().optional().describe('Primary language of repository'),
@@ -247,20 +247,6 @@ export function registerDiscoveryTools(server: McpServer): void {
         })
         .optional()
         .describe('Repository metadata'),
-      repo: z
-        .object({
-          fullName: z.string().describe('Full name of repository, e.g. "facebook/react"'),
-          stars: z.number().optional().describe('Repository star count'),
-          starsCount: z.number().optional().describe('Repository star count'),
-          forksCount: z.number().optional().describe('Repository fork count'),
-          openIssuesCount: z.number().optional().describe('Total open issues'),
-          primaryLanguage: z.string().optional().describe('Primary language of repository'),
-          hasContributingGuide: z.boolean().optional().describe('Whether repo has CONTRIBUTING.md'),
-          hasGoodFirstIssueLabel: z.boolean().optional().describe('Whether good first issue label is present'),
-          pushedAt: z.string().optional().describe('ISO timestamp of last push'),
-        })
-        .optional()
-        .describe('Repository metadata (alias for repository)'),
       developerProfile: z
         .object({
           techStack: z.array(z.string()).describe('Developer tech stack keywords, e.g. ["typescript", "react"]'),
@@ -271,10 +257,10 @@ export function registerDiscoveryTools(server: McpServer): void {
         .describe('Optional developer profile to evaluate skill affinity and probability signals'),
     },
     async (args) => {
-      const repoObj = args.repository || args.repo;
+      const repoObj = args.repository;
       const normalizedRepo = {
         fullName: repoObj?.fullName || 'unknown/unknown',
-        stars: repoObj?.stars ?? repoObj?.starsCount ?? 0,
+        stars: repoObj?.stars ?? 0,
         primaryLanguage: repoObj?.primaryLanguage,
         openIssuesCount: repoObj?.openIssuesCount,
       };
