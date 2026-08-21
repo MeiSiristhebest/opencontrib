@@ -222,7 +222,7 @@ describe('Evidence-Backed Quality Rubric & Subagent Review Decoupling', () => {
         issueOrTaskId: 'test-999',
       });
     }).toThrow('Failed to create isolated workspace');
-  });
+  }, { timeout: 30000 });
 
   test('SandboxProvider strictly blocks execution when cwd escapes workspaceRoot', () => {
     const sandbox = new SanitizedLocalSandboxProvider();

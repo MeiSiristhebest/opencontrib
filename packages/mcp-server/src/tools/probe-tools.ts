@@ -8,6 +8,7 @@ import {
   generatePropertyTest,
   ProbeRegistry,
   createDefaultPluginHost,
+  triagePointerFindings,
   type ProbeCost,
   type DefectCategory,
 } from '@opencontrib/core';
@@ -18,27 +19,34 @@ export function registerProbeTools(server: McpServer): void {
   // -------------------------------------------------------------
   server.tool(
     'contrib_probe_plan',
-    'Extract repository fingerprint and negotiate matching active SAST/AST probes and cost budget without executing them',
+    'Extract repository fingerprint and negotiate matching active SAST/AST/Concurrency probe plugins with cost profiles',
     {
-      targetPath: z.string().optional().default('.').describe('Target repository workspace path (defaults to current directory)'),
-      maxCost: z.enum(['fast', 'medium', 'deep']).optional().default('medium').describe('Maximum allowed execution cost tier'),
-      onlyProbes: z.array(z.string()).optional().describe('Optional list of probe IDs to exclusively include'),
-      skipProbes: z.array(z.string()).optional().describe('Optional list of probe IDs to skip'),
+      targetPath: z.string().optional().default('.').describe('Target repository workspace path'),
+      category: z
+        .enum([
+          'lifecycle_leak',
+          'concurrency_race',
+          'protocol_drift',
+          'security_cwe',
+          'numerical_bounds',
+          'dead_code',
+          'ci_workflow',
+        ])
+        .optional()
+        .describe('Filter probes targeting specific defect archetype'),
+      maxCost: z.enum(['fast', 'medium', 'deep']).optional().default('medium').describe('Maximum allowable probe execution cost profile'),
+      includeOptional: z.boolean().optional().default(false).describe('Include optional uninstalled or community probes'),
     },
     async (args) => {
       try {
         const resolved = path.resolve(args.targetPath || '.');
         const fingerprint = await extractRepoFingerprint(resolved);
-        const plan = negotiateProbes(
-          fingerprint,
-          {
-            only: args.onlyProbes,
-            skip: args.skipProbes,
-            maxCost: args.maxCost as ProbeCost,
-            checkBinaries: true,
-          },
-          new ProbeRegistry(),
-        );
+        const plan = await negotiateProbes(fingerprint, {
+          target: resolved,
+          categoryFilter: args.category as DefectCategory | undefined,
+          maxCost: args.maxCost as ProbeCost,
+          includeOptional: args.includeOptional,
+        });
 
         return {
           content: [
@@ -48,7 +56,6 @@ export function registerProbeTools(server: McpServer): void {
                 {
                   status: 'success',
                   target: resolved,
-                  fingerprint,
                   plan,
                 },
                 null,
@@ -67,17 +74,17 @@ export function registerProbeTools(server: McpServer): void {
   );
 
   // -------------------------------------------------------------
-  // Tool: contrib_probe_run (执行 Microkernel 探测插件并输出 Top-K Smart Pointers)
+  // Tool: contrib_probe_run (执行探测器并生成 Smart Pointer)
   // -------------------------------------------------------------
   server.tool(
     'contrib_probe_run',
-    'Execute matching SAST/AST Microkernel probe plugins against target repository, returning triaged Top-K actionable Smart Pointers (ptr://...)',
+    'Execute negotiated SAST/AST probe plugins against repository and return triaged Top-K Smart Pointer URIs (ptr://...)',
     {
-      targetPath: z.string().optional().default('.').describe('Target repository workspace directory'),
-      limit: z.number().optional().default(5).describe('Maximum number of top high-value Smart Pointers to return (default 5)'),
-      minConfidence: z.number().optional().default(80).describe('Minimum finding confidence threshold (0-100, default 80)'),
-      onlyProbes: z.array(z.string()).optional().describe('Optional probe IDs to exclusively execute'),
-      skipProbes: z.array(z.string()).optional().describe('Optional probe IDs to skip'),
+      targetPath: z.string().optional().default('.').describe('Target repository workspace path'),
+      onlyProbes: z.array(z.string()).optional().describe('Execute only specific probe IDs (e.g. ["ast-grep", "semgrep-sast"])'),
+      skipProbes: z.array(z.string()).optional().describe('Skip specific probe IDs'),
+      limit: z.number().optional().default(5).describe('Maximum number of top findings to return'),
+      minConfidence: z.number().optional().default(80).describe('Minimum confidence threshold (0-100)'),
     },
     async (args) => {
       try {
@@ -93,39 +100,11 @@ export function registerProbeTools(server: McpServer): void {
 
         const scanResult = await host.executeScan(resolved, matchingProbes);
 
-        const severityWeights: Record<string, number> = {
-          critical: 100,
-          high: 85,
-          medium: 60,
-          low: 30,
-        };
-
-        const categoryMultipliers: Record<string, number> = {
-          lifecycle_leak: 1.2,
-          concurrency_race: 1.2,
-          protocol_drift: 1.15,
-          security_cwe: 1.1,
-          numerical_bounds: 1.05,
-        };
-
-        const scoredPointers = scanResult.pointersCreated.map((ptr) => {
-          const sevWeight = severityWeights[ptr.severity] || 50;
-          const catMult = categoryMultipliers[ptr.category] || 1.0;
-          const conf = typeof ptr.confidence === 'number' ? ptr.confidence : 80;
-          const triageScore = Math.round(sevWeight * catMult * (conf / 100));
-
-          return {
-            ...ptr,
-            triageScore,
-            resolveCommand: `opencontrib pointer resolve ${ptr.uri} --view slice`,
-          };
+        const triaged = triagePointerFindings(scanResult.pointersCreated, {
+          limit: args.limit ?? 5,
+          minConfidence: args.minConfidence ?? 80,
+          includeAll: false,
         });
-
-        const minConfidence = args.minConfidence ?? 80;
-        const limit = args.limit ?? 5;
-        const filtered = scoredPointers.filter((p) => (p.confidence ?? 80) >= minConfidence);
-        const sorted = filtered.sort((a, b) => b.triageScore - a.triageScore);
-        const topPointers = sorted.slice(0, limit);
 
         return {
           content: [
@@ -137,9 +116,9 @@ export function registerProbeTools(server: McpServer): void {
                   target: resolved,
                   executedProbes: scanResult.executedProbes,
                   totalFindingsCount: scanResult.pointersCreated.length,
-                  triagedPointersCount: topPointers.length,
-                  triageSummary: `Identified ${scanResult.pointersCreated.length} raw findings across ${scanResult.executedProbes.length} active probes. Triaged to top ${topPointers.length} actionable high-value defect pointers.`,
-                  topPointers,
+                  triagedPointersCount: triaged.triagedCount,
+                  triageSummary: triaged.summary,
+                  topPointers: triaged.topPointers,
                 },
                 null,
                 2,

@@ -81,7 +81,7 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     expect(result.appliedFiles).toBeDefined();
     expect(result.subagentReview).toBeDefined();
     expect(result.reportSummary).toContain('Dry run completed');
-  }, 60000);
+  }, { timeout: 60000 });
 
   it('pauses at HUMAN_GATE when humanApproved is false in interactive mode', async () => {
     const mockLlm = new LLMService(new MockLLMProvider());
@@ -109,7 +109,7 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     expect(result.confidenceScore).toBeGreaterThanOrEqual(70);
     expect(result.reportSummary).toContain('Awaiting human');
 
-  }, 60000);
+  }, { timeout: 60000 });
 
   it('strictly blocks execution when no LLM provider is configured (no fake patches)', async () => {
     const orchestratorWithoutLlm = new AgentOrchestrator({

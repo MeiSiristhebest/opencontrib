@@ -8,6 +8,7 @@ import {
   generatePropertyTest,
   ProbeRegistry,
   createDefaultPluginHost,
+  triagePointerFindings,
   type ProbeCost,
   type DefectCategory,
 } from '@opencontrib/core';
@@ -85,41 +86,14 @@ probeCommand
       // Execute full plugin scan through ProbeScanScheduler
       const scanResult = await host.executeScan(resolved, matchingProbes);
 
-      // Rank and triage pointers
+      // Rank and triage pointers using pure core domain function
       const minConfidence = parseInt(opts.minConfidence ?? '80', 10);
       const limit = parseInt(opts.limit ?? '5', 10);
-
-      const severityWeights: Record<string, number> = {
-        critical: 100,
-        high: 85,
-        medium: 60,
-        low: 30,
-      };
-
-      const categoryMultipliers: Record<string, number> = {
-        lifecycle_leak: 1.2,
-        concurrency_race: 1.2,
-        protocol_drift: 1.15,
-        security_cwe: 1.1,
-        numerical_bounds: 1.05,
-      };
-
-      const scoredPointers = scanResult.pointersCreated.map((ptr) => {
-        const sevWeight = severityWeights[ptr.severity] || 50;
-        const catMult = categoryMultipliers[ptr.category] || 1.0;
-        const conf = typeof ptr.confidence === 'number' ? ptr.confidence : 80;
-        const triageScore = Math.round(sevWeight * catMult * (conf / 100));
-
-        return {
-          ...ptr,
-          triageScore,
-          resolveCommand: `opencontrib pointer resolve ${ptr.uri} --view slice`,
-        };
+      const triaged = triagePointerFindings(scanResult.pointersCreated, {
+        limit,
+        minConfidence,
+        includeAll: Boolean(opts.all),
       });
-
-      const filtered = scoredPointers.filter((p) => (p.confidence ?? 80) >= minConfidence);
-      const sorted = filtered.sort((a, b) => b.triageScore - a.triageScore);
-      const topPointers = opts.all ? sorted : sorted.slice(0, limit);
 
       printJSON(
         {
@@ -127,9 +101,9 @@ probeCommand
           target: resolved,
           executedProbes: scanResult.executedProbes,
           totalPointersCount: scanResult.pointersCreated.length,
-          triagedPointersCount: topPointers.length,
-          triageSummary: `Identified ${scanResult.pointersCreated.length} raw findings across ${scanResult.executedProbes.length} probes. Triaged to top ${topPointers.length} actionable high-value defect pointers.`,
-          topPointers,
+          triagedPointersCount: triaged.triagedCount,
+          triageSummary: triaged.summary,
+          topPointers: triaged.topPointers,
         },
         opts.pretty,
       );

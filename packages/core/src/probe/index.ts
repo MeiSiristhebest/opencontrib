@@ -5,6 +5,7 @@ export * from './negotiator.js';
 export * from './runner.js';
 export * from './forensics.js';
 export * from './fuzz-generator.js';
+export * from './triage.js';
 export * from './probe-scanner.js';
 export * from './adapters/piolium.js';
 export * from './adapters/ast-grep.js';

@@ -113,14 +113,23 @@ export class WorktreeManager {
       const shaRes = this.runGit(['-C', sourceRepoPath, 'rev-parse', 'HEAD']);
       const baseCommitSha = shaRes.success ? shaRes.stdout.trim() : undefined;
 
-      // Clean previous branch if it existed
+      // Prune dead worktrees and clean previous branch if it existed
+      this.runGit(['-C', sourceRepoPath, 'worktree', 'prune']);
       this.runGit(['-C', sourceRepoPath, 'branch', '-D', branchName]);
+
+      // Remove existing workspacePath if leftover from previous run
+      if (existsSync(workspacePath)) {
+        try {
+          rmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        } catch {}
+      }
 
       const addResult = this.runGit([
         '-C',
         sourceRepoPath,
         'worktree',
         'add',
+        '--force',
         '-B',
         branchName,
         workspacePath,
@@ -136,9 +145,13 @@ export class WorktreeManager {
         baseRepoPath: sourceRepoPath,
         baseCommitSha,
       };
-    } catch (err) {
+    } catch (err: any) {
       // Fallback: If worktree add fails, attempt direct single-branch clone into workspace
-      if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
+      if (existsSync(workspacePath)) {
+        try {
+          rmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        } catch {}
+      }
       mkdirSync(workspacePath, { recursive: true });
       const cloneUrl = `https://github.com/${repoFullName}.git`;
       const cloneRes = this.runGit(['clone', '--depth', '1', '-b', defaultBranch, cloneUrl, workspacePath]);
@@ -155,7 +168,11 @@ export class WorktreeManager {
         };
       } else {
         // Clone failed: strictly fail-closed, refuse to masquerade as an empty repository
-        if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
+        if (existsSync(workspacePath)) {
+          try {
+            rmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+          } catch {}
+        }
         throw new Error(
           `Failed to create isolated workspace for ${repoFullName}: clone failed (${cloneRes.stderr || 'Network/Auth failure'}). Refusing to initialize empty repository.`,
         );
