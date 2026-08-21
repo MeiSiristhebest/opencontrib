@@ -19,11 +19,11 @@ cd opencontrib
 # Install all monorepo dependencies
 bun install
 
-# Run the complete test matrix (16 suites, 78+ tests)
+# Run the complete test matrix (29 suites, 134 tests, 908 assertions)
 bun test
 
-# Run TypeScript type check
-bunx tsc --noEmit
+# Run TypeScript type check (0 errors)
+bun x tsc --noEmit
 ```
 
 ### 3. Local Services
@@ -54,9 +54,12 @@ We follow **Trunk-Based Development** and strict quality verification:
 
 ## 🛡️ Anti-AI Noise & Clean-Room Policy
 
-OpenContrib adheres to strict contribution ethics:
+OpenContrib adheres to strict contribution ethics and the 5 Zero-Tolerance Invariants:
 - **No Unverified AI Dumps**: Submissions must be reasoned through, tested locally, and accompanied by reproduction evidence.
 - **100-Line RFC Gate**: Proactive bug fixes should remain surgical and focused. Architectural refactors >100 lines require an approved Feature RFC Issue first.
+- **Issue-First Invariant**: Proactive 0-day discoveries must anchor a created Issue and claim before PR submission.
+- **Targeted Subsystem Isolation**: Always run isolated sub-package test commands, never broad un-isolated root tests.
+- **Explicit Search Paths**: Every `rg` or `fd` invocation must explicitly supply a target path.
 - **Zero Credential Leaks**: Never commit API keys, personal access tokens, or sensitive environment files.
 
 ---

@@ -2,8 +2,22 @@
   "skill_name": "opencontrib-cli",
   "evals": [
     {
-      "id": "eval_01_scout_and_rank",
-      "prompt": "使用 opencontrib-cli 对 TencentCloud/CubeSandbox 仓库进行机会扫描，找出前 3 个最具合并价值的深水区 Bug，并输出评分。",
+      "id": "eval_01_proactive_0day_probe",
+      "prompt": "Run an autonomous deep code audit on the local trpc-agent-go repository, identify high-risk Smart Pointer defect slices, and prepare an empirical reproduction test.",
+      "expected_actions": [
+        "opencontrib probe run ./trpc-agent-go --pretty",
+        "opencontrib workspace prepare --repo trpc-group/trpc-agent-go --issue 0",
+        "opencontrib evidence"
+      ],
+      "assertions": [
+        "Executes multi-probe static analysis without hanging on stdin",
+        "Filters out non-code assets and media (.gif, .png, docs)",
+        "Isolates test suite to the specific modified sub-package"
+      ]
+    },
+    {
+      "id": "eval_02_reactive_scout_and_qualify",
+      "prompt": "Scout the TencentCloud/CubeSandbox repository for the top 3 maintainer-welcomed deep-water defects and output objective feasibility scores.",
       "expected_actions": [
         "opencontrib doctor",
         "opencontrib scout TencentCloud/CubeSandbox --limit 3",
@@ -11,37 +25,26 @@
         "opencontrib discovery rank"
       ],
       "assertions": [
-        "Runs doctor before scouting",
-        "Ranks candidate issues by the 8 deep-water defect criteria",
-        "Rejects typo or documentation-only issues"
+        "Runs doctor audit before scouting",
+        "Ranks candidate issues by the 8 deep-water defect archetypes",
+        "Disqualifies cosmetic typos and unlinked pull requests"
       ]
     },
     {
-      "id": "eval_02_worktree_and_evidence",
-      "prompt": "基于已确认的 Issue #42，使用 opencontrib-cli 准备隔离沙盒，并在修改代码前执行失败断言以收集基线物证。",
-      "expected_actions": [
-        "opencontrib run create",
-        "opencontrib workspace prepare --issue 42",
-        "opencontrib evidence --assertion"
-      ],
-      "assertions": [
-        "Prepares isolated worktree sandbox rather than editing main repo directly",
-        "Executes fail-first baseline evidence test before modifying source code"
-      ]
-    },
-    {
-      "id": "eval_03_governance_and_pr_template",
-      "prompt": "代码修复完成并经过 20 次压力测试后，使用 opencontrib-cli 执行治理审计与 PR 模板渲染，确保代码变更小于 100 行且无 AI 废话。",
+      "id": "eval_03_governance_and_issue_first_pr",
+      "prompt": "Complete surgical remediation, collect 20x stress test evidence, run governance quality audit, and submit an Issue-First pull request.",
       "expected_actions": [
         "opencontrib evidence --stress-loop 20",
         "opencontrib governance audit",
+        "gh issue create --body-file",
         "opencontrib governance pr-template",
+        "gh pr create --body-file",
         "opencontrib flywheel sync"
       ],
       "assertions": [
-        "Verifies diff size <= 100 lines",
-        "Renders clean PR template without AI disclosure badges by default",
-        "Syncs flywheel ledger"
+        "Enforces RFC-100 line limit and anti-AI linter",
+        "Creates tracking GitHub Issue before opening Pull Request",
+        "Passes markdown body safely via local body-file"
       ]
     }
   ]
