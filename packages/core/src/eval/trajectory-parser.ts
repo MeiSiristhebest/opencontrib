@@ -25,6 +25,9 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
   let wholeFileRgDumps = 0;
   let shellScriptWriteHacks = 0;
 
+  const rgDumpRegex = /rg\s+.*?(?:-n\s+)?["']?(?:\.\*|\^)["']?\s+[A-Za-z0-9_\-\.\/\\:]+/i;
+  const writeHackRegex = /(?:node\s+-e|python\s+-c)\s+.*?(?:fs\.(?:writeFileSync|writeFile)|Buffer\.from|open\(.*['"]w['"]\)|b64|create_clean_md)/i;
+
   for (let idx = 0; idx < lines.length; idx++) {
     try {
       const raw = JSON.parse(lines[idx]);
@@ -34,14 +37,15 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
 
       for (const tc of rawToolCalls) {
         const name = tc.name || tc.function?.name || '';
-        const args = tc.args || tc.parameters || tc.function?.arguments || {};
+        const rawArgs = tc.args || tc.parameters || tc.function?.arguments || {};
+        const parsedArgs = typeof rawArgs === 'string' ? safeParseJson(rawArgs) : rawArgs;
         const duration = tc.durationMs || tc.duration;
         const exitCode = tc.exitCode;
         const output = tc.output || tc.result;
 
         toolCalls.push({
           name,
-          args: typeof args === 'string' ? safeParseJson(args) : args,
+          args: parsedArgs,
           durationMs: typeof duration === 'number' ? duration : undefined,
           exitCode: typeof exitCode === 'number' ? exitCode : undefined,
           outputSnippet: typeof output === 'string' ? output.slice(0, 300) : undefined,
@@ -50,18 +54,18 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
         // 1. Metric: Commands run
         if (name === 'run_command') {
           totalCommands++;
-          const cmd = String(args.CommandLine || args.command || '');
+          const cmd = unwrapCommandString(parsedArgs.CommandLine || parsedArgs.command || '');
           if (exitCode !== undefined && exitCode !== 0) {
             failedCommands++;
           }
 
           // Anti-pattern 1: whole-file rg dumps (rg -n ".*" or rg "^")
-          if (/rg\s+(?:-n\s+)?["'](?:\.\*|\^)["']/i.test(cmd)) {
+          if (rgDumpRegex.test(cmd)) {
             wholeFileRgDumps++;
           }
 
           // Anti-pattern 2: shell script write hacks (node -e "const fs" or Buffer.from)
-          if (/node\s+-e\s+["']const\s+fs/i.test(cmd) || /Buffer\.from\(['"][A-Za-z0-9+/=]{30,}['"]\)/i.test(cmd)) {
+          if (writeHackRegex.test(cmd)) {
             shellScriptWriteHacks++;
           }
         }
@@ -109,4 +113,17 @@ function safeParseJson(str: string): Record<string, any> {
   } catch {
     return { raw: str };
   }
+}
+
+function unwrapCommandString(raw: any): string {
+  if (typeof raw !== 'string') return '';
+  let str = raw.trim();
+  if (str.startsWith('"') && str.endsWith('"')) {
+    try {
+      str = JSON.parse(str);
+    } catch {
+      str = str.slice(1, -1);
+    }
+  }
+  return str;
 }
