@@ -11,14 +11,14 @@ import {
 import { createOpenContribMcpServer } from '../src/server.js';
 
 describe('OpenContrib MCP Server', () => {
-  it('initializes and registers all 31 composable contribution domain tools, resources, and workflow prompt', () => {
+  it('initializes and registers all 34 composable contribution domain tools, resources, and workflow prompt', () => {
     const server = createOpenContribMcpServer();
     expect(server).toBeDefined();
     expect(server['server']).toBeDefined();
 
     // Verify underlying tools registration
     const tools = (server as any)._registeredTools;
-    expect(Object.keys(tools).length).toBe(31);
+    expect(Object.keys(tools).length).toBe(34);
     expect(tools['contrib_scout']).toBeDefined();
     expect(tools['contrib_rank_opportunity']).toBeDefined();
     expect(tools['contrib_create_run']).toBeDefined();

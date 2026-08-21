@@ -21,6 +21,7 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
       'contrib_assemble_context',
       'contrib_prepare_workspace',
       'contrib_collect_evidence',
+      'contrib_verify_poc',
       'contrib_audit_governance',
       'contrib_analyze_impact',
       'contrib_diagnose_ci',
@@ -28,6 +29,7 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
       'contrib_render_issue_claim',
       'contrib_sync_flywheel',
       'contrib_track_pr_status',
+      'contrib_lint_markdown',
       'contrib_purge_sandbox',
       'contrib_doctor',
       'contrib_create_run',
@@ -44,6 +46,7 @@ describe('OpenContrib MCP Contract Tests & Schema Invariants', () => {
       'contrib_probe_fuzz',
       'contrib_plan_capabilities',
       'contrib_list_plugins',
+      'contrib_plugin_info',
     ];
 
     expect(Object.keys(tools).length).toBe(expectedTools.length);

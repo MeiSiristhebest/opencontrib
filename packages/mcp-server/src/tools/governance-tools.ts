@@ -391,4 +391,35 @@ export function registerGovernanceTools(
       };
     },
   );
+
+  // -------------------------------------------------------------
+  // Tool: contrib_lint_markdown (5层工业级 Markdown 静态完整性校验)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_lint_markdown',
+    'Run 5-layer industrial static validation on Markdown text to prevent mojibake, unclosed tags, corrupted links, or broken codeblocks before creating issues/PRs',
+    {
+      markdownContent: z.string().describe('Markdown text content to validate'),
+    },
+    async (args) => {
+      const { validateMarkdownIntegrity } = await import('@opencontrib/core');
+      const report = validateMarkdownIntegrity(args.markdownContent);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: report.isValid ? 'passed' : 'failed',
+                report,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
 }

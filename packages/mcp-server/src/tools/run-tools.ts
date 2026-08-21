@@ -58,8 +58,10 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
       runId: z.string().describe('Unique contribution run ID'),
       artifactType: z.enum([
         'opportunity',
+        'probe',
         'context',
         'workspace',
+        'poc',
         'patch',
         'evidence',
         'governance',
@@ -71,8 +73,10 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
         .enum([
           'INITIALIZED',
           'OPPORTUNITY_SCOUTED',
+          'PROBE_COMPLETED',
           'CONTEXT_ASSEMBLED',
           'WORKSPACE_PREPARED',
+          'POC_GENERATED',
           'PATCH_DRAFTED',
           'EVIDENCE_COLLECTED',
           'GOVERNANCE_AUDITED',

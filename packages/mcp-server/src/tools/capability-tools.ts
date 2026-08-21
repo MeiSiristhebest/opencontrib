@@ -99,4 +99,70 @@ export function registerCapabilityTools(server: McpServer): void {
       }
     },
   );
+
+  // -------------------------------------------------------------
+  // Tool: contrib_plugin_info (获取单个插件/探针的详细元数据)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_plugin_info',
+    'Get detailed capability schema, supported languages, cost metrics, and defect patterns for a specific active probe or plugin',
+    {
+      probeId: z.string().describe('Unique ID of the probe or plugin (e.g. "ast-grep", "semgrep-sast", "go-analyzers")'),
+    },
+    async (args) => {
+      try {
+        const host = await createDefaultPluginHost();
+        const probe = host.get(args.probeId);
+
+        if (!probe) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    status: 'error',
+                    message: `Probe not found: "${args.probeId}"`,
+                    availableProbes: host.listAll().map((p) => p.id),
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  status: 'success',
+                  probe: {
+                    id: probe.id,
+                    name: probe.name,
+                    category: probe.category,
+                    description: probe.description,
+                    cost: probe.cost,
+                    supportedLanguages: probe.supportedLanguages,
+                    version: probe.version,
+                  },
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ status: 'error', message: err.message }, null, 2) }],
+        };
+      }
+    },
+  );
 }

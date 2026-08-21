@@ -4,74 +4,88 @@ Use Track A when the user asks to "audit", "find deep-water bugs", "scan reposit
 
 ---
 
-## The 8-Step Autonomous Pipeline
+## The 9-Phase Autonomous Pipeline
 
 ```text
-[Step 1: Multi-Probe Scan]
+[Phase 1: Initialize Run & Doctor Audit]
         │
         ▼
-[Step 2: Smart Pointer Selection]
+[Phase 2: Multi-Probe Scan & Fingerprinting]
         │
         ▼
-[Step 3: Clean-Room Worktree]
+[Phase 3: Smart Pointer Triage & Selection]
         │
         ▼
-[Step 4: Fail-First Reproduction (RED)]
+[Phase 4: Clean-Room Worktree Sandbox]
         │
         ▼
-[Step 5: Surgical Fix & Evidence (GREEN)]
+[Phase 5: Fail-First Reproduction (RED)]
         │
         ▼
-[Step 6: Governance Quality Audit]
+[Phase 6: Surgical Fix & Evidence (GREEN)]
         │
         ▼
-[Step 7: Issue-First Registration]
+[Phase 7: Governance Quality & Markdown Audit]
         │
         ▼
-[Step 8: Render PR Template & Submit PR]
+[Phase 8: Issue-First Registration & PR Submission]
+        │
+        ▼
+[Phase 9: Sync Profile & Memory Flywheel]
 ```
 
 ---
 
 ## Step-by-Step Command Execution
 
-### Step 1: Run Multi-Probe SAST & Hotspot Analysis
-Execute `opencontrib probe run` to trigger all matching language analyzers (Semgrep, ast-grep, NilAway, GoLeak, Knip, Ruff, Cargo Deny, Git Churn Forensics).
-
+### Phase 1: Initialize Run Session
 ```bash
-opencontrib probe run ./<repo_dir> --pretty
-```
-- **Output**: Ranked list of Smart Pointers (`ptr://<hash>`), categorized by defect archetype (e.g. `lifecycle_leak`, `protocol_drift`, `concurrency_race`).
-
----
-
-### Step 2: Dereference Smart Pointer & Select Target Defect
-Inspect the top Smart Pointer finding using 3-level progressive dereferencing:
-
-```bash
-# Level 2: Inspect 150-token code slice directly (no manual file searching)
-opencontrib pointer resolve ptr://findings/<pointer_id> --view slice
-
-# Level 3: View full AST trace or PoC harness if needed
-opencontrib pointer resolve ptr://findings/<pointer_id> --view evidence
+opencontrib doctor --pretty
+opencontrib run create --repo <owner>/<repo> --pretty
 ```
 
 ---
 
-### Step 3: Prepare Clean-Room Worktree Sandbox
+### Phase 2: Run Multi-Probe SAST & Fingerprint Analysis
+Execute `opencontrib probe run` to trigger matching language analyzers:
+
+```bash
+opencontrib probe run ./<repo_dir> --limit 5 --pretty
+```
+- **Output**: Triaged Top-K Smart Pointers (`ptr://...`), categorized by defect archetype (e.g. `lifecycle_leak`, `protocol_drift`, `concurrency_race`).
+
+---
+
+### Phase 3: Dereference Smart Pointer & Context Assembly
+Inspect the top Smart Pointer finding using progressive dereferencing:
+
+```bash
+# Level 1: View stub metadata
+opencontrib pointer list
+
+# Level 2: Inspect code slice (~150 tokens)
+opencontrib pointer resolve ptr://<namespace>/<defect_id>/<file>:<line> --view slice
+
+# Level 3: View full proof evidence
+opencontrib pointer resolve ptr://<namespace>/<defect_id>/<file>:<line> --view evidence
+```
+
+---
+
+### Phase 4: Prepare Clean-Room Worktree Sandbox
 Create an isolated git worktree for the contribution run:
 
 ```bash
 opencontrib workspace prepare \
   --repo <owner>/<repo> \
   --issue 0 \
-  --run-id "run_$(date +%s)"
+  --run-id "$RUN_ID"
 ```
 - **Capture**: Save the returned `workspacePath` for all subsequent operations.
 
 ---
 
-### Step 4: Construct Minimal Failing Test Case (RED Phase)
+### Phase 5: Construct Minimal Failing Test Case (RED Phase)
 Write a targeted regression test inside the workspace. Execute **ONLY the targeted package or test file** to observe the pre-fix failure:
 
 ```bash
@@ -89,7 +103,7 @@ pytest tests/test_specific.py -k test_defect
 
 ---
 
-### Step 5: Implement Surgical Fix & Concurrency Stampede Evidence (GREEN Phase)
+### Phase 6: Implement Surgical Fix & Concurrency Evidence (GREEN Phase)
 Apply the minimal, idiomatic code modification (strictly $\le 100$ lines). Then run the bounded concurrency stampede harness:
 
 ```bash
@@ -103,80 +117,66 @@ opencontrib evidence \
 
 ---
 
-### Step 6: Sister-Module Variant Sweep & Governance Audit
-Sweep adjacent structs in the same directory (In-Domain Deep Defense), then verify governance:
+### Phase 7: Governance Quality & Markdown Integrity Audit
+Verify RFC-100 line limit, anti-AI linting, and 7D quality rubric:
 
 ```bash
-# Verify RFC-100 line limit, anti-AI linting, and 7D quality rubric
-git -C "<workspacePath>" diff | opencontrib governance audit \
-  --line-count 50 \
-  --subagent-score 95
+opencontrib governance audit \
+  --patch diff.patch \
+  --pr-title "fix(<subsystem>): <concise fix description>" \
+  --pr-body-file pr_body.md \
+  --is-autonomous \
+  --pretty
 ```
 
 ---
 
-### Step 7: Mandatory Issue-First Registration (Create Issue BEFORE PR)
+### Phase 8: Mandatory Issue-First Registration & PR Submission
 Before opening a PR, publicly register the bug in GitHub Issues with an idiomatic Claim statement:
 
 ```bash
-# 1. Write issue description to a local markdown file
-cat << 'EOF' > issue_body.md
-### Description
-<Clear technical description of the defect, impact, and reproduction steps>
+# 1. Generate Claim statement / Issue draft
+opencontrib governance claim \
+  --issue 0 \
+  --title "[Bug]: <Precise Defect Title>" \
+  --finding "Root cause in <file>:<line>" \
+  --pretty
 
-### Reproduction
-```
-<Targeted test failure trace>
-```
-
-### Claim Statement
-I have reproduced this issue with a targeted test case and have an idiomatic fix prepared. Please assign this to me, I will submit a PR shortly.
-EOF
-
-# 2. Create the GitHub Issue using --body-file
+# 2. Use native write_to_file tool to create issue_body.md, then create GitHub issue
 gh issue create \
   --repo <owner>/<repo> \
   --title "[Bug]: <Precise Defect Title>" \
   --body-file issue_body.md
-```
-- **Capture**: Note the newly created Issue number `#<new_issue_id>`.
 
----
-
-### Step 8: Render Native PR Template & Submit Pull Request
-Generate a maintainer-aligned PR body linking `Fixes #<new_issue_id>` and submit the PR:
-
-```bash
+# 3. Render PR template and submit PR
 opencontrib governance pr-template \
   --issue <new_issue_id> \
   --issue-title "<Precise Defect Title>" \
   --summary "<Concise explanation of the surgical fix>" \
   --validation-cmd "<targeted_test_command>" \
-  --validation-output "20/20 stress loops passed" > pr_body.md
+  --validation-output "20/20 stress loops passed"
 
 gh pr create \
   --repo <owner>/<repo> \
   --title "fix(<subsystem>): <concise fix description>" \
-  --body-file pr_body.md \
-  --draft
+  --body-file pr_body.md
 ```
 
 ---
 
-### Step 9: Sync Profile & Memory Flywheel
-Record the in-flight contribution in local ledger memory:
+### Phase 9: Sync Profile & Memory Flywheel
+Record the in-flight or completed contribution in local ledger memory:
 
 ```bash
-opencontrib flywheel sync --repo <owner>/<repo> --pr <pr_number>
+opencontrib flywheel sync \
+  --repo <owner>/<repo> \
+  --run-id "$RUN_ID" \
+  --status "open" \
+  --pr <pr_number> \
+  --issue <issue_number>
 ```
 
-
-### Phase 9: Sync Flywheel
-
-```bash
-printf '{"runId":"%s","status":"merged","techStack":["typescript","react"],"qualityRubricScore":88,"prNumber":%d,"issueNumber":42}' \
-  "$RUN_ID" "$PR_NUMBER" | opencontrib flywheel sync --repo facebook/react
-```
+---
 
 ## Resume a Paused Pipeline
 
@@ -197,11 +197,5 @@ opencontrib run get "$RUN_ID"
 opencontrib workspace prepare --repo facebook/react --issue 42 --run-id "$RUN_ID"
 
 # If evidence was lost, re-run from the patch phase
-opencontrib evidence --cwd "$WORKSPACE" --test-cmd "npm test" --run-id "$RUN_ID"
+opencontrib evidence --cwd "$WORKSPACE" --test-cmd "bun test" --run-id "$RUN_ID"
 ```
-
-## LLM Agent Tips
-
-- Always pass `--run-id` to every command that supports it — it creates a traceable, resumable session.
-- The pipeline is **phase-gated**: you cannot skip ahead. E.g., `governance audit` expects a patch artifact to exist in the run session.
-- Use `run get` between phases to verify state before proceeding.
