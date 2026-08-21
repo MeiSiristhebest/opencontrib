@@ -40,6 +40,7 @@ export interface JudgeDimensionScore {
   weight: number;
   score: number; // 0 - 100
   reasoning: string;
+  evidenceQuotes?: string[];
 }
 
 export interface JudgeEvaluationReport {
@@ -51,6 +52,7 @@ export interface JudgeEvaluationReport {
   criticalCritiques: string[];
   actionableDirectives: string[];
   metrics: TrajectoryMetrics;
+  chainOfThought?: string; // Full LLM Judge reasoning chain
 }
 
 export interface ReflexionInsight {

@@ -10,8 +10,10 @@ import { registerWorkspaceTools } from './tools/workspace-tools.js';
 import { registerEvidenceTools } from './tools/evidence-tools.js';
 import { registerGovernanceTools } from './tools/governance-tools.js';
 import { registerRunTools } from './tools/run-tools.js';
+import { registerEvalTools } from './tools/eval-tools.js';
 import { registerResources } from './resources/index.js';
 import { registerPrompts } from './prompts/index.js';
+
 
 export function createOpenContribMcpServer(): McpServer {
   const server = new McpServer({
@@ -31,6 +33,7 @@ export function createOpenContribMcpServer(): McpServer {
   registerEvidenceTools(server, runManager);
   registerGovernanceTools(server, memory, flywheel);
   registerRunTools(server, runManager);
+  registerEvalTools(server);
 
   // Register resources and workflow prompts
   registerResources(server, memory, runManager);
