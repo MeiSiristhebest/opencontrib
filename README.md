@@ -13,6 +13,10 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
 
 <p align="center">
+  <b>[ English | <a href="./README_zh.md">简体中文</a> ]</b>
+</p>
+
+<p align="center">
   <b>A production-grade contribution infrastructure providing autonomous AI coding agents with discrete, composable domain capabilities: 6-dimension probe weapon arsenal, Smart Pointer progressive dereferencing, isolated worktree sandboxes, concurrency stampede evidence verification, anti-AI governance, structured run persistence, and a profile flywheel.</b>
 </p>
 
