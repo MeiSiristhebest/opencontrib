@@ -6,6 +6,7 @@ import {
   analyzePatchImpactAndConsistency,
   parseCiRawLogs,
   renderMasterPrTemplate,
+  validateMarkdownIntegrity,
 } from '@opencontrib/core';
 import { printJSON, parseJSON, readStdin } from '../utils/output.js';
 
@@ -156,11 +157,31 @@ const prTemplateCommand = new Command('pr-template')
     printJSON({ status: 'success', prBody }, opts.pretty);
   });
 
+// ─── governance lint-md ───────────────────────────────────────────────────────
+const lintMdCommand = new Command('lint-md')
+  .description('Run 5-layer industrial static validation on Markdown file or stdin')
+  .argument('[file]', 'Path to markdown file to validate (reads from stdin if omitted)')
+  .option('--pretty', 'Pretty-print', false)
+  .action(async (file?: string, opts?: { pretty?: boolean }) => {
+    let content = '';
+    if (file && fs.existsSync(file)) {
+      content = fs.readFileSync(file, 'utf-8');
+    } else {
+      content = await readStdin();
+    }
+    const report = validateMarkdownIntegrity(content);
+    printJSON({
+      status: report.isValid ? 'passed' : 'failed',
+      report,
+    }, opts?.pretty);
+  });
+
 // ─── Top-level command ────────────────────────────────────────────────────────
 
 export const governanceCommand = new Command('governance')
-  .description('Governance audit, impact analysis, CI diagnosis, and PR template rendering')
+  .description('Governance audit, impact analysis, CI diagnosis, PR template rendering, and Markdown linting')
   .addCommand(auditCommand)
   .addCommand(impactCommand)
   .addCommand(ciDiagnoseCommand)
-  .addCommand(prTemplateCommand);
+  .addCommand(prTemplateCommand)
+  .addCommand(lintMdCommand);

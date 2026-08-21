@@ -5,3 +5,5 @@ export * from './pr-tracker.js';
 export * from './impact-analyzer.js';
 export * from './ci-diagnostics.js';
 export * from './claim-helper.js';
+export * from './markdown-validator.js';
+

@@ -1,4 +1,6 @@
 import type { ConfidenceBreakdown, GovernanceAuditResult } from '../contracts/schemas.js';
+import { validateMarkdownIntegrity, type MarkdownValidationReport } from './markdown-validator.js';
+
 
 export const FORBIDDEN_AI_PHRASES = [
   'as an ai language model',
@@ -170,32 +172,12 @@ export function lintMarkdownIntegrity(text: string): {
   isClean: boolean;
   corruptedIssues: string[];
 } {
-  const issues: string[] = [];
-
-  // 1. Check for Unicode replacement characters (\uFFFD / )
-  if (/\uFFFD/.test(text)) {
-    issues.push('Contains corrupted Unicode replacement characters (\\uFFFD / ) caused by terminal encoding errors.');
-  }
-
-  // 2. Check for malformed markdown headers like "3##" or "2#"
-  if (/(?:^|\n)\s*\d+#{1,6}\s+/i.test(text)) {
-    issues.push('Contains malformed numbered markdown headers (e.g. "3##").');
-  }
-
-  // 3. Check for raw broken base64 payload fragments leaking into markdown
-  if (/Buffer\.from\(['"][A-Za-z0-9+/=]{40,}['"]\)/.test(text)) {
-    issues.push('Contains raw Buffer.from base64 code snippets instead of clean markdown text.');
-  }
-
-  // 4. Check for unclosed backticks in single line contexts
-  const codeBlockCount = (text.match(/```/g) || []).length;
-  if (codeBlockCount % 2 !== 0) {
-    issues.push('Contains unclosed multi-line code blocks (odd count of triple backticks).');
-  }
-
+  const report = validateMarkdownIntegrity(text);
   return {
-    isClean: issues.length === 0,
-    corruptedIssues: issues,
+    isClean: report.isValid,
+    corruptedIssues: report.errors.map(
+      (e) => `[${e.ruleId}${e.line ? ` Line ${e.line}` : ''}] ${e.message} (Fix: ${e.suggestedFix})`
+    ),
   };
 }
 
