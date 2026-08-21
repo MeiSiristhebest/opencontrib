@@ -43,7 +43,7 @@ Load these modular references into context **only when entering that specific ph
 - **Phase 2 & 3 (Scouting & Context):** Read [`references/discovery.md`](file:///C:/Users/Mei/.gemini/config/skills/opencontrib-cli/references/discovery.md) for qualification filters, scoring heuristics, and context bundling.
 - **Phase 2 (Deep SAST & AST Probes):** Read [`references/probe.md`](file:///C:/Users/Mei/.gemini/config/skills/opencontrib-cli/references/probe.md) for Smart Pointer (`ptr://...`) slicing, Semgrep packs, and Tree-sitter AST queries.
 - **Phase 4 (Workspace Sandbox):** Read [`references/workspace.md`](file:///C:/Users/Mei/.gemini/config/skills/opencontrib-cli/references/workspace.md) for git worktree isolation and environment sanitization.
-- **Phase 5 & 6 (Empirical Verification):** Read [`references/evidence.md`](file:///C:/Users/Mei/.gemini/config/skills/opencontrib-cli/references/evidence.md) for fail-first baseline assertions and 20x stress loops.
+- **Phase 5 & 6 (Empirical Verification):** Read [`references/evidence.md`](file:///e:/Mei/下载/cs/opencontrib/skills/opencontrib-cli/references/evidence.md) for fail-first baseline assertions and targeted verification (use stress loops only when testing concurrency or race conditions).
 - **Phase 7 & 8 (Governance & Pull Requests):** Read [`references/governance.md`](file:///C:/Users/Mei/.gemini/config/skills/opencontrib-cli/references/governance.md) for anti-AI linting, RFC-100 diff constraints, and native PR template merging.
 - **Phase 9 (Memory & Profile):** Read [`references/flywheel.md`](file:///C:/Users/Mei/.gemini/config/skills/opencontrib-cli/references/flywheel.md) for ledger synchronization.
 

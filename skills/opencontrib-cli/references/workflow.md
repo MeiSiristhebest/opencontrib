@@ -103,15 +103,22 @@ pytest tests/test_specific.py -k test_defect
 
 ---
 
-### Phase 6: Implement Surgical Fix & Concurrency Evidence (GREEN Phase)
-Apply the minimal, idiomatic code modification (strictly $\le 100$ lines). Then run the bounded concurrency stampede harness:
+### Phase 6: Implement Surgical Fix & Empirical Evidence (GREEN Phase)
+Apply the minimal, idiomatic code modification (strictly $\le 100$ lines). Then run targeted evidence verification:
 
 ```bash
+# Standard targeted verification (1x clean run):
 opencontrib evidence \
   --cwd "<workspacePath>" \
   --test-cmd "<targeted_test_command>" \
-  --concurrency 10 \
-  --stress-loop 20 \
+  --run-id "$RUN_ID"
+
+# Optional: For concurrency / race condition / flaky defects:
+opencontrib evidence \
+  --cwd "<workspacePath>" \
+  --test-cmd "<targeted_test_command>" \
+  --concurrency 5 \
+  --stress-loop 5 \
   --run-id "$RUN_ID"
 ```
 
@@ -154,7 +161,7 @@ opencontrib governance pr-template \
   --issue-title "<Precise Defect Title>" \
   --summary "<Concise explanation of the surgical fix>" \
   --validation-cmd "<targeted_test_command>" \
-  --validation-output "20/20 stress loops passed"
+  --validation-output "Targeted regression test passed cleanly (0 regressions)"
 
 gh pr create \
   --repo <owner>/<repo> \

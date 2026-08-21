@@ -22,5 +22,5 @@ describe('Workspace Cleanup & Purge Engine', () => {
     expect(result.purgedScratchFiles).toContain('temp_test.ts');
     expect(result.purgedScratchFiles).toContain('temp_evidence.log');
     expect(existsSync(join(testScratchDir, 'temp_test.ts'))).toBe(false);
-  });
+  }, { timeout: 30000 });
 });

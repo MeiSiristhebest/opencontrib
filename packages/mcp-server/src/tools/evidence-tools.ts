@@ -27,7 +27,7 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
         .string()
         .optional()
         .describe('Optional separate reproduction script/command to trigger pre-fix failure baseline'),
-      stressLoopCount: z.number().optional().describe('Number of stress loop iterations (default 20)'),
+      stressLoopCount: z.number().optional().default(1).describe('Number of test execution runs / stress loop iterations (default 1, use >1 for concurrency/race tests)'),
       runId: z.string().optional().describe('Optional runId to automatically resolve workspaceRoot and save evidence.json artifact'),
     },
     async (args) => {
@@ -62,7 +62,7 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
           testCommand: args.testCommand,
           preFixBaselineCaptured: preFixCheck.assertionCaptured,
           preFixFailureOutput: preFixCheck.baselineOutput,
-          stressLoopCount: args.stressLoopCount ?? 5,
+          stressLoopCount: args.stressLoopCount ?? 1,
         });
       }
 
@@ -72,7 +72,7 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
         workspaceRoot: resolvedWorkspaceRoot,
         baselineCommitSha: resolvedBaselineCommitSha,
         testCommand: args.testCommand,
-        stressLoopCount: args.stressLoopCount ?? 20,
+        stressLoopCount: args.stressLoopCount ?? 1,
       });
 
       const fullEvidenceReport = {
