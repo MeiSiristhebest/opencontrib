@@ -4,3 +4,4 @@ export * from './llm-judge.js';
 export * from './judge-prompt.js';
 export * from './reflexion-engine.js';
 export * from './benchmark-runner.js';
+export * from './harness-utils.js';

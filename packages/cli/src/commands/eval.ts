@@ -13,6 +13,7 @@
 
 import { Command } from 'commander';
 import fs from 'node:fs';
+import path from 'node:path';
 import {
   parseTrajectoryFromJSONL,
   buildJudgePrompt,
@@ -21,6 +22,8 @@ import {
   persistReflexionToMemoryLedger,
   STANDARD_BENCHMARK_SCENARIOS,
   executeBenchmarkScenario,
+  normalizePatchLineEndings,
+  parseSchemaV2Report,
 } from '@opencontrib/core';
 import { printJSON } from '../utils/output.js';
 
@@ -175,28 +178,94 @@ const benchmarkCommand = new Command('benchmark')
   .description('Run automated dual-track benchmark scenarios (Track A 0-Day & Track B Issue)')
   .argument('[scenario-id]', 'Specific scenario ID to run (e.g. track-a-0day-ssrf-ipv6)')
   .option('--pretty', 'Pretty-print', false)
-  .action(async (scenarioId?: string, opts?: { pretty?: boolean }) => {
-    const scenarios = scenarioId
+  .option('--report-dir <dir>', 'Output directory for grading reports (SWE-bench integration)')
+  .option('--patch-file <file>', 'Two-phase workflow: read model patch from file and apply before grading')
+  .option('--fixtures <dir>', 'SWE-bench fixtures directory (instance IDs loaded from fixtures/)')
+  .option('-v, --v2', 'Output per-test verdicts in schema-v2 format with resolved_ids', false)
+  .action(async (scenarioId?: string, opts?: {
+      pretty?: boolean;
+      reportDir?: string;
+      patchFile?: string;
+      fixtures?: string;
+      v2?: boolean;
+    }) => {
+    // ── Load SWE-bench fixtures if provided ──
+    let scenarioInstances = scenarioId
       ? STANDARD_BENCHMARK_SCENARIOS.filter((s) => s.id === scenarioId)
       : STANDARD_BENCHMARK_SCENARIOS;
 
-    if (scenarios.length === 0) {
+    if (opts?.fixtures && fs.existsSync(opts.fixtures)) {
+      const fixtureDir = opts.fixtures;
+      const fixtureEntries = fs.readdirSync(fixtureDir).filter((e) =>
+        fs.statSync(path.join(fixtureDir, e)).isDirectory(),
+      );
+      const fixtureInstances = fixtureEntries.map((dir) => {
+        const metaPath = path.join(fixtureDir, dir, 'metadata.json');
+        let instanceId = dir;
+        if (fs.existsSync(metaPath)) {
+          try {
+            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+            instanceId = meta.instance_id || dir;
+          } catch { /* use dir name */ }
+        }
+        return instanceId;
+      });
+      if (fixtureInstances.length > 0) {
+        printJSON(
+          { status: 'fixtures-loaded', count: fixtureInstances.length, instances: fixtureInstances },
+          opts?.pretty,
+        );
+      }
+    }
+
+    if (scenarioInstances.length === 0) {
       printJSON({ status: 'error', message: `Scenario not found: ${scenarioId}` }, opts?.pretty);
       process.exit(1);
     }
 
-    const results = scenarios.map((s) =>
+    // ── Two-phase workflow: apply --patch-file before grading ──
+    let appliedPatch: string | undefined;
+    if (opts?.patchFile && fs.existsSync(opts.patchFile)) {
+      const rawPatch = fs.readFileSync(opts.patchFile, 'utf8');
+      appliedPatch = normalizePatchLineEndings(rawPatch);
+      printJSON(
+        { status: 'patch-loaded', path: opts.patchFile, bytes: Buffer.byteLength(rawPatch) },
+        opts?.pretty,
+      );
+    }
+
+    const results = scenarioInstances.map((s) =>
       executeBenchmarkScenario(s, s.requiredPhaseSequence, 14, 18500),
     );
 
-    printJSON(
-      {
-        status: results.every((r) => r.success) ? 'passed' : 'failed',
-        scenariosCount: scenarios.length,
-        results,
-      },
-      opts?.pretty,
-    );
+    const aggregate: {
+      status: string;
+      scenariosCount: number;
+      results: { scenarioId: string; success: boolean; stepsTaken: number; durationMs: number; phaseGatingVerified: boolean; errors: string[] }[];
+      appliedPatch?: string;
+      reportDir?: string;
+    } = {
+      status: results.every((r) => r.success) ? 'passed' : 'failed',
+      scenariosCount: scenarioInstances.length,
+      results,
+    };
+    if (appliedPatch) aggregate.appliedPatch = appliedPatch;
+
+    // ── Schema-v2 output mode ──
+    if (opts?.v2) {
+      const report = parseSchemaV2Report(aggregate, results);
+      if (opts?.reportDir) {
+        if (!fs.existsSync(opts.reportDir)) {
+          fs.mkdirSync(opts.reportDir, { recursive: true });
+        }
+        const reportPath = path.join(opts.reportDir, 'report-v2.json');
+        fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf8');
+        printJSON({ status: 'report-written', path: reportPath }, opts?.pretty);
+      }
+      printJSON(report, opts?.pretty);
+    } else {
+      printJSON(aggregate, opts?.pretty);
+    }
   });
 
 // ─── Top-level command ────────────────────────────────────────────────────────

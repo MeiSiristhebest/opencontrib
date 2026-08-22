@@ -24,9 +24,15 @@ program
   .name('opencontrib')
   .description('Agent-Native Open Source Contribution Engine — CLI')
   .version('1.0.0')
+  .option('--home <dir>', 'Set custom OpenContrib home directory (overrides ~/.opencontrib and OPENCONTRIB_HOME env)', process.env.OPENCONTRIB_HOME)
+  .hook('preAction', (parsed) => {
+    if (parsed.options.home && typeof parsed.options.home === 'string') {
+      process.env.OPENCONTRIB_HOME = parsed.options.home;
+    }
+  })
   .configureHelp({
     subcommandTerm: (cmd) => cmd.name() + ((cmd.options as any[]).length ? ' [options]' : ''),
-    argumentTerm: (arg) => `<${arg.name}>`,
+    argumentTerm: (arg) => `<${arg.name()}>`,
   });
 
 program.addCommand(doctorCommand);

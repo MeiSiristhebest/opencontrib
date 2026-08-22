@@ -41,6 +41,79 @@ import {
 } from '../risk/risk-engine.js';
 import type { UserProfile, Opportunity, ConfidenceBreakdown } from '../contracts/schemas.js';
 
+export interface ToolFeedbackEntry {
+  turn: number;
+  toolName: string;
+  command?: string;
+  exitCode?: number;
+  output: string;
+  success: boolean;
+}
+
+export interface PromptRebuildContext {
+  basePrompt: string;
+  testCommand?: string;
+  feedback: ToolFeedbackEntry[];
+  appliedFiles: Array<{ path: string; operation: string }>;
+  attemptNumber: number;
+  maxAttempts: number;
+}
+
+/**
+ * Rebuild the prompt from scratch each turn with accumulated tool feedback.
+ *
+ * Previously, the prompt was built once at loop entry and then simply had
+ * failure traces appended. This meant the LLM could not see or learn from
+ * successful intermediate tool calls — only failures were fed back.
+ *
+ * The per-turn rebuild includes ALL tool outputs from every attempt,
+ * giving the model the full context of what was tried and what worked/failed.
+ */
+export function buildTurnPrompt(ctx: PromptRebuildContext): string {
+  const lines: string[] = [];
+  lines.push(ctx.basePrompt);
+  lines.push('');
+
+  if (ctx.feedback.length > 0) {
+    lines.push(`## Previous Attempt Feedback (Attempts 1-${ctx.attemptNumber - 1})`);
+    lines.push('');
+    for (const entry of ctx.feedback) {
+      const status = entry.success ? '✅ PASS' : `❌ FAIL (exit ${entry.exitCode ?? 'N/A'})`;
+      const cmd = entry.command ? `\`${entry.command.slice(0, 200)}\`` : entry.toolName;
+      lines.push(`### ${status} — ${entry.toolName}`);
+      if (entry.command) lines.push(`Command: ${cmd}`);
+      lines.push('```');
+      lines.push(entry.output.slice(-1500));
+      lines.push('```');
+      lines.push('');
+    }
+  }
+
+  if (ctx.appliedFiles.length > 0) {
+    lines.push(`## Previously Applied Changes`);
+    lines.push('');
+    for (const f of ctx.appliedFiles) {
+      lines.push(`- ${f.operation} ${f.path}`);
+    }
+    lines.push('');
+  }
+
+  if (ctx.attemptNumber > 1) {
+    lines.push(`## Repair Instructions (Attempt ${ctx.attemptNumber}/${ctx.maxAttempts})`);
+    lines.push('');
+    lines.push(`You have ${ctx.maxAttempts - ctx.attemptNumber} attempt(s) remaining.`);
+    lines.push('Based on the feedback above, diagnose the root cause and produce a revised surgical patch.');
+    lines.push('Focus on the specific failure rather than making unrelated changes.');
+    lines.push('');
+    lines.push(`- **Test Command**: \`${ctx.testCommand || 'N/A'}\``);
+  }
+
+  lines.push('');
+  lines.push('Please generate a minimal surgical patch conforming strictly to PatchDraftSchema JSON with concrete code files in the "files" array.');
+
+  return lines.join('\n');
+}
+
 export interface TelemetryRecord {
   runId: string;
   repoFullName: string;
@@ -249,6 +322,7 @@ export class AgentOrchestrator {
     let filesToSubmit: Array<{ path: string; content: string }> = [];
     let evidenceReport: any;
     let lastFailureOutput = '';
+    const toolFeedback: ToolFeedbackEntry[] = [];
 
     const loopRuns = input.stressLoopRuns || 1;
 
@@ -256,6 +330,34 @@ export class AgentOrchestrator {
       implementationAttempts++;
       appliedFiles = [];
       filesToSubmit = [];
+
+      const turnPrompt = implementationAttempts > 1
+        ? buildTurnPrompt({
+            basePrompt: prompt,
+            testCommand: testCmd,
+            feedback: toolFeedback,
+            appliedFiles,
+            attemptNumber: implementationAttempts,
+            maxAttempts,
+          })
+        : `${prompt}\n\nPlease generate a minimal surgical patch conforming strictly to PatchDraftSchema JSON with concrete code files in the 'files' array.`;
+
+      // Generate (or re-generate on repair turn) the patch draft from the per-turn prompt
+      if (implementationAttempts > 1) {
+        if (this.llmService) {
+          try {
+            const repairResult = await this.llmService.generateStructured({
+              prompt: turnPrompt,
+              schema: PatchDraftSchema,
+            });
+            if (repairResult.data && (repairResult.data as any).files && (repairResult.data as any).files.length > 0) {
+              activePatch = (repairResult.data as unknown) as PatchDraft;
+            }
+          } catch {}
+        } else {
+          break;
+        }
+      }
 
       // 1. Physically apply file edits to worktree with strict boundary checking
       const safeApplyResult = this.worktreeManager.applySurgicalFilesSafely(
@@ -274,8 +376,13 @@ export class AgentOrchestrator {
         validationStatus = 'VALIDATION_FAILED';
         validationPassed = false;
         lastFailureOutput = `Workspace safety boundary error: ${safeApplyResult.errors.join('; ')}`;
+        toolFeedback.push({
+          turn: implementationAttempts,
+          toolName: 'applySurgicalFilesSafely',
+          output: lastFailureOutput,
+          success: false,
+        });
       } else if (testCmd) {
-        // 2. Validate in sanitized sandbox runtime
         try {
           evidenceReport = await collectEvidence({
             cwd: workspace.workspacePath,
@@ -284,48 +391,40 @@ export class AgentOrchestrator {
             runFlakyBaseline: false,
           });
 
+          const output = `Stress loops passed: ${evidenceReport.stressLoopPassed}, Passed tests: ${evidenceReport.passedUnitTestsCount}, Failed tests: ${evidenceReport.failedUnitTestsCount || 0}`;
+          toolFeedback.push({
+            turn: implementationAttempts,
+            toolName: 'collectEvidence',
+            command: testCmd,
+            exitCode: evidenceReport.exitCode,
+            output: output,
+            success: evidenceReport.stressLoopPassed,
+          });
+
           if (evidenceReport.stressLoopPassed) {
             validationStatus = 'VALIDATED';
             validationPassed = true;
           } else {
             validationStatus = 'VALIDATION_FAILED';
             validationPassed = false;
-            lastFailureOutput = `Stress loop failed on ${testCmd}. Total passing tests: ${evidenceReport.passedUnitTestsCount}`;
+            lastFailureOutput = `Stress loop failed on ${testCmd}. ${output}`;
           }
         } catch (err: any) {
           validationStatus = 'VALIDATION_UNAVAILABLE';
           validationPassed = false;
           lastFailureOutput = `Validation execution error: ${err.message}`;
+          toolFeedback.push({
+            turn: implementationAttempts,
+            toolName: 'collectEvidence',
+            command: testCmd,
+            output: lastFailureOutput,
+            success: false,
+          });
         }
       } else {
         validationStatus = 'NO_TEST_AVAILABLE';
-        validationPassed = false; // No automated tests executed; does not pretend to be validated
-        break; // No repair loop needed when no test command exists
-      }
-
-      // 3. If failed and attempts remain, trigger LLM Diagnose & Repair with REAL failure trace
-      if (!validationPassed && implementationAttempts < maxAttempts && this.llmService) {
-
-        const repairPrompt = `${prompt}
-
-### Sandboxed Validation Failure Trace (Attempt ${implementationAttempts}/${maxAttempts}):
-\`\`\`
-${lastFailureOutput.slice(-2000)}
-\`\`\`
-- **Test Command**: \`${testCmd}\`
-- **Failing Files Changed**: ${appliedFiles.map((f) => f.path).join(', ')}
-
-Please diagnose the exact failure reason above and generate a revised surgical patch conforming strictly to PatchDraftSchema JSON.`;
-
-        try {
-          const repairResult = await this.llmService.generateStructured({
-            prompt: repairPrompt,
-            schema: PatchDraftSchema,
-          });
-          if (repairResult.data && (repairResult.data as any).files && (repairResult.data as any).files.length > 0) {
-            activePatch = (repairResult.data as unknown) as PatchDraft;
-          }
-        } catch {}
+        validationPassed = false;
+        break;
       }
     }
 
