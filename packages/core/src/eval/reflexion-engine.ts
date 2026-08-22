@@ -19,16 +19,17 @@ export function synthesizeReflexionInsights(
   context?: { runId?: string; repoFullName?: string },
 ): ReflexionInsight {
   // ── Source of truth: what the neutral LLM Judge said, verbatim ──────────────
-  const lessons: string[] = report.actionableDirectives.length > 0
+  const lessons: string[] = (report.actionableDirectives || []).length > 0
     ? report.actionableDirectives
     : ['Maintain current contribution standards.'];
 
-  const critiques: string[] = report.criticalCritiques;
+  const critiques: string[] = report.criticalCritiques || [];
 
   // ── Failure mode and root cause: distilled from Judge's dimension reasoning ─
-  const failingDimensions = report.dimensions
-    .filter((d) => d.score < 60)
-    .sort((a, b) => a.score - b.score);
+  const dimensions = report.dimensions || [];
+  const failingDimensions = dimensions
+    .filter((d) => (d.score || 0) < 60)
+    .sort((a, b) => (a.score || 0) - (b.score || 0));
 
   const failureMode = failingDimensions.length > 0
     ? failingDimensions.map((d) => d.title).join('; ')
@@ -36,7 +37,7 @@ export function synthesizeReflexionInsights(
 
   const rootCause = failingDimensions.length > 0
     ? failingDimensions.map((d) => `[${d.title}] ${d.reasoning}`).join('\n')
-    : report.summary;
+    : (report.summary || 'No summary available');
 
   // ── Prompt additions: derived from Judge critiques + dimension evidence ───────
   const promptAdditions: string[] = critiques.length > 0
@@ -45,7 +46,7 @@ export function synthesizeReflexionInsights(
 
   // ── Golden sequence: opencontrib commands from exemplary sessions only ───────
   const goldenSequence: string[] = [];
-  if (report.overallScore >= 85) {
+  if ((report.overallScore ?? 0) >= 85) {
     for (const e of events) {
       for (const t of e.toolCalls ?? []) {
         if (

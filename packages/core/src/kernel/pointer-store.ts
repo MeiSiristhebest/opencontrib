@@ -12,6 +12,7 @@ import type {
 export class SmartPointerStore implements PointerStoreApi {
   private memoryMap = new Map<string, SmartPointer>();
   private storageDir?: string;
+  private idCounters = new Map<string, number>();
 
   constructor(storageDir?: string) {
     this.storageDir = storageDir;
@@ -22,7 +23,15 @@ export class SmartPointerStore implements PointerStoreApi {
 
   public create(params: PointerCreateOptions): SmartPointer {
     const namespace = params.namespace || 'findings';
-    const cleanId = params.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const rawId = params.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    // Prevent same-id overwrite: append counter when id collides within namespace
+    const counterKey = `${namespace}:${rawId}`;
+    const existingCount = this.idCounters.get(counterKey) || 0;
+    const counter = existingCount > 0 ? `_${existingCount}` : '';
+    this.idCounters.set(counterKey, existingCount + 1);
+
+    const cleanId = `${rawId}${counter}`;
     const uri = `ptr://${namespace}/${cleanId}`;
 
     const pointer: SmartPointer = {
@@ -33,10 +42,10 @@ export class SmartPointerStore implements PointerStoreApi {
       stub: {
         id: cleanId,
         uri,
-        title: params.title,
-        category: params.category,
-        severity: params.severity,
-        file: params.file,
+        title: params.title || '',
+        category: params.category || '',
+        severity: params.severity || '',
+        file: params.file || '',
         line: params.line,
         confidence: params.confidence ?? 90,
         affectedSymbol: params.affectedSymbol,

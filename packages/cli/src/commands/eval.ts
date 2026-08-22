@@ -83,7 +83,10 @@ const parseJudgmentCommand = new Command('parse-judgment')
     let rawText: string;
 
     if (opts?.stdin) {
-      rawText = fs.readFileSync('/dev/stdin', 'utf8');
+      rawText = process.stdin.readSync({ maxLength: 10 * 1024 * 1024 }) || '';
+      if (!rawText) {
+        rawText = '';
+      }
     } else if (responseFile) {
       if (!fs.existsSync(responseFile)) {
         printJSON({ status: 'error', message: `File not found: ${responseFile}` }, opts?.pretty);
