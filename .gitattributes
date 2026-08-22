@@ -1,0 +1,10 @@
+# Always normalize text files to LF
+* text=auto
+*.ts lf
+*.js lf
+*.json lf
+*.md lf
+*.yml lf
+*.yaml lf
+*.diff lf
+*.patch lf
