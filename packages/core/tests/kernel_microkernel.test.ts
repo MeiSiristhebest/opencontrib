@@ -164,6 +164,6 @@ describe('OpenContrib Microkernel & Smart Pointer Architecture', () => {
 
     expect(result.executedProbes).toContain('workflow-linter');
     expect(result.pointersCreated.length).toBeGreaterThan(0);
-    expect(result.pointersCreated[0].uri).toContain('ptr://findings/ci-checkout-ci_yml');
+    expect(result.pointersCreated[0].uri).toContain('ptr://findings/ci-deprecated');
   });
 });

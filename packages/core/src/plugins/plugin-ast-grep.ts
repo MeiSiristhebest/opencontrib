@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
-import { STANDARD_AST_RELATIONAL_RULES } from '../probe/adapters/ast-grep-rules.js';
+import { STANDARD_AST_RELATIONAL_RULES, serializeRuleToYaml } from '../probe/adapters/ast-grep-rules.js';
 
 export interface ASTGrepMatch {
   text: string;
@@ -96,18 +97,38 @@ export const astGrepPlugin: OpenContribPlugin = {
         // 2. Deep Relational Rules Execution with atomic pattern queries
         for (const rule of STANDARD_AST_RELATIONAL_RULES) {
           try {
-            const langFlag =
-              rule.language === 'typescript' ? '--lang ts' :
-              rule.language === 'javascript' ? '--lang js' :
-              rule.language === 'go' ? '--lang go' :
-              rule.language === 'rust' ? '--lang rust' :
-              rule.language === 'python' ? '--lang py' : '';
-            const cmd = `${bin} run -p "${rule.rule.pattern}" ${langFlag} --json=compact`;
+            const ruleDef = rule.rule;
+            const needsYaml = ruleDef.kind || ruleDef.inside || ruleDef.has || ruleDef.not || ruleDef.any || ruleDef.all;
 
-            const { stdout } = await host.exec(cmd, {
-              cwd: targetPath,
-              timeout: 20000,
-            });
+            let stdout: string;
+            if (needsYaml) {
+              const yamlPath = path.join(os.tmpdir(), `astgrep-${rule.id}.yml`);
+              fs.writeFileSync(yamlPath, serializeRuleToYaml(rule), 'utf8');
+              const cmd = `${bin} scan --rule "${yamlPath}" --json=compact`;
+              const execResult = await host.exec(cmd, {
+                cwd: targetPath,
+                timeout: 20000,
+              });
+              stdout = execResult.stdout;
+              fs.unlinkSync(yamlPath);
+            } else {
+              const langFlag =
+                rule.language === 'typescript' ? '--lang ts' :
+                rule.language === 'javascript' ? '--lang js' :
+                rule.language === 'go' ? '--lang go' :
+                rule.language === 'rust' ? '--lang rust' :
+                rule.language === 'python' ? '--lang py' :
+                rule.language === 'java' ? '--lang java' :
+                rule.language === 'c' ? '--lang c' :
+                rule.language === 'csharp' ? '--lang csharp' :
+                rule.language === 'php' ? '--lang php' : '';
+              const cmd = `${bin} run -p "${ruleDef.pattern}" ${langFlag} --json=compact`;
+              const execResult = await host.exec(cmd, {
+                cwd: targetPath,
+                timeout: 20000,
+              });
+              stdout = execResult.stdout;
+            }
 
             if (stdout && stdout.trim().startsWith('[')) {
               const matches: ASTGrepMatch[] = JSON.parse(stdout);

@@ -22,17 +22,32 @@ export interface ESLintSecurityFileResult {
  * ESLint Security & Node.js Hazard Adapter
  * Detects command injection (child_process), path traversal (non-literal-fs-filename), and ReDoS regular expressions in JS/TS environments.
  */
+export const ESLINT_SECURITY_RULES = [
+  { id: 'no-eval', severity: 'high', category: 'code-injection-eval', cwe: 'CWE-95' },
+  { id: 'no-implied-eval', severity: 'high', category: 'code-injection-eval', cwe: 'CWE-95' },
+  { id: 'no-new-func', severity: 'high', category: 'code-injection-new-function', cwe: 'CWE-95' },
+  { id: 'no-script-url', severity: 'medium', category: 'code-injection-eval', cwe: 'CWE-79' },
+  { id: 'react/no-danger-with-children', severity: 'medium', category: 'xss-danger-children', cwe: 'CWE-79' },
+  { id: 'react/no-inline-styles', severity: 'low', category: 'xss-inline-styles', cwe: 'CWE-79' },
+  { id: 'callback-return', severity: 'medium', category: 'error-handling-callback', cwe: 'CWE-754' },
+  { id: 'handle-callback-err', severity: 'medium', category: 'error-handling-callback', cwe: 'CWE-391' },
+] as const;
+
+/**
+ * ESLint Security & Node.js Hazard Adapter v2.0
+ * Detects code injection (eval/new Function), child_process injection, path traversal, XSS, and ReDoS.
+ */
 export const eslintSecurityPlugin: OpenContribPlugin = {
   name: '@opencontrib/plugin-eslint-security',
-  version: '1.0.0',
-  description: 'Node.js security auditor for child_process injection, path traversal, and ReDoS',
+  version: '2.0.0',
+  description: 'Node.js security auditor for child_process injection, path traversal, eval, ReDoS, and XSS',
   permissions: ['fs:read', 'exec:binary'],
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'eslint-security',
       name: 'Node.js Security Hazard Auditor',
       category: 'security_cwe',
-      description: 'Finds child_process command injection, non-literal fs operations, and unsafe regexes in Node.js',
+      description: 'Finds child_process injection, eval, unsafe regex, path traversal, and XSS patterns in Node.js',
       match: (fp) =>
         ['typescript', 'javascript'].includes(fp.primaryLanguage.toLowerCase()) ||
         fp.manifests.includes('package.json'),
@@ -40,7 +55,47 @@ export const eslintSecurityPlugin: OpenContribPlugin = {
         const pkgJson = path.join(targetPath, 'package.json');
         if (!fs.existsSync(pkgJson)) return;
 
-        // Use ast-grep for microsecond Tree-sitter inspection of Node.js security hazards
+        // Path A: Try eslint CLI with --no-config-lookup
+        const hasEslint = host.isBinaryAvailable('eslint');
+        if (hasEslint) {
+          try {
+            const ruleFlags = ESLINT_SECURITY_RULES.map((r) => `--rule "${r.id}: error"`).join(' ');
+            const { stdout } = await host.exec(
+              `eslint ${ruleFlags} --no-config-lookup --format json .`,
+              { cwd: targetPath, timeout: 30000 },
+            );
+            if (stdout && stdout.trim().startsWith('[')) {
+              const results = JSON.parse(stdout);
+              for (const fileResult of results) {
+                if (!fileResult.messages) continue;
+                for (const msg of fileResult.messages) {
+                  const relFile = path.relative(targetPath, fileResult.filePath);
+                  const rule = ESLINT_SECURITY_RULES.find((r) => r.id === msg.ruleId);
+                  if (!rule) continue;
+                  pointers.create({
+                    namespace: 'findings',
+                    id: `eslint-${msg.ruleId}-${path.basename(relFile)}-${msg.line}`,
+                    title: `[Security] ${msg.message || msg.ruleId} in ${path.basename(relFile)}`,
+                    category: 'security_cwe',
+                    severity: rule.severity,
+                    file: relFile,
+                    line: msg.line,
+                    confidence: 93,
+                    affectedSymbol: msg.ruleId,
+                    slice: {
+                      ruleExplanation: `${msg.ruleId} - ${rule.category}`,
+                      remediationSuggestion: `Fix ${msg.ruleId} violation`,
+                    },
+                  });
+                }
+              }
+            }
+          } catch {
+            // Fall through to Path B
+          }
+        }
+
+        // Path B: ast-grep fallback
         const hasAstGrep = host.isBinaryAvailable('ast-grep') || host.isBinaryAvailable('sg');
         if (!hasAstGrep) return;
 
@@ -64,6 +119,18 @@ export const eslintSecurityPlugin: OpenContribPlugin = {
             message: 'Dynamic RegExp constructor may allow Regular Expression Denial of Service (ReDoS)',
             ruleId: 'detect-unsafe-regex',
             severity: 'medium' as const,
+          },
+          {
+            pattern: 'eval($$)',
+            message: 'eval() execution allows arbitrary code injection',
+            ruleId: 'detect-eval',
+            severity: 'high' as const,
+          },
+          {
+            pattern: 'new Function($$)',
+            message: 'new Function() allows dynamic code injection',
+            ruleId: 'detect-new-function',
+            severity: 'high' as const,
           },
         ];
 
@@ -94,7 +161,7 @@ export const eslintSecurityPlugin: OpenContribPlugin = {
                   slice: {
                     codeSnippet: m.lines || m.text,
                     ruleExplanation: sec.message,
-                    remediationSuggestion: 'Use `execFile` with array arguments instead of raw string execution.',
+                    remediationSuggestion: 'Use safe alternatives (execFile, structured parsing, avoid eval)',
                   },
                   evidence: {
                     astDataFlow: `${m.text} -> ${sec.ruleId}`,

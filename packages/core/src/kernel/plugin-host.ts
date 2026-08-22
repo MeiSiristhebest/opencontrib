@@ -1,8 +1,7 @@
-import { execSync, exec } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { promisify } from 'util';
 import {
   PluginPermissionError,
   type OpenContribPlugin,
@@ -20,8 +19,34 @@ import { CapabilityRouter } from './capability-router.js';
 import { EvidenceGraph } from './evidence-graph.js';
 import { ProbeScanScheduler } from './scan-scheduler.js';
 
-const execAsync = promisify(exec);
 const binaryCache = new Map<string, boolean>();
+
+function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string }> {
+  const cwd = opts.cwd || process.cwd();
+  return new Promise((resolve, reject) => {
+    const isWindows = process.platform === 'win32';
+    const shell = isWindows ? 'cmd.exe' : 'sh';
+    const shellArgs = isWindows ? ['/c', cmd] : ['-c', cmd];
+    const child = spawn(shell, shellArgs, {
+      cwd,
+      timeout: opts.timeout || 30000,
+      maxBuffer: 10 * 1024 * 1024,
+      encoding: 'utf-8',
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr || `Command exited with code ${code}: ${cmd}`));
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
+}
 
 export class PluginHost implements ProbeRegistryApi {
   private plugins = new Map<string, OpenContribPlugin>();
@@ -62,12 +87,7 @@ export class PluginHost implements ProbeRegistryApi {
 
   public async exec(cmd: string, opts: { cwd?: string; timeout?: number } = {}): Promise<{ stdout: string; stderr: string }> {
     const cwd = opts.cwd || this.workspacePath;
-    const { stdout, stderr } = await execAsync(cmd, {
-      cwd,
-      timeout: opts.timeout || 30000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    return { stdout, stderr };
+    return execWithSpawn(cmd, { ...opts, cwd });
   }
 
   public register(probe: ProbeDescriptor): void {
@@ -122,10 +142,9 @@ export class PluginHost implements ProbeRegistryApi {
         }
 
         const cwd = opts.cwd || this.workspacePath;
-        const { stdout, stderr } = await execAsync(cmd, {
+        const { stdout, stderr } = await execWithSpawn(cmd, {
           cwd,
           timeout: opts.timeout || 30000,
-          maxBuffer: 10 * 1024 * 1024,
         });
         return { stdout, stderr };
       },

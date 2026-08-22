@@ -29,11 +29,13 @@ export function constructPoCForFinding(finding: NormalizedFinding): PoCArtifact 
   const isConcurrency = finding.category === 'lifecycle_leak';
 
   const cleanId = finding.id.replace(/[^a-zA-Z0-9]/g, '_');
-  const targetSymbol = finding.affectedSymbol || finding.title.match(/in\s+([a-zA-Z0-9_]+)/i)?.[1] || 'targetFunction';
+  const title = finding.title || '';
+  const targetSymbol = title.match(/in\s+([a-zA-Z0-9_]+)/i)?.[1] || (finding.affectedSymbol || 'targetFunction');
+  const fileRef = `${finding.file || 'unknown'}:${finding.line ?? '?'}`;
 
   const verificationSteps: VerificationStep[] = [];
 
-  if (finding.file.endsWith('.go')) {
+  if ((finding.file || '').endsWith('.go')) {
     const pocFileName = `repro_${cleanId}_test.go`;
     const executionCommand = `go test -v -run TestRepro_${cleanId}`;
     const expectedFailurePattern = 'FAIL|panic|fatal error';
@@ -56,7 +58,7 @@ import (
 	"time"
 )
 
-// PoC: Reproduce concurrency/lifecycle leak found in ${finding.file}:${finding.line}
+// PoC: Reproduce concurrency/lifecycle leak found in ${fileRef}
 func TestRepro_${cleanId}(t *testing.T) {
 	var wg sync.WaitGroup
 	done := make(chan struct{})
@@ -97,7 +99,7 @@ import (
 	"testing"
 )
 
-// PoC: Reproduce boundary/nil handling defect found in ${finding.file}:${finding.line}
+// PoC: Reproduce boundary/nil handling defect found in ${fileRef}
 func TestRepro_${cleanId}(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -123,7 +125,7 @@ func TestRepro_${cleanId}(t *testing.T) {
   }
 
   // Python
-  if (finding.file.endsWith('.py')) {
+  if ((finding.file || '').endsWith('.py')) {
     const pocFileName = `test_repro_${cleanId}.py`;
     const executionCommand = `pytest ${pocFileName}`;
     const expectedFailurePattern = 'AssertionError|TypeError|ValueError|Exception';
@@ -138,7 +140,7 @@ func TestRepro_${cleanId}(t *testing.T) {
 
     const pocCode = `import pytest
 
-# PoC: Reproduce defect found in ${finding.file}:${finding.line}
+# PoC: Reproduce defect found in ${fileRef}
 def test_repro_${cleanId}():
     """Reproduces ${finding.title}"""
     # Pre-Fix: Trigger boundary defect
@@ -157,7 +159,7 @@ def test_repro_${cleanId}():
   }
 
   // Rust
-  if (finding.file.endsWith('.rs')) {
+  if ((finding.file || '').endsWith('.rs')) {
     const pocFileName = `tests/repro_${cleanId}.rs`;
     const executionCommand = `cargo test --test repro_${cleanId}`;
     const expectedFailurePattern = 'panicked at';
@@ -165,14 +167,17 @@ def test_repro_${cleanId}():
     verificationSteps.push({
       setupCode: '// Setup Rust reproduction fixture',
       exploitPayload: 'panic / overflow input',
-      targetCall: `${targetSymbol}()`,
+      targetCall: `${targetSymbol}("../../../etc/passwd")`,
       expectedFailureAssertion: 'thread panicked at boundary condition',
       expectedPostFixAssertion: 'returns Result::Err or handles cleanly without panic',
     });
 
     const pocCode = `#[test]
 fn test_repro_${cleanId}() {
-    // PoC: Reproduce ${finding.title} in ${finding.file}:${finding.line}
+    // PoC: Reproduce ${finding.title} in ${fileRef}
+    let input = "../../../etc/passwd";
+    let result = ${targetSymbol}(input);
+    assert!(result.is_err());
 }
 `;
 
@@ -187,7 +192,7 @@ fn test_repro_${cleanId}() {
   }
 
   // Java
-  if (finding.file.endsWith('.java')) {
+  if ((finding.file || '').endsWith('.java')) {
     const pocFileName = `src/test/java/Repro${cleanId}Test.java`;
     const executionCommand = `mvn test -Dtest=Repro${cleanId}Test`;
     const expectedFailurePattern = 'AssertionError|NullPointerException|Exception';
@@ -195,7 +200,7 @@ fn test_repro_${cleanId}() {
     verificationSteps.push({
       setupCode: '// Setup Java reproduction test fixture',
       exploitPayload: 'null / unhandled exception input',
-      targetCall: `${targetSymbol}()`,
+      targetCall: `input = "../../../etc/passwd"; ${targetSymbol}(input)`,
       expectedFailureAssertion: 'throws NullPointerException or invalid state',
       expectedPostFixAssertion: 'handles null safely without exception',
     });
@@ -208,7 +213,9 @@ import static org.junit.jupiter.api.Assertions.*;
 public class Repro${cleanId}Test {
     @Test
     public void testRepro${cleanId}() {
-        // PoC: Reproduce ${finding.title} in ${finding.file}:${finding.line}
+        // PoC: Reproduce ${finding.title} in ${fileRef}
+        String input = "../../../etc/passwd";
+        assertThrows(Exception.class, () -> ${targetSymbol}(input));
     }
 }
 `;
@@ -249,7 +256,7 @@ public class Repro${cleanId}Test {
   const pocCode = `import { describe, it, expect } from 'bun:test';
 
 describe('PoC Reproducer: ${finding.title}', () => {
-  it('triggers boundary condition in ${finding.file}:${finding.line}', () => {
+  it('triggers boundary condition in ${fileRef}', () => {
     // Exploit Payload: ${verificationSteps[0].exploitPayload}
     // Expected Pre-Fix: ${verificationSteps[0].expectedFailureAssertion}
     // Expected Post-Fix: ${verificationSteps[0].expectedPostFixAssertion}
