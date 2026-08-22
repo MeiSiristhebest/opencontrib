@@ -1,8 +1,9 @@
 import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'child_process';
-import { mkdtempSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, existsSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join, resolve, sep } from 'path';
 import { parseCommandSpec, type CommandSpec } from './command-spec.js';
+import { safeRmSync } from '../workspace/worktree-manager.js';
 
 export interface SandboxExecutionOptions {
   cwd: string;
@@ -266,7 +267,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
     } finally {
       if (sandboxTempDir && existsSync(sandboxTempDir) && sandboxTempDir.includes('opencontrib-sandbox-')) {
         try {
-          rmSync(sandboxTempDir, { recursive: true, force: true });
+          safeRmSync(sandboxTempDir, { recursive: true, force: true });
         } catch {
           // Cleanup best effort
         }

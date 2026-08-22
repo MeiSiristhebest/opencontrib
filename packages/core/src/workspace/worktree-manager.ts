@@ -1,9 +1,57 @@
 import { spawnSync } from 'child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
-import { join, resolve, sep, relative } from 'path';
+import { homedir, tmpdir } from 'os';
+import { join, resolve, sep } from 'path';
 import { sanitizeRunId } from '../run/artifact-bundle.js';
 
+/** Normalize path separators to forward slashes for consistent comparison on all platforms. */
+function norm(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
+export function safeRmSync(
+  targetPath: string,
+  opts: { recursive?: boolean; force?: boolean; maxRetries?: number; retryDelay?: number } = {},
+  allowedParents?: string[],
+): boolean {
+  const resolved = norm(resolve(targetPath));
+  const homedirPath = norm(resolve(homedir()));
+  const tempDir = norm(resolve(tmpdir()));
+  const opencontribHome = norm(resolve(homedirPath, '.opencontrib'));
+
+  const SEP = '/';
+
+  // Allowlist: must be within one of these parents
+  const defaultAllowed = [
+    opencontribHome,
+    tempDir,
+    ...(allowedParents || []).map((p) => norm(resolve(p))),
+  ];
+  const isWithinAllowed = defaultAllowed.some((parent) =>
+    resolved === parent || resolved.startsWith(parent + SEP),
+  );
+
+  if (!isWithinAllowed) {
+    console.error(`[SAFE_RMSNRC] BLOCKED: '${targetPath}' is outside allowed parent directories`);
+    console.error(`  Allowed: ${defaultAllowed.join(', ')}`);
+    console.error(`  Target:  ${resolved}`);
+    return false;
+  }
+
+  // Never delete root directories themselves (only their children)
+  if (resolved === opencontribHome || resolved === homedirPath || resolved === tempDir || resolved === '/') {
+    console.error(`[SAFE_RMSNRC] BLOCKED: Refusing to delete root directory '${targetPath}'`);
+    return false;
+  }
+
+  try {
+    rmSync(resolved, opts);
+    return true;
+  } catch (err: any) {
+    console.error(`[SAFE_RMSNRC] FAILED: rmSync('${targetPath}'): ${err.message}`);
+    return false;
+  }
+}
 
 export const MAX_DISCOVERED_FILES = 250;
 export const MAX_GENERATED_FILES = 6;
@@ -17,7 +65,6 @@ export interface WorkspaceContext {
   baseRepoPath: string;
   baseCommitSha?: string;
 }
-
 
 export class WorktreeManager {
   private workspaceRoot: string;
@@ -51,14 +98,12 @@ export class WorktreeManager {
   }
 
   detectDefaultBranch(sourceRepoPath: string): string {
-    // 1. Try to read symbolic-ref of origin/HEAD
     const headResult = this.runGit(['-C', sourceRepoPath, 'symbolic-ref', 'refs/remotes/origin/HEAD']);
     if (headResult.success && headResult.stdout.trim()) {
       const match = headResult.stdout.trim().match(/refs\/remotes\/origin\/(.+)$/);
       if (match) return match[1];
     }
 
-    // 2. Check if main or master branch exists
     const branchResult = this.runGit(['-C', sourceRepoPath, 'branch', '-a']);
     if (branchResult.success) {
       if (branchResult.stdout.includes('main')) return 'main';
@@ -81,9 +126,6 @@ export class WorktreeManager {
     const branchName = `opencontrib/fix-${issueOrTaskId}${runSuffix}`;
     const workspacePath = join(this.workspaceRoot, `${sanitizedRepoName}__${issueOrTaskId}${runSuffix}`);
 
-
-
-    // If workspace directory already exists, return it or clean it
     if (existsSync(workspacePath)) {
       return {
         workspacePath,
@@ -95,7 +137,6 @@ export class WorktreeManager {
 
     let sourceRepoPath = localRepoPath;
 
-    // If no local repo provided, clone or reuse in cache
     if (!sourceRepoPath || !existsSync(sourceRepoPath)) {
       const cachedRepoPath = join(this.cacheRoot, sanitizedRepoName);
       if (!existsSync(cachedRepoPath)) {
@@ -107,33 +148,22 @@ export class WorktreeManager {
 
     const defaultBranch = this.detectDefaultBranch(sourceRepoPath);
 
-    // Create Git Worktree
     try {
-      // Capture base commit SHA before creating worktree/branch
       const shaRes = this.runGit(['-C', sourceRepoPath, 'rev-parse', 'HEAD']);
       const baseCommitSha = shaRes.success ? shaRes.stdout.trim() : undefined;
 
-      // Prune dead worktrees and clean previous branch if it existed
       this.runGit(['-C', sourceRepoPath, 'worktree', 'prune']);
       this.runGit(['-C', sourceRepoPath, 'branch', '-D', branchName]);
 
-      // Remove existing workspacePath if leftover from previous run
       if (existsSync(workspacePath)) {
         try {
-          rmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+          safeRmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
         } catch {}
       }
 
       const addResult = this.runGit([
-        '-C',
-        sourceRepoPath,
-        'worktree',
-        'add',
-        '--force',
-        '-B',
-        branchName,
-        workspacePath,
-        'HEAD',
+        '-C', sourceRepoPath,
+        'worktree', 'add', '--force', '-B', branchName, workspacePath, 'HEAD',
       ]);
 
       if (!addResult.success) throw new Error(addResult.stderr);
@@ -146,10 +176,9 @@ export class WorktreeManager {
         baseCommitSha,
       };
     } catch (err: any) {
-      // Fallback: If worktree add fails, attempt direct single-branch clone into workspace
       if (existsSync(workspacePath)) {
         try {
-          rmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+          safeRmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
         } catch {}
       }
       mkdirSync(workspacePath, { recursive: true });
@@ -158,7 +187,7 @@ export class WorktreeManager {
       if (cloneRes.success) {
         const shaRes = this.runGit(['-C', workspacePath, 'rev-parse', 'HEAD']);
         const baseCommitSha = shaRes.success ? shaRes.stdout.trim() : undefined;
-        this.runGit(['-C', workspacePath, 'checkout', '-b', branchName]);
+        this.runGit(['-C', workspacePath, 'checkout', '-B', branchName]);
         return {
           workspacePath,
           branchName,
@@ -167,10 +196,9 @@ export class WorktreeManager {
           baseCommitSha,
         };
       } else {
-        // Clone failed: strictly fail-closed, refuse to masquerade as an empty repository
         if (existsSync(workspacePath)) {
           try {
-            rmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+            safeRmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
           } catch {}
         }
         throw new Error(
@@ -178,9 +206,7 @@ export class WorktreeManager {
         );
       }
     }
-
   }
-
 
   cleanupWorkspace(workspacePath: string, baseRepoPath?: string): void {
     if (!existsSync(workspacePath)) return;
@@ -193,10 +219,8 @@ export class WorktreeManager {
 
     if (existsSync(workspacePath)) {
       try {
-        rmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-      } catch {
-        // Safe fallback for Windows file lock
-      }
+        safeRmSync(workspacePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      } catch {}
     }
   }
 
@@ -212,34 +236,33 @@ export class WorktreeManager {
     const purgedWorkspaces: string[] = [];
     const purgedScratchFiles: string[] = [];
 
-    // 1. Purge all ephemeral worktrees in ~/.opencontrib/workspaces
     if (existsSync(this.workspaceRoot)) {
       const { readdirSync } = require('fs');
       const items = readdirSync(this.workspaceRoot);
       for (const item of items) {
         const itemPath = join(this.workspaceRoot, item);
         try {
-          rmSync(itemPath, { recursive: true, force: true });
-          purgedWorkspaces.push(item);
+          if (safeRmSync(itemPath, { recursive: true, force: true })) {
+            purgedWorkspaces.push(item);
+          }
         } catch {}
       }
     }
 
-    // 2. Optionally purge cached bare repos in ~/.opencontrib/repos
     let cleanedRepos = false;
     if (cleanRepos && existsSync(this.cacheRoot)) {
       try {
-        rmSync(this.cacheRoot, { recursive: true, force: true });
-        mkdirSync(this.cacheRoot, { recursive: true });
-        cleanedRepos = true;
+        if (safeRmSync(this.cacheRoot, { recursive: true, force: true })) {
+          mkdirSync(this.cacheRoot, { recursive: true });
+          cleanedRepos = true;
+        }
       } catch {}
     }
 
-    // 3. Clean temporary scratch directory if specified (with strict boundary safety check)
     if (cleanScratchDir && existsSync(cleanScratchDir)) {
       if (!this.isSafeScratchDirectory(cleanScratchDir)) {
         throw new Error(
-          `Security boundary violation: cleanScratchDir "${cleanScratchDir}" is not a permitted scratch location. Path must reside within ~/.opencontrib/, system temp, or be named "scratch".`,
+          `Security boundary violation: cleanScratchDir "${cleanScratchDir}" is not a permitted scratch location.`,
         );
       }
       const { readdirSync } = require('fs');
@@ -247,8 +270,9 @@ export class WorktreeManager {
       for (const item of scratchItems) {
         const itemPath = join(cleanScratchDir, item);
         try {
-          rmSync(itemPath, { recursive: true, force: true });
-          purgedScratchFiles.push(item);
+          if (safeRmSync(itemPath, { recursive: true, force: true })) {
+            purgedScratchFiles.push(item);
+          }
         } catch {}
       }
     }
@@ -260,31 +284,24 @@ export class WorktreeManager {
     };
   }
 
-  /**
-   * Validates whether a directory is safe to purge as a scratch space.
-   * Disallows system roots, home directory, and uncontained paths.
-   */
   isSafeScratchDirectory(dirPath: string): boolean {
-    const resolved = resolve(dirPath);
-    const opencontribHome = resolve(homedir(), '.opencontrib');
+    const resolved = norm(resolve(dirPath));
+    const opencontribHome = norm(resolve(homedir(), '.opencontrib'));
     const { tmpdir } = require('os');
-    const tempDir = resolve(tmpdir());
+    const tempDir = norm(resolve(tmpdir()));
 
-    // Explicitly disallow filesystem roots and user home directory
-    if (resolved === '/' || /^[a-zA-Z]:\\?$/.test(resolved) || resolved === resolve(homedir())) {
+    if (resolved === '/' || resolved === norm(resolve(homedir()))) {
       return false;
     }
 
-    // Must be inside ~/.opencontrib, temp directory, or an explicitly named scratch folder
-    if (resolved.startsWith(opencontribHome + sep) || resolved === opencontribHome) {
+    if (resolved.startsWith(opencontribHome + '/') || resolved === opencontribHome) {
+      return true;
+    }
+    if (resolved.startsWith(tempDir + '/') || resolved === tempDir) {
       return true;
     }
 
-    if (resolved.startsWith(tempDir + sep) || resolved === tempDir) {
-      return true;
-    }
-
-    const parts = resolved.split(sep);
+    const parts = resolved.split('/');
     const lastPart = parts[parts.length - 1]?.toLowerCase() || '';
     if (lastPart === 'scratch' || lastPart === '.scratch' || parts.includes('.opencontrib')) {
       return true;
@@ -293,20 +310,12 @@ export class WorktreeManager {
     return false;
   }
 
-  /**
-   * Validates whether a relative or absolute path is strictly within the workspace boundary.
-   * Prevents path traversal vulnerabilities.
-   */
   isPathWithinWorkspace(workspacePath: string, targetRelativePath: string): boolean {
     const resolvedRoot = resolve(workspacePath);
     const resolvedTarget = resolve(workspacePath, targetRelativePath);
     return resolvedTarget.startsWith(resolvedRoot + sep) || resolvedTarget === resolvedRoot;
   }
 
-  /**
-   * Safely applies generated files to workspace, strictly enforcing file counts, size limits,
-   * and path traversal boundaries.
-   */
   applySurgicalFilesSafely(
     workspacePath: string,
     files: Array<{ path: string; operation: string; content: string }>,
@@ -323,9 +332,7 @@ export class WorktreeManager {
     }
 
     let totalChars = 0;
-    for (const f of files) {
-      totalChars += f.content.length;
-    }
+    for (const f of files) totalChars += f.content.length;
     if (totalChars > MAX_GENERATED_FILE_CHARS) {
       errors.push(`Generated content size (${totalChars} chars) exceeds safety limit (${MAX_GENERATED_FILE_CHARS})`);
       return { appliedFiles, errors };
@@ -337,7 +344,6 @@ export class WorktreeManager {
         continue;
       }
 
-      // Deny writing into .git directory
       const normalizedPath = f.path.replace(/\\/g, '/');
       if (normalizedPath.startsWith('.git/') || normalizedPath === '.git') {
         errors.push(`Security violation: Write to protected directory '${f.path}' is forbidden`);
@@ -348,7 +354,7 @@ export class WorktreeManager {
       try {
         const { dirname } = require('path');
         mkdirSync(dirname(fullPath), { recursive: true });
-        writeFileSync(fullPath, f.content, 'utf-8');
+        writeFileSync(fullPath, f.content, 'utf8');
         appliedFiles.push({ path: f.path, operation: f.operation });
       } catch (err: any) {
         errors.push(`Failed writing '${f.path}': ${err.message}`);
@@ -358,4 +364,3 @@ export class WorktreeManager {
     return { appliedFiles, errors };
   }
 }
-

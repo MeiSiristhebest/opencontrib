@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { safeRmSync } from '../workspace/worktree-manager.js';
 
 export interface WorktreeSandboxOptions {
   repoPath: string;
@@ -133,10 +134,10 @@ export class WorktreeSandbox {
         });
       }
     } catch {
-      // If git worktree cleanup fails, remove directory manually
+      // If git worktree cleanup fails, remove directory manually via safe guard
       try {
         if (fs.existsSync(this.sandboxPath)) {
-          fs.rmSync(this.sandboxPath, { recursive: true, force: true });
+          safeRmSync(this.sandboxPath, { recursive: true, force: true });
         }
       } catch {
         // Handled
