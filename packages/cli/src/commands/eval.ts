@@ -83,10 +83,26 @@ const parseJudgmentCommand = new Command('parse-judgment')
     let rawText: string;
 
     if (opts?.stdin) {
-      rawText = process.stdin.readSync({ maxLength: 10 * 1024 * 1024 }) || '';
-      if (!rawText) {
-        rawText = '';
-      }
+      // Cross-platform stdin read (works on Node.js, Bun, Windows, Unix)
+      rawText = await new Promise<string>((resolve) => {
+        const chunks: string[] = [];
+        const dataHandler = (d: string | Buffer) => { chunks.push(d.toString()); };
+        const endHandler = () => {
+          process.stdin.removeListener('data', dataHandler);
+          process.stdin.removeListener('end', endHandler);
+          process.stdin.setEncoding('utf8');
+          resolve(chunks.join(''));
+        };
+        process.stdin.setEncoding('utf8');
+        process.stdin.on('data', dataHandler);
+        process.stdin.on('end', endHandler);
+        // Handle piped input that arrives synchronously before listeners attach
+        const syncChunk = process.stdin.read?.();
+        if (syncChunk) {
+          chunks.push(syncChunk.toString());
+          endHandler();
+        }
+      });
     } else if (responseFile) {
       if (!fs.existsSync(responseFile)) {
         printJSON({ status: 'error', message: `File not found: ${responseFile}` }, opts?.pretty);
