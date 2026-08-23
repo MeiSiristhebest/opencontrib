@@ -36,19 +36,32 @@ export class RepoMemoryLedger {
     if (!existsSync(this.memoryFilePath)) return;
     try {
       const data = JSON.parse(readFileSync(this.memoryFilePath, 'utf-8'));
-      if (Array.isArray(data)) {
-        for (const entry of data) {
+      if (!Array.isArray(data)) {
+        console.warn('[RepoMemory] Cache file is not an array, resetting');
+        this.cache.clear();
+        return;
+      }
+      for (const entry of data) {
+        if (entry && typeof entry.repoFullName === 'string') {
           this.cache.set(entry.repoFullName, entry);
+        } else {
+          console.warn('[RepoMemory] Skipping entry with invalid repoFullName');
         }
       }
-    } catch {}
+    } catch (err: any) {
+      console.warn(`[RepoMemory] Failed to load cache: ${err.message}, resetting`);
+      this.cache.clear();
+    }
   }
 
   save(): void {
     const entries = Array.from(this.cache.values());
     try {
       writeAtomic(this.memoryFilePath, JSON.stringify(entries, null, 2));
-    } catch {}
+    } catch (err: any) {
+      console.error(`[RepoMemory] CRITICAL: Failed to persist memory to ${this.memoryFilePath}: ${err.message}`);
+      throw err;
+    }
   }
 
   getMemory(repoFullName: string): RepoMemoryEntry {

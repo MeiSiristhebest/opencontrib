@@ -33,35 +33,46 @@ const auditCommand = new Command('audit')
     isAutonomous?: boolean;
     pretty?: boolean;
   }) => {
-    let patchContent = opts.patch;
-    if (fs.existsSync(opts.patch)) {
-      try {
-        patchContent = fs.readFileSync(opts.patch, 'utf-8');
-      } catch {}
-    }
+    try {
+      let patchContent = opts.patch;
+      if (fs.existsSync(opts.patch)) {
+        try {
+          patchContent = fs.readFileSync(opts.patch, 'utf-8');
+        } catch (err: any) {
+          console.error(`Failed to read patch file "${opts.patch}": ${err.message}`);
+          process.exit(1);
+        }
+      }
 
-    let prBodyContent = opts.prBody || '';
-    if (opts.prBodyFile && fs.existsSync(opts.prBodyFile)) {
-      try {
-        prBodyContent = fs.readFileSync(opts.prBodyFile, 'utf-8');
-      } catch {}
-    }
+      let prBodyContent = opts.prBody || '';
+      if (opts.prBodyFile && fs.existsSync(opts.prBodyFile)) {
+        try {
+          prBodyContent = fs.readFileSync(opts.prBodyFile, 'utf-8');
+        } catch (err: any) {
+          console.error(`Failed to read PR body file "${opts.prBodyFile}": ${err.message}`);
+          process.exit(1);
+        }
+      }
 
-    const evidence = opts.evidence
-      ? (parseJSON(opts.evidence, '--evidence') as any) || undefined
-      : undefined;
-    const audit = auditGovernance({
-      patchContent,
-      prTitle: opts.prTitle,
-      prBody: prBodyContent,
-      evidence,
-      subagentQualityScore: opts.subagentScore,
-      isAutonomousPrSubmission: opts.isAutonomous ?? false,
-    });
-    printJSON({
-      status: audit.overallConfidence.isPassed ? 'passed' : 'failed',
-      audit,
-    }, opts.pretty);
+      const evidence = opts.evidence
+        ? (parseJSON(opts.evidence, '--evidence') as any) || undefined
+        : undefined;
+      const audit = auditGovernance({
+        patchContent,
+        prTitle: opts.prTitle,
+        prBody: prBodyContent,
+        evidence,
+        subagentQualityScore: opts.subagentScore,
+        isAutonomousPrSubmission: opts.isAutonomous ?? false,
+      });
+      printJSON({
+        status: audit.overallConfidence.isPassed ? 'passed' : 'failed',
+        audit,
+      }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
   });
 
 // ─── governance impact ────────────────────────────────────────────────────────
@@ -77,15 +88,20 @@ const impactCommand = new Command('impact')
     repoContext?: string[];
     pretty?: boolean;
   }) => {
-    const analysis = analyzePatchImpactAndConsistency({
-      modifiedFiles: opts.modifiedFiles,
-      patchContent: opts.patch,
-      repoContextFiles: opts.repoContext,
-    });
-    printJSON({
-      status: analysis.isCompliant ? 'compliant' : 'warnings_found',
-      analysis,
-    }, opts.pretty);
+    try {
+      const analysis = analyzePatchImpactAndConsistency({
+        modifiedFiles: opts.modifiedFiles,
+        patchContent: opts.patch,
+        repoContextFiles: opts.repoContext,
+      });
+      printJSON({
+        status: analysis.isCompliant ? 'compliant' : 'warnings_found',
+        analysis,
+      }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
   });
 
 // ─── governance ci-diagnose ───────────────────────────────────────────────────
@@ -94,23 +110,28 @@ const ciDiagnoseCommand = new Command('ci-diagnose')
   .option('--log-file <path>', 'Path to raw CI/terminal log file (or pipe via stdin)')
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: { pretty?: boolean }, cmd: Command) => {
-    const logFile = (opts as any)['log-file'];
-    let rawLog: string;
-    if (logFile) {
-      const fs = await import('fs');
-      rawLog = fs.readFileSync(logFile, 'utf-8');
-    } else {
-      rawLog = await readStdin();
-    }
-    if (!rawLog) {
-      console.error('❌ No log input. Use --log-file <path> or pipe via stdin');
+    try {
+      const logFile = (opts as any)['log-file'];
+      let rawLog: string;
+      if (logFile) {
+        const fsLib = await import('fs');
+        rawLog = fsLib.readFileSync(logFile, 'utf-8');
+      } else {
+        rawLog = await readStdin();
+      }
+      if (!rawLog) {
+        console.error('❌ No log input. Use --log-file <path> or pipe via stdin');
+        process.exit(1);
+      }
+      const report = parseCiRawLogs(rawLog);
+      printJSON({
+        status: report.hasFailure ? 'failure_detected' : 'healthy',
+        report,
+      }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);
     }
-    const report = parseCiRawLogs(rawLog);
-    printJSON({
-      status: report.hasFailure ? 'failure_detected' : 'healthy',
-      report,
-    }, opts.pretty);
   });
 
 // ─── governance pr-template ───────────────────────────────────────────────────
@@ -141,20 +162,25 @@ const prTemplateCommand = new Command('pr-template')
     aiDisclosure?: boolean;
     pretty?: boolean;
   }) => {
-    const prBody = renderMasterPrTemplate({
-      keyChanges: ['Fixed the issue'],
-      nativeTemplateContent: opts.nativeTemplate,
-      issueNumber: parseInt(opts.issue, 10) || 1,
-      issueTitle: opts.issueTitle,
-      summary: opts.summary,
-      validationCommand: opts.validationCmd || 'bun test',
-      validationOutputSnippet: opts.validationOutput || 'All unit tests pass cleanly.',
-      confidenceScore: opts.confidence,
-      riskLevel: opts.risk,
-      isDocumentationOnly: opts.isDocsOnly ?? false,
-      aiDisclosureRequired: opts.aiDisclosure ?? false,
-    });
-    printJSON({ status: 'success', prBody }, opts.pretty);
+    try {
+      const prBody = renderMasterPrTemplate({
+        keyChanges: ['Fixed the issue'],
+        nativeTemplateContent: opts.nativeTemplate,
+        issueNumber: parseInt(opts.issue, 10) || 1,
+        issueTitle: opts.issueTitle,
+        summary: opts.summary,
+        validationCommand: opts.validationCmd || 'bun test',
+        validationOutputSnippet: opts.validationOutput || 'All unit tests pass cleanly.',
+        confidenceScore: opts.confidence,
+        riskLevel: opts.risk,
+        isDocumentationOnly: opts.isDocsOnly ?? false,
+        aiDisclosureRequired: opts.aiDisclosure ?? false,
+      });
+      printJSON({ status: 'success', prBody }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
   });
 
 // ─── governance claim / render-issue ─────────────────────────────────────────
@@ -173,16 +199,21 @@ const claimCommand = new Command('claim')
     testSnippet?: string;
     pretty?: boolean;
   }) => {
-    const { ClaimProtocol } = await import('@opencontrib/core');
-    const num = parseInt(opts.issue, 10) || 0;
-    const payload = ClaimProtocol.generateClaimPayload(num, opts.title);
-    if (opts.finding) {
-      payload.findingSummary = opts.finding;
+    try {
+      const { ClaimProtocol } = await import('@opencontrib/core');
+      const num = parseInt(opts.issue, 10) || 0;
+      const payload = ClaimProtocol.generateClaimPayload(num, opts.title);
+      if (opts.finding) {
+        payload.findingSummary = opts.finding;
+      }
+      if (opts.testSnippet) {
+        payload.claimComment += `\n\n\`\`\`\n${opts.testSnippet}\n\`\`\``;
+      }
+      printJSON({ status: 'success', payload }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
     }
-    if (opts.testSnippet) {
-      payload.claimComment += `\n\n\`\`\`\n${opts.testSnippet}\n\`\`\``;
-    }
-    printJSON({ status: 'success', payload }, opts.pretty);
   });
 
 // ─── governance lint-md ───────────────────────────────────────────────────────
@@ -191,17 +222,22 @@ const lintMdCommand = new Command('lint-md')
   .argument('[file]', 'Path to markdown file to validate (reads from stdin if omitted)')
   .option('--pretty', 'Pretty-print', false)
   .action(async (file?: string, opts?: { pretty?: boolean }) => {
-    let content = '';
-    if (file && fs.existsSync(file)) {
-      content = fs.readFileSync(file, 'utf-8');
-    } else {
-      content = await readStdin();
+    try {
+      let content = '';
+      if (file && fs.existsSync(file)) {
+        content = fs.readFileSync(file, 'utf-8');
+      } else {
+        content = await readStdin();
+      }
+      const report = validateMarkdownIntegrity(content);
+      printJSON({
+        status: report.isValid ? 'passed' : 'failed',
+        report,
+      }, opts?.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts?.pretty);
+      process.exit(1);
     }
-    const report = validateMarkdownIntegrity(content);
-    printJSON({
-      status: report.isValid ? 'passed' : 'failed',
-      report,
-    }, opts?.pretty);
   });
 
 // ─── Top-level command ────────────────────────────────────────────────────────

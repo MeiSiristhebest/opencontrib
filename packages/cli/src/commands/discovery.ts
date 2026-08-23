@@ -17,24 +17,29 @@ const rankCommand = new Command('rank')
   .option('--input <json>', 'JSON object with issue, repository, developerProfile (or pipe via stdin)')
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: { pretty?: boolean }, cmd: Command) => {
-    const input = (opts as any).input ?? await readStdin();
-    const parsed = parseJSON(input, 'stdin') as any;
-    if (!parsed?.issue) {
-      console.error('❌ Missing required "issue" field in input JSON');
+    try {
+      const input = (opts as any).input ?? await readStdin();
+      const parsed = parseJSON(input, 'stdin') as any;
+      if (!parsed?.issue) {
+        console.error('❌ Missing required "issue" field in input JSON');
+        process.exit(1);
+      }
+      const repoObj = parsed.repository || parsed.repo;
+      const normalizedRepo = {
+        fullName: repoObj?.fullName || 'unknown/unknown',
+        stars: repoObj?.stars ?? repoObj?.starsCount ?? 0,
+        primaryLanguage: repoObj?.primaryLanguage,
+      };
+      const signals = rankOpportunitySignals({
+        issue: parsed.issue,
+        repository: normalizedRepo,
+        developerProfile: parsed.developerProfile,
+      });
+      printJSON({ status: 'success', signals }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);
     }
-    const repoObj = parsed.repository || parsed.repo;
-    const normalizedRepo = {
-      fullName: repoObj?.fullName || 'unknown/unknown',
-      stars: repoObj?.stars ?? repoObj?.starsCount ?? 0,
-      primaryLanguage: repoObj?.primaryLanguage,
-    };
-    const signals = rankOpportunitySignals({
-      issue: parsed.issue,
-      repository: normalizedRepo,
-      developerProfile: parsed.developerProfile,
-    });
-    printJSON({ status: 'success', signals }, opts.pretty);
   });
 
 const qualifyCommand = new Command('qualify')
@@ -42,17 +47,22 @@ const qualifyCommand = new Command('qualify')
   .option('--input <json>', 'JSON object with issue data (or pipe via stdin)')
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: { pretty?: boolean }, cmd: Command) => {
-    const input = (opts as any).input ?? await readStdin();
-    const parsed = parseJSON(input, 'stdin') as any;
-    if (!parsed?.issueNumber || !parsed.issueTitle) {
-      console.error('❌ Missing required "issueNumber" and "issueTitle" in input JSON');
+    try {
+      const input = (opts as any).input ?? await readStdin();
+      const parsed = parseJSON(input, 'stdin') as any;
+      if (!parsed?.issueNumber || !parsed.issueTitle) {
+        console.error('❌ Missing required "issueNumber" and "issueTitle" in input JSON');
+        process.exit(1);
+      }
+      const qualification = qualifyIssue(parsed);
+      printJSON({
+        status: qualification.isQualified ? 'qualified' : 'disqualified',
+        qualification,
+      }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);
     }
-    const qualification = qualifyIssue(parsed);
-    printJSON({
-      status: qualification.isQualified ? 'qualified' : 'disqualified',
-      qualification,
-    }, opts.pretty);
   });
 
 const feasibilityCommand = new Command('feasibility')
@@ -62,22 +72,27 @@ const feasibilityCommand = new Command('feasibility')
   .option('--labels <list>', 'Issue labels, comma-separated', (v) => v.split(','))
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: { title: string; body?: string; labels?: string[]; pretty?: boolean }) => {
-    const capabilities = detectSystemCapabilities();
-    const assessment = assessFeasibility(
-      opts.title,
-      opts.body || '',
-      opts.labels || [],
-      capabilities,
-    );
-    printJSON({
-      status: 'success',
-      assessment,
-      localCapabilities: {
-        os: capabilities.os,
-        hasWsl: capabilities.hasWsl,
-        hasDocker: capabilities.hasDocker,
-      },
-    }, opts.pretty);
+    try {
+      const capabilities = detectSystemCapabilities();
+      const assessment = assessFeasibility(
+        opts.title,
+        opts.body || '',
+        opts.labels || [],
+        capabilities,
+      );
+      printJSON({
+        status: 'success',
+        assessment,
+        localCapabilities: {
+          os: capabilities.os,
+          hasWsl: capabilities.hasWsl,
+          hasDocker: capabilities.hasDocker,
+        },
+      }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
   });
 
 const contextCommand = new Command('context')
@@ -85,38 +100,43 @@ const contextCommand = new Command('context')
   .option('--input <json>', 'JSON with issue, repoDetails, repoTree (or pipe via stdin)')
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: { pretty?: boolean }, cmd: Command) => {
-    const input = (opts as any).input ?? await readStdin();
-    const parsed = parseJSON(input, 'stdin') as any;
-    if (!parsed?.issue || !parsed.repoDetails) {
-      console.error('❌ Missing required "issue" and "repoDetails" in input JSON');
+    try {
+      const input = (opts as any).input ?? await readStdin();
+      const parsed = parseJSON(input, 'stdin') as any;
+      if (!parsed?.issue || !parsed.repoDetails) {
+        console.error('❌ Missing required "issue" and "repoDetails" in input JSON');
+        process.exit(1);
+      }
+      const { ContextAssembler } = await import('@opencontrib/core');
+      const assembler = new ContextAssembler();
+      const repoTree = (parsed.repoTree || []).map((item: any) => ({
+        path: item.path,
+        mode: '100644',
+        type: item.type as any,
+        sha: item.sha || 'placeholder',
+      }));
+      const context = await assembler.assembleContext({
+        issue: {
+          number: parsed.issue.number,
+          title: parsed.issue.title,
+          body: parsed.issue.body,
+          labels: parsed.issue.labels || [],
+          isOpen: true,
+          assignees: [],
+          createdAt: parsed.issue.createdAt || new Date().toISOString(),
+          comments: parsed.issue.comments || [],
+        },
+        repoDetails: {
+          ...parsed.repoDetails,
+          fullName: parsed.repoDetails.fullName || `${parsed.repoDetails.owner}/${parsed.repoDetails.repo}`,
+        },
+        repoTree,
+      });
+      printJSON({ status: 'success', context }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);
     }
-    const { ContextAssembler } = await import('@opencontrib/core');
-    const assembler = new ContextAssembler();
-    const repoTree = (parsed.repoTree || []).map((item: any) => ({
-      path: item.path,
-      mode: '100644',
-      type: item.type as any,
-      sha: item.sha || 'placeholder',
-    }));
-    const context = await assembler.assembleContext({
-      issue: {
-        number: parsed.issue.number,
-        title: parsed.issue.title,
-        body: parsed.issue.body,
-        labels: parsed.issue.labels || [],
-        isOpen: true,
-        assignees: [],
-        createdAt: parsed.issue.createdAt || new Date().toISOString(),
-        comments: parsed.issue.comments || [],
-      },
-      repoDetails: {
-        ...parsed.repoDetails,
-        fullName: parsed.repoDetails.fullName || `${parsed.repoDetails.owner}/${parsed.repoDetails.repo}`,
-      },
-      repoTree,
-    });
-    printJSON({ status: 'success', context }, opts.pretty);
   });
 
 const manifestsCommand = new Command('manifests')
@@ -124,10 +144,15 @@ const manifestsCommand = new Command('manifests')
   .option('--input <json>', 'JSON with workflows, readmeContent, packageJsonContent, etc. (or pipe via stdin)')
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: { pretty?: boolean }, cmd: Command) => {
-    const input = (opts as any).input ?? await readStdin();
-    const parsed = parseJSON(input, 'stdin') as any;
-    const result = diagnoseManifests(parsed || {});
-    printJSON(result, opts.pretty);
+    try {
+      const input = (opts as any).input ?? await readStdin();
+      const parsed = parseJSON(input, 'stdin') as any;
+      const result = diagnoseManifests(parsed || {});
+      printJSON(result, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
   });
 
 // ─── Top-level command ────────────────────────────────────────────────────────

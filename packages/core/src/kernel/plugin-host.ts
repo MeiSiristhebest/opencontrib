@@ -208,7 +208,10 @@ export class PluginHost implements ProbeRegistryApi {
         toolsCount: registeredTools.length,
       }, plugin.name);
     } catch (err: any) {
-      console.error(`[PluginHost] Failed to activate plugin "${plugin.name}":`, err.message);
+      // Rollback: undo all registrations that occurred before the failure
+      for (const pId of registeredProbes) this.unregister(pId);
+      for (const tName of registeredTools) this.tools.delete(tName);
+      console.error(`[PluginHost] Failed to activate "${plugin.name}", rolled back ${registeredProbes.length} probes and ${registeredTools.length} tools:`, err.message);
       throw err;
     }
   }

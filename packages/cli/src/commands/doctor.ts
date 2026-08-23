@@ -9,7 +9,8 @@ export const doctorCommand = new Command('doctor')
   .option('--pretty', 'Render output as an ASCII table', false)
   .option('--json', 'Force JSON output (default is table)', false)
   .action(async (opts: { pretty?: boolean; json?: boolean }) => {
-    const report = runDoctorAudit();
+    try {
+      const report = runDoctorAudit();
 
     const useTable = opts.pretty || !opts.json;
 
@@ -27,5 +28,9 @@ export const doctorCommand = new Command('doctor')
       console.log('');
     } else {
       printJSON({ status: 'success', report }, true);
+    }
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, true);
+      process.exit(1);
     }
   });

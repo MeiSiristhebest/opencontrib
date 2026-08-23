@@ -32,8 +32,23 @@ export class EvidenceGraph {
     this.edges.push({ fromUri, toUri, relation });
   }
 
-  public getEvidenceChain(findingUri: string): EvidenceChain {
+  public unlink(fromUri?: string, toUri?: string): void {
+    if (fromUri && toUri) {
+      this.edges = this.edges.filter((e) => !(e.fromUri === fromUri && e.toUri === toUri));
+    } else if (fromUri) {
+      this.edges = this.edges.filter((e) => e.fromUri !== fromUri && e.toUri !== fromUri);
+    }
+  }
+
+  public clear(): void {
+    this.edges = [];
+  }
+
+  public getEvidenceChain(findingUri: string): EvidenceChain | { error: 'NOT_FOUND'; uri: string } {
     const finding = this.pointerStore.get(findingUri);
+    if (!finding) {
+      return { error: 'NOT_FOUND', uri: findingUri };
+    }
     const relatedEdges = this.edges.filter((e) => e.fromUri === findingUri || e.toUri === findingUri);
 
     let hotspotUri: string | undefined;

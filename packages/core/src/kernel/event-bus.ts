@@ -16,7 +16,7 @@ export class MicrokernelEventBus implements EventBusApi {
 
   public async emit<T = unknown>(eventType: string, payload: T, source = 'kernel'): Promise<void> {
     const event: KernelEvent<T> = {
-      id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
       type: eventType,
       timestamp: new Date().toISOString(),
       source,
@@ -37,6 +37,13 @@ export class MicrokernelEventBus implements EventBusApi {
         console.error(`[EventBus] Error in handler for event '${eventType}' from source '${source}':`, err.message);
       }
     }
+  }
+
+  public off<T = unknown>(eventType: string, handler: (event: KernelEvent<T>) => Promise<void> | void): void {
+    const list = this.handlers.get(eventType);
+    if (!list) return;
+    const idx = list.indexOf(handler as KernelEventHandler);
+    if (idx !== -1) list.splice(idx, 1);
   }
 
   public getHistory(limit = 20): KernelEvent[] {

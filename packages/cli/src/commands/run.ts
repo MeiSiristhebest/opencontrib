@@ -35,12 +35,17 @@ const runGet = new Command('get')
   .addArgument(new Argument('<runId>', 'Run ID'))
   .option('--pretty', 'Pretty-print', false)
   .action(async (runId: string, opts: { pretty?: boolean }) => {
-    const run = runManager.getRun(runId);
-    if (!run) {
-      console.error(`❌ Run "${runId}" not found`);
+    try {
+      const run = runManager.getRun(runId);
+      if (!run) {
+        console.error(`❌ Run "${runId}" not found`);
+        process.exit(1);
+      }
+      printJSON({ status: 'success', run }, opts.pretty);
+    } catch (err: any) {
+      console.error(`❌ ${err.message}`);
       process.exit(1);
     }
-    printJSON({ status: 'success', run }, opts.pretty);
   });
 
 // ─── run resume <runId> ──────────────────────────────────────────────────────

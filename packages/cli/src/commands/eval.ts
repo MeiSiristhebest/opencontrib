@@ -24,6 +24,7 @@ import {
   executeBenchmarkScenario,
   normalizePatchLineEndings,
   parseSchemaV2Report,
+  RepoMemoryLedger,
 } from '@opencontrib/core';
 import { printJSON } from '../utils/output.js';
 
@@ -38,13 +39,14 @@ const judgeCommand = new Command('judge')
   .argument('<transcript-file>', 'Path to transcript.jsonl file')
   .option('--pretty', 'Pretty-print metrics summary', false)
   .action(async (transcriptFile: string, opts: { pretty?: boolean }) => {
-    if (!fs.existsSync(transcriptFile)) {
-      printJSON({ status: 'error', message: `File not found: ${transcriptFile}` }, opts.pretty);
-      process.exit(1);
-    }
+    try {
+      if (!fs.existsSync(transcriptFile)) {
+        printJSON({ status: 'error', message: `File not found: ${transcriptFile}` }, opts.pretty);
+        process.exit(1);
+      }
 
-    const { events, metrics } = parseTrajectoryFromJSONL(transcriptFile);
-    const { systemPrompt, userPrompt, trajectoryText } = buildJudgePrompt(events, metrics);
+      const { events, metrics } = parseTrajectoryFromJSONL(transcriptFile);
+      const { systemPrompt, userPrompt, trajectoryText } = buildJudgePrompt(events, metrics);
 
     // Print a human-readable guide for the Agent to follow
     console.log([
@@ -71,7 +73,11 @@ const judgeCommand = new Command('judge')
       '### After the sub-agent responds:',
       '  opencontrib eval parse-judgment <path-to-sub-agent-response.json>',
       '  (or pipe: echo \'<json>\' | opencontrib eval parse-judgment --stdin)',
-    ].join('\n'));
+      ].join('\n'));
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
   });
 
 // ─── eval parse-judgment ──────────────────────────────────────────────────────
@@ -145,32 +151,37 @@ const reflectCommand = new Command('reflect')
     judgmentFile: string,
     opts: { repo?: string; runId?: string; persist?: boolean; pretty?: boolean },
   ) => {
-    if (!fs.existsSync(judgmentFile)) {
-      printJSON({ status: 'error', message: `File not found: ${judgmentFile}` }, opts.pretty);
-      process.exit(1);
-    }
-
-    let report;
     try {
-      const raw = fs.readFileSync(judgmentFile, 'utf8');
-      const parsed = JSON.parse(raw);
-      report = parsed.report ?? parsed; // support both `{status, report}` and bare report
+      if (!fs.existsSync(judgmentFile)) {
+        printJSON({ status: 'error', message: `File not found: ${judgmentFile}` }, opts.pretty);
+        process.exit(1);
+      }
+
+      let report;
+      try {
+        const raw = fs.readFileSync(judgmentFile, 'utf8');
+        const parsed = JSON.parse(raw);
+        report = parsed.report ?? parsed;
+      } catch (err: any) {
+        printJSON({ status: 'error', message: `Failed to parse judgment file: ${err.message}` }, opts.pretty);
+        process.exit(1);
+      }
+
+      const insight = synthesizeReflexionInsights(report, [], {
+        runId: opts.runId,
+        repoFullName: opts.repo,
+      });
+
+      if (opts.persist) {
+        const memLedger = new RepoMemoryLedger();
+        persistReflexionToMemoryLedger(insight, memLedger);
+      }
+
+      printJSON({ status: 'success', insight, persisted: opts.persist ?? false }, opts.pretty);
     } catch (err: any) {
-      printJSON({ status: 'error', message: `Failed to parse judgment file: ${err.message}` }, opts.pretty);
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);
-      return;
     }
-
-    const insight = synthesizeReflexionInsights(report, [], {
-      runId: opts.runId,
-      repoFullName: opts.repo,
-    });
-
-    if (opts.persist) {
-      persistReflexionToMemoryLedger(insight);
-    }
-
-    printJSON({ status: 'success', insight, persisted: opts.persist ?? false }, opts.pretty);
   });
 
 // ─── eval benchmark ───────────────────────────────────────────────────────────
@@ -189,82 +200,85 @@ const benchmarkCommand = new Command('benchmark')
       fixtures?: string;
       v2?: boolean;
     }) => {
-    // ── Load SWE-bench fixtures if provided ──
-    let scenarioInstances = scenarioId
-      ? STANDARD_BENCHMARK_SCENARIOS.filter((s) => s.id === scenarioId)
-      : STANDARD_BENCHMARK_SCENARIOS;
+    try {
+      // ── Load SWE-bench fixtures if provided ──
+      let scenarioInstances = scenarioId
+        ? STANDARD_BENCHMARK_SCENARIOS.filter((s) => s.id === scenarioId)
+        : STANDARD_BENCHMARK_SCENARIOS;
 
-    if (opts?.fixtures && fs.existsSync(opts.fixtures)) {
-      const fixtureDir = opts.fixtures;
-      const fixtureEntries = fs.readdirSync(fixtureDir).filter((e) =>
-        fs.statSync(path.join(fixtureDir, e)).isDirectory(),
-      );
-      const fixtureInstances = fixtureEntries.map((dir) => {
-        const metaPath = path.join(fixtureDir, dir, 'metadata.json');
-        let instanceId = dir;
-        if (fs.existsSync(metaPath)) {
-          try {
-            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-            instanceId = meta.instance_id || dir;
-          } catch { /* use dir name */ }
+      if (opts?.fixtures && fs.existsSync(opts.fixtures)) {
+        const fixtureDir = opts.fixtures;
+        const fixtureEntries = fs.readdirSync(fixtureDir).filter((e) =>
+          fs.statSync(path.join(fixtureDir, e)).isDirectory(),
+        );
+        const fixtureInstances = fixtureEntries.map((dir) => {
+          const metaPath = path.join(fixtureDir, dir, 'metadata.json');
+          let instanceId = dir;
+          if (fs.existsSync(metaPath)) {
+            try {
+              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+              instanceId = meta.instance_id || dir;
+            } catch { /* use dir name */ }
+          }
+          return instanceId;
+        });
+        if (fixtureInstances.length > 0) {
+          printJSON(
+            { status: 'fixtures-loaded', count: fixtureInstances.length, instances: fixtureInstances },
+            opts?.pretty,
+          );
         }
-        return instanceId;
-      });
-      if (fixtureInstances.length > 0) {
+      }
+
+      if (scenarioInstances.length === 0) {
+        printJSON({ status: 'error', message: `Scenario not found: ${scenarioId}` }, opts?.pretty);
+        process.exit(1);
+      }
+
+      let appliedPatch: string | undefined;
+      if (opts?.patchFile && fs.existsSync(opts.patchFile)) {
+        const rawPatch = fs.readFileSync(opts.patchFile, 'utf8');
+        appliedPatch = normalizePatchLineEndings(rawPatch);
         printJSON(
-          { status: 'fixtures-loaded', count: fixtureInstances.length, instances: fixtureInstances },
+          { status: 'patch-loaded', path: opts.patchFile, bytes: Buffer.byteLength(rawPatch) },
           opts?.pretty,
         );
       }
-    }
 
-    if (scenarioInstances.length === 0) {
-      printJSON({ status: 'error', message: `Scenario not found: ${scenarioId}` }, opts?.pretty);
-      process.exit(1);
-    }
-
-    // ── Two-phase workflow: apply --patch-file before grading ──
-    let appliedPatch: string | undefined;
-    if (opts?.patchFile && fs.existsSync(opts.patchFile)) {
-      const rawPatch = fs.readFileSync(opts.patchFile, 'utf8');
-      appliedPatch = normalizePatchLineEndings(rawPatch);
-      printJSON(
-        { status: 'patch-loaded', path: opts.patchFile, bytes: Buffer.byteLength(rawPatch) },
-        opts?.pretty,
+      const results = scenarioInstances.map((s) =>
+        executeBenchmarkScenario(s, s.requiredPhaseSequence, 14, 18500),
       );
-    }
 
-    const results = scenarioInstances.map((s) =>
-      executeBenchmarkScenario(s, s.requiredPhaseSequence, 14, 18500),
-    );
+      const aggregate: {
+        status: string;
+        scenariosCount: number;
+        results: { scenarioId: string; success: boolean; stepsTaken: number; durationMs: number; phaseGatingVerified: boolean; errors: string[] }[];
+        appliedPatch?: string;
+        reportDir?: string;
+      } = {
+        status: results.every((r) => r.success) ? 'passed' : 'failed',
+        scenariosCount: scenarioInstances.length,
+        results,
+      };
+      if (appliedPatch) aggregate.appliedPatch = appliedPatch;
 
-    const aggregate: {
-      status: string;
-      scenariosCount: number;
-      results: { scenarioId: string; success: boolean; stepsTaken: number; durationMs: number; phaseGatingVerified: boolean; errors: string[] }[];
-      appliedPatch?: string;
-      reportDir?: string;
-    } = {
-      status: results.every((r) => r.success) ? 'passed' : 'failed',
-      scenariosCount: scenarioInstances.length,
-      results,
-    };
-    if (appliedPatch) aggregate.appliedPatch = appliedPatch;
-
-    // ── Schema-v2 output mode ──
-    if (opts?.v2) {
-      const report = parseSchemaV2Report(aggregate, results);
-      if (opts?.reportDir) {
-        if (!fs.existsSync(opts.reportDir)) {
-          fs.mkdirSync(opts.reportDir, { recursive: true });
+      if (opts?.v2) {
+        const report = parseSchemaV2Report(aggregate, results);
+        if (opts?.reportDir) {
+          if (!fs.existsSync(opts.reportDir)) {
+            fs.mkdirSync(opts.reportDir, { recursive: true });
+          }
+          const reportPath = path.join(opts.reportDir, 'report-v2.json');
+          fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf8');
+          printJSON({ status: 'report-written', path: reportPath }, opts?.pretty);
         }
-        const reportPath = path.join(opts.reportDir, 'report-v2.json');
-        fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf8');
-        printJSON({ status: 'report-written', path: reportPath }, opts?.pretty);
+        printJSON(report, opts?.pretty);
+      } else {
+        printJSON(aggregate, opts?.pretty);
       }
-      printJSON(report, opts?.pretty);
-    } else {
-      printJSON(aggregate, opts?.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts?.pretty);
+      process.exit(1);
     }
   });
 

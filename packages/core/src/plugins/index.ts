@@ -153,7 +153,11 @@ export async function createDefaultPluginHost(
   const host = new PluginHost({ ...options, workspacePath: wsPath });
 
   for (const plugin of BUILTIN_PLUGINS) {
-    await host.registerPlugin(plugin);
+    try {
+      await host.registerPlugin(plugin);
+    } catch (err: any) {
+      console.error(`[createDefaultPluginHost] Plugin "${plugin.name}" failed to activate, skipping:`, err.message);
+    }
   }
 
   // Register only capabilities enabled in configuration

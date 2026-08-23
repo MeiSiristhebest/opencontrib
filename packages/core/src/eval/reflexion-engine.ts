@@ -73,14 +73,14 @@ export function synthesizeReflexionInsights(
 
 /**
  * Persists Reflexion insights into the local repository memory ledger.
+ * The ledger is required to prevent throwaway instances whose data is silently GC'd.
  */
 export function persistReflexionToMemoryLedger(
   insight: ReflexionInsight,
-  ledger?: RepoMemoryLedger,
+  ledger: RepoMemoryLedger,
 ): void {
-  const memLedger = ledger ?? new RepoMemoryLedger();
   if (insight.repoFullName) {
-    memLedger.recordReflexionInsight(insight.repoFullName, {
+    ledger.recordReflexionInsight(insight.repoFullName, {
       failureMode: insight.failureMode,
       rootCause: insight.rootCause,
       lessonsLearned: insight.lessonsLearned,

@@ -48,7 +48,9 @@ export const evidenceCommand = new Command('evidence')
           if (run?.artifacts?.workspace?.baseCommitSha && !baselineSha) {
             baselineSha = String(run.artifacts.workspace.baseCommitSha);
           }
-        } catch {}
+        } catch (err: any) {
+          console.warn(`Warning: Could not resolve run "${opts.runId}": ${err.message}`);
+        }
       }
 
       let dualStage: any;

@@ -134,7 +134,7 @@ export class ContributionStateMachine {
     const { policy, confidenceScore, reproductionCaptured, stage } = this.state;
 
     // 1. Lifecycle position constraint
-    const validStages: PipelineStage[] = ['HUMAN_GATE', 'PR_SUBMISSION'];
+    const validStages: PipelineStage[] = ['SUBAGENT_REVIEW', 'HUMAN_GATE', 'PR_SUBMISSION'];
     if (!validStages.includes(stage)) {
       return {
         allowed: false,

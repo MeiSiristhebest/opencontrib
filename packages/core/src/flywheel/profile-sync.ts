@@ -20,8 +20,14 @@ export class ProfileFlywheel {
   loadRecords(): ContributionRecord[] {
     if (!existsSync(this.ledgerPath)) return [];
     try {
-      return JSON.parse(readFileSync(this.ledgerPath, 'utf-8'));
-    } catch {
+      const data = JSON.parse(readFileSync(this.ledgerPath, 'utf-8'));
+      if (!Array.isArray(data)) {
+        console.warn('[ProfileSync] Ledger file is not an array, returning empty');
+        return [];
+      }
+      return data;
+    } catch (err: any) {
+      console.error(`[ProfileSync] CRITICAL: Failed to load ledger: ${err.message}`);
       return [];
     }
   }

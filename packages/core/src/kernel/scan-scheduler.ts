@@ -50,7 +50,7 @@ export class ProbeScanScheduler {
     probesToRun: ProbeDescriptor[],
     store: SmartPointerStore,
   ): Promise<ScanSchedulerResult> {
-    const executed: string[] = [];
+    const executed: Array<{ id: string; status: 'success' | 'error'; error?: string }> = [];
     const beforeCount = store.list().length;
 
     const hostServices: HostServices = {
@@ -59,7 +59,9 @@ export class ProbeScanScheduler {
         const cwd = opts.cwd || targetPath;
         return execWithSpawn(cmd, { ...opts, cwd });
       },
-      log: () => {},
+      log: (msg, level = 'info') => {
+        console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](msg);
+      },
       isBinaryAvailable: (bin: string) => {
         if (binaryCache.has(bin)) return binaryCache.get(bin)!;
         try {
@@ -77,11 +79,12 @@ export class ProbeScanScheduler {
     };
 
     for (const probe of probesToRun) {
-      executed.push(probe.id);
       try {
         await probe.scan(targetPath, store, hostServices);
+        executed.push({ id: probe.id, status: 'success' });
       } catch (err: any) {
         console.error(`[ProbeScanScheduler] Probe "${probe.id}" scan error:`, err.message);
+        executed.push({ id: probe.id, status: 'error', error: err.message });
       }
     }
 
@@ -91,7 +94,7 @@ export class ProbeScanScheduler {
     return {
       target: targetPath,
       timestamp: new Date().toISOString(),
-      executedProbes: executed,
+      executedProbes: executed.map((e) => e.id),
       pointersCreated: newPointers.map((p) => p.stub),
     };
   }

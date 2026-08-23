@@ -19,15 +19,46 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number; maxB
     const shellArgs = isWindows ? ['/c', cmd] : ['-c', cmd];
     const child = spawn(shell, shellArgs, {
       cwd,
-      timeout: opts.timeout || 30000,
       encoding: 'utf-8',
     });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', reject);
+    let killed = false;
+    const maxLen = opts.maxBuffer || 10 * 1024 * 1024;
+
+    const timer = opts.timeout
+      ? setTimeout(() => {
+          if (killed) return;
+          killed = true;
+          child.kill('SIGKILL');
+          reject(new Error(`Command timed out after ${opts.timeout}ms: ${cmd}`));
+        }, opts.timeout)
+      : undefined;
+
+    child.stdout.on('data', (d) => {
+      const chunk = d.toString();
+      if (stdout.length + chunk.length > maxLen) {
+        if (!killed) { killed = true; child.kill('SIGKILL'); }
+        clearTimeout(timer);
+        reject(new Error(`Output exceeded ${maxLen} bytes`));
+        return;
+      }
+      stdout += chunk;
+    });
+    child.stderr.on('data', (d) => {
+      const chunk = d.toString();
+      if (stderr.length + chunk.length > maxLen) {
+        if (!killed) { killed = true; child.kill('SIGKILL'); }
+        clearTimeout(timer);
+        reject(new Error(`Output exceeded ${maxLen} bytes`));
+        return;
+      }
+      stderr += chunk;
+    });
+    child.on('error', (err) => { clearTimeout(timer); reject(err); });
     child.on('close', (code: number | null) => {
+      clearTimeout(timer);
+      if (killed) return;
       if (code !== 0) reject(new Error(stderr || `Command exited with code ${code}: ${cmd}`));
       else resolve({ stdout, stderr });
     });
