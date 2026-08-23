@@ -82,7 +82,7 @@ export function constructPoCForFinding(finding: NormalizedFinding): PoCArtifact 
         expectedPostFixAssertion: 'wg.Wait() completes within 1s with 0 races',
       });
 
-      pocCode = `package main
+      pocCode = `package main_test
 
 import (
 	"sync"
@@ -90,7 +90,8 @@ import (
 	"time"
 )
 
-// PoC: Reproduce concurrency/lifecycle leak found in ${fileRef}
+// NOTE: Replace 'TargetPackage' with the actual module import path.
+// Example: import TargetPackage "github.com/user/repo/pkg"
 func TestRepro_${cleanId}(t *testing.T) {
 	var wg sync.WaitGroup
 	done := make(chan struct{})
@@ -99,7 +100,7 @@ func TestRepro_${cleanId}(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			// Concurrency stress trigger targeting ${finding.title}
+			TargetPackage.${targetSymbol}(id)
 		}(i)
 	}
 
@@ -176,12 +177,18 @@ func TestRepro_${cleanId}(t *testing.T) {
 
     const pocCode = `import pytest
 
+# NOTE: Replace 'target_module' with the actual Python module path.
+# Derive from file location: src/my_package/utils.py => from my_package.utils import ${targetSymbol}
+from target_module import ${targetSymbol}
+
 # PoC: Reproduce defect found in ${fileRef}
 def test_repro_${cleanId}():
     """Reproduces ${finding.title}"""
-    # Pre-Fix: Trigger boundary defect
-    # Post-Fix: Assert graceful execution
-    pass
+    # Pre-Fix: Trigger boundary defect via null / boundary input
+    # Post-Fix: Target function returns a valid non-None result without exception
+    result = ${targetSymbol}(None)
+    assert result is not None
+    assert result != ""
 `;
 
     return {
@@ -208,12 +215,18 @@ def test_repro_${cleanId}():
       expectedPostFixAssertion: 'returns Result::Err or handles cleanly without panic',
     });
 
-    const pocCode = `#[test]
+    const pocCode = `// NOTE: Replace 'target_crate' with the actual crate/library name.
+// For integration tests: extern crate target_crate;
+// For unit tests: use crate::${targetSymbol};
+use target_crate::${targetSymbol};
+
+#[test]
+#[should_panic]
 fn test_repro_${cleanId}() {
     // PoC: Reproduce ${finding.title} in ${fileRef}
-    let input = "../../../etc/passwd";
-    let result = ${targetSymbol}(input);
-    assert!(result.is_err());
+    // The target function should panic on this boundary input.
+    // If it does not panic, the vulnerability/defect is present.
+    let _result = ${targetSymbol}("/../../../etc/passwd");
 }
 `;
 
@@ -241,7 +254,9 @@ fn test_repro_${cleanId}() {
       expectedPostFixAssertion: 'handles null safely without exception',
     });
 
-    const pocCode = `package org.opencontrib.repro;
+    const pocCode = `// NOTE: Replace 'com.example.repro' with the actual package matching the target project.
+// Derive from file location: src/main/java/com/example/app/Utils.java => package com.example.app;
+package com.example.repro;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -289,7 +304,7 @@ public class Repro${cleanId}Test {
     });
   }
 
-  const pocCode = `import { describe, it, expect } from 'bun:test';
+    const pocCode = `import { describe, it, expect } from 'bun:test';
 
 describe('PoC Reproducer: ${finding.title}', () => {
   it('triggers boundary condition in ${fileRef}', () => {
@@ -298,9 +313,12 @@ describe('PoC Reproducer: ${finding.title}', () => {
     // Expected Post-Fix: ${verificationSteps[0].expectedPostFixAssertion}
     // Source Context: ${sourceContext || 'N/A'}
     const payload = ${isSecurity ? '"../../../etc/passwd"' : 'null'};
+${isSecurity ? `    // Security: expect path-traversal to be rejected with an exception
     expect(() => {
       ${targetSymbol}(payload);
-    }).toThrow();
+    }).toThrow();` : `    // Non-security: target returns an invalid/bad value
+    const result = ${targetSymbol}(payload);
+    expect(Number.isFinite(result)).toBe(false);`}
   });
 });
 `;
