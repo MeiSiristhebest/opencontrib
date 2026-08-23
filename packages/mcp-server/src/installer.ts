@@ -74,13 +74,12 @@ export function getKnownIdeTargets(): IdeConfigTarget[] {
   return targets;
 }
 
-export function generateStandardMcpConfig(runner: 'npx' | 'bunx' = 'npx', githubToken?: string) {
+export function generateStandardMcpConfig(runner: 'npx' | 'bunx' = 'npx') {
   return {
     mcpServers: {
       opencontrib: {
         command: runner,
         args: runner === 'npx' ? ['-y', OPENCONTRIB_MCP_PACKAGE] : [OPENCONTRIB_MCP_PACKAGE],
-        ...(githubToken ? { env: { GITHUB_TOKEN: githubToken } } : {}),
       },
     },
   };
@@ -98,8 +97,12 @@ export function configureMcpTarget(target: IdeConfigTarget, options: InstallOpti
   const serverConfig = {
     command: runner,
     args: runner === 'npx' ? ['-y', OPENCONTRIB_MCP_PACKAGE] : [OPENCONTRIB_MCP_PACKAGE],
-    ...(options.githubToken ? { env: { GITHUB_TOKEN: options.githubToken } } : {}),
   };
+
+  // SECURITY: Tokens are NOT written to config files. Set GITHUB_TOKEN in your environment.
+  if (options.githubToken) {
+    console.warn('[installer] githubToken provided but intentionally not written to config file. Set GITHUB_TOKEN env var instead.');
+  }
 
   try {
     const configDir = dirname(target.configPath);

@@ -500,7 +500,7 @@ export class AgentOrchestrator {
       subagentQualityScore: qualityRubric.overallScore,
     });
 
-    if (riskAssessment.riskLevel === 'CRITICAL' || riskAssessment.recommendedPolicy === 'blocked' || (!qualityRubric.isPassed && !input.humanApproved && validationStatus === 'VALIDATION_FAILED')) {
+    if (riskAssessment.riskLevel === 'CRITICAL' || riskAssessment.recommendedPolicy === 'blocked' || (!qualityRubric.isPassed && !input.humanApproved && (validationStatus === 'VALIDATION_FAILED' || validationStatus === 'VALIDATION_UNAVAILABLE'))) {
       this.stateMachine.transition(
         'BLOCKED',
         `Contribution risk critical or validation failed: ${riskAssessment.reasons.join(', ')}`,
@@ -588,7 +588,8 @@ export class AgentOrchestrator {
     // Phase 7: Real Pull Request Submission & Verified Flywheel Sync
     // ─────────────────────────────────────────────────────────────
     // Authoritative State Machine Submission Policy Enforcement
-    if (!this.stateMachine.canProceedToSubmission()) {
+    const submissionGate = this.stateMachine.canProceedToSubmission();
+    if (!submissionGate.allowed) {
       const currentState = this.stateMachine.getState();
       this.stateMachine.transition('BLOCKED', 'Submission blocked by authoritative state machine policy');
       return {
@@ -611,10 +612,10 @@ export class AgentOrchestrator {
     this.stateMachine.transition('PR_SUBMISSION', 'Creating Pull Request on GitHub');
     const prDraftText = buildPrDescription({
       issueNumber: selectedOpp.issueNumber,
-      problemSummary: patchDraft?.summary || selectedOpp.title,
-      rootCause: patchDraft?.rationale || 'Targeted surgical bugfix',
-      keyChanges: patchDraft?.implementationSteps || ['Applied surgical fix'],
-      reproductionCommand: patchDraft?.regressionTestPlan?.[0] || 'npm test',
+      problemSummary: activePatch?.summary || selectedOpp.title,
+      rootCause: activePatch?.rationale || 'Targeted surgical bugfix',
+      keyChanges: activePatch?.implementationSteps || ['Applied surgical fix'],
+      reproductionCommand: activePatch?.regressionTestPlan?.[0] || 'npm test',
       verificationCommand: 'npm test',
       testCount: 5,
       dcoAuthorName: 'OpenContrib',
@@ -675,7 +676,7 @@ export class AgentOrchestrator {
       prUrl,
       status: 'submitted',
       submittedAt: new Date().toISOString(),
-      diffStat: `~${patchDraft?.estimatedDiffLines || 10} lines`,
+      diffStat: `~${activePatch?.estimatedDiffLines || 10} lines`,
       evidenceSummary: `Verified across ${implementationAttempts} attempt(s) with ${qualityRubric.overallScore}% quality score (${validationStatus})`,
       provenance: {
         source: 'system_recorded',

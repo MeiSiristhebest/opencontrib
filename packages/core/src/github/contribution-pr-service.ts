@@ -53,7 +53,11 @@ export class ContributionPrService {
         await new Promise((r) => setTimeout(r, 3000));
         return currentUser;
       }
-    } catch {
+    } catch (err) {
+      const status = (err as any).status;
+      if (status === 401 || status === 403) {
+        throw new Error(`GitHub auth failed (${status}) when forking ${owner}/${repo}: ${(err as any).message}`);
+      }
       return owner;
     }
   }
@@ -92,7 +96,11 @@ export class ContributionPrService {
     });
     const baseTreeSha = baseCommit.data.tree.sha;
 
-    // 2. Create or update working branch on fork
+    // 2. Validate and sanitize branch name
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,100}$/.test(branchName)) {
+      throw new Error(`Invalid branch name "${branchName}": must be 2-102 chars, alphanumeric with dots/underscores/hyphens`);
+    }
+
     try {
       await this.octokit.rest.git.createRef({
         owner: forkOwner,
@@ -138,7 +146,11 @@ export class ContributionPrService {
     let finalCommitMessage = commitMessage;
     if (dcoSignOff && !finalCommitMessage.includes('Signed-off-by:')) {
       const user = await this.octokit.rest.users.getAuthenticated();
-      finalCommitMessage += `\n\nSigned-off-by: ${user.data.name || user.data.login} <${user.data.email || 'noreply@github.com'}>`;
+      const email = user.data.email || `${user.data.login}@users.noreply.github.com`;
+      if (email.endsWith('@noreply.github.com')) {
+        console.warn(`[contribution-pr] DCO sign-off uses GitHub no-reply email "${email}" — may fail DCO check`);
+      }
+      finalCommitMessage += `\n\nSigned-off-by: ${user.data.name || user.data.login} <${email}>`;
     }
 
     const newCommit = await this.octokit.rest.git.createCommit({

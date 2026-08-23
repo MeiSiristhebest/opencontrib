@@ -77,6 +77,11 @@ export function analyzeGitHotspots(
   for (const [file, data] of churnMap.entries()) {
     const fullPath = path.join(resolved, file);
     try {
+      const stat = fs.statSync(fullPath);
+      if (stat.size > 2 * 1024 * 1024) {
+        // Skip files > 2MB to avoid memory exhaustion on large binaries/assets
+        continue;
+      }
       const content = fs.readFileSync(fullPath, 'utf8');
       const lines = content.split('\n');
       const loc = lines.length;

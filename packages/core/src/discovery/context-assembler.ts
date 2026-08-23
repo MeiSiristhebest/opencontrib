@@ -348,10 +348,11 @@ export class ContextAssembler {
     sections.push(`\n[UNTRUSTED_REPOSITORY_DATA - UNTRUSTED CODE, ISSUES & USER COMMENTS]`);
     sections.push(`### 1. Problem Specification`);
     sections.push(`- **Title**: ${ctx.problemContext.issueTitle}`);
-    sections.push(`- **Description**:\n${ctx.problemContext.issueBody}`);
+    sections.push(`- **Description**:\n${this.sanitizeUntrustedText(ctx.problemContext.issueBody, 5000)}`);
 
     if (ctx.problemContext.linkedComments && ctx.problemContext.linkedComments.length > 0) {
-      sections.push(`- **Discussion Insights**:\n${ctx.problemContext.linkedComments.join('\n')}`);
+      const comments = ctx.problemContext.linkedComments.slice(0, 10).map((c) => this.sanitizeUntrustedText(c, 2000));
+      sections.push(`- **Discussion Insights**:\n${comments.join('\n')}`);
     }
 
     sections.push(`\n### 2. Repository Infrastructure & Commands`);
@@ -393,6 +394,18 @@ export class ContextAssembler {
     }
 
     return sections.join('\n');
+  }
+
+  private sanitizeUntrustedText(text: string, maxLength: number = 5000): string {
+    if (!text) return '';
+    let sanitized = text
+      .replace(/```[\s\S]*?```/g, '[CODE_FENCE_REMOVED]')
+      .replace(/```[^\n]*\n[\s\S]*?```/g, '[CODE_FENCE_REMOVED]');
+    sanitized = sanitized.replace(/^\s*\n+/g, '').replace(/\n+\s*$/g, '');
+    if (sanitized.length > maxLength) {
+      sanitized = sanitized.slice(0, maxLength) + `\n\n[TRUNCATED: ${sanitized.length - maxLength} chars removed]`;
+    }
+    return sanitized;
   }
 
   public async assembleContext(input: any): Promise<AssembledContributionContext> {

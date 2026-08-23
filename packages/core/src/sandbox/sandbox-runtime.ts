@@ -241,7 +241,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
         timeout: timeoutMs,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: sanitizedEnv,
-        shell: process.platform === 'win32', // Use shell wrapper only on Windows for .cmd batch dispatch
+        shell: false,
       };
 
       const result = spawnSync(finalCommand, finalArgs, spawnOptions);

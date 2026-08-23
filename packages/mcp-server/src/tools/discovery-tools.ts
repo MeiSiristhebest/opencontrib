@@ -322,7 +322,6 @@ export function registerDiscoveryTools(server: McpServer): void {
       focusAreas: z.array(z.string()).optional().describe('Developer focus areas (e.g. ["bugfix", "testing", "docs"])'),
       limit: z.number().optional().describe('Maximum number of ranked candidates to return (default 5)'),
       minStars: z.number().optional().describe('Minimum repository stars filter (default 50)'),
-      githubToken: z.string().optional().describe('Optional GitHub token if not set in GITHUB_TOKEN environment variable'),
     },
     async (args) => {
       const profile = {
@@ -337,7 +336,6 @@ export function registerDiscoveryTools(server: McpServer): void {
         repo: isOrg ? undefined : args.target,
         limit: args.limit ?? 5,
         minStars: args.minStars ?? (isOrg ? 100 : 0),
-        githubToken: args.githubToken || process.env.GITHUB_TOKEN,
       };
 
       const opportunities = await scoutOpportunities(profile, scoutOpts);

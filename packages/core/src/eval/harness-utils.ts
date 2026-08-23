@@ -24,8 +24,8 @@ import * as path from 'path';
 export function normalizePatchLineEndings(patch: string): string {
   // Strip any BOM that some Windows editors inject
   const withoutBom = patch.replace(/^\uFEFF/, '');
-  // Normalize CRLF → LF everywhere (but preserve intentional \r in content)
-  return withoutBom.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Normalize CRLF → LF everywhere (preserve standalone \r characters)
+  return withoutBom.replace(/\r\n/g, '\n');
 }
 
 /**
@@ -185,9 +185,8 @@ export function isInstanceResolved(report: SchemaV2Report, instanceId: string): 
   const instanceVerdicts = report.per_test.filter((t) => t.testId === instanceId);
   if (instanceVerdicts.length === 0) return false;
 
-  const hasFailToPass = instanceVerdicts.some((t) => t.status === 'FAIL_TO_PASS' && t.resolved);
+  // Resolved = ALL FAIL_TO_PASS tests pass AND no regressions
+  const allFailToPassResolved = instanceVerdicts.every((t) => t.status !== 'FAIL_TO_PASS' || t.resolved);
   const hasPassToFail = instanceVerdicts.some((t) => t.status === 'PASS_TO_FAIL');
-
-  // Resolved = all FAIL_TO_PASS tests pass AND no regressions
-  return hasFailToPass && !hasPassToFail;
+  return allFailToPassResolved && !hasPassToFail;
 }

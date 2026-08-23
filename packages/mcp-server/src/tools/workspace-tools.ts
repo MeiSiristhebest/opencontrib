@@ -88,7 +88,7 @@ export function registerWorkspaceTools(
         const resolved = path.resolve(args.cleanScratchDir);
         const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
         const allowedRoot = path.resolve(home);
-        if (!resolved.startsWith(allowedRoot)) {
+        if (!resolved.startsWith(allowedRoot + path.sep) && resolved !== allowedRoot) {
           return {
             isError: true,
             content: [{

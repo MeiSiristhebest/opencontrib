@@ -37,7 +37,7 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
       const resolvedCwd = path.resolve(args.cwd);
       if (args.workspaceRoot) {
         const resolvedRoot = path.resolve(args.workspaceRoot);
-        if (!resolvedCwd.startsWith(resolvedRoot)) {
+        if (!resolvedCwd.startsWith(resolvedRoot + path.sep) && resolvedCwd !== resolvedRoot) {
           return {
             isError: true,
             content: [{
@@ -49,7 +49,7 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
       } else {
         // Validate cwd is within home directory
         const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
-        if (!resolvedCwd.startsWith(path.resolve(home))) {
+        if (!resolvedCwd.startsWith(path.resolve(home) + path.sep) && resolvedCwd !== path.resolve(home)) {
           return {
             isError: true,
             content: [{

@@ -14,7 +14,7 @@ export class DefaultNodeFileSystemAdapter implements FileSystemPort {
   public readFile(relPath: string): string {
     const resolved = path.resolve(this.basePath, relPath);
     const baseResolved = path.resolve(this.basePath);
-    if (!resolved.startsWith(baseResolved)) {
+    if (!resolved.startsWith(baseResolved + path.sep) && resolved !== baseResolved) {
       throw new Error(`Path traversal blocked: "${relPath}" resolves outside basePath`);
     }
     const full = path.join(this.basePath, relPath);
@@ -28,7 +28,7 @@ export class DefaultNodeFileSystemAdapter implements FileSystemPort {
   public readDir(relPath: string): string[] {
     const resolved = path.resolve(this.basePath, relPath);
     const baseResolved = path.resolve(this.basePath);
-    if (!resolved.startsWith(baseResolved)) {
+    if (!resolved.startsWith(baseResolved + path.sep) && resolved !== baseResolved) {
       return [];
     }
     const target = path.join(this.basePath, relPath);
@@ -40,7 +40,7 @@ export class DefaultNodeFileSystemAdapter implements FileSystemPort {
     try {
       const resolved = path.resolve(this.basePath, relPath);
       const baseResolved = path.resolve(this.basePath);
-      if (!resolved.startsWith(baseResolved)) return false;
+      if (!resolved.startsWith(baseResolved + path.sep) && resolved !== baseResolved) return false;
     } catch {
       return false;
     }
