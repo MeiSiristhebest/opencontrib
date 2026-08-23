@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import type { ProbeManifest, RepoFingerprint, ProbeNegotiationPlan, SkippedProbeInfo, ProbeCost, ProbeStage } from './types.js';
 import { ProbeRegistry } from './registry.js';
 
@@ -24,10 +24,11 @@ function isBinaryAvailable(binary: string): boolean {
   }
   try {
     const isWindows = process.platform === 'win32';
-    const cmd = isWindows ? `where.exe ${binary}` : `which ${binary}`;
-    execSync(cmd, { stdio: 'ignore' });
-    binaryCache.set(binary, true);
-    return true;
+    const cmd = isWindows ? 'where.exe' : 'command';
+    const args = isWindows ? ['-q', binary] : ['-v', binary];
+    const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000 });
+    binaryCache.set(binary, result.status === 0);
+    return result.status === 0;
   } catch {
     binaryCache.set(binary, false);
     return false;
@@ -52,7 +53,6 @@ export function negotiateProbes(
   const manifestsSet = new Set(fingerprint.manifests);
 
   for (const probe of allProbes) {
-    // 1. Check user explicit skip
     if (options.skip && options.skip.includes(probe.name)) {
       skippedProbes.push({
         name: probe.name,
@@ -62,7 +62,6 @@ export function negotiateProbes(
       continue;
     }
 
-    // 2. Check user explicit only
     if (options.only && options.only.length > 0 && !options.only.includes(probe.name)) {
       skippedProbes.push({
         name: probe.name,
@@ -72,7 +71,6 @@ export function negotiateProbes(
       continue;
     }
 
-    // 3. Check cost filter
     if (options.maxCost && COST_RANK[probe.execution.cost] > COST_RANK[options.maxCost]) {
       skippedProbes.push({
         name: probe.name,
@@ -82,7 +80,6 @@ export function negotiateProbes(
       continue;
     }
 
-    // 4. Check Language match
     const probeLangs = probe.activation.languages.map((l) => l.toLowerCase());
     const isUniversal = probeLangs.includes('*');
     const hasLangMatch = isUniversal || probeLangs.some((l) => repoLangsLower.has(l));
@@ -96,7 +93,6 @@ export function negotiateProbes(
       continue;
     }
 
-    // 5. Check Manifest file requirement if specified
     if (probe.activation.manifestFiles && probe.activation.manifestFiles.length > 0) {
       const hasRequiredManifest = probe.activation.manifestFiles.some((m) => manifestsSet.has(m));
       if (!hasRequiredManifest) {
@@ -109,10 +105,8 @@ export function negotiateProbes(
       }
     }
 
-    // 6. Check Binary availability if required
     const checkBin = options.checkBinaries !== false;
     if (checkBin && probe.activation.requiresBinaries && probe.activation.requiresBinaries.length > 0) {
-      // If any of the alternative binaries is available
       const anyBinaryFound = probe.activation.requiresBinaries.some((bin) => isBinaryAvailable(bin));
       if (!anyBinaryFound) {
         skippedProbes.push({
@@ -127,7 +121,6 @@ export function negotiateProbes(
     selectedProbes.push(probe);
   }
 
-  // Calculate estimated duration
   let estimatedDurationMs = 0;
   for (const p of selectedProbes) {
     if (p.execution.cost === 'fast') estimatedDurationMs += 2000;

@@ -45,6 +45,12 @@ export function safeRmSync(
     return false;
   }
 
+  // Never delete a protected workspace (guardfile enforcement)
+  if (isProtectedWorkspace(resolved)) {
+    console.error(`[SAFE_RMSNRC] BLOCKED: '${targetPath}' contains .opencontrib-guard, refusing to delete protected workspace`);
+    return false;
+  }
+
   try {
     rmSync(resolved, opts);
     return true;

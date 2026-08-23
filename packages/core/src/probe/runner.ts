@@ -1,7 +1,6 @@
-import { exec } from 'child_process';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { promisify } from 'util';
 import type {
   ProbeNegotiationPlan,
   ProbeRunResult,
@@ -12,7 +11,28 @@ import type {
 import { analyzeGitHotspots } from './forensics.js';
 import { generatePropertyTest } from './fuzz-generator.js';
 
-const execAsync = promisify(exec);
+function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number; maxBuffer?: number }): Promise<{ stdout: string; stderr: string }> {
+  const cwd = opts.cwd || process.cwd();
+  return new Promise((resolve, reject) => {
+    const isWindows = process.platform === 'win32';
+    const shell = isWindows ? 'cmd.exe' : 'sh';
+    const shellArgs = isWindows ? ['/c', cmd] : ['-c', cmd];
+    const child = spawn(shell, shellArgs, {
+      cwd,
+      timeout: opts.timeout || 30000,
+      encoding: 'utf-8',
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code: number | null) => {
+      if (code !== 0) reject(new Error(stderr || `Command exited with code ${code}: ${cmd}`));
+      else resolve({ stdout, stderr });
+    });
+  });
+}
 
 export interface RunOptions {
   timeoutMs?: number;
@@ -77,7 +97,7 @@ export async function runProbes(
           .replace('{outputJson}', '');
 
         try {
-          const { stdout } = await execAsync(formattedCmd, {
+          const { stdout } = await execWithSpawn(formattedCmd, {
             cwd: targetPath,
             timeout: probe.execution.timeoutMs || timeoutMs,
             maxBuffer: 10 * 1024 * 1024,

@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -37,10 +37,10 @@ export function analyzeGitHotspots(
   const churnMap = new Map<string, { commits: number; authors: Set<string> }>();
 
   try {
-    const gitLog = execSync(
-      `git log --since="${sinceStr}" --name-only --format="COMMIT:%an"`,
-      { cwd: resolved, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
-    );
+    const res = spawnSync('git', ['log', `--since=${sinceStr}`, '--name-only', '--format=COMMIT:%an'], {
+      cwd: resolved, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024,
+    });
+    const gitLog = res.stdout || '';
 
     let currentAuthor = 'Unknown';
     for (const line of gitLog.split('\n')) {

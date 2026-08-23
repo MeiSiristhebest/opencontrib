@@ -49,7 +49,7 @@ export class VariantHunter {
           : ext === '.java' ? 'java'
           : 'ts';
 
-        const pattern = `${finding.affectedSymbol}($$$ARGS)`;
+        const pattern = `${finding.affectedSymbol}($ARGS)`;
         const { stdout } = await (host as any).exec(`${bin} run -p "${pattern}" --lang ${lang} --json=compact`, {
           cwd: repoPath,
           timeout: 20000,

@@ -1,9 +1,7 @@
-import { execSync, exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn, spawnSync } from 'child_process';
 import type { ProbeDescriptor, HostServices, PointerStub } from './contract.js';
 import type { SmartPointerStore } from './pointer-store.js';
 
-const execAsync = promisify(exec);
 const binaryCache = new Map<string, boolean>();
 
 export interface ScanSchedulerResult {
@@ -11,6 +9,32 @@ export interface ScanSchedulerResult {
   timestamp: string;
   executedProbes: string[];
   pointersCreated: PointerStub[];
+}
+
+function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string }> {
+  const cwd = opts.cwd || process.cwd();
+  return new Promise((resolve, reject) => {
+    const isWindows = process.platform === 'win32';
+    const shell = isWindows ? 'cmd.exe' : 'sh';
+    const shellArgs = isWindows ? ['/c', cmd] : ['-c', cmd];
+    const child = spawn(shell, shellArgs, {
+      cwd,
+      timeout: opts.timeout || 30000,
+      encoding: 'utf-8',
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code: number | null, _signal: string | null) => {
+      if (code !== 0) {
+        reject(new Error(stderr || `Command exited with code ${code}: ${cmd}`));
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
 }
 
 /**
@@ -33,22 +57,18 @@ export class ProbeScanScheduler {
       workspacePath: targetPath,
       exec: async (cmd: string, opts = {}) => {
         const cwd = opts.cwd || targetPath;
-        const { stdout, stderr } = await execAsync(cmd, {
-          cwd,
-          timeout: opts.timeout || 30000,
-          maxBuffer: 10 * 1024 * 1024,
-        });
-        return { stdout, stderr };
+        return execWithSpawn(cmd, { ...opts, cwd });
       },
       log: () => {},
       isBinaryAvailable: (bin: string) => {
         if (binaryCache.has(bin)) return binaryCache.get(bin)!;
         try {
           const isWindows = process.platform === 'win32';
-          const checkCmd = isWindows ? `where.exe ${bin}` : `which ${bin}`;
-          execSync(checkCmd, { stdio: 'ignore' });
-          binaryCache.set(bin, true);
-          return true;
+          const cmd = isWindows ? 'where.exe' : 'command';
+          const args = isWindows ? ['-q', bin] : ['-v', bin];
+          const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000 });
+          binaryCache.set(bin, result.status === 0);
+          return result.status === 0;
         } catch {
           binaryCache.set(bin, false);
           return false;

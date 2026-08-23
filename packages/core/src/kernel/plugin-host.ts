@@ -156,10 +156,11 @@ export class PluginHost implements ProbeRegistryApi {
         if (binaryCache.has(bin)) return binaryCache.get(bin)!;
         try {
           const isWindows = process.platform === 'win32';
-          const checkCmd = isWindows ? `where.exe ${bin}` : `which ${bin}`;
-          execSync(checkCmd, { stdio: 'ignore' });
-          binaryCache.set(bin, true);
-          return true;
+          const cmd = isWindows ? 'where.exe' : 'command';
+          const args = isWindows ? ['-q', bin] : ['-v', bin];
+          const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000 });
+          binaryCache.set(bin, result.status === 0);
+          return result.status === 0;
         } catch {
           binaryCache.set(bin, false);
           return false;

@@ -240,7 +240,12 @@ pluginCommand
 
       const diagnostics = probes.map((p) => {
         const state = pm.getState(p.id);
-        const requiredBinaries = (p.requiredBinaries || []);
+        const requiredToolIds = PROBE_TOOLS_MAP[p.id] || [];
+        const requiredBinaries: string[] = [];
+        for (const tid of requiredToolIds) {
+          const entry = TOOL_REGISTRY.find((t) => t.id === tid);
+          if (entry) requiredBinaries.push(...entry.bin);
+        }
         const availableBinaries: string[] = [];
         const missingBinaries: string[] = [];
 

@@ -16,6 +16,52 @@ export interface WorktreeExecResult {
   exitCode: number;
 }
 
+function parseExecCommand(cmd: string): { cmd: string; args: string[] } {
+  const trimmed = cmd.trim();
+  if (!trimmed) {
+    throw new Error('Empty command string');
+  }
+
+  const parts: string[] = [];
+  let current = '';
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let escaped = false;
+
+  for (const ch of trimmed) {
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && !inSingleQuote) {
+      escaped = true;
+      continue;
+    }
+    if (ch === '\'' && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+    if (ch === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+    if (/\s/.test(ch) && !inSingleQuote && !inDoubleQuote) {
+      if (current) {
+        parts.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (current) parts.push(current);
+  if (parts.length === 0) {
+    throw new Error('No command parsed');
+  }
+  return { cmd: parts[0], args: parts.slice(1) };
+}
+
 /**
  * Clean-Room Git Worktree Sandbox Manager
  * Spawns an isolated git worktree in OS temporary storage to safely mutate, test, and verify fixes without polluting workspace.
@@ -41,7 +87,6 @@ export class WorktreeSandbox {
         encoding: 'utf8',
       });
     } catch {
-      // Fallback: if not a full git repo or detached, create standalone directory copy
       if (!fs.existsSync(this.sandboxPath)) {
         fs.mkdirSync(this.sandboxPath, { recursive: true });
         this.copyDirRecursive(this.repoPath, this.sandboxPath);
@@ -49,17 +94,15 @@ export class WorktreeSandbox {
     }
   }
 
-  /**
-   * Executes a command inside the clean-room sandbox
-   */
   public exec(cmd: string, timeoutMs = 60000): WorktreeExecResult {
     if (this.isDestroyed) {
       throw new Error(`Cannot execute in destroyed sandbox: ${this.sandboxPath}`);
     }
 
-    const res = spawnSync(cmd, {
+    const { cmd: program, args } = parseExecCommand(cmd);
+
+    const res = spawnSync(program, args, {
       cwd: this.sandboxPath,
-      shell: true,
       encoding: 'utf8',
       timeout: timeoutMs,
     });
@@ -71,26 +114,17 @@ export class WorktreeSandbox {
     };
   }
 
-  /**
-   * Writes a file inside the clean-room sandbox
-   */
   public writeFile(relPath: string, content: string): void {
     const fullPath = path.join(this.sandboxPath, relPath);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, content, 'utf8');
   }
 
-  /**
-   * Reads a file inside the clean-room sandbox
-   */
   public readFile(relPath: string): string {
     const fullPath = path.join(this.sandboxPath, relPath);
     return fs.readFileSync(fullPath, 'utf8');
   }
 
-  /**
-   * Applies an atomic patch or code replacement inside the clean-room sandbox
-   */
   public applyPatch(relFile: string, targetContent: string, replacementContent: string): boolean {
     const fullPath = path.join(this.sandboxPath, relFile);
     if (!fs.existsSync(fullPath)) return false;
@@ -103,9 +137,6 @@ export class WorktreeSandbox {
     return true;
   }
 
-  /**
-   * Commits the sandbox state to the isolated branch
-   */
   public commit(message: string): boolean {
     try {
       execFileSync('git', ['add', '-A'], { cwd: this.sandboxPath, stdio: 'pipe' });
@@ -119,9 +150,6 @@ export class WorktreeSandbox {
     }
   }
 
-  /**
-   * Cleans up the ephemeral worktree and deletes the sandbox branch
-   */
   public cleanup(): void {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
@@ -134,7 +162,6 @@ export class WorktreeSandbox {
         });
       }
     } catch {
-      // If git worktree cleanup fails, remove directory manually via safe guard
       try {
         if (fs.existsSync(this.sandboxPath)) {
           safeRmSync(this.sandboxPath, { recursive: true, force: true });

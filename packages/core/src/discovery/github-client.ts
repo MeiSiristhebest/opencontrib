@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process';
 import { Octokit } from '@octokit/rest';
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
@@ -64,12 +65,12 @@ export class GitHubClient {
     // Fallback 2: Read from GitHub CLI (gh auth token)
     if (!token) {
       try {
-        const ghToken = require('child_process').execSync('gh auth token', {
+        const res = spawnSync('gh', ['auth', 'token'], {
           encoding: 'utf-8',
           timeout: 2000,
           stdio: ['ignore', 'pipe', 'ignore'],
         });
-        token = ghToken.trim();
+        token = res.stdout ? res.stdout.trim() : '';
       } catch {}
     }
 

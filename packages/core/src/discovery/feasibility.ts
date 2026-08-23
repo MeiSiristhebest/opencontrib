@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { platform } from 'os';
 import type { FeasibilityAssessment, FeasibilityLevel } from '../contracts/schemas.js';
 
@@ -21,47 +21,63 @@ export interface SystemCapabilities {
   };
 }
 
+function checkCommand(bin: string, args: string[] = ['--version']): boolean {
+  const result = spawnSync(bin, args, {
+    encoding: 'utf-8',
+    timeout: 2000,
+    stdio: ['ignore', 'ignore', 'ignore'],
+  });
+  return result.status === 0;
+}
+
+function checkPowershellCommand(pwshCmd: string): string {
+  const result = spawnSync('powershell', ['-NoProfile', '-Command', pwshCmd], {
+    encoding: 'utf-8',
+    timeout: 2000,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  return result.stdout ? result.stdout.trim() : '';
+}
+
 export function detectSystemCapabilities(): SystemCapabilities {
   const currentOs = platform() as 'win32' | 'linux' | 'darwin' | 'other';
-  
+
   let hasWsl = false;
   let hasDocker = false;
   let hasHyperV = false;
 
   if (currentOs === 'win32') {
     try {
-      execSync('wsl --status', { stdio: 'ignore', timeout: 2000 });
-      hasWsl = true;
+      const result = spawnSync('wsl', ['--status'], {
+        encoding: 'utf-8',
+        timeout: 2000,
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+      hasWsl = result.status === 0;
     } catch {
       hasWsl = false;
     }
 
     try {
-      const hypervCheck = execSync('powershell -NoProfile -Command "(Get-Service vmms -ErrorAction SilentlyContinue).Status"', {
-        encoding: 'utf-8',
-        timeout: 2000,
-      });
-      hasHyperV = hypervCheck.trim().toLowerCase() === 'running';
+      const output = checkPowershellCommand(
+        '(Get-Service vmms -ErrorAction SilentlyContinue).Status',
+      );
+      hasHyperV = output.toLowerCase() === 'running';
     } catch {
       hasHyperV = false;
     }
   }
 
   try {
-    execSync('docker --version', { stdio: 'ignore', timeout: 2000 });
-    hasDocker = true;
+    const result = spawnSync('docker', ['--version'], {
+      encoding: 'utf-8',
+      timeout: 2000,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    hasDocker = result.status === 0;
   } catch {
     hasDocker = false;
   }
-
-  const checkCommand = (cmd: string): boolean => {
-    try {
-      execSync(`${cmd} --version`, { stdio: 'ignore', timeout: 2000 });
-      return true;
-    } catch {
-      return false;
-    }
-  };
 
   return {
     os: currentOs,
@@ -90,14 +106,13 @@ export function assessFeasibility(
   capabilities: SystemCapabilities = detectSystemCapabilities(),
 ): FeasibilityAssessment {
   const text = `${issueTitle} ${issueBody} ${labels.join(' ')}`.toLowerCase();
-  
+
   const detectedRisks: string[] = [];
   const missingCapabilities: string[] = [];
   const mitigations: string[] = [];
   let scorePenalty = 0;
   let scope: FeasibilityAssessment['scope'] = 'small_code_change';
 
-  // 1. Determine Scope
   if (text.includes('documentation') || text.includes('readme') || text.includes('typo') || text.includes('docs')) {
     scope = 'docs_only';
   } else if (text.includes('leak') || text.includes('oom') || text.includes('memory') || text.includes('performance') || text.includes('benchmark')) {
@@ -110,7 +125,6 @@ export function assessFeasibility(
     scope = 'hardware_specific';
   }
 
-  // 2. OS Compatibility Check
   const requiresMac = text.includes('macos') || text.includes('darwin') || text.includes('m1') || text.includes('m2') || text.includes('apple silicon');
   const requiresLinux = text.includes('linux') || text.includes('cgroup') || text.includes('systemd') || text.includes('epoll');
   const requiresWindows = text.includes('windows') || text.includes('win32') || text.includes('powershell');
@@ -121,7 +135,7 @@ export function assessFeasibility(
     detectedRisks.push('macos_specific');
     if (capabilities.os !== 'darwin') {
       missingCapabilities.push('macos_surface');
-      scorePenalty += 30; // Heavy penalty if not on macOS
+      scorePenalty += 30;
     }
   }
 
@@ -130,7 +144,7 @@ export function assessFeasibility(
     if (capabilities.os !== 'linux') {
       if (capabilities.hasWsl) {
         mitigations.push('linux_possible_via_wsl');
-        scorePenalty += 5; // Minor penalty with WSL
+        scorePenalty += 5;
       } else {
         missingCapabilities.push('linux_surface');
         scorePenalty += 25;
@@ -161,7 +175,6 @@ export function assessFeasibility(
     scorePenalty += 5;
   }
 
-  // 3. Determine Feasibility Level
   let level: FeasibilityLevel = 'fully_feasible';
   if (scorePenalty >= 30 || scope === 'hardware_specific') {
     level = 'likely_blocked';
@@ -231,5 +244,3 @@ export function calculateOsFeasibility(
     reason: assessment.rationale,
   };
 }
-
-

@@ -185,7 +185,7 @@ export function runDoctorAudit(): DoctorReport {
     { name: 'Semgrep SAST Scanner', bin: 'semgrep', id: 'semgrep' },
     { name: 'Ruff Python Linter', bin: 'ruff', id: 'ruff' },
     { name: 'Go Compiler Toolchain', bin: 'go', id: 'go' },
-    { name: 'Rust Compiler Toolchain', bin: 'rustc', id: 'cargo-deny' },
+    { name: 'Rust Compiler Toolchain', bin: 'rustc', id: 'rustc' },
     { name: 'Python / UV Toolchain', bin: 'uv', id: 'uv' },
     { name: 'Java JDK / Maven Toolchain', bin: 'javac', id: 'java' },
     { name: 'C/C++ CMake Toolchain', bin: 'cmake', id: 'cmake' },
