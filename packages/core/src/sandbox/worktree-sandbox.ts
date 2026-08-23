@@ -94,6 +94,12 @@ export class WorktreeSandbox {
     }
   }
 
+  private isWithinSandbox(relPath: string): boolean {
+    const fullPath = path.resolve(this.sandboxPath, relPath);
+    const sandboxResolved = path.resolve(this.sandboxPath);
+    return fullPath === sandboxResolved || fullPath.startsWith(sandboxResolved + path.sep);
+  }
+
   public exec(cmd: string, timeoutMs = 60000): WorktreeExecResult {
     if (this.isDestroyed) {
       throw new Error(`Cannot execute in destroyed sandbox: ${this.sandboxPath}`);
@@ -115,17 +121,26 @@ export class WorktreeSandbox {
   }
 
   public writeFile(relPath: string, content: string): void {
+    if (!this.isWithinSandbox(relPath)) {
+      throw new Error(`Path traversal blocked: '${relPath}' escapes sandbox boundary`);
+    }
     const fullPath = path.join(this.sandboxPath, relPath);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, content, 'utf8');
   }
 
   public readFile(relPath: string): string {
+    if (!this.isWithinSandbox(relPath)) {
+      throw new Error(`Path traversal blocked: '${relPath}' escapes sandbox boundary`);
+    }
     const fullPath = path.join(this.sandboxPath, relPath);
     return fs.readFileSync(fullPath, 'utf8');
   }
 
   public applyPatch(relFile: string, targetContent: string, replacementContent: string): boolean {
+    if (!this.isWithinSandbox(relFile)) {
+      throw new Error(`Path traversal blocked: '${relFile}' escapes sandbox boundary`);
+    }
     const fullPath = path.join(this.sandboxPath, relFile);
     if (!fs.existsSync(fullPath)) return false;
 

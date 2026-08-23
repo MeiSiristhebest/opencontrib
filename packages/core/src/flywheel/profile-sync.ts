@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import type { ContributionRecord } from '../contracts/schemas.js';
@@ -29,7 +29,14 @@ export class ProfileFlywheel {
     } else {
       records.unshift(record);
     }
-    writeFileSync(this.ledgerPath, JSON.stringify(records, null, 2), 'utf-8');
+    const tmpPath = this.ledgerPath + '.tmp';
+    try {
+      writeFileSync(tmpPath, JSON.stringify(records, null, 2), 'utf-8');
+      renameSync(tmpPath, this.ledgerPath);
+    } catch {
+      try { unlinkSync(tmpPath); } catch {}
+      throw new Error(`Failed to save contribution record to ${this.ledgerPath}`);
+    }
   }
 
   renderProfileMarkdown(records: ContributionRecord[] = this.loadRecords()): string {

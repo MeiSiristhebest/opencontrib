@@ -223,7 +223,7 @@ export interface OpenContribPlugin {
   name: string;
   version: string;
   description?: string;
-  permissions?: PluginPermission[];
+  permissions: PluginPermission[];
   activate(ctx: PluginContext): Promise<void> | void;
   deactivate?(): Promise<void> | void;
 }

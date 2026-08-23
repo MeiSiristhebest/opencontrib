@@ -112,11 +112,12 @@ export class VariantHunter {
     const extGlob = ext ? `--glob "*${ext}"` : '';
 
     // Try ripgrep first (fastest, most accurate text search available)
+    // --word-regexp enforces word boundaries so "foo" does not match "fooBar" or "unfoolish"
     const rgResult = spawnSync('rg', [
-      '--fixed-strings', '--with-filename', '--line-number',
+      '--word-regexp', '--with-filename', '--line-number',
       '--glob', '!node_modules', '--glob', '!.git', '--glob', '!dist',
       ...(extGlob ? [extGlob] : []),
-      symbol,
+      `\\b${symbol}\\b`,
     ], { encoding: 'utf-8', timeout: 15000, cwd: repoPath });
 
     if (rgResult.status === 0 && rgResult.stdout) {
@@ -141,9 +142,14 @@ export class VariantHunter {
           : ext === '.js' || ext === '.jsx' ? 'js'
           : 'ts';
 
-        const bin = spawnSync('where.exe', ['-q', 'sg'], { timeout: 3000 }).status === 0
-          ? 'sg' : spawnSync('where.exe', ['-q', 'ast-grep'], { timeout: 3000 }).status === 0
-          ? 'ast-grep' : null;
+        const isWindows = process.platform === 'win32';
+        const binCmd = isWindows ? 'where.exe' : 'command';
+        const binArgs = isWindows ? ['-q', 'sg'] : ['-v', 'sg'];
+        const sgResult = spawnSync(binCmd, binArgs, { timeout: 3000 });
+        const astCmd = isWindows ? 'where.exe' : 'command';
+        const astArgs = isWindows ? ['-q', 'ast-grep'] : ['-v', 'ast-grep'];
+        const astResult = spawnSync(astCmd, astArgs, { timeout: 3000 });
+        const bin = sgResult.status === 0 ? 'sg' : astResult.status === 0 ? 'ast-grep' : null;
 
         if (bin) {
           const result = spawnSync(bin, ['run', '-p', symbol, `--lang`, lang, '--json=compact'], {

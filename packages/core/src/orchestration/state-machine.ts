@@ -74,6 +74,28 @@ export class ContributionStateMachine {
   }
 
   transition(nextStage: PipelineStage, note?: string): void {
+    const currentStage = this.state.stage;
+    const validTransitions: Record<PipelineStage, PipelineStage[]> = {
+      IDLE: ['DISCOVERY', 'BLOCKED'],
+      DISCOVERY: ['QUALIFICATION', 'BLOCKED'],
+      QUALIFICATION: ['ONBOARDING', 'PATCH_DESIGN', 'BLOCKED'],
+      ONBOARDING: ['PATCH_DESIGN', 'BLOCKED'],
+      PATCH_DESIGN: ['SANDBOX_VALIDATION', 'BLOCKED'],
+      SANDBOX_VALIDATION: ['SUBAGENT_REVIEW', 'HUMAN_GATE', 'PATCH_DESIGN', 'BLOCKED'],
+      SUBAGENT_REVIEW: ['SANDBOX_VALIDATION', 'HUMAN_GATE', 'PATCH_DESIGN', 'BLOCKED'],
+      HUMAN_GATE: ['PR_SUBMISSION', 'PATCH_DESIGN', 'BLOCKED'],
+      PR_SUBMISSION: ['COMPLETED', 'BLOCKED'],
+      COMPLETED: [],
+      BLOCKED: ['IDLE', 'PATCH_DESIGN'],
+    };
+
+    const allowedTargets = validTransitions[currentStage] || [];
+    if (!allowedTargets.includes(nextStage)) {
+      throw new Error(
+        `Invalid pipeline transition: ${currentStage} -> ${nextStage}. Allowed: ${allowedTargets.join(', ') || 'none'}`,
+      );
+    }
+
     this.state.stage = nextStage;
     this.state.history.push({
       stage: nextStage,

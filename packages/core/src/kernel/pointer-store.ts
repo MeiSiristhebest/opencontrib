@@ -22,7 +22,8 @@ export class SmartPointerStore implements PointerStoreApi {
   }
 
   public create(params: PointerCreateOptions): SmartPointer {
-    const namespace = params.namespace || 'findings';
+    const rawNamespace = params.namespace || 'findings';
+    const namespace = rawNamespace.replace(/[^a-zA-Z0-9_-]/g, '_');
     const rawId = params.id.replace(/[^a-zA-Z0-9_-]/g, '_');
 
     // Prevent same-id overwrite: append counter when id collides within namespace

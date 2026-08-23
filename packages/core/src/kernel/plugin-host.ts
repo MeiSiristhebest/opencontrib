@@ -129,17 +129,15 @@ export class PluginHost implements ProbeRegistryApi {
     const hostServices: HostServices = {
       workspacePath: this.workspacePath,
       exec: async (cmd: string, opts = {}) => {
-        // Enforce runtime permission checks if permissions are declared
-        if (plugin.permissions) {
-          const isGitCmd = cmd.trim().startsWith('git ') || cmd.trim() === 'git';
-          const hasGitPerm = plugin.permissions.includes('exec:git') || plugin.permissions.includes('exec:binary');
-          const hasBinPerm = plugin.permissions.includes('exec:binary');
+        const isGitCmd = cmd.trim().startsWith('git ') || cmd.trim() === 'git';
+        const hasGitPerm = plugin.permissions?.includes('exec:git') || plugin.permissions?.includes('exec:binary');
+        const hasBinPerm = plugin.permissions?.includes('exec:binary');
 
-          if (isGitCmd && !hasGitPerm) {
-            throw new PluginPermissionError(plugin.name, 'exec:git', cmd);
-          } else if (!isGitCmd && !hasBinPerm) {
-            throw new PluginPermissionError(plugin.name, 'exec:binary', cmd);
-          }
+        if (isGitCmd && !hasGitPerm) {
+          throw new PluginPermissionError(plugin.name, 'exec:git', cmd);
+        }
+        if (!isGitCmd && !hasBinPerm) {
+          throw new PluginPermissionError(plugin.name, 'exec:binary', cmd);
         }
 
         const cwd = opts.cwd || this.workspacePath;

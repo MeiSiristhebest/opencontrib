@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 
 import { homedir } from 'os';
 import { basename, dirname, join, resolve, sep } from 'path';
@@ -164,7 +164,19 @@ export class ArtifactBundleManager {
       timestamp: now,
       ...event,
     };
-    appendFileSync(eventsPath, JSON.stringify(fullEvent) + '\n', 'utf-8');
+    const eventLine = JSON.stringify(fullEvent) + '\n';
+    const tmpEventsPath = eventsPath + '.tmp';
+    try {
+      writeFileSync(tmpEventsPath, eventLine, 'utf-8');
+      if (existsSync(eventsPath)) {
+        appendFileSync(eventsPath, readFileSync(tmpEventsPath, 'utf-8'));
+      } else {
+        renameSync(tmpEventsPath, eventsPath);
+      }
+    } catch {
+      try { unlinkSync(tmpEventsPath); } catch {}
+      throw new Error(`Failed to append event to ${eventsPath}`);
+    }
 
     // Automatically maintain human-readable timelog.md
     if (!existsSync(timelogPath)) {
@@ -185,7 +197,19 @@ export class ArtifactBundleManager {
     }
     try {
       const lines = readFileSync(eventsPath, 'utf-8').trim().split('\n').filter(Boolean);
-      return lines.map((l) => JSON.parse(l) as RunEvent);
+      const events: RunEvent[] = [];
+      const errors: string[] = [];
+      for (const [idx, l] of lines.entries()) {
+        try {
+          events.push(JSON.parse(l) as RunEvent);
+        } catch (err: any) {
+          errors.push(`Line ${idx + 1}: ${err.message}`);
+        }
+      }
+      if (errors.length > 0) {
+        console.warn(`[ArtifactBundle] Warning: ${errors.length} corrupted event line(s) skipped: ${errors.join('; ')}`);
+      }
+      return events;
     } catch {
       return [];
     }

@@ -131,6 +131,15 @@ export function assessFeasibility(
   const requiresDocker = text.includes('docker') || text.includes('container') || text.includes('k8s') || text.includes('kubernetes');
   const requiresBrowserE2E = text.includes('playwright') || text.includes('cypress') || text.includes('puppeteer') || text.includes('e2e');
 
+  // Detect language-specific requirements from issue text
+  const requiresGo = text.includes('golang') || text.includes('goroutine') || text.includes('channel ') || /\b\.go\b/.test(text) || text.includes('go.mod');
+  const requiresRust = text.includes('rust') || text.includes('cargo ') || text.includes('crates.io') || /\b\.rs\b/.test(text);
+  const requiresPython = text.includes('python') || text.includes('pip ') || text.includes('pypi') || text.includes('pytest') || /\b\.py\b/.test(text);
+  const requiresJava = text.includes('java') || text.includes('maven') || text.includes('gradle') || text.includes('spring') || /\b\.java\b/.test(text);
+  const requiresCpp = text.includes('cpp') || text.includes('c++') || text.includes('gcc') || text.includes('clang') || /\b\.cpp\b/.test(text) || /\b\.cc\b/.test(text);
+  const requiresDotnet = text.includes('dotnet') || text.includes('csharp') || text.includes('nuget') || /\b\.cs\b/.test(text);
+  const requiresNode = text.includes('node.js') || text.includes('npm ') || text.includes('typescript') || text.includes('bun ') || /\b\.ts\b/.test(text);
+
   if (requiresMac) {
     detectedRisks.push('macos_specific');
     if (capabilities.os !== 'darwin') {
@@ -173,6 +182,52 @@ export function assessFeasibility(
   if (requiresBrowserE2E) {
     detectedRisks.push('browser_e2e_tests');
     scorePenalty += 5;
+  }
+
+  // Language-specific toolchain checks
+  const toolchainChecks: Array<{ name: string; available: boolean }> = [
+    { name: 'go', available: capabilities.toolchains.go },
+    { name: 'rust', available: capabilities.toolchains.rust },
+    { name: 'python', available: capabilities.toolchains.python },
+    { name: 'java', available: capabilities.toolchains.java },
+    { name: 'cpp', available: capabilities.toolchains.cpp },
+    { name: 'dotnet', available: capabilities.toolchains.dotnet },
+    { name: 'node', available: capabilities.toolchains.node || capabilities.toolchains.bun },
+  ];
+  if (requiresGo && !capabilities.toolchains.go) {
+    missingCapabilities.push('go_toolchain');
+    detectedRisks.push('toolchain_missing');
+    scorePenalty += 25;
+  }
+  if (requiresRust && !capabilities.toolchains.rust) {
+    missingCapabilities.push('rust_toolchain');
+    detectedRisks.push('toolchain_missing');
+    scorePenalty += 25;
+  }
+  if (requiresPython && !capabilities.toolchains.python) {
+    missingCapabilities.push('python_toolchain');
+    detectedRisks.push('toolchain_missing');
+    scorePenalty += 25;
+  }
+  if (requiresJava && !capabilities.toolchains.java) {
+    missingCapabilities.push('java_toolchain');
+    detectedRisks.push('toolchain_missing');
+    scorePenalty += 25;
+  }
+  if (requiresCpp && !capabilities.toolchains.cpp) {
+    missingCapabilities.push('cpp_toolchain');
+    detectedRisks.push('toolchain_missing');
+    scorePenalty += 25;
+  }
+  if (requiresDotnet && !capabilities.toolchains.dotnet) {
+    missingCapabilities.push('dotnet_toolchain');
+    detectedRisks.push('toolchain_missing');
+    scorePenalty += 25;
+  }
+  if (requiresNode && !capabilities.toolchains.node && !capabilities.toolchains.bun) {
+    missingCapabilities.push('node_toolchain');
+    detectedRisks.push('toolchain_missing');
+    scorePenalty += 25;
   }
 
   let level: FeasibilityLevel = 'fully_feasible';
