@@ -109,9 +109,9 @@ export class ContributionPrService {
         sha: baseCommitSha,
       });
     } catch (err) {
-      // Only fall through to updateRef for 409 Conflict (branch already exists)
-      if ((err as any).status !== 409) {
-        throw new Error(`Failed to create branch "${branchName}": ${err.message || String(err)}`);
+      const error = err as any;
+      if (error.status !== 409) {
+        throw new Error(`Failed to create branch "${branchName}": ${error.message || String(err)}`);
       }
       await this.octokit.rest.git.updateRef({
         owner: forkOwner,

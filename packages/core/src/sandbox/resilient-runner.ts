@@ -1,4 +1,5 @@
 import { spawnSync } from 'child_process';
+import { dirname } from 'path';
 import * as path from 'path';
 import { homedir as osHomedir, platform } from 'os';
 

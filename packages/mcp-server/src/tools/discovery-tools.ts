@@ -270,7 +270,7 @@ export function registerDiscoveryTools(server: McpServer): void {
           description: args.repoDetails.description || '',
           stars: args.repoDetails.stars || 0,
         },
-        repoTree: args.repoTree.map((item) => ({
+        repoTree: args.repoTree.map((item: any) => ({
           path: item.path,
           mode: '100644',
           type: item.type as any,

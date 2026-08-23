@@ -322,21 +322,21 @@ export function registerGovernanceTools(
           draft: args.pr.draft,
           headSha: args.pr.headSha,
         },
-        reviews: (args.reviews ?? []).map((r) => ({
+        reviews: (args.reviews ?? []).map((r: any) => ({
           id: r.id,
           user: r.user,
           state: r.state,
           body: r.body,
           submittedAt: r.submittedAt,
         })),
-        checkRuns: (args.checkRuns ?? []).map((c) => ({
+        checkRuns: (args.checkRuns ?? []).map((c: any) => ({
           id: c.id,
           name: c.name,
           status: c.status,
           conclusion: c.conclusion,
           detailsUrl: c.detailsUrl,
         })),
-        comments: (args.comments ?? []).map((c) => ({
+        comments: (args.comments ?? []).map((c: any) => ({
           id: c.id,
           user: c.user,
           body: c.body,
