@@ -89,48 +89,45 @@ const parseJudgmentCommand = new Command('parse-judgment')
   .option('--transcript <file>', 'Original transcript path (for metadata)')
   .option('--pretty', 'Pretty-print', false)
   .action(async (responseFile?: string, opts?: { stdin?: boolean; transcript?: string; pretty?: boolean }) => {
-    let rawText: string;
-
-    if (opts?.stdin) {
-      // Cross-platform stdin read (works on Node.js, Bun, Windows, Unix)
-      rawText = await new Promise<string>((resolve) => {
-        const chunks: string[] = [];
-        const dataHandler = (d: string | Buffer) => { chunks.push(d.toString()); };
-        const endHandler = () => {
-          process.stdin.removeListener('data', dataHandler);
-          process.stdin.removeListener('end', endHandler);
-          process.stdin.setEncoding('utf8');
-          resolve(chunks.join(''));
-        };
-        process.stdin.setEncoding('utf8');
-        process.stdin.on('data', dataHandler);
-        process.stdin.on('end', endHandler);
-        // Handle piped input that arrives synchronously before listeners attach
-        const syncChunk = process.stdin.read?.();
-        if (syncChunk) {
-          chunks.push(syncChunk.toString());
-          endHandler();
-        }
-      });
-    } else if (responseFile) {
-      if (!fs.existsSync(responseFile)) {
-        printJSON({ status: 'error', message: `File not found: ${responseFile}` }, opts?.pretty);
-        process.exit(1);
-      }
-      rawText = fs.readFileSync(responseFile, 'utf8');
-    } else {
-      printJSON({ status: 'error', message: 'Provide a response file or use --stdin' }, opts?.pretty);
-      process.exit(1);
-      return;
-    }
-
-    // Re-parse metrics from transcript if provided
-    let metrics;
-    if (opts?.transcript && fs.existsSync(opts.transcript)) {
-      ({ metrics } = parseTrajectoryFromJSONL(opts.transcript));
-    }
-
     try {
+      let rawText: string;
+
+      if (opts?.stdin) {
+        rawText = await new Promise<string>((resolve) => {
+          const chunks: string[] = [];
+          const dataHandler = (d: string | Buffer) => { chunks.push(d.toString()); };
+          const endHandler = () => {
+            process.stdin.removeListener('data', dataHandler);
+            process.stdin.removeListener('end', endHandler);
+            process.stdin.setEncoding('utf8');
+            resolve(chunks.join(''));
+          };
+          process.stdin.setEncoding('utf8');
+          process.stdin.on('data', dataHandler);
+          process.stdin.on('end', endHandler);
+          const syncChunk = process.stdin.read?.();
+          if (syncChunk) {
+            chunks.push(syncChunk.toString());
+            endHandler();
+          }
+        });
+      } else if (responseFile) {
+        if (!fs.existsSync(responseFile)) {
+          printJSON({ status: 'error', message: `File not found: ${responseFile}` }, opts?.pretty);
+          process.exit(1);
+        }
+        rawText = fs.readFileSync(responseFile, 'utf8');
+      } else {
+        printJSON({ status: 'error', message: 'Provide a response file or use --stdin' }, opts?.pretty);
+        process.exit(1);
+        return;
+      }
+
+      let metrics;
+      if (opts?.transcript && fs.existsSync(opts.transcript)) {
+        ({ metrics } = parseTrajectoryFromJSONL(opts.transcript));
+      }
+
       const report = parseJudgeResponse(rawText, metrics);
       printJSON({ status: 'success', report }, opts?.pretty);
     } catch (err: any) {

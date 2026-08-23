@@ -8,8 +8,20 @@ import {
   ProfileFlywheel,
   renderMasterPrTemplate,
   RepoMemoryLedger,
-  type ContributionRecord,
 } from '@opencontrib/core';
+
+function wrapHandler(fn: (args: any) => Promise<any>) {
+  return async (args: any) => {
+    try {
+      return await fn(args);
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: 'text', text: JSON.stringify({ status: 'error', message: err.message }, null, 2) }],
+      };
+    }
+  };
+}
 
 export function registerGovernanceTools(
   server: McpServer,
@@ -47,7 +59,7 @@ export function registerGovernanceTools(
         .describe('Whether the caller is preparing for autonomous PR submission (demands empirical evidence)'),
       confidenceBreakdown: ConfidenceBreakdownSchema.optional().describe('Optional detailed 7-dimensional confidence scores'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const audit = auditGovernance({
         patchContent: args.patchContent,
         prTitle: args.prTitle,
@@ -59,21 +71,16 @@ export function registerGovernanceTools(
       });
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: audit.overallConfidence.isPassed ? 'passed' : 'failed',
-                audit,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify(
+            { status: audit.overallConfidence.isPassed ? 'passed' : 'failed', audit },
+            null,
+            2,
+          ),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -87,7 +94,7 @@ export function registerGovernanceTools(
       patchContent: z.string().describe('Git unified diff content'),
       repoContextFiles: z.array(z.string()).optional().describe('Optional list of existing repository file paths for sister file detection'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const analysis = analyzePatchImpactAndConsistency({
         modifiedFiles: args.modifiedFiles,
         patchContent: args.patchContent,
@@ -95,21 +102,16 @@ export function registerGovernanceTools(
       });
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: analysis.isCompliant ? 'compliant' : 'warnings_found',
-                analysis,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify(
+            { status: analysis.isCompliant ? 'compliant' : 'warnings_found', analysis },
+            null,
+            2,
+          ),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -123,25 +125,20 @@ export function registerGovernanceTools(
       repoFullName: z.string().optional().describe('Target repository, e.g. "alibaba/open-code-review"'),
       pullNumber: z.number().optional().describe('Pull request number'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const report = parseCiRawLogs(args.rawLogText);
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: report.hasFailure ? 'failure_detected' : 'healthy',
-                report,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify(
+            { status: report.hasFailure ? 'failure_detected' : 'healthy', report },
+            null,
+            2,
+          ),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -162,7 +159,7 @@ export function registerGovernanceTools(
       isDocumentationOnly: z.boolean().optional().describe('Whether changes are purely documentation/typo fix'),
       aiDisclosureRequired: z.boolean().optional().describe('Set true ONLY if repo CONTRIBUTING.md explicitly demands AI disclosure'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const prBody = renderMasterPrTemplate({
         nativeTemplateContent: args.nativeTemplateContent,
         issueNumber: typeof args.issueNumber === 'string' ? parseInt(args.issueNumber, 10) || 1 : args.issueNumber,
@@ -177,21 +174,12 @@ export function registerGovernanceTools(
       });
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                prBody,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ status: 'success', prBody }, null, 2),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -206,11 +194,11 @@ export function registerGovernanceTools(
       findingSummary: z.string().optional().describe('Summary of the identified defect and root cause file/line'),
       reproductionTestSnippet: z.string().optional().describe('Reproduction test case or verification snippet'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const { ClaimProtocol } = await import('@opencontrib/core');
       const num = typeof args.issueNumber === 'string' ? parseInt(args.issueNumber, 10) || 0 : args.issueNumber;
       const payload = ClaimProtocol.generateClaimPayload(num, args.issueTitle);
-      
+
       if (args.findingSummary) {
         payload.findingSummary = args.findingSummary;
       }
@@ -219,21 +207,12 @@ export function registerGovernanceTools(
       }
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                payload,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ status: 'success', payload }, null, 2),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -255,7 +234,7 @@ export function registerGovernanceTools(
         failureLessons: z.string().optional().describe('Key insights or failure root causes learned during this run'),
       }),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const result = flywheel.recordContribution(args.repoFullName, {
         runId: args.record.runId,
         repoFullName: args.repoFullName,
@@ -270,21 +249,12 @@ export function registerGovernanceTools(
       });
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                flywheelResult: result,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ status: 'success', flywheelResult: result }, null, 2),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -339,7 +309,7 @@ export function registerGovernanceTools(
         .optional()
         .describe('Issue comments on PR from GitHub MCP'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const { trackPrStatus } = await import('@opencontrib/core');
 
       const evaluation = trackPrStatus({
@@ -375,21 +345,12 @@ export function registerGovernanceTools(
       });
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                evaluation,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ status: 'success', evaluation }, null, 2),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -401,25 +362,16 @@ export function registerGovernanceTools(
     {
       markdownContent: z.string().describe('Markdown text content to validate'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const { validateMarkdownIntegrity } = await import('@opencontrib/core');
       const report = validateMarkdownIntegrity(args.markdownContent);
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: report.isValid ? 'passed' : 'failed',
-                report,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ status: report.isValid ? 'passed' : 'failed', report }, null, 2),
+        }],
       };
-    },
+    }),
   );
 }

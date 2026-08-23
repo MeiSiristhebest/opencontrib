@@ -4,6 +4,14 @@ import * as path from 'path';
 import * as os from 'os';
 import { safeRmSync } from '../workspace/worktree-manager.js';
 
+const SANDBOX_CREDENTIAL_KEYS = new Set([
+  'GH_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'NPM_TOKEN', 'NPM_AUTH_TOKEN',
+  'AWS_SECRET_ACCESS_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SESSION_TOKEN',
+  'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID', 'GCP_SERVICE_ACCOUNT_KEY',
+  'GOOGLE_APPLICATION_CREDENTIALS', 'SLACK_TOKEN', 'DOCKER_TOKEN', 'DOCKER_PASSWORD',
+  'PRIVATE_KEY', 'SSH_AUTH_SOCK',
+]);
+
 export interface WorktreeSandboxOptions {
   repoPath: string;
   branchName?: string;
@@ -107,11 +115,20 @@ export class WorktreeSandbox {
 
     const { cmd: program, args } = parseExecCommand(cmd);
 
+    // Credential-stripped env to prevent secret leakage to sandboxed subprocesses
+    const strippedEnv: NodeJS.ProcessEnv = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (!SANDBOX_CREDENTIAL_KEYS.has(key)) {
+        strippedEnv[key] = value;
+      }
+    }
+
     const res = spawnSync(program, args, {
       cwd: this.sandboxPath,
       encoding: 'utf8',
       timeout: timeoutMs,
       shell: false,
+      env: strippedEnv,
     });
 
     return {

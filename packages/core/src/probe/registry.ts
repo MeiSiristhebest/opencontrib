@@ -522,6 +522,10 @@ export class ProbeRegistry {
     if (!manifest.name || typeof manifest.name !== 'string') {
       throw new Error('Probe manifest requires a valid string "name"');
     }
+    // Reject names with path traversal characters or absolute paths
+    if (/^\.\/|^\/|\\\\|[^\w.\/-]/.test(manifest.name) || manifest.name.includes('..')) {
+      throw new Error(`Probe manifest "${manifest.name}" contains invalid characters`);
+    }
     if (!manifest.activation || !Array.isArray(manifest.activation.languages)) {
       throw new Error(`Probe manifest "${manifest.name}" requires activation.languages array`);
     }

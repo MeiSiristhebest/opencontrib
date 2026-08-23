@@ -1,6 +1,6 @@
 import { spawnSync } from 'child_process';
-import { dirname } from 'path';
-import { platform } from 'os';
+import * as path from 'path';
+import { homedir as osHomedir, platform } from 'os';
 
 export interface ResilientRunOptions {
   cwd: string;
@@ -72,6 +72,18 @@ export function runResilientCommand(options: ResilientRunOptions): ResilientRunR
   const { cwd, command, args = [], timeoutMs = 30000, modifiedFiles = [], allowFullScan = false } = options;
   const warnings: string[] = [];
   let currentArgs = [...args];
+
+  // Validate cwd boundary — prevent execution outside sandbox/workspace
+  const resolvedCwd = path.resolve(cwd);
+  const opencontribHome = process.env.OPENCONTRIB_HOME || process.env.HOME || osHomedir();
+  const sandboxRoot = path.join(opencontribHome, '.opencontrib', 'workspaces');
+  const resolvedSandbox = path.resolve(sandboxRoot);
+  const resolvedHome = path.resolve(opencontribHome);
+  if (!resolvedCwd.startsWith(resolvedSandbox + path.sep) &&
+      !resolvedCwd.startsWith(resolvedHome + path.sep) &&
+      resolvedCwd !== resolvedHome) {
+    return { isSuccess: false, exitCode: 126, stdout: '', stderr: `Blocked: cwd "${cwd}" outside sandbox boundary`, executionTimeMs: 0, warnings: ['CWD boundary violation'] };
+  }
   let targetedPackage: string | undefined;
 
   // Check and rewrite broad full repo tests into targeted package tests
@@ -137,10 +149,14 @@ export function runResilientCommand(options: ResilientRunOptions): ResilientRunR
       timeout: timeoutMs,
       encoding: 'utf-8',
       env: sanitizedEnv,
+      shell: false,
     });
 
+    const MAX_OUTPUT = 256 * 1024;
     stdout = res.stdout || '';
     stderr = res.stderr || '';
+    if (stdout.length > MAX_OUTPUT) stdout = stdout.slice(0, MAX_OUTPUT) + '\n[TRUNCATED]';
+    if (stderr.length > MAX_OUTPUT) stderr = stderr.slice(0, MAX_OUTPUT) + '\n[TRUNCATED]';
     exitCode = res.status;
 
     if (res.error) {

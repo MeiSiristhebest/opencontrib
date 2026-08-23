@@ -81,18 +81,18 @@ const runSave = new Command('save')
   .option('--phase <phase>', 'Phase to auto-advance to')
   .option('--pretty', 'Pretty-print', false)
   .action(async (runId: string, opts: { type: string; content?: string; phase?: string; pretty?: boolean }) => {
-    let payload: string | Record<string, unknown>;
-    if (opts.content) {
-      payload = (parseJSON(opts.content, '--content') as Record<string, unknown>) || {};
-    } else {
-      const stdinData = await readStdin();
-      if (!stdinData) {
-        console.error('❌ No content provided. Use --content <json> or pipe via stdin');
-        process.exit(1);
-      }
-      payload = (parseJSON(stdinData, 'stdin') as Record<string, unknown>) || {};
-    }
     try {
+      let payload: string | Record<string, unknown>;
+      if (opts.content) {
+        payload = (parseJSON(opts.content, '--content') as Record<string, unknown>) || {};
+      } else {
+        const stdinData = await readStdin();
+        if (!stdinData) {
+          console.error('❌ No content provided. Use --content <json> or pipe via stdin');
+          process.exit(1);
+        }
+        payload = (parseJSON(stdinData, 'stdin') as Record<string, unknown>) || {};
+      }
       const saved = runManager.saveArtifact(
         runId,
         opts.type as any,

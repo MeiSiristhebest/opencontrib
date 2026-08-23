@@ -5,6 +5,24 @@ import { parseCommandSpec } from '../sandbox/command-spec.js';
 
 const binaryCache = new Map<string, boolean>();
 
+/** Credential-bearing env var keys stripped from probe subprocesses. */
+const CREDENTIAL_ENV_KEYS = new Set([
+  'GH_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'NPM_TOKEN', 'NPM_AUTH_TOKEN',
+  'AWS_SECRET_ACCESS_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SESSION_TOKEN',
+  'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID', 'GCP_SERVICE_ACCOUNT_KEY',
+  'GOOGLE_APPLICATION_CREDENTIALS', 'SLACK_TOKEN', 'DOCKER_TOKEN', 'DOCKER_PASSWORD',
+  'PRIVATE_KEY', 'SSH_AUTH_SOCK',
+]);
+
+function buildSanitizedEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!CREDENTIAL_ENV_KEYS.has(key)) env[key] = value;
+  }
+  return env;
+}
+const SANITIZED_ENV = buildSanitizedEnv();
+
 export interface ScanSchedulerResult {
   target: string;
   timestamp: string;
@@ -27,6 +45,7 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): P
       cwd,
       encoding: 'utf-8',
       shell: false,
+      env: SANITIZED_ENV,
     });
 
     const timer = opts.timeout

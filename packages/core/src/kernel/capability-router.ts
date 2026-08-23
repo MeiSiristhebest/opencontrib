@@ -92,6 +92,7 @@ export class CapabilityRouter {
 
         const baseScore = provider.scoreProvider(fingerprint, options.intent);
 
+        // Heavy non-core probes are deferred (not selected) when enableHeavy is false
         if (!provider.isCore && provider.cost.cpu === 'heavy' && !options.enableHeavy) {
           deferred.push({
             capability: capType,
@@ -110,7 +111,15 @@ export class CapabilityRouter {
           });
           totalEstimatedMs += provider.cost.typicalLatencyMs;
           if (options.maxDurationMs && totalEstimatedMs >= options.maxDurationMs) {
-            break;
+            // Use return to short-circuit all remaining iterations (not just inner loop)
+            return {
+              targetRepo: fingerprint.repoPath,
+              primaryLanguage: fingerprint.primaryLanguage,
+              summaryLevel0: this.getLevel0Domains(),
+              selectedCapabilities: selected,
+              deferredHeavyCapabilities: deferred,
+              estimatedDurationMs: totalEstimatedMs,
+            };
           }
         }
       }

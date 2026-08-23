@@ -10,6 +10,19 @@ import {
   scoutOpportunities,
 } from '@opencontrib/core';
 
+function wrapHandler(fn: (args: any) => Promise<any>) {
+  return async (args: any) => {
+    try {
+      return await fn(args);
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: 'text', text: JSON.stringify({ status: 'error', message: err.message }, null, 2) }],
+      };
+    }
+  };
+}
+
 export function registerDiscoveryTools(server: McpServer): void {
   // -------------------------------------------------------------
   // Tool 1: contrib_assess_feasibility (纯算法：环境可行性矩阵)
@@ -22,7 +35,7 @@ export function registerDiscoveryTools(server: McpServer): void {
       issueBody: z.string().optional().describe('Body of the issue'),
       labels: z.array(z.string()).optional().describe('Labels attached to the issue'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const capabilities = detectSystemCapabilities();
       const assessment = assessFeasibility(
         args.issueTitle,
@@ -32,26 +45,24 @@ export function registerDiscoveryTools(server: McpServer): void {
       );
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                assessment,
-                localCapabilities: {
-                  os: capabilities.os,
-                  hasWsl: capabilities.hasWsl,
-                  hasDocker: capabilities.hasDocker,
-                },
+        content: [{
+          type: 'text',
+          text: JSON.stringify(
+            {
+              status: 'success',
+              assessment,
+              localCapabilities: {
+                os: capabilities.os,
+                hasWsl: capabilities.hasWsl,
+                hasDocker: capabilities.hasDocker,
               },
-              null,
-              2,
-            ),
-          },
-        ],
+            },
+            null,
+            2,
+          ),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -81,25 +92,20 @@ export function registerDiscoveryTools(server: McpServer): void {
         .optional()
         .describe('Recent issue comments for bandwagoning check'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const qualification = qualifyIssue(args as any);
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: qualification.isQualified ? 'qualified' : 'disqualified',
-                qualification,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify(
+            { status: qualification.isQualified ? 'qualified' : 'disqualified', qualification },
+            null,
+            2,
+          ),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -117,18 +123,16 @@ export function registerDiscoveryTools(server: McpServer): void {
       gitignoreContent: z.string().optional().describe('Content of .gitignore from GitHub MCP'),
       dependabotContent: z.string().optional().describe('Content of .github/dependabot.yml from GitHub MCP'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const result = diagnoseManifests(args);
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -138,25 +142,16 @@ export function registerDiscoveryTools(server: McpServer): void {
     'contrib_doctor',
     'Audit host environment health (Git, Bun/Node, Docker, WSL, and OpenContrib storage)',
     {},
-    async () => {
+    wrapHandler(async () => {
       const report = runDoctorAudit();
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                report,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ status: 'success', report }, null, 2),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -199,7 +194,7 @@ export function registerDiscoveryTools(server: McpServer): void {
         .optional()
         .describe('Optional developer profile to evaluate skill affinity and probability signals'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const repoObj = args.repository;
       const normalizedRepo = {
         fullName: repoObj?.fullName || 'unknown/unknown',
@@ -215,21 +210,12 @@ export function registerDiscoveryTools(server: McpServer): void {
       });
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                signals,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ status: 'success', signals }, null, 2),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -261,7 +247,7 @@ export function registerDiscoveryTools(server: McpServer): void {
         )
         .describe('List of file paths from GitHub MCP get_file_contents or git tree'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const { ContextAssembler } = await import('@opencontrib/core');
       const assembler = new ContextAssembler();
 
@@ -293,21 +279,12 @@ export function registerDiscoveryTools(server: McpServer): void {
       });
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                context,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ status: 'success', context }, null, 2),
+        }],
       };
-    },
+    }),
   );
 
   // -------------------------------------------------------------
@@ -323,7 +300,7 @@ export function registerDiscoveryTools(server: McpServer): void {
       limit: z.number().optional().describe('Maximum number of ranked candidates to return (default 5)'),
       minStars: z.number().optional().describe('Minimum repository stars filter (default 50)'),
     },
-    async (args) => {
+    wrapHandler(async (args) => {
       const profile = {
         techStack: args.techStack ?? ['typescript', 'javascript'],
         focusAreas: args.focusAreas ?? ['bugfix', 'testing', 'docs'],
@@ -341,22 +318,15 @@ export function registerDiscoveryTools(server: McpServer): void {
       const opportunities = await scoutOpportunities(profile, scoutOpts);
 
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                target: args.target,
-                foundCount: opportunities.length,
-                opportunities,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{
+          type: 'text',
+          text: JSON.stringify(
+            { status: 'success', target: args.target, foundCount: opportunities.length, opportunities },
+            null,
+            2,
+          ),
+        }],
       };
-    },
+    }),
   );
 }
