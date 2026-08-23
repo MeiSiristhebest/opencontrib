@@ -45,19 +45,26 @@ export class PluginManager {
   private save(): void {
     const dir = path.dirname(this.statePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.statePath, JSON.stringify(this.state, null, 2), 'utf8');
+    const tmpPath = this.statePath + '.tmp';
+    try {
+      fs.writeFileSync(tmpPath, JSON.stringify(this.state, null, 2), 'utf8');
+      fs.renameSync(tmpPath, this.statePath);
+    } catch {
+      try { fs.unlinkSync(tmpPath); } catch {}
+      throw new Error(`Failed to save plugin state to ${this.statePath}`);
+    }
   }
 
-  /** Get the current state of a plugin. Returns `{ enabled: true }` for unknown plugins. */
+  /** Get the current state of a plugin. Unknown plugins return `{ enabled: false }`. */
   getState(pluginId: string): PluginState {
-    return this.state[pluginId] || { enabled: true };
+    const s = this.state[pluginId];
+    if (!s) return { enabled: false };
+    return s;
   }
 
-  /** Whether the plugin is currently enabled. Returns false for unknown IDs — prevents silent activation of undeclared probes. */
+  /** Whether the plugin is currently enabled. Returns false for unknown IDs. */
   isEnabled(pluginId: string): boolean {
-    const s = this.state[pluginId];
-    if (!s) return false;
-    return s.enabled !== false;
+    return this.state[pluginId]?.enabled !== false;
   }
 
   /** Return the reason a plugin was disabled, or undefined. */

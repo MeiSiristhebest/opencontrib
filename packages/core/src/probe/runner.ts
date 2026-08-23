@@ -108,10 +108,20 @@ export async function runProbes(
         } catch (err: any) {
           if (err.stdout) {
             const parsed = parseProbeOutput(probe, err.stdout, targetPath);
+            findings.push(...parsed);
+            // Record partial failure even when some output was recovered
             if (parsed.length > 0) {
-              findings.push(...parsed);
-              continue;
+              failedProbes.push({
+                name: probe.name,
+                error: `Partial failure (recovered ${parsed.length} finding(s)): ${err.message || String(err)}`,
+              });
+            } else {
+              failedProbes.push({
+                name: probe.name,
+                error: err.message || String(err),
+              });
             }
+            continue;
           }
           failedProbes.push({
             name: probe.name,

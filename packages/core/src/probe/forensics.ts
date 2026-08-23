@@ -126,8 +126,25 @@ export function analyzeGitHotspots(
   };
 }
 
+function stripStringsAndComments(content: string): string {
+  // Remove single-line comments (// and #)
+  let stripped = content.replace(/\/\/.*$/gm, '').replace(/#.*/gm, '');
+  // Remove multi-line comments (/* ... */)
+  stripped = stripped.replace(/\/\*[\s\S]*?\*\//g, '');
+  // Remove string literals (double-quoted)
+  stripped = stripped.replace(/"(?:\\.|[^"\\])*"/g, '""');
+  // Remove string literals (single-quoted)
+  stripped = stripped.replace(/'(?:\\.|[^'\\])*'/g, "''");
+  // Remove template literals
+  stripped = stripped.replace(/`(?:\\.|[^`\\])*`/g, '``');
+  return stripped;
+}
+
 function estimateCyclomaticComplexity(content: string): number {
   let complexity = 1;
+  // Strip strings and comments so keyword matching only sees actual code
+  const codeOnly = stripStringsAndComments(content);
+
   const branchingPatterns = [
     /\bif\b/g,
     /\belse\s+if\b/g,
@@ -137,13 +154,14 @@ function estimateCyclomaticComplexity(content: string): number {
     /\bcatch\b/g,
     /\b&&/g,
     /\|\|/g,
-    /\?/g, // ternary
     /\bguard\b/g,
     /\bmatch\b/g,
+    // Ternary: only match ? preceded by non-?: (not optional chaining ?. or nullish ??)
+    /(?<!\?)(?<!\.)(?<!\?)\?(?![?\.\:])\s*(?!\()/g,
   ];
 
   for (const pattern of branchingPatterns) {
-    const matches = content.match(pattern);
+    const matches = codeOnly.match(pattern);
     if (matches) {
       complexity += matches.length;
     }
