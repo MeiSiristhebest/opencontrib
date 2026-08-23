@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join, resolve, sep } from 'path';
 import { sanitizeRunId } from '../run/artifact-bundle.js';
+import { ensureWorkspaceGuard, releaseWorkspaceGuard, isProtectedWorkspace } from './workspace-guard.js';
 
 /** Normalize path separators to forward slashes for consistent comparison on all platforms. */
 function norm(p: string): string {

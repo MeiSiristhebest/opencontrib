@@ -20,6 +20,35 @@ export interface ASTGrepMatch {
   language?: string;
 }
 
+/** Scan repository file extensions to determine which languages are actually present. */
+function detectRepoLanguages(targetPath: string): string[] {
+  const EXT_TO_LANG: Record<string, string> = {
+    '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
+    '.go': 'go', '.rs': 'rust', '.py': 'python', '.java': 'java',
+    '.c': 'c', '.h': 'c', '.cpp': 'cpp', '.h++': 'cpp',
+    '.cs': 'csharp', '.php': 'php', '.rb': 'ruby',
+  };
+  const langs = new Set<string>();
+  const walk = (dir: string, depth = 0): void => {
+    if (depth > 4) return;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist' || entry.name === 'build') continue;
+          walk(fullPath, depth + 1);
+        } else if (entry.isFile()) {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (EXT_TO_LANG[ext]) langs.add(EXT_TO_LANG[ext]);
+        }
+      }
+    } catch { /* skip unreadable dirs */ }
+  };
+  walk(targetPath);
+  return Array.from(langs);
+}
+
 export const astGrepPlugin: OpenContribPlugin = {
   name: '@opencontrib/plugin-ast-grep',
   version: '1.0.0',
@@ -49,6 +78,8 @@ export const astGrepPlugin: OpenContribPlugin = {
           host.log('[ast-grep Probe] ast-grep/sg binary not found in PATH. Install with: npm i -g @ast-grep/cli or cargo install ast-grep-cli', 'info');
           return;
         }
+
+        const repoLanguages = detectRepoLanguages(targetPath);
 
         // 1. Config Passthrough: check if project has native sgconfig.yml
         const customSgConfig = path.join(targetPath, 'sgconfig.yml');
@@ -94,8 +125,8 @@ export const astGrepPlugin: OpenContribPlugin = {
           }
         }
 
-        // 2. Deep Relational Rules Execution with atomic pattern queries
-        for (const rule of STANDARD_AST_RELATIONAL_RULES) {
+        // 2. Deep Relational Rules Execution — filter by languages actually present in the repo
+        for (const rule of STANDARD_AST_RELATIONAL_RULES.filter((r) => repoLanguages.includes(r.language))) {
           try {
             const ruleDef = rule.rule;
             const needsYaml = ruleDef.kind || ruleDef.inside || ruleDef.has || ruleDef.not || ruleDef.any || ruleDef.all;
@@ -112,16 +143,7 @@ export const astGrepPlugin: OpenContribPlugin = {
               stdout = execResult.stdout;
               fs.unlinkSync(yamlPath);
             } else {
-              const langFlag =
-                rule.language === 'typescript' ? '--lang ts' :
-                rule.language === 'javascript' ? '--lang js' :
-                rule.language === 'go' ? '--lang go' :
-                rule.language === 'rust' ? '--lang rust' :
-                rule.language === 'python' ? '--lang py' :
-                rule.language === 'java' ? '--lang java' :
-                rule.language === 'c' ? '--lang c' :
-                rule.language === 'csharp' ? '--lang csharp' :
-                rule.language === 'php' ? '--lang php' : '';
+              const langFlag = `--lang ${rule.language}`;
               const cmd = `${bin} run -p "${ruleDef.pattern}" ${langFlag} --json=compact`;
               const execResult = await host.exec(cmd, {
                 cwd: targetPath,

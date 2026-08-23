@@ -1,7 +1,8 @@
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { existsSync } from 'fs';
 import { homedir, platform } from 'os';
 import { join } from 'path';
+import { discoverDocker } from './docker-discovery.js';
 
 export interface DoctorCheckResult {
   category: string;
@@ -20,6 +21,7 @@ export interface DoctorReport {
     bunVersion?: string;
     gitVersion?: string;
     dockerAvailable: boolean;
+    dockerMethod?: string;
     wslAvailable: boolean;
   };
 }
@@ -32,7 +34,6 @@ export function runDoctorAudit(): DoctorReport {
   let gitVersion: string | undefined;
   let gitCmd = 'git';
 
-  // Cross-platform fallback check for Windows
   if (currentOs === 'win32') {
     const candidatePaths = [
       'git',
@@ -55,25 +56,16 @@ export function runDoctorAudit(): DoctorReport {
   } else {
     try {
       const gitOut = execSync('git --version', { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      if (gitOut) gitVersion = gitOut;
+      if (gitOut) gitVersion = out;
     } catch {}
   }
 
-  if (gitVersion) {
-    checks.push({
-      category: 'VCS',
-      name: 'Git Binary',
-      status: 'PASSED',
-      message: `Git is installed: ${gitVersion}`,
-    });
-  } else {
-    checks.push({
-      category: 'VCS',
-      name: 'Git Binary',
-      status: 'FAILED',
-      message: 'Git is not installed or not in PATH',
-    });
-  }
+  checks.push({
+    category: 'VCS',
+    name: 'Git Binary',
+    status: gitVersion ? 'PASSED' : 'FAILED',
+    message: gitVersion ? `Git is installed: ${gitVersion}` : 'Git is not installed or not in PATH',
+  });
 
   // 2. Check Git User Identity
   try {
@@ -131,23 +123,27 @@ export function runDoctorAudit(): DoctorReport {
     });
   }
 
-  // 4. Check Containers (Docker)
+  // 4. Check Containers (Docker) — six-layer discovery
   let dockerAvailable = false;
+  let dockerMethod = '';
   try {
-    execSync('docker --version', { stdio: 'ignore', timeout: 4000 });
-    dockerAvailable = true;
+    const dockerResult = discoverDocker();
+    dockerAvailable = dockerResult.found;
+    dockerMethod = dockerResult.method || '';
     checks.push({
       category: 'Sandbox',
       name: 'Docker Engine',
-      status: 'PASSED',
-      message: 'Docker daemon available for isolated clean-room container sandboxes',
+      status: dockerAvailable ? 'PASSED' : 'WARNING',
+      message: dockerAvailable
+        ? `Docker available via ${dockerMethod}`
+        : `Docker not found. Alternatives: ${(dockerResult.alternatives || ['Native Git Worktree sandbox']).join('; ')}`,
     });
   } catch {
     checks.push({
       category: 'Sandbox',
       name: 'Docker Engine',
       status: 'WARNING',
-      message: 'Docker not available; running under native Git Worktree sandbox',
+      message: 'Docker discovery failed; running under native Git Worktree sandbox',
     });
   }
 
@@ -179,6 +175,7 @@ export function runDoctorAudit(): DoctorReport {
     { name: 'ast-grep (sg)', bin: 'ast-grep', verCmd: 'ast-grep --version', cat: 'Analyzers', altBin: 'sg' },
     { name: 'Knip Dead Code Analyzer', bin: 'knip', verCmd: 'knip --version', cat: 'Analyzers' },
     { name: 'Semgrep SAST Scanner', bin: 'semgrep', verCmd: 'semgrep --version', cat: 'Analyzers' },
+    { name: 'Ruff Python Linter', bin: 'ruff', verCmd: 'ruff --version', cat: 'Analyzers' },
     { name: 'Go Compiler Toolchain', bin: 'go', verCmd: 'go version', cat: 'Compilers' },
     { name: 'Rust Compiler Toolchain', bin: 'rustc', verCmd: 'rustc --version', cat: 'Compilers' },
     { name: 'Python / UV Toolchain', bin: 'uv', verCmd: 'uv --version', cat: 'Compilers', altBin: 'python' },
@@ -187,6 +184,7 @@ export function runDoctorAudit(): DoctorReport {
     { name: '.NET / C# SDK', bin: 'dotnet', verCmd: 'dotnet --version', cat: 'Compilers' },
     { name: 'PHP / Composer Toolchain', bin: 'php', verCmd: 'php -v', cat: 'Compilers', altBin: 'composer' },
     { name: 'Ruby Toolchain', bin: 'ruby', verCmd: 'ruby -v', cat: 'Compilers', altBin: 'bundle' },
+    { name: 'Alibaba OpenCodeReview (ocr)', bin: 'ocr', verCmd: 'ocr --version', cat: 'Analyzers' },
   ];
 
   for (const tc of toolchains) {
@@ -215,7 +213,7 @@ export function runDoctorAudit(): DoctorReport {
   checks.push({
     category: 'Storage',
     name: 'OpenContrib Ledger & Sandboxes',
-    status: existsSync(opencontribDir) ? 'PASSED' : 'PASSED',
+    status: existsSync(opencontribDir) ? 'PASSED' : 'WARNING',
     message: `Workspace root: ${workspacesDir} (Ledger persistent)`,
   });
 
@@ -231,6 +229,7 @@ export function runDoctorAudit(): DoctorReport {
       bunVersion,
       gitVersion,
       dockerAvailable,
+      dockerMethod,
       wslAvailable,
     },
   };

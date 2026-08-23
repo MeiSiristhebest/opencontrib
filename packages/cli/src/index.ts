@@ -17,6 +17,7 @@ import { runCommand } from './commands/run.js';
 import { scoutCommand } from './commands/scout.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { evalCommand } from './commands/eval.js';
+import { setupCommand } from './commands/setup.js';
 
 const program = new Command();
 
@@ -50,5 +51,6 @@ program.addCommand(runCommand);
 program.addCommand(scoutCommand);
 program.addCommand(workspaceCommand);
 program.addCommand(evalCommand);
+program.addCommand(setupCommand);
 
 program.parse();

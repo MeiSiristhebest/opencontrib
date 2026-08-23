@@ -124,7 +124,7 @@ describe('OpenContrib Microkernel & Smart Pointer Architecture', () => {
       totalFiles: 15,
     };
 
-    const negotiation = host.negotiate(goFingerprint);
+    const negotiation = host.negotiate(goFingerprint, { checkBinaries: false });
     const selectedIds = negotiation.selectedProbes.map((p) => p.id);
 
     // OCR, ast-grep, git-hotspot, property-fuzz match Go
