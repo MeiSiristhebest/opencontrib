@@ -105,7 +105,7 @@ export function runResilientCommand(options: ResilientRunOptions): ResilientRunR
       timeout: timeoutMs,
       encoding: 'utf-8',
       env: {
-        ...process.env,
+        PATH: process.env.PATH || '',
         CI: 'true',
         FORCE_COLOR: '0',
       },

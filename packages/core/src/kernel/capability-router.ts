@@ -99,7 +99,9 @@ export class CapabilityRouter {
             matchScore: baseScore,
             reason: 'Heavy scan provider deferred; enable with --enable-heavy or high risk threshold',
           });
-        } else if (baseScore >= 50) {
+        }
+
+        if (baseScore >= 50) {
           selected.push({
             capability: capType,
             provider,
@@ -107,6 +109,9 @@ export class CapabilityRouter {
             reason: `Optimal provider for ${capType} on ${primaryLang}`,
           });
           totalEstimatedMs += provider.cost.typicalLatencyMs;
+          if (options.maxDurationMs && totalEstimatedMs >= options.maxDurationMs) {
+            break;
+          }
         }
       }
     }

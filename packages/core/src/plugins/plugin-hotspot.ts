@@ -5,13 +5,14 @@ export const hotspotPlugin: OpenContribPlugin = {
   name: '@opencontrib/plugin-hotspot',
   version: '1.0.0',
   description: 'Code as a Crime Scene Git churn and cyclomatic complexity hotspot forensics',
+  permissions: ['fs:read'],
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'git-hotspot',
       name: 'Git Hotspot Forensics',
       category: 'lifecycle_leak',
       description: 'Pinpoints the top vulnerable files using Churn × Complexity ranking',
-      match: (fp) => (fp.totalFiles || 0) >= 0,
+      match: (fp) => (fp.totalFiles || 0) > 0,
       scan: async (targetPath, pointers) => {
         const result = analyzeGitHotspots(targetPath, { limit: 5 });
         for (const h of result.topHotspots) {

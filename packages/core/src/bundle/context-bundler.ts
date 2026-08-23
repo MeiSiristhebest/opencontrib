@@ -12,16 +12,38 @@ export class DefaultNodeFileSystemAdapter implements FileSystemPort {
   constructor(private basePath: string) {}
 
   public readFile(relPath: string): string {
-    return fs.readFileSync(path.join(this.basePath, relPath), 'utf8');
+    const resolved = path.resolve(this.basePath, relPath);
+    const baseResolved = path.resolve(this.basePath);
+    if (!resolved.startsWith(baseResolved)) {
+      throw new Error(`Path traversal blocked: "${relPath}" resolves outside basePath`);
+    }
+    const full = path.join(this.basePath, relPath);
+    const stat = fs.statSync(full);
+    if (stat.size > 5 * 1024 * 1024) {
+      throw new Error(`File too large to read: ${relPath} (${stat.size} bytes)`);
+    }
+    return fs.readFileSync(full, 'utf8');
   }
 
   public readDir(relPath: string): string[] {
+    const resolved = path.resolve(this.basePath, relPath);
+    const baseResolved = path.resolve(this.basePath);
+    if (!resolved.startsWith(baseResolved)) {
+      return [];
+    }
     const target = path.join(this.basePath, relPath);
     if (!fs.existsSync(target)) return [];
     return fs.readdirSync(target);
   }
 
   public exists(relPath: string): boolean {
+    try {
+      const resolved = path.resolve(this.basePath, relPath);
+      const baseResolved = path.resolve(this.basePath);
+      if (!resolved.startsWith(baseResolved)) return false;
+    } catch {
+      return false;
+    }
     return fs.existsSync(path.join(this.basePath, relPath));
   }
 }

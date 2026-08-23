@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process';
 import { Octokit } from '@octokit/rest';
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir as osHomedir } from 'os';
 import { join } from 'path';
 
@@ -102,10 +102,15 @@ export class GitHubClient {
 
     try {
       const data = JSON.parse(readFileSync(filePath, 'utf-8'));
+      if (!data || typeof data !== 'object' || typeof data.timestamp !== 'number') {
+        try { unlinkSync(filePath); } catch {}
+        return null;
+      }
       if (Date.now() - data.timestamp < this.cacheTtlMs) {
         return data.payload as T;
       }
     } catch {
+      try { unlinkSync(filePath); } catch {}
       return null;
     }
     return null;

@@ -4,6 +4,7 @@ export const ocrPlugin: OpenContribPlugin = {
   name: '@opencontrib/plugin-ocr',
   version: '1.0.0',
   description: 'Alibaba OpenCodeReview hybrid rule matcher for NPE, concurrency, and SQL injection',
+  permissions: ['exec:binary'],
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'ocr',

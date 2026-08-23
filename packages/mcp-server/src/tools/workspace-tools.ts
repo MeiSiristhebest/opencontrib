@@ -1,5 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import * as path from 'path';
+import * as os from 'os';
 import { ContributionRunManager, WorktreeManager } from '@opencontrib/core';
 
 export function registerWorkspaceTools(
@@ -82,6 +84,21 @@ export function registerWorkspaceTools(
       cleanScratchDir: z.string().optional().describe('Optional path to local scratch directory to clean'),
     },
     async (args) => {
+      if (args.cleanScratchDir) {
+        const resolved = path.resolve(args.cleanScratchDir);
+        const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
+        const allowedRoot = path.resolve(home);
+        if (!resolved.startsWith(allowedRoot)) {
+          return {
+            isError: true,
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ status: 'error', message: `cleanScratchDir "${resolved}" is outside the allowed directory "${allowedRoot}"` }, null, 2),
+            }],
+          };
+        }
+      }
+
       const report = worktreeManager.purgeAllWorkspaces({
         cleanRepos: args.cleanRepos ?? false,
         cleanScratchDir: args.cleanScratchDir,

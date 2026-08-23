@@ -1,5 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import * as path from 'path';
+import * as os from 'os';
 import {
   capturePreFixAssertion,
   collectEvidence,
@@ -31,6 +33,38 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
       runId: z.string().optional().describe('Optional runId to automatically resolve workspaceRoot and save evidence.json artifact'),
     },
     async (args) => {
+      // Validate cwd against workspaceRoot boundary
+      const resolvedCwd = path.resolve(args.cwd);
+      if (args.workspaceRoot) {
+        const resolvedRoot = path.resolve(args.workspaceRoot);
+        if (!resolvedCwd.startsWith(resolvedRoot)) {
+          return {
+            isError: true,
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ status: 'error', message: `cwd "${resolvedCwd}" is outside workspaceRoot "${resolvedRoot}"` }, null, 2),
+            }],
+          };
+        }
+      } else {
+        // Validate cwd is within home directory
+        const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
+        if (!resolvedCwd.startsWith(path.resolve(home))) {
+          return {
+            isError: true,
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ status: 'error', message: `cwd "${resolvedCwd}" is outside the allowed workspace boundary. Set workspaceRoot explicitly.` }, null, 2),
+            }],
+          };
+        }
+      }
+
+      // Limit stress loop count
+      if (args.stressLoopCount > 100) {
+        args.stressLoopCount = 100;
+      }
+
       let resolvedWorkspaceRoot = args.workspaceRoot;
       let resolvedBaselineCommitSha = args.baselineCommitSha;
 

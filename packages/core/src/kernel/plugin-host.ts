@@ -18,6 +18,7 @@ import { MicrokernelEventBus } from './event-bus.js';
 import { CapabilityRouter } from './capability-router.js';
 import { EvidenceGraph } from './evidence-graph.js';
 import { ProbeScanScheduler } from './scan-scheduler.js';
+import { parseCommandSpec } from '../sandbox/command-spec.js';
 
 function getOpenContribHome(): string {
   return process.env.OPENCONTRIB_HOME || os.homedir();
@@ -27,27 +28,39 @@ const binaryCache = new Map<string, boolean>();
 
 function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string }> {
   const cwd = opts.cwd || process.cwd();
+  const parsed = parseCommandSpec(cmd);
+  if (!parsed.executable) {
+    return Promise.reject(new Error('Empty command'));
+  }
   return new Promise((resolve, reject) => {
-    const isWindows = process.platform === 'win32';
-    const shell = isWindows ? 'cmd.exe' : 'sh';
-    const shellArgs = isWindows ? ['/c', cmd] : ['-c', cmd];
-    const child = spawn(shell, shellArgs, {
-      cwd,
-      timeout: opts.timeout || 30000,
-      maxBuffer: 10 * 1024 * 1024,
-      encoding: 'utf-8',
-    });
     let stdout = '';
     let stderr = '';
+    let killed = false;
+
+    const child = spawn(parsed.executable, parsed.args, {
+      cwd,
+      maxBuffer: 10 * 1024 * 1024,
+      encoding: 'utf-8',
+      shell: false,
+    });
+
+    const timer = opts.timeout
+      ? setTimeout(() => {
+          if (killed) return;
+          killed = true;
+          child.kill('SIGKILL');
+          reject(new Error(`Command timed out after ${opts.timeout}ms: ${parsed.executable}`));
+        }, opts.timeout)
+      : undefined;
+
     child.stdout.on('data', (d) => { stdout += d.toString(); });
     child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(stderr || `Command exited with code ${code}: ${cmd}`));
-      } else {
-        resolve({ stdout, stderr });
-      }
+    child.on('error', (err) => { clearTimeout(timer); reject(err); });
+    child.on('close', (code: number | null) => {
+      clearTimeout(timer);
+      if (killed) return;
+      if (code !== 0) reject(new Error(stderr || `Command exited with code ${code}: ${parsed.executable}`));
+      else resolve({ stdout, stderr });
     });
   });
 }
@@ -133,7 +146,9 @@ export class PluginHost implements ProbeRegistryApi {
     const hostServices: HostServices = {
       workspacePath: this.workspacePath,
       exec: async (cmd: string, opts = {}) => {
-        const isGitCmd = cmd.trim().startsWith('git ') || cmd.trim() === 'git';
+        const parsed = parseCommandSpec(cmd);
+        const exe = parsed.executable.toLowerCase();
+        const isGitCmd = exe === 'git' || exe === 'git.exe';
         const hasGitPerm = plugin.permissions?.includes('exec:git') || plugin.permissions?.includes('exec:binary');
         const hasBinPerm = plugin.permissions?.includes('exec:binary');
 
@@ -152,7 +167,7 @@ export class PluginHost implements ProbeRegistryApi {
         return { stdout, stderr };
       },
       log: (msg: string, level = 'info') => {
-        // Structured logging
+        console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](msg);
       },
       isBinaryAvailable: (bin: string) => {
         if (binaryCache.has(bin)) return binaryCache.get(bin)!;

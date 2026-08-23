@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'child_process';
 import type { ProbeDescriptor, HostServices, PointerStub } from './contract.js';
 import type { SmartPointerStore } from './pointer-store.js';
+import { parseCommandSpec } from '../sandbox/command-spec.js';
 
 const binaryCache = new Map<string, boolean>();
 
@@ -13,26 +14,38 @@ export interface ScanSchedulerResult {
 
 function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string }> {
   const cwd = opts.cwd || process.cwd();
+  const parsed = parseCommandSpec(cmd);
+  if (!parsed.executable) {
+    return Promise.reject(new Error('Empty command'));
+  }
   return new Promise((resolve, reject) => {
-    const isWindows = process.platform === 'win32';
-    const shell = isWindows ? 'cmd.exe' : 'sh';
-    const shellArgs = isWindows ? ['/c', cmd] : ['-c', cmd];
-    const child = spawn(shell, shellArgs, {
-      cwd,
-      timeout: opts.timeout || 30000,
-      encoding: 'utf-8',
-    });
     let stdout = '';
     let stderr = '';
+    let killed = false;
+
+    const child = spawn(parsed.executable, parsed.args, {
+      cwd,
+      encoding: 'utf-8',
+      shell: false,
+    });
+
+    const timer = opts.timeout
+      ? setTimeout(() => {
+          if (killed) return;
+          killed = true;
+          child.kill('SIGKILL');
+          reject(new Error(`Command timed out after ${opts.timeout}ms: ${parsed.executable}`));
+        }, opts.timeout)
+      : undefined;
+
     child.stdout.on('data', (d) => { stdout += d.toString(); });
     child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', reject);
+    child.on('error', (err) => { clearTimeout(timer); reject(err); });
     child.on('close', (code: number | null, _signal: string | null) => {
-      if (code !== 0) {
-        reject(new Error(stderr || `Command exited with code ${code}: ${cmd}`));
-      } else {
-        resolve({ stdout, stderr });
-      }
+      clearTimeout(timer);
+      if (killed) return;
+      if (code !== 0) reject(new Error(stderr || `Command exited with code ${code}: ${parsed.executable}`));
+      else resolve({ stdout, stderr });
     });
   });
 }

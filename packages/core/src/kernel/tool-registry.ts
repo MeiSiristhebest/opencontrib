@@ -305,12 +305,10 @@ export function areBinariesOnPath(bins: string[]): Record<string, boolean> {
       results[bin] = foundBinaries.has(bin) || foundBinaries.has(winName) || existsSync(bin);
     }
   } else {
-    // Unix: chain command -v calls in a single sh process
-    const script = bins.map((b, i) => `command -v ${b} && echo "FOUND_${i}" || true`).join('\n');
-    const result = spawnSync('sh', ['-c', script], { encoding: 'utf-8', timeout: 5000 });
-    const output = result.stdout || '';
+    // Unix: check each binary individually without shell interpolation
     for (const [i, bin] of bins.entries()) {
-      results[bin] = output.includes(`FOUND_${i}`);
+      const result = spawnSync('command', ['-v', bin], { encoding: 'utf-8', timeout: 5000 });
+      results[bin] = result.status === 0;
     }
   }
 
