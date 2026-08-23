@@ -147,6 +147,11 @@ export class ContributionStateMachine {
       return { allowed: false, reason: `Policy forbids real PR submissions (mode: ${policy.mode})` };
     }
 
+    // 2b. Review required constraint — cannot bypass human gate
+    if (policy.reviewRequired && stage === 'SUBAGENT_REVIEW') {
+      return { allowed: false, reason: 'Human gate review required before PR submission' };
+    }
+
     // 3. Dual-stage evidence constraint
     if (!reproductionCaptured) {
       return { allowed: false, reason: 'Failing reproduction assertion has not been captured in sandbox' };

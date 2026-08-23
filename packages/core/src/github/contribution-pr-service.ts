@@ -54,11 +54,11 @@ export class ContributionPrService {
         return currentUser;
       }
     } catch (err) {
-      const status = (err as any).status;
-      if (status === 401 || status === 403) {
-        throw new Error(`GitHub auth failed (${status}) when forking ${owner}/${repo}: ${(err as any).message}`);
+      if ((err as any).status === 401 || (err as any).status === 403) {
+        throw new Error(`GitHub auth failed (${(err as any).status}) when forking ${owner}/${repo}: ${(err as any).message}`);
       }
-      return owner;
+      // Any other fork error — do not silently fall back to upstream
+      throw new Error(`Fork operation failed for ${owner}/${repo}: ${(err as any).message}`);
     }
   }
 

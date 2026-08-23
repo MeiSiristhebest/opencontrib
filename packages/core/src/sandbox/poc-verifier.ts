@@ -111,6 +111,12 @@ export class AutonomousPoCVerifier {
 
       // Phase 4: Full Regression Suite Check
       const regCmd = options.testCommand || defaultCmd;
+      if (/[$\|;&`()<>\s*?]/.test(regCmd)) {
+        report.status = 'SKIPPED';
+        report.logs.regressionOutput = 'Regression test skipped: testCommand contains unsafe characters';
+        sandbox.cleanup();
+        return report;
+      }
       const regResult = sandbox.exec(regCmd, options.timeoutMs || 45000);
       report.logs.regressionOutput = (regResult.stdout + '\n' + regResult.stderr).trim();
       report.regressionPassed = regResult.exitCode === 0;

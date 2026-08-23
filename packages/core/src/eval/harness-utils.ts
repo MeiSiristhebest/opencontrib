@@ -73,7 +73,7 @@ export function parseSchemaV2Report(
   const allFailed = results.length > 0 && results.every((r) => !r.success);
 
   const perTest: PerTestVerdict[] = results.map((r) => {
-    const failedPhases = r.errors.filter((e) => e.startsWith('Missing required'));
+    const failedPhases = (r.errors || []).filter((e: any) => e && e.startsWith('Missing required'));
     return {
       testId: r.scenarioId,
       file: `${r.scenarioId}.patch`,

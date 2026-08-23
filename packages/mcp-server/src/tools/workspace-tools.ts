@@ -22,54 +22,61 @@ export function registerWorkspaceTools(
       runId: z.string().optional().describe('Optional runId to automatically save workspace.json artifact and advance phase'),
     },
     async (args) => {
-      const context = worktreeManager.createIsolatedWorkspace({
-        repoFullName: args.repoFullName,
-        issueOrTaskId: args.issueOrTaskId,
-        localRepoPath: args.localRepoPath,
-        runId: args.runId,
-      });
+      try {
+        const context = worktreeManager.createIsolatedWorkspace({
+          repoFullName: args.repoFullName,
+          issueOrTaskId: args.issueOrTaskId,
+          localRepoPath: args.localRepoPath,
+          runId: args.runId,
+        });
 
-      let persistence: { saved: boolean; error?: string } = { saved: false };
-      if (args.runId) {
-        try {
-          runManager.saveArtifact(
-            args.runId,
-            'workspace',
-            {
-              workspacePath: context.workspacePath,
-              branchName: context.branchName,
-              isWorktree: context.isWorktree,
-              baseRepoPath: context.baseRepoPath,
-              baseCommitSha: context.baseCommitSha,
-              repoFullName: args.repoFullName,
-            },
-            'WORKSPACE_PREPARED',
-          );
-          persistence = { saved: true };
-        } catch (err: any) {
-          persistence = { saved: false, error: err.message };
-        }
-      }
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
+        let persistence: { saved: boolean; error?: string } = { saved: false };
+        if (args.runId) {
+          try {
+            runManager.saveArtifact(
+              args.runId,
+              'workspace',
               {
-                status: persistence.error ? 'PARTIAL_SUCCESS' : 'success',
                 workspacePath: context.workspacePath,
                 branchName: context.branchName,
                 isWorktree: context.isWorktree,
+                baseRepoPath: context.baseRepoPath,
                 baseCommitSha: context.baseCommitSha,
-                persistence: args.runId ? persistence : undefined,
+                repoFullName: args.repoFullName,
               },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+              'WORKSPACE_PREPARED',
+            );
+            persistence = { saved: true };
+          } catch (err: any) {
+            persistence = { saved: false, error: err.message };
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  status: persistence.error ? 'PARTIAL_SUCCESS' : 'success',
+                  workspacePath: context.workspacePath,
+                  branchName: context.branchName,
+                  isWorktree: context.isWorktree,
+                  baseCommitSha: context.baseCommitSha,
+                  persistence: args.runId ? persistence : undefined,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ status: 'error', message: err.message }, null, 2) }],
+        };
+      }
     },
   );
 
@@ -84,42 +91,49 @@ export function registerWorkspaceTools(
       cleanScratchDir: z.string().optional().describe('Optional path to local scratch directory to clean'),
     },
     async (args) => {
-      if (args.cleanScratchDir) {
-        const resolved = path.resolve(args.cleanScratchDir);
-        const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
-        const allowedRoot = path.resolve(home);
-        if (!resolved.startsWith(allowedRoot + path.sep) && resolved !== allowedRoot) {
-          return {
-            isError: true,
-            content: [{
-              type: 'text',
-              text: JSON.stringify({ status: 'error', message: `cleanScratchDir "${resolved}" is outside the allowed directory "${allowedRoot}"` }, null, 2),
-            }],
-          };
+      try {
+        if (args.cleanScratchDir) {
+          const resolved = path.resolve(args.cleanScratchDir);
+          const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
+          const allowedRoot = path.resolve(home);
+          if (!resolved.startsWith(allowedRoot + path.sep) && resolved !== allowedRoot) {
+            return {
+              isError: true,
+              content: [{
+                type: 'text',
+                text: JSON.stringify({ status: 'error', message: `cleanScratchDir "${resolved}" is outside the allowed directory "${allowedRoot}"` }, null, 2),
+              }],
+            };
+          }
         }
+
+        const report = worktreeManager.purgeAllWorkspaces({
+          cleanRepos: args.cleanRepos ?? false,
+          cleanScratchDir: args.cleanScratchDir,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  status: 'success',
+                  message: 'Sandbox cleanup completed',
+                  report,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ status: 'error', message: err.message }, null, 2) }],
+        };
       }
-
-      const report = worktreeManager.purgeAllWorkspaces({
-        cleanRepos: args.cleanRepos ?? false,
-        cleanScratchDir: args.cleanScratchDir,
-      });
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                status: 'success',
-                message: 'Sandbox cleanup completed',
-                report,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
     },
   );
 }

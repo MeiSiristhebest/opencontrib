@@ -366,10 +366,10 @@ export class ContextAssembler {
       sections.push(`- **Top-level Structure**: ${ctx.repoContext.detectedSkeletonFiles.join(', ')}`);
     }
     if (ctx.repoContext.contributingGuidelinesSnippet) {
-      sections.push(`- **Contributing Guidelines**:\n${ctx.repoContext.contributingGuidelinesSnippet}`);
+      sections.push(`- **Contributing Guidelines**:\n${this.sanitizeUntrustedText(ctx.repoContext.contributingGuidelinesSnippet, 5000)}`);
     }
     if (ctx.repoContext.packageManifestSnippet) {
-      sections.push(`- **Package Manifest**:\n\`\`\`\n${ctx.repoContext.packageManifestSnippet}\n\`\`\``);
+      sections.push(`- **Package Manifest**:\n\`\`\`\n${this.sanitizeUntrustedText(ctx.repoContext.packageManifestSnippet, 5000)}\n\`\`\``);
     }
 
     if (ctx.guidance.suggestedReadingOrder.length > 0 || ctx.guidance.targetTestFiles.length > 0) {

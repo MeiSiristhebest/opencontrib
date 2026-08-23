@@ -49,8 +49,8 @@ export class RepoMemoryLedger {
         }
       }
     } catch (err: any) {
-      console.warn(`[RepoMemory] Failed to load cache: ${err.message}, resetting`);
-      this.cache.clear();
+      console.error(`[RepoMemory] CRITICAL: Failed to load cache: ${err.message}. Throwing to prevent silent data loss.`);
+      throw err;
     }
   }
 
