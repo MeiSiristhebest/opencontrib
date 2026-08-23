@@ -125,6 +125,9 @@ function generateHypothesisTest(category: DefectCategory, targetFn: string): Fuz
     targetFunction: targetFn,
     codeSnippet: `from hypothesis import given, strategies as st
 import pytest
+
+# NOTE: Replace 'my_module' with the actual Python module path.
+# Derive from file location: src/my_package/utils.py => from my_package.utils import ${targetFn}
 from my_module import ${targetFn}
 
 @given(st.one_of(st.floats(allow_nan=True, allow_infinity=True), st.integers()))
@@ -143,6 +146,9 @@ function generateProptest(category: DefectCategory, targetFn: string): FuzzTempl
     framework: 'proptest',
     targetFunction: targetFn,
     codeSnippet: `use proptest::prelude::*;
+
+// NOTE: Replace 'crate' with the actual module path where ${targetFn} lives.
+// Example: use crate::utils::${targetFn};
 use crate::${targetFn};
 
 proptest! {
@@ -162,7 +168,7 @@ function generateGoQuickTest(category: DefectCategory, targetFn: string): FuzzTe
     category,
     framework: 'go-quick',
     targetFunction: targetFn,
-    codeSnippet: `package main
+    codeSnippet: `package main_test
 
 import (
 	"math"
@@ -170,10 +176,11 @@ import (
 	"testing/quick"
 )
 
+// NOTE: Import the target package and replace TargetPackage with the actual import path.
+// Example: import TargetPackage "github.com/user/repo"
 func TestProperty_${targetFn}(t *testing.T) {
 	f := func(val float64) bool {
-		res := ${targetFn}(val)
-		// NaN check: NaN != NaN is the only expression that identifies NaN in Go
+		res := TargetPackage.${targetFn}(val)
 		return !(math.IsNaN(res))
 	}
 	if err := quick.Check(f, nil); err != nil {

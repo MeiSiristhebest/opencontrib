@@ -125,13 +125,15 @@ func TestRepro_${cleanId}(t *testing.T) {
         expectedPostFixAssertion: 'err != nil && !panicked',
       });
 
-      pocCode = `package main
+      pocCode = `package main_test
 
 import (
+	"context"
 	"testing"
 )
 
-// PoC: Reproduce boundary/nil handling defect found in ${fileRef}
+// NOTE: Replace 'TargetPackage' with the actual module import path.
+// Example: import TargetPackage "github.com/user/repo/pkg"
 func TestRepro_${cleanId}(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -142,6 +144,8 @@ func TestRepro_${cleanId}(t *testing.T) {
 	// Target boundary call reproducing: ${finding.title}
 	// Before patch: this invocation panics or corrupts state
 	// After patch: returns sanitized error gracefully
+	ctx := context.Background()
+	_ = TargetPackage.${targetSymbol}(ctx, nil)
 }
 `;
     }

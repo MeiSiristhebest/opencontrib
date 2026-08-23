@@ -453,10 +453,14 @@ export class ProbeRegistry {
 
   public unregister(name: string): boolean {
     if (BUILTIN_PROBES.some((p) => p.name === name)) {
-      return false; // Cannot delete built-in probes
+      return false;
     }
     const existed = this.memoryProbes.delete(name);
-    const diskPath = path.join(this.pluginsDir, `${name}.json`);
+    const sanitizedName = this.sanitizePluginName(name);
+    if (!sanitizedName) {
+      return existed;
+    }
+    const diskPath = path.join(this.pluginsDir, `${sanitizedName}.json`);
     if (fs.existsSync(diskPath)) {
       fs.unlinkSync(diskPath);
     }
@@ -468,9 +472,21 @@ export class ProbeRegistry {
     if (!fs.existsSync(this.pluginsDir)) {
       fs.mkdirSync(this.pluginsDir, { recursive: true });
     }
-    const diskPath = path.join(this.pluginsDir, `${manifest.name}.json`);
+    const sanitizedName = this.sanitizePluginName(manifest.name);
+    if (!sanitizedName) {
+      throw new Error(`Invalid probe name: ${manifest.name}`);
+    }
+    const diskPath = path.join(this.pluginsDir, `${sanitizedName}.json`);
     fs.writeFileSync(diskPath, JSON.stringify(manifest, null, 2), 'utf8');
     this.memoryProbes.set(manifest.name, manifest);
+  }
+
+  private sanitizePluginName(name: string): string | null {
+    const sanitized = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    if (!sanitized || sanitized === '_' || sanitized.length > 64) {
+      return null;
+    }
+    return sanitized;
   }
 
   private loadCustomPlugins(): void {
@@ -480,16 +496,17 @@ export class ProbeRegistry {
     try {
       const files = fs.readdirSync(this.pluginsDir);
       for (const file of files) {
-        if (file.endsWith('.json')) {
-          const filePath = path.join(this.pluginsDir, file);
-          try {
-            const content = fs.readFileSync(filePath, 'utf8');
-            const manifest: ProbeManifest = JSON.parse(content);
-            this.validateManifest(manifest);
-            this.memoryProbes.set(manifest.name, manifest);
-          } catch {
-            // Ignore invalid plugin files
-          }
+        if (!file.endsWith('.json')) continue;
+        const filePath = path.join(this.pluginsDir, file);
+        try {
+          const stat = fs.lstatSync(filePath);
+          if (stat.isSymbolicLink()) continue;
+          const content = fs.readFileSync(filePath, 'utf8');
+          const manifest: ProbeManifest = JSON.parse(content);
+          this.validateManifest(manifest);
+          this.memoryProbes.set(manifest.name, manifest);
+        } catch {
+          // Ignore invalid plugin files
         }
       }
     } catch {

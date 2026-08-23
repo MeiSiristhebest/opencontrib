@@ -127,16 +127,14 @@ export function analyzeGitHotspots(
 }
 
 function stripStringsAndComments(content: string): string {
-  // Remove single-line comments (// and #)
-  let stripped = content.replace(/\/\/.*$/gm, '').replace(/#.*/gm, '');
-  // Remove multi-line comments (/* ... */)
-  stripped = stripped.replace(/\/\*[\s\S]*?\*\//g, '');
-  // Remove string literals (double-quoted)
-  stripped = stripped.replace(/"(?:\\.|[^"\\])*"/g, '""');
-  // Remove string literals (single-quoted)
+  // Remove string literals first (double-quoted, single-quoted, template)
+  let stripped = content.replace(/"(?:\\.|[^"\\])*"/g, '""');
   stripped = stripped.replace(/'(?:\\.|[^'\\])*'/g, "''");
-  // Remove template literals
   stripped = stripped.replace(/`(?:\\.|[^`\\])*`/g, '``');
+  // Then remove single-line comments
+  stripped = stripped.replace(/\/\/.*$/gm, '').replace(/#.*/gm, '');
+  // Then remove multi-line comments
+  stripped = stripped.replace(/\/\*[\s\S]*?\*\//g, '');
   return stripped;
 }
 

@@ -75,14 +75,19 @@ export class ContributionStateMachine {
 
   transition(nextStage: PipelineStage, note?: string): void {
     const currentStage = this.state.stage;
+    // Valid transitions aligned with the agent-orchestrator's actual execution paths:
+    //   Autonomous/dry-run:  DISCOVERY -> ONBOARDING -> PATCH_DESIGN -> SANDBOX_VALIDATION -> SUBAGENT_REVIEW -> COMPLETED
+    //   With PR:            ... -> SUBAGENT_REVIEW -> PR_SUBMISSION -> COMPLETED
+    //   With human gate:    ... -> SUBAGENT_REVIEW -> HUMAN_GATE -> PR_SUBMISSION -> COMPLETED
+    // QUALIFICATION is a logical concept inlined in the orchestrator (ranking) and is not a separate transition.
     const validTransitions: Record<PipelineStage, PipelineStage[]> = {
       IDLE: ['DISCOVERY', 'BLOCKED'],
-      DISCOVERY: ['QUALIFICATION', 'BLOCKED'],
+      DISCOVERY: ['ONBOARDING', 'QUALIFICATION', 'PATCH_DESIGN', 'BLOCKED'],
       QUALIFICATION: ['ONBOARDING', 'PATCH_DESIGN', 'BLOCKED'],
       ONBOARDING: ['PATCH_DESIGN', 'BLOCKED'],
       PATCH_DESIGN: ['SANDBOX_VALIDATION', 'BLOCKED'],
-      SANDBOX_VALIDATION: ['SUBAGENT_REVIEW', 'HUMAN_GATE', 'PATCH_DESIGN', 'BLOCKED'],
-      SUBAGENT_REVIEW: ['SANDBOX_VALIDATION', 'HUMAN_GATE', 'PATCH_DESIGN', 'BLOCKED'],
+      SANDBOX_VALIDATION: ['SUBAGENT_REVIEW', 'PATCH_DESIGN', 'BLOCKED'],
+      SUBAGENT_REVIEW: ['SANDBOX_VALIDATION', 'HUMAN_GATE', 'PR_SUBMISSION', 'COMPLETED', 'PATCH_DESIGN', 'BLOCKED'],
       HUMAN_GATE: ['PR_SUBMISSION', 'PATCH_DESIGN', 'BLOCKED'],
       PR_SUBMISSION: ['COMPLETED', 'BLOCKED'],
       COMPLETED: [],
