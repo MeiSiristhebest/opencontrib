@@ -287,6 +287,11 @@ export function calculateOsFeasibility(
       python: true,
       go: true,
       rust: true,
+      java: true,
+      cpp: true,
+      dotnet: true,
+      ruby: true,
+      php: true,
     },
   };
 

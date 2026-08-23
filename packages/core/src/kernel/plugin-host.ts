@@ -73,8 +73,6 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): P
 
     const child = spawn(parsed.executable, parsed.args, {
       cwd,
-      maxBuffer: 10 * 1024 * 1024,
-      encoding: 'utf-8',
       shell: false,
       env: SANITIZED_PLUGIN_ENV,
     });

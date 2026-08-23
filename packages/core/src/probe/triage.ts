@@ -12,7 +12,7 @@ export const DEFAULT_SEVERITY_WEIGHTS: Record<FindingSeverity, number> = {
   low: 30,
 };
 
-export const DEFAULT_CATEGORY_MULTIPLIERS: Record<DefectCategory, number> = {
+export const DEFAULT_CATEGORY_MULTIPLIERS: Record<string, number> = {
   lifecycle_leak: 1.2,
   concurrency_race: 1.2,
   protocol_drift: 1.15,
@@ -54,7 +54,7 @@ export function triagePointerFindings(
     ...weights.severityWeights,
   };
 
-  const categoryMultipliers: Record<DefectCategory, number> = {
+  const categoryMultipliers: Record<string, number> = {
     ...DEFAULT_CATEGORY_MULTIPLIERS,
     ...weights.categoryMultipliers,
   };

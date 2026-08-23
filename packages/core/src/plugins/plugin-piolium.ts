@@ -5,6 +5,7 @@ export const pioliumPlugin: OpenContribPlugin = {
   name: '@opencontrib/plugin-piolium',
   version: '1.0.0',
   description: 'Vigolium Piolium 17-Phase adversarial audit and autonomous PoC constructor',
+  permissions: ['exec:binary'],
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'piolium',

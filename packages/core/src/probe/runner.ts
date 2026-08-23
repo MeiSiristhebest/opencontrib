@@ -21,8 +21,6 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number; maxB
   return new Promise((resolve, reject) => {
     const child = spawn(parsed.executable, parsed.args, {
       cwd,
-      encoding: 'utf-8',
-      maxBuffer: opts.maxBuffer || 10 * 1024 * 1024,
       shell: false,
     });
     let stdout = '';

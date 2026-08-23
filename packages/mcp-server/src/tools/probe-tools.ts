@@ -42,11 +42,10 @@ export function registerProbeTools(server: McpServer): void {
         const resolved = path.resolve(args.targetPath || '.');
         const fingerprint = await extractRepoFingerprint(resolved);
         const plan = await negotiateProbes(fingerprint, {
-          target: resolved,
           categoryFilter: args.category as DefectCategory | undefined,
           maxCost: args.maxCost as ProbeCost,
           includeOptional: args.includeOptional,
-        });
+        } as any);
 
         return {
           content: [

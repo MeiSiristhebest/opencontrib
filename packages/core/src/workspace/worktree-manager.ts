@@ -20,7 +20,7 @@ export function safeRmSync(
   allowedParents?: string[],
 ): boolean {
   const resolved = norm(resolve(targetPath));
-  const homedirPath = norm(resolve(homedir()));
+  const homedirPath = norm(resolve(osHomedir()));
   const tempDir = norm(resolve(tmpdir()));
   const opencontribHome = norm(resolve(homedirPath, '.opencontrib'));
 

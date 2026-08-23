@@ -133,9 +133,6 @@ export class ArtifactBundleManager {
     try {
       return JSON.parse(content) as T;
     } catch (err: any) {
-      if (type === 'patch' || type === 'pr_draft') {
-        return content as unknown as T;
-      }
       console.warn(`[ArtifactBundle] Failed to parse artifact ${type} for run ${runId}: ${err.message}`);
       return content as unknown as T;
     }

@@ -16,6 +16,24 @@
 
 import { platform } from 'os';
 
+/** Credential keys stripped from binary-detection subprocesses. */
+const TOOL_REGISTRY_CREDENTIAL_KEYS = new Set([
+  'GH_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'NPM_TOKEN', 'NPM_AUTH_TOKEN',
+  'AWS_SECRET_ACCESS_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SESSION_TOKEN',
+  'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID', 'GCP_SERVICE_ACCOUNT_KEY',
+  'GOOGLE_APPLICATION_CREDENTIALS', 'SLACK_TOKEN', 'DOCKER_TOKEN', 'DOCKER_PASSWORD',
+  'PRIVATE_KEY', 'SSH_AUTH_SOCK',
+]);
+
+function buildToolRegistryEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!TOOL_REGISTRY_CREDENTIAL_KEYS.has(key)) env[key] = value;
+  }
+  return env;
+}
+const TOOL_REGISTRY_ENV = buildToolRegistryEnv();
+
 export interface ToolInstallStep {
   cmd: string;
   desc: string;
@@ -247,10 +265,16 @@ export function isBinaryOnPath(bin: string): boolean {
   const { spawnSync } = require('node:child_process');
   const { join, resolve } = require('node:path');
 
+  // Strip credentials from subprocess env
+  const strippedEnv: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!TOOL_REGISTRY_CREDENTIAL_KEYS.has(key)) strippedEnv[key] = value;
+  }
+
   const isWindows = currentPlatform() === 'win32';
   const cmd = isWindows ? 'where.exe' : 'command';
   const args = isWindows ? ['-q', bin] : ['-v', bin];
-  const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000 });
+  const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000, env: strippedEnv });
   if (result.status === 0) return true;
 
   // Fallback: check OPENCONTRIB_DOCKER_BIN_DIR for non-standard install paths
@@ -263,7 +287,7 @@ export function isBinaryOnPath(bin: string): boolean {
     // Also scan the directory for any matching name
     try {
       const files = readdirSync(customDir);
-      if (files.some((f) => f.toLowerCase() === bin.toLowerCase() || f.toLowerCase().startsWith(bin.toLowerCase()))) {
+      if (files.some((f: string) => f.toLowerCase() === bin.toLowerCase() || f.toLowerCase().startsWith(bin.toLowerCase()))) {
         return true;
       }
     } catch {
@@ -293,10 +317,10 @@ export function areBinariesOnPath(bins: string[]): Record<string, boolean> {
 
   // Batch: single process call for all binaries
   if (isWindows) {
-    const result = spawnSync('where.exe', bins, { encoding: 'utf-8', timeout: 5000 });
+    const result = spawnSync('where.exe', bins, { encoding: 'utf-8', timeout: 5000, env: TOOL_REGISTRY_ENV });
     const output = result.stdout || '';
     // where.exe outputs each found binary on its own line
-    const foundBinaries = new Set(output.split(/\r?\n/).map((l) => {
+    const foundBinaries = new Set(output.split(/\r?\n/).map((l: string) => {
       const base = l.trim().replace(/.*[\\/]/, '');
       return base;
     }).filter(Boolean));
@@ -307,7 +331,7 @@ export function areBinariesOnPath(bins: string[]): Record<string, boolean> {
   } else {
     // Unix: check each binary individually without shell interpolation
     for (const [i, bin] of bins.entries()) {
-      const result = spawnSync('command', ['-v', bin], { encoding: 'utf-8', timeout: 5000 });
+      const result = spawnSync('command', ['-v', bin], { encoding: 'utf-8', timeout: 5000, env: TOOL_REGISTRY_ENV });
       results[bin] = result.status === 0;
     }
   }

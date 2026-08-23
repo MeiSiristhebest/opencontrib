@@ -19,7 +19,7 @@ export const fuzzPlugin: OpenContribPlugin = {
           ['typescript', 'javascript', 'python', 'rust', 'go'].includes(l.language.toLowerCase())
         ),
       scan: async (targetPath, pointers, host) => {
-        const extensions: { ext: string; lang: string; funcRegexes: RegExp[]; skipExt: string[] } = [
+        const extensions: Array<{ ext: string; lang: string; funcRegexes: RegExp[]; skipExt: string[] }> = [
           { ext: '.ts', lang: 'typescript', funcRegexes: [
             /(?:export\s+)?function\s+(\w+)\s*\(/g,
             /(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(/g,
@@ -99,6 +99,7 @@ export const fuzzPlugin: OpenContribPlugin = {
             category: 'numerical_bounds',
             severity: 'medium',
             file: relFile,
+            line: 1,
             confidence: 90,
             slice: {
               codeSnippet: spec.codeSnippet,

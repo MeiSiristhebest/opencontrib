@@ -83,6 +83,7 @@ export const eslintSecurityPlugin: OpenContribPlugin = {
                     confidence: 93,
                     affectedSymbol: msg.ruleId,
                     slice: {
+                      codeSnippet: '',
                       ruleExplanation: `${msg.ruleId} - ${rule.category}`,
                       remediationSuggestion: `Fix ${msg.ruleId} violation`,
                     },
