@@ -133,6 +133,27 @@ export const workflowPlugin: OpenContribPlugin = {
                   },
                 });
               }
+
+              // 5. GITHUB_TOKEN passed to untrusted actions via env (secret injection)
+              if (lineText.match(/::add-path::|GITHUB_TOKEN.*env/i) && lineText.includes('echo')) {
+                pointers.create({
+                  namespace: 'findings',
+                  id: `ci-token-echo-${file.replace(/[^a-zA-Z0-9_-]/g, '_')}-${lineNum}`,
+                  title: `GITHUB_TOKEN may be exposed via echo/printf in ${file}:${lineNum}`,
+                  category: 'security_cwe',
+                  severity: 'high',
+                  file: `.github/workflows/${file}`,
+                  line: lineNum,
+                  confidence: 85,
+                  affectedSymbol: 'GITHUB_TOKEN',
+                  callSite: lineText.trim(),
+                  slice: {
+                    codeSnippet: lineText,
+                    ruleExplanation: 'GITHUB_TOKEN in echo/printf can leak the token to job logs',
+                    remediationSuggestion: 'Use env vars directly; never echo tokens to logs. Mask with ${{ secrets.* }}',
+                  },
+                });
+              }
             });
           }
         } catch {

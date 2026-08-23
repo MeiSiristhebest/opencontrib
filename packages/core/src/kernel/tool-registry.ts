@@ -72,7 +72,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
       win32: [{ cmd: 'pip install ruff', desc: 'Install ruff via pip' }],
       darwin: [
         { cmd: 'pip install ruff', desc: 'Install ruff via pip' },
-        { cmd: 'brew install astral-sh/ruff/ruff', desc: 'Install ruff via Homebrew' },
+        { cmd: 'brew install ruff', desc: 'Install ruff via Homebrew' },
       ],
       linux: [{ cmd: 'pip install ruff', desc: 'Install ruff via pip' }],
     },
@@ -241,35 +241,85 @@ export function getInstallSteps(toolId: string): ToolInstallStep[] {
   return entry.install[currentPlatform()] || [];
 }
 
-/** Check if a single binary is available on PATH. */
+/** Check if a single binary is available on PATH or in OPENCONTRIB_DOCKER_BIN_DIR. */
 export function isBinaryOnPath(bin: string): boolean {
+  const { existsSync, readdirSync } = require('node:fs');
   const { spawnSync } = require('node:child_process');
+  const { join, resolve } = require('node:path');
+
   const isWindows = currentPlatform() === 'win32';
   const cmd = isWindows ? 'where.exe' : 'command';
   const args = isWindows ? ['-q', bin] : ['-v', bin];
   const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000 });
-  return result.status === 0;
+  if (result.status === 0) return true;
+
+  // Fallback: check OPENCONTRIB_DOCKER_BIN_DIR for non-standard install paths
+  const customDir = process.env.OPENCONTRIB_DOCKER_BIN_DIR;
+  if (customDir) {
+    const fullPath = resolve(customDir, bin);
+    const winPath = resolve(customDir, `${bin}.exe`);
+    if (isWindows && existsSync(winPath)) return true;
+    if (existsSync(fullPath)) return true;
+    // Also scan the directory for any matching name
+    try {
+      const files = readdirSync(customDir);
+      if (files.some((f) => f.toLowerCase() === bin.toLowerCase() || f.toLowerCase().startsWith(bin.toLowerCase()))) {
+        return true;
+      }
+    } catch {
+      // Directory not readable
+    }
+  }
+  return false;
 }
 
 /**
  * Check multiple binaries in a single shell call for batch efficiency.
- * Windows: `where.exe a b c...` (single process, checks all)
- * Unix:    `command -v a && command -v b ...` (chained)
+ * Windows: `where.exe a b c...` (single process, checks all binaries at once)
+ * Unix:    `command -v a && command -v b ...` (single process)
  */
 export function areBinariesOnPath(bins: string[]): Record<string, boolean> {
   if (bins.length === 0) return {};
 
   const results: Record<string, boolean> = {};
   const isWindows = currentPlatform() === 'win32';
+  const { existsSync } = require('node:fs');
+  const { spawnSync } = require('node:child_process');
 
   if (bins.length === 1) {
     results[bins[0]] = isBinaryOnPath(bins[0]);
     return results;
   }
 
-  // For multiple binaries, check each individually for accurate per-binary results
-  for (const bin of bins) {
-    results[bin] = isBinaryOnPath(bin);
+  // Batch: single process call for all binaries
+  if (isWindows) {
+    const result = spawnSync('where.exe', bins, { encoding: 'utf-8', timeout: 5000 });
+    const output = result.stdout || '';
+    // where.exe outputs each found binary on its own line
+    const foundBinaries = new Set(output.split(/\r?\n/).map((l) => {
+      const base = l.trim().replace(/.*[\\/]/, '');
+      return base;
+    }).filter(Boolean));
+    for (const bin of bins) {
+      const winName = bin.endsWith('.exe') ? bin : bin + '.exe';
+      results[bin] = foundBinaries.has(bin) || foundBinaries.has(winName) || existsSync(bin);
+    }
+  } else {
+    // Unix: chain command -v calls in a single sh process
+    const script = bins.map((b, i) => `command -v ${b} && echo "FOUND_${i}" || true`).join('\n');
+    const result = spawnSync('sh', ['-c', script], { encoding: 'utf-8', timeout: 5000 });
+    const output = result.stdout || '';
+    for (const [i, bin] of bins.entries()) {
+      results[bin] = output.includes(`FOUND_${i}`);
+    }
   }
+
+  // Fill in any false negatives via individual check (handles env var fallback)
+  for (const bin of bins) {
+    if (!results[bin]) {
+      results[bin] = isBinaryOnPath(bin);
+    }
+  }
+
   return results;
 }

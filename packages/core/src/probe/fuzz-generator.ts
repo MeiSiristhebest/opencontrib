@@ -165,6 +165,7 @@ function generateGoQuickTest(category: DefectCategory, targetFn: string): FuzzTe
     codeSnippet: `package main
 
 import (
+	"math"
 	"testing"
 	"testing/quick"
 )
@@ -172,7 +173,8 @@ import (
 func TestProperty_${targetFn}(t *testing.T) {
 	f := func(val float64) bool {
 		res := ${targetFn}(val)
-		return !isNaN(res)
+		// NaN check: NaN != NaN is the only expression that identifies NaN in Go
+		return !(math.IsNaN(res))
 	}
 	if err := quick.Check(f, nil); err != nil {
 		t.Errorf("Property failed: %v", err)

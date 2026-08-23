@@ -19,16 +19,25 @@ export const fuzzPlugin: OpenContribPlugin = {
           ['typescript', 'javascript', 'python', 'rust', 'go'].includes(l.language.toLowerCase())
         ),
       scan: async (targetPath, pointers, host) => {
-        const extensions: { ext: string; lang: string; funcRegex: RegExp; skipExt: string[] } = [
-          { ext: '.ts', lang: 'typescript', funcRegex: /(?:export\s+)?function\s+(\w+)\s*\(/g, skipExt: ['.d.ts'] },
-          { ext: '.js', lang: 'javascript', funcRegex: /(?:export\s+)?function\s+(\w+)\s*\(/g, skipExt: [] },
-          { ext: '.py', lang: 'python', funcRegex: /^\s*def\s+(\w+)\s*\(/gm, skipExt: [] },
-          { ext: '.go', lang: 'go', funcRegex: /func\s+(?:\([^)]*\)\s+)?(\w+)\s*\(/g, skipExt: [] },
-          { ext: '.rs', lang: 'rust', funcRegex: /fn\s+(\w+)\s*\(/g, skipExt: [] },
+        const extensions: { ext: string; lang: string; funcRegexes: RegExp[]; skipExt: string[] } = [
+          { ext: '.ts', lang: 'typescript', funcRegexes: [
+            /(?:export\s+)?function\s+(\w+)\s*\(/g,
+            /(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(/g,
+          ], skipExt: ['.d.ts'] },
+          { ext: '.js', lang: 'javascript', funcRegexes: [
+            /(?:export\s+)?function\s+(\w+)\s*\(/g,
+            /(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(/g,
+          ], skipExt: [] },
+          { ext: '.py', lang: 'python', funcRegexes: [/^\s*def\s+(\w+)\s*\(/gm], skipExt: [] },
+          { ext: '.go', lang: 'go', funcRegexes: [/func\s+(?:\([^)]*\)\s+)?(\w+)\s*\(/g], skipExt: [] },
+          { ext: '.rs', lang: 'rust', funcRegexes: [
+            /fn\s+(\w+)\s*\(/g,
+            /pub\s+fn\s+(\w+)\s*\(/g,
+          ], skipExt: [] },
         ];
 
-        const MAX_PER_FILE = 5;
-        const MAX_TOTAL = 25;
+        const MAX_PER_FILE = 50;
+        const MAX_TOTAL = 10;
 
         const functions: Array<{ file: string; name: string; lang: string }> = [];
         let totalTestsGenerated = 0;
@@ -43,30 +52,32 @@ export const fuzzPlugin: OpenContribPlugin = {
               discoverFunctions(fullPath);
               if (functions.length >= MAX_TOTAL) return;
             } else if (entry.isFile()) {
-              for (const extInfo of extensions) {
-                if (fullPath.endsWith(extInfo.ext) && !extInfo.skipExt.some((s) => fullPath.endsWith(s))) {
-                  try {
-                    const content = fs.readFileSync(fullPath, 'utf8');
-                    const lines = content.split(/\r?\n/);
-                    const fileCount = functions.filter((f) => f.file === fullPath).length;
-                    if (fileCount >= MAX_PER_FILE) continue;
+                  for (const extInfo of extensions) {
+                    if (fullPath.endsWith(extInfo.ext) && !extInfo.skipExt.some((s) => fullPath.endsWith(s))) {
+                      try {
+                        const content = fs.readFileSync(fullPath, 'utf8');
+                        const lines = content.split(/\r?\n/);
+                        const fileCount = functions.filter((f) => f.file === fullPath).length;
+                        if (fileCount >= MAX_PER_FILE) continue;
 
-                    for (const line of lines) {
-                      const stripped = line.replace(/(\/\/|\/\*|\*|#).*/, '');
-                      const matches = stripped.matchAll(extInfo.funcRegex);
-                      for (const match of matches) {
-                        if (match[1] && !['if', 'for', 'while', 'switch', 'catch'].includes(match[1])) {
-                          functions.push({ file: fullPath, name: match[1], lang: extInfo.lang });
-                          totalTestsGenerated++;
-                          if (totalTestsGenerated >= MAX_TOTAL) return;
+                        for (const line of lines) {
+                          const stripped = line.replace(/(\/\/|\/\*|\*|#).*/, '');
+                          for (const regex of extInfo.funcRegexes) {
+                            regex.lastIndex = 0;
+                            for (const match of stripped.matchAll(regex)) {
+                              if (match[1] && !['if', 'for', 'while', 'switch', 'catch'].includes(match[1])) {
+                                functions.push({ file: fullPath, name: match[1], lang: extInfo.lang });
+                                totalTestsGenerated++;
+                                if (totalTestsGenerated >= MAX_TOTAL) return;
+                              }
+                            }
+                          }
                         }
+                      } catch {
+                        // Skip unreadable files
                       }
                     }
-                  } catch {
-                    // Skip unreadable files
                   }
-                }
-              }
               if (functions.length >= MAX_TOTAL) return;
             }
           }

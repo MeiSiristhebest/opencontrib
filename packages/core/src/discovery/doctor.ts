@@ -1,8 +1,10 @@
-import { execSync, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { existsSync } from 'fs';
 import { homedir, platform } from 'os';
 import { join } from 'path';
 import { discoverDocker } from './docker-discovery.js';
+import { isBinaryOnPath } from '../kernel/tool-registry.js';
+import { defaultPluginManager } from '../kernel/plugin-manager.js';
 
 export interface DoctorCheckResult {
   category: string;
@@ -26,18 +28,24 @@ export interface DoctorReport {
   };
 }
 
+function run(cmd: string, args: string[], timeoutMs: number): string {
+  const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: timeoutMs, stdio: ['ignore', 'pipe', 'ignore'] });
+  return (result.stdout || '').trim();
+}
+
 export function runDoctorAudit(): DoctorReport {
   const checks: DoctorCheckResult[] = [];
   const currentOs = platform();
+  const isWindows = currentOs === 'win32';
+  const pm = defaultPluginManager;
 
   // 1. Check Git
   let gitVersion: string | undefined;
   let gitCmd = 'git';
 
-  if (currentOs === 'win32') {
+  if (isWindows) {
     const candidatePaths = [
-      'git',
-      'git.exe',
+      'git', 'git.exe',
       'C:\\Program Files\\Git\\cmd\\git.exe',
       'C:\\Program Files\\Git\\bin\\git.exe',
       'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
@@ -45,7 +53,7 @@ export function runDoctorAudit(): DoctorReport {
     ];
     for (const p of candidatePaths) {
       try {
-        const out = execSync(`"${p}" --version`, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        const out = run('cmd.exe', ['/c', `"${p}" --version`], 3000);
         if (out) {
           gitCmd = p;
           gitVersion = out;
@@ -55,8 +63,8 @@ export function runDoctorAudit(): DoctorReport {
     }
   } else {
     try {
-      const gitOut = execSync('git --version', { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      if (gitOut) gitVersion = out;
+      const out = run('git', ['--version'], 3000);
+      if (out) gitVersion = out;
     } catch {}
   }
 
@@ -69,8 +77,8 @@ export function runDoctorAudit(): DoctorReport {
 
   // 2. Check Git User Identity
   try {
-    const userName = execSync(`"${gitCmd}" config user.name`, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const userEmail = execSync(`"${gitCmd}" config user.email`, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const userName = run(gitCmd, ['config', 'user.name'], 3000);
+    const userEmail = run(gitCmd, ['config', 'user.email'], 3000);
     if (userName && userEmail) {
       checks.push({
         category: 'VCS',
@@ -106,7 +114,7 @@ export function runDoctorAudit(): DoctorReport {
 
   let bunVersion: string | undefined;
   try {
-    const bunOut = execSync('bun --version', { encoding: 'utf-8', timeout: 5000 }).trim();
+    const bunOut = run('bun', ['--version'], 5000);
     bunVersion = bunOut;
     checks.push({
       category: 'Runtime',
@@ -149,9 +157,9 @@ export function runDoctorAudit(): DoctorReport {
 
   // 5. Check WSL (if Windows)
   let wslAvailable = false;
-  if (currentOs === 'win32') {
+  if (isWindows) {
     try {
-      execSync('wsl --status', { stdio: 'ignore', timeout: 4000 });
+      run('wsl', ['--status'], 4000);
       wslAvailable = true;
       checks.push({
         category: 'Sandbox',
@@ -169,45 +177,69 @@ export function runDoctorAudit(): DoctorReport {
     }
   }
 
-  // 6. Check Static Analysis & Multi-Language Toolchains
+  // 6. Check Static Analysis & Multi-Language Toolchains (with PluginManager state)
   const toolchains = [
-    { name: 'GitHub CLI (gh)', bin: 'gh', verCmd: 'gh --version', cat: 'VCS' },
-    { name: 'ast-grep (sg)', bin: 'ast-grep', verCmd: 'ast-grep --version', cat: 'Analyzers', altBin: 'sg' },
-    { name: 'Knip Dead Code Analyzer', bin: 'knip', verCmd: 'knip --version', cat: 'Analyzers' },
-    { name: 'Semgrep SAST Scanner', bin: 'semgrep', verCmd: 'semgrep --version', cat: 'Analyzers' },
-    { name: 'Ruff Python Linter', bin: 'ruff', verCmd: 'ruff --version', cat: 'Analyzers' },
-    { name: 'Go Compiler Toolchain', bin: 'go', verCmd: 'go version', cat: 'Compilers' },
-    { name: 'Rust Compiler Toolchain', bin: 'rustc', verCmd: 'rustc --version', cat: 'Compilers' },
-    { name: 'Python / UV Toolchain', bin: 'uv', verCmd: 'uv --version', cat: 'Compilers', altBin: 'python' },
-    { name: 'Java JDK / Maven Toolchain', bin: 'javac', verCmd: 'javac -version', cat: 'Compilers', altBin: 'mvn' },
-    { name: 'C/C++ CMake Toolchain', bin: 'cmake', verCmd: 'cmake --version', cat: 'Compilers', altBin: 'gcc' },
-    { name: '.NET / C# SDK', bin: 'dotnet', verCmd: 'dotnet --version', cat: 'Compilers' },
-    { name: 'PHP / Composer Toolchain', bin: 'php', verCmd: 'php -v', cat: 'Compilers', altBin: 'composer' },
-    { name: 'Ruby Toolchain', bin: 'ruby', verCmd: 'ruby -v', cat: 'Compilers', altBin: 'bundle' },
-    { name: 'Alibaba OpenCodeReview (ocr)', bin: 'ocr', verCmd: 'ocr --version', cat: 'Analyzers' },
+    { name: 'GitHub CLI (gh)', bin: 'gh', id: 'git' },
+    { name: 'ast-grep (sg)', bin: 'ast-grep', id: 'ast-grep' },
+    { name: 'Knip Dead Code Analyzer', bin: 'knip', id: 'knip' },
+    { name: 'Semgrep SAST Scanner', bin: 'semgrep', id: 'semgrep' },
+    { name: 'Ruff Python Linter', bin: 'ruff', id: 'ruff' },
+    { name: 'Go Compiler Toolchain', bin: 'go', id: 'go' },
+    { name: 'Rust Compiler Toolchain', bin: 'rustc', id: 'cargo-deny' },
+    { name: 'Python / UV Toolchain', bin: 'uv', id: 'uv' },
+    { name: 'Java JDK / Maven Toolchain', bin: 'javac', id: 'java' },
+    { name: 'C/C++ CMake Toolchain', bin: 'cmake', id: 'cmake' },
+    { name: '.NET / C# SDK', bin: 'dotnet', id: 'dotnet' },
+    { name: 'PHP / Composer Toolchain', bin: 'php', id: 'php' },
+    { name: 'Ruby Toolchain', bin: 'ruby', id: 'ruby' },
+    { name: 'Alibaba OpenCodeReview (ocr)', bin: 'ocr', id: 'ocr' },
   ];
 
   for (const tc of toolchains) {
-    try {
-      const out = execSync(tc.verCmd, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      const firstLine = out.split('\n')[0].trim();
+    const state = pm.getState(tc.id);
+    const binaryAvailable = isBinaryOnPath(tc.bin);
+
+    if (!state.enabled) {
       checks.push({
-        category: tc.cat,
-        name: tc.name,
-        status: 'PASSED',
-        message: `${tc.name} is installed: ${firstLine}`,
-      });
-    } catch {
-      checks.push({
-        category: tc.cat,
+        category: 'Tool',
         name: tc.name,
         status: 'WARNING',
-        message: `${tc.name} not found in PATH (Optional analyzer capability)`,
+        message: `${tc.name} is disabled (reason: ${state.disabledReason || 'user-disabled'})`,
       });
+      continue;
     }
+
+    checks.push({
+      category: 'Tool',
+      name: tc.name,
+      status: binaryAvailable ? 'PASSED' : 'WARNING',
+      message: binaryAvailable
+        ? `${tc.name} is available (enabled)`
+        : `${tc.name} not found in PATH (Optional analyzer capability)`,
+    });
   }
 
-  // 7. Check Local OpenContrib Storage Directories
+  // 7. Plugin Manager state summary
+  const allStates = pm.getAllStates();
+  const disabledPlugins = Object.entries(allStates).filter(([, s]) => !s.enabled);
+  if (disabledPlugins.length > 0) {
+    const disabledList = disabledPlugins.map(([id, s]) => `${id} (${s.disabledReason || 'user'})`).join(', ');
+    checks.push({
+      category: 'Plugins',
+      name: 'Disabled Plugins',
+      status: 'WARNING',
+      message: `${disabledPlugins.length} plugin(s) disabled: ${disabledList}`,
+    });
+  } else {
+    checks.push({
+      category: 'Plugins',
+      name: 'Plugin Manager',
+      status: 'PASSED',
+      message: `All ${allStates.length} plugins enabled (state: ${pm.getStatePath()})`,
+    });
+  }
+
+  // 8. Check Local OpenContrib Storage Directories
   const opencontribDir = join(homedir(), '.opencontrib');
   const workspacesDir = join(opencontribDir, 'workspaces');
   checks.push({

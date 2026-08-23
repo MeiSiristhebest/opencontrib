@@ -53,10 +53,10 @@ export class PluginManager {
     return this.state[pluginId] || { enabled: true };
   }
 
-  /** Whether the plugin is currently enabled (and not disabled). */
+  /** Whether the plugin is currently enabled. Returns false for unknown IDs — prevents silent activation of undeclared probes. */
   isEnabled(pluginId: string): boolean {
     const s = this.state[pluginId];
-    if (!s) return true;
+    if (!s) return false;
     return s.enabled !== false;
   }
 

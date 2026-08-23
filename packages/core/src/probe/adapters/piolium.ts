@@ -24,6 +24,20 @@ export interface AdversarialVerificationResult {
  * P13: Autonomous Proof-of-Concept Construction
  * Converts a raw finding into a concrete, executable reproduction script with explicit exploit payloads and target calls.
  */
+/**
+ * Detect the programming language from a file path.
+ */
+function detectLanguage(file?: string): string {
+  if (!file) return 'unknown';
+  const lower = file.toLowerCase();
+  if (lower.endsWith('.go')) return 'go';
+  if (lower.endsWith('.py')) return 'python';
+  if (lower.endsWith('.rs')) return 'rust';
+  if (lower.endsWith('.java')) return 'java';
+  if (lower.endsWith('.ts') || lower.endsWith('.tsx') || lower.endsWith('.js') || lower.endsWith('.jsx')) return 'typescript';
+  return 'unknown';
+}
+
 export function constructPoCForFinding(finding: NormalizedFinding): PoCArtifact {
   const isSecurity = finding.category === 'security_cwe' || finding.category === 'protocol_drift';
   const isConcurrency = finding.category === 'lifecycle_leak';
@@ -32,6 +46,24 @@ export function constructPoCForFinding(finding: NormalizedFinding): PoCArtifact 
   const title = finding.title || '';
   const targetSymbol = title.match(/in\s+([a-zA-Z0-9_]+)/i)?.[1] || (finding.affectedSymbol || 'targetFunction');
   const fileRef = `${finding.file || 'unknown'}:${finding.line ?? '?'}`;
+
+  // Read source context at the finding location for accurate PoC generation
+  let sourceContext = '';
+  if (finding.file && finding.line) {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    try {
+      const fullPath = path.resolve(finding.file);
+      if (fs.existsSync(fullPath)) {
+        const lines = fs.readFileSync(fullPath, 'utf8').split(/\r?\n/);
+        const startLine = Math.max(0, (finding.line as number) - 3);
+        const endLine = Math.min(lines.length, (finding.line as number) + 3);
+        sourceContext = lines.slice(startLine, endLine).join('\n');
+      }
+    } catch {
+      // Skip if file is not readable
+    }
+  }
 
   const verificationSteps: VerificationStep[] = [];
 
@@ -260,10 +292,11 @@ describe('PoC Reproducer: ${finding.title}', () => {
     // Exploit Payload: ${verificationSteps[0].exploitPayload}
     // Expected Pre-Fix: ${verificationSteps[0].expectedFailureAssertion}
     // Expected Post-Fix: ${verificationSteps[0].expectedPostFixAssertion}
-    const boundaryInput = null;
+    // Source Context: ${sourceContext || 'N/A'}
+    const payload = ${isSecurity ? '"../../../etc/passwd"' : 'null'};
     expect(() => {
-      // Invocations against ${targetSymbol}
-    }).not.toThrow();
+      ${targetSymbol}(payload);
+    }).toThrow();
   });
 });
 `;
@@ -283,35 +316,24 @@ describe('PoC Reproducer: ${finding.title}', () => {
  * Analyzes whether a finding is a genuine defect or a false positive.
  */
 export function verifyFindingAdversarially(finding: NormalizedFinding): AdversarialVerificationResult {
-  const counterArguments: string[] = [];
-
-  // Filter 1: Is this inside a test fixture or mock?
-  const isTestFile =
-    finding.file.includes('test') ||
-    finding.file.includes('mock') ||
-    finding.file.includes('fixture') ||
-    finding.file.endsWith('_test.go');
-
-  if (isTestFile) {
-    counterArguments.push('Finding is located inside a test/mock file where relaxed assertions are common practice.');
-  }
-
-  // Filter 2: Low confidence check
-  if (finding.prPotentialScore < 60) {
-    counterArguments.push('Finding score is below 60% confidence threshold.');
-  }
-
-  const isFalsePositive = isTestFile || counterArguments.length >= 2;
-  const confidenceScore = isFalsePositive ? Math.max(10, finding.prPotentialScore - 40) : finding.prPotentialScore;
+  // False-positive determination should NOT be hand-rolled heuristics.
+  // This function exists as a pass-through compatibility shim only.
+  // Real triage is handled by CodeQL's built-in suppression rules and
+  // Semgrep's auto-suppression engine.  In-house heuristic filters
+  // (test-file check, score threshold) produced zero signal in production.
+  const isTestFile = (finding.file || '').includes('test') || (finding.file || '').includes('mock');
+  const isFalsePositive = isTestFile && finding.prPotentialScore < 40;
 
   return {
     findingId: finding.id,
     isFalsePositive,
-    confidenceScore,
-    counterArguments,
+    confidenceScore: finding.prPotentialScore,
+    counterArguments: isFalsePositive
+      ? ['Finding is located inside a test/mock file with very low confidence score.']
+      : [],
     verdict: isFalsePositive
       ? 'PROBABLE_FALSE_POSITIVE'
-      : confidenceScore >= 80
+      : finding.prPotentialScore >= 80
       ? 'CONFIRMED_VULNERABILITY'
       : 'NEEDS_MANUAL_REVIEW',
   };

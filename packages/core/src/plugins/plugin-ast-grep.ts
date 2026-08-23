@@ -20,6 +20,24 @@ export interface ASTGrepMatch {
   language?: string;
 }
 
+/** Map from rule.language to the --lang flag value accepted by ast-grep. No fallback to empty string. */
+const LANG_FLAG: Record<string, string> = {
+  typescript: 'typescript',
+  javascript: 'javascript',
+  go: 'go',
+  rust: 'rust',
+  python: 'python',
+  java: 'java',
+  c: 'c',
+  cpp: 'cpp',
+  csharp: 'csharp',
+  php: 'php',
+  ruby: 'ruby',
+  bash: 'bash',
+  yaml: 'yaml',
+  json: 'json',
+};
+
 /** Scan repository file extensions to determine which languages are actually present. */
 function detectRepoLanguages(targetPath: string): string[] {
   const EXT_TO_LANG: Record<string, string> = {
@@ -135,7 +153,8 @@ export const astGrepPlugin: OpenContribPlugin = {
             if (needsYaml) {
               const yamlPath = path.join(os.tmpdir(), `astgrep-${rule.id}.yml`);
               fs.writeFileSync(yamlPath, serializeRuleToYaml(rule), 'utf8');
-              const cmd = `${bin} scan --rule "${yamlPath}" --json=compact`;
+              const langFlag = LANG_FLAG[rule.language] || rule.language;
+              const cmd = `${bin} scan --rule "${yamlPath}" --lang ${langFlag} --json=compact`;
               const execResult = await host.exec(cmd, {
                 cwd: targetPath,
                 timeout: 20000,
@@ -143,8 +162,8 @@ export const astGrepPlugin: OpenContribPlugin = {
               stdout = execResult.stdout;
               fs.unlinkSync(yamlPath);
             } else {
-              const langFlag = `--lang ${rule.language}`;
-              const cmd = `${bin} run -p "${ruleDef.pattern}" ${langFlag} --json=compact`;
+              const langFlag = LANG_FLAG[rule.language] || rule.language;
+              const cmd = `${bin} run -p "${ruleDef.pattern}" --lang ${langFlag} --json=compact`;
               const execResult = await host.exec(cmd, {
                 cwd: targetPath,
                 timeout: 20000,

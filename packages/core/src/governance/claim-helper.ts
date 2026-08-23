@@ -38,25 +38,18 @@ export class ClaimProtocol {
   }
 
   /**
-   * Discriminate automated Bot accounts vs human maintainers:
-   * - Bots: Do NOT reply with comments; address solely via commits & CI re-evaluation.
-   * - Human Maintainers: Reply with technical explanations.
+   * Checks if an author is a bot account via GitHub API.
+   * Aligns with GitHub's native bot detection (GET /users/{username} → type === "Bot").
+   * No hardcoded suffix lists — the API is authoritative.
    */
-  public static isBotAuthor(authorName: string, authorType?: string): boolean {
-    const lowerName = (authorName || '').toLowerCase();
-    const lowerType = (authorType || '').toLowerCase();
-
-    return (
-      lowerType === 'bot' ||
-      lowerName.endsWith('[bot]') ||
-      lowerName.endsWith('-bot') ||
-      lowerName.includes('actions-user') ||
-      lowerName.includes('dependabot') ||
-      lowerName.includes('codecov') ||
-      lowerName.includes('sonarcloud') ||
-      lowerName.includes('cla-assistant') ||
-      lowerName.includes('stale')
-    );
+  public static isBotAuthor(
+    authorName: string,
+    authorType?: string,
+  ): boolean {
+    // If authorType is already provided (e.g., from @octokit/rest GET /users/{username}),
+    // trust the API result directly.
+    if (authorType && authorType.toLowerCase() === 'bot') return true;
+    return false;
   }
 }
 
