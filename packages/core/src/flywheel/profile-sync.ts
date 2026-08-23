@@ -1,13 +1,18 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
+import { homedir as osHomedir } from 'os';
 import { join } from 'path';
+
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || osHomedir();
+}
+
 import type { ContributionRecord } from '../contracts/schemas.js';
 
 export class ProfileFlywheel {
   private ledgerPath: string;
 
   constructor() {
-    const dir = join(homedir(), '.opencontrib');
+    const dir = join(getOpenContribHome(), '.opencontrib');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     this.ledgerPath = join(dir, 'contributions.json');
   }

@@ -3,6 +3,10 @@ import * as path from 'path';
 import * as os from 'os';
 import type { CapabilityType } from './capability.js';
 
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || os.homedir();
+}
+
 export interface OpenContribPolicy {
   network: 'allowed' | 'denied';
   maxRuntimeSeconds: number;
@@ -55,7 +59,7 @@ export function loadWorkspaceConfig(workspacePath: string = process.cwd()): Open
   const candidates = [
     path.join(workspacePath, '.opencontrib.json'),
     path.join(workspacePath, '.opencontrib', 'config.json'),
-    path.join(os.homedir(), '.opencontrib', 'config.json'),
+    path.join(getOpenContribHome(), '.opencontrib', 'config.json'),
   ];
 
   for (const candidate of candidates) {

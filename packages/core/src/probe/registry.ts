@@ -3,6 +3,10 @@ import * as path from 'path';
 import * as os from 'os';
 import type { ProbeManifest } from './types.js';
 
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || os.homedir();
+}
+
 export const BUILTIN_PROBES: ProbeManifest[] = [
   // ── Dimension 1: AI-Native / Agentic Security & Review Frameworks ──
   {
@@ -430,7 +434,7 @@ export class ProbeRegistry {
   private memoryProbes: Map<string, ProbeManifest> = new Map();
 
   constructor(customPluginsDir?: string) {
-    this.pluginsDir = customPluginsDir || path.join(os.homedir(), '.opencontrib', 'plugins');
+    this.pluginsDir = customPluginsDir || path.join(getOpenContribHome(), '.opencontrib', 'plugins');
     // Load built-in probes
     for (const probe of BUILTIN_PROBES) {
       this.memoryProbes.set(probe.name, probe);

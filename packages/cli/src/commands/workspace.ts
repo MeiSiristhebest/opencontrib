@@ -22,43 +22,48 @@ const workspacePrepare = new Command('prepare')
     runId?: string;
     pretty?: boolean;
   }) => {
-    const context = worktreeManager.createIsolatedWorkspace({
-      repoFullName: opts.repo,
-      issueOrTaskId: opts.issue,
-      localRepoPath: opts.localPath,
-      runId: opts.runId,
-    });
+    try {
+      const context = worktreeManager.createIsolatedWorkspace({
+        repoFullName: opts.repo,
+        issueOrTaskId: opts.issue,
+        localRepoPath: opts.localPath,
+        runId: opts.runId,
+      });
 
-    let persistence: { saved: boolean; error?: string } | undefined;
-    if (opts.runId) {
-      try {
-        runManager.saveArtifact(
-          opts.runId,
-          'workspace',
-          {
-            workspacePath: context.workspacePath,
-            branchName: context.branchName,
-            isWorktree: context.isWorktree,
-            baseRepoPath: context.baseRepoPath,
-            baseCommitSha: context.baseCommitSha,
-            repoFullName: opts.repo,
-          },
-          'WORKSPACE_PREPARED',
-        );
-        persistence = { saved: true };
-      } catch (err: any) {
-        persistence = { saved: false, error: err.message };
+      let persistence: { saved: boolean; error?: string } | undefined;
+      if (opts.runId) {
+        try {
+          runManager.saveArtifact(
+            opts.runId,
+            'workspace',
+            {
+              workspacePath: context.workspacePath,
+              branchName: context.branchName,
+              isWorktree: context.isWorktree,
+              baseRepoPath: context.baseRepoPath,
+              baseCommitSha: context.baseCommitSha,
+              repoFullName: opts.repo,
+            },
+            'WORKSPACE_PREPARED',
+          );
+          persistence = { saved: true };
+        } catch (err: any) {
+          persistence = { saved: false, error: err.message };
+        }
       }
-    }
 
-    printJSON({
-      status: persistence?.error ? 'PARTIAL_SUCCESS' : 'success',
-      workspacePath: context.workspacePath,
-      branchName: context.branchName,
-      isWorktree: context.isWorktree,
-      baseCommitSha: context.baseCommitSha,
-      persistence,
-    }, opts.pretty);
+      printJSON({
+        status: persistence?.error ? 'PARTIAL_SUCCESS' : 'success',
+        workspacePath: context.workspacePath,
+        branchName: context.branchName,
+        isWorktree: context.isWorktree,
+        baseCommitSha: context.baseCommitSha,
+        persistence,
+      }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
   });
 
 // ─── workspace purge ──────────────────────────────────────────────────────────
@@ -67,14 +72,19 @@ const workspacePurge = new Command('purge')
   .option('--clean-repos', 'Also delete bare repo cache (~/.opencontrib/repos)', false)
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: { cleanRepos?: boolean; pretty?: boolean }) => {
-    const report = worktreeManager.purgeAllWorkspaces({
-      cleanRepos: opts.cleanRepos ?? false,
-    });
-    printJSON({
-      status: 'success',
-      message: 'Sandbox cleanup completed',
-      report,
-    }, opts.pretty);
+    try {
+      const report = worktreeManager.purgeAllWorkspaces({
+        cleanRepos: opts.cleanRepos ?? false,
+      });
+      printJSON({
+        status: 'success',
+        message: 'Sandbox cleanup completed',
+        report,
+      }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
   });
 
 // ─── Top-level command ────────────────────────────────────────────────────────

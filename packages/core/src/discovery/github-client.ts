@@ -2,8 +2,12 @@ import { spawnSync } from 'child_process';
 import { Octokit } from '@octokit/rest';
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
+import { homedir as osHomedir } from 'os';
 import { join } from 'path';
+
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || osHomedir();
+}
 
 export interface GitHubClientOptions {
   token?: string;
@@ -54,7 +58,7 @@ export class GitHubClient {
     // Fallback 1: Read from ~/.config/opencontrib/config.json
     if (!token) {
       try {
-        const configPath = join(homedir(), '.config', 'opencontrib', 'config.json');
+        const configPath = join(getOpenContribHome(), '.config', 'opencontrib', 'config.json');
         if (existsSync(configPath)) {
           const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
           token = cfg?.github?.pat || '';
@@ -80,7 +84,7 @@ export class GitHubClient {
     this.octokit = new Octokit({ auth: token || undefined, baseUrl: options.host ? `https://${options.host}/api/v3` : undefined });
     this.cacheTtlMs = options.cacheTtlMs ?? 10 * 60 * 1000; // 10 minutes
 
-    this.cacheDir = join(homedir(), '.opencontrib', 'cache');
+    this.cacheDir = join(getOpenContribHome(), '.opencontrib', 'cache');
     if (!existsSync(this.cacheDir)) {
       mkdirSync(this.cacheDir, { recursive: true });
     }

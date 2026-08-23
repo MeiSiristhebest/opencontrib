@@ -1,8 +1,12 @@
 import { randomUUID } from 'crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 
-import { homedir } from 'os';
+import { homedir as osHomedir } from 'os';
 import { basename, dirname, join, resolve, sep } from 'path';
+
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || osHomedir();
+}
 import type {
   ArtifactType,
   ContributionRunManifest,
@@ -49,7 +53,7 @@ export class ArtifactBundleManager {
   private baseDir: string;
 
   constructor(customBaseDir?: string) {
-    this.baseDir = customBaseDir || join(homedir(), '.opencontrib', 'runs');
+    this.baseDir = customBaseDir || join(getOpenContribHome(), '.opencontrib', 'runs');
     if (!existsSync(this.baseDir)) {
       mkdirSync(this.baseDir, { recursive: true });
     }

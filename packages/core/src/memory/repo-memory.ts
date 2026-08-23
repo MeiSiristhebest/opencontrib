@@ -1,6 +1,11 @@
 import { existsSync, mkdirSync, readFileSync } from 'fs';
-import { homedir } from 'os';
+import { homedir as osHomedir } from 'os';
 import { join } from 'path';
+
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || osHomedir();
+}
+
 import type { RepoMemoryEntry } from '../contracts/schemas.js';
 import { writeAtomic } from '../run/artifact-bundle.js';
 
@@ -21,7 +26,7 @@ export class RepoMemoryLedger {
   private cache: Map<string, RepoMemoryEntry> = new Map();
 
   constructor(customDir?: string) {
-    const dir = customDir || join(homedir(), '.opencontrib');
+    const dir = customDir || join(getOpenContribHome(), '.opencontrib');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     this.memoryFilePath = join(dir, 'repo-memory.json');
     this.load();

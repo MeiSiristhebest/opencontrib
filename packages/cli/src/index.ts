@@ -53,4 +53,13 @@ program.addCommand(workspaceCommand);
 program.addCommand(evalCommand);
 program.addCommand(setupCommand);
 
+// Graceful shutdown on SIGINT / SIGTERM
+const shutdown = (signal: 'SIGINT' | 'SIGTERM') => {
+  console.error(`\n⚠️  OpenContrib received ${signal}. Shutting down gracefully...`);
+  process.exit(signal === 'SIGINT' ? 130 : 143);
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
 program.parse();

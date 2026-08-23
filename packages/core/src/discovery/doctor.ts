@@ -6,6 +6,10 @@ import { discoverDocker } from './docker-discovery.js';
 import { isBinaryOnPath } from '../kernel/tool-registry.js';
 import { defaultPluginManager } from '../kernel/plugin-manager.js';
 
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || homedir();
+}
+
 export interface DoctorCheckResult {
   category: string;
   name: string;
@@ -240,7 +244,7 @@ export function runDoctorAudit(): DoctorReport {
   }
 
   // 8. Check Local OpenContrib Storage Directories
-  const opencontribDir = join(homedir(), '.opencontrib');
+  const opencontribDir = join(getOpenContribHome(), '.opencontrib');
   const workspacesDir = join(opencontribDir, 'workspaces');
   checks.push({
     category: 'Storage',

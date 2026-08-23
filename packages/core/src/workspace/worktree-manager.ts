@@ -1,9 +1,13 @@
 import { spawnSync } from 'child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
-import { homedir, tmpdir } from 'os';
+import { homedir as osHomedir, tmpdir } from 'os';
 import { join, resolve, sep } from 'path';
 import { sanitizeRunId } from '../run/artifact-bundle.js';
 import { ensureWorkspaceGuard, releaseWorkspaceGuard, isProtectedWorkspace } from './workspace-guard.js';
+
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || osHomedir();
+}
 
 /** Normalize path separators to forward slashes for consistent comparison on all platforms. */
 function norm(p: string): string {
@@ -78,8 +82,8 @@ export class WorktreeManager {
   private cacheRoot: string;
 
   constructor() {
-    this.workspaceRoot = join(homedir(), '.opencontrib', 'workspaces');
-    this.cacheRoot = join(homedir(), '.opencontrib', 'repos');
+    this.workspaceRoot = join(getOpenContribHome(), '.opencontrib', 'workspaces');
+    this.cacheRoot = join(getOpenContribHome(), '.opencontrib', 'repos');
 
     if (!existsSync(this.workspaceRoot)) mkdirSync(this.workspaceRoot, { recursive: true });
     if (!existsSync(this.cacheRoot)) mkdirSync(this.cacheRoot, { recursive: true });
@@ -293,11 +297,11 @@ export class WorktreeManager {
 
   isSafeScratchDirectory(dirPath: string): boolean {
     const resolved = norm(resolve(dirPath));
-    const opencontribHome = norm(resolve(homedir(), '.opencontrib'));
+    const opencontribHome = norm(resolve(getOpenContribHome(), '.opencontrib'));
     const { tmpdir } = require('os');
     const tempDir = norm(resolve(tmpdir()));
 
-    if (resolved === '/' || resolved === norm(resolve(homedir()))) {
+    if (resolved === '/' || resolved === norm(resolve(getOpenContribHome()))) {
       return false;
     }
 

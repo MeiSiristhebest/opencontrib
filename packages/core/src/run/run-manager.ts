@@ -1,7 +1,12 @@
 import { existsSync, readdirSync } from 'fs';
-import { homedir } from 'os';
+import { homedir as osHomedir } from 'os';
 import { join } from 'path';
 import { ArtifactBundleManager } from './artifact-bundle.js';
+
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || osHomedir();
+}
+
 import type {
   ArtifactType,
   ContributionRunManifest,
@@ -41,7 +46,7 @@ export class ContributionRunManager {
   private baseDir: string;
 
   constructor(customBaseDir?: string) {
-    this.baseDir = customBaseDir || join(homedir(), '.opencontrib', 'runs');
+    this.baseDir = customBaseDir || join(getOpenContribHome(), '.opencontrib', 'runs');
     this.bundleManager = new ArtifactBundleManager(this.baseDir);
   }
 

@@ -35,62 +35,67 @@ export const evidenceCommand = new Command('evidence')
     runId?: string;
     pretty?: boolean;
   }) => {
-    let workspaceRoot = opts.workspaceRoot;
-    let baselineSha = opts.baselineSha;
+    try {
+      let workspaceRoot = opts.workspaceRoot;
+      let baselineSha = opts.baselineSha;
 
-    if (opts.runId) {
-      try {
-        const run = runManager.getRun(opts.runId);
-        if (run?.artifacts?.workspace?.workspacePath && !workspaceRoot) {
-          workspaceRoot = String(run.artifacts.workspace.workspacePath);
-        }
-        if (run?.artifacts?.workspace?.baseCommitSha && !baselineSha) {
-          baselineSha = String(run.artifacts.workspace.baseCommitSha);
-        }
-      } catch {}
-    }
+      if (opts.runId) {
+        try {
+          const run = runManager.getRun(opts.runId);
+          if (run?.artifacts?.workspace?.workspacePath && !workspaceRoot) {
+            workspaceRoot = String(run.artifacts.workspace.workspacePath);
+          }
+          if (run?.artifacts?.workspace?.baseCommitSha && !baselineSha) {
+            baselineSha = String(run.artifacts.workspace.baseCommitSha);
+          }
+        } catch {}
+      }
 
-    let dualStage: any;
-    if (opts.assertion) {
-      const preFixCheck = capturePreFixAssertion(
-        opts.cwd,
-        opts.preFixCmd || opts.testCmd,
-        workspaceRoot,
-      );
-      dualStage = await verifyDualStageReproduction({
+      let dualStage: any;
+      if (opts.assertion) {
+        const preFixCheck = capturePreFixAssertion(
+          opts.cwd,
+          opts.preFixCmd || opts.testCmd,
+          workspaceRoot,
+        );
+        dualStage = await verifyDualStageReproduction({
+          cwd: opts.cwd,
+          workspaceRoot,
+          testCommand: opts.testCmd,
+          preFixBaselineCaptured: preFixCheck.assertionCaptured,
+          preFixFailureOutput: preFixCheck.baselineOutput,
+          stressLoopCount: opts.stressLoop ?? 1,
+        });
+      }
+
+      const evidence = await collectEvidence({
         cwd: opts.cwd,
         workspaceRoot,
+        baselineCommitSha: baselineSha,
         testCommand: opts.testCmd,
-        preFixBaselineCaptured: preFixCheck.assertionCaptured,
-        preFixFailureOutput: preFixCheck.baselineOutput,
         stressLoopCount: opts.stressLoop ?? 1,
+        concurrencyWorkers: opts.concurrency ?? 1,
       });
-    }
 
-    const evidence = await collectEvidence({
-      cwd: opts.cwd,
-      workspaceRoot,
-      baselineCommitSha: baselineSha,
-      testCommand: opts.testCmd,
-      stressLoopCount: opts.stressLoop ?? 1,
-      concurrencyWorkers: opts.concurrency ?? 1,
-    });
+      const fullReport = { ...evidence, dualStage };
 
-    const fullReport = { ...evidence, dualStage };
-
-    let persistence: { saved: boolean; error?: string } | undefined;
-    if (opts.runId) {
-      try {
-        runManager.saveArtifact(opts.runId, 'evidence', fullReport, 'EVIDENCE_COLLECTED');
-        persistence = { saved: true };
-      } catch (err: any) {
-        persistence = { saved: false, error: err.message };
+      let persistence: { saved: boolean; error?: string } | undefined;
+      if (opts.runId) {
+        try {
+          runManager.saveArtifact(opts.runId, 'evidence', fullReport, 'EVIDENCE_COLLECTED');
+          persistence = { saved: true };
+        } catch (err: any) {
+          persistence = { saved: false, error: err.message };
+        }
       }
-    }
 
-    printJSON({
-      status: persistence?.error ? 'PARTIAL_SUCCESS' : 'success',
-      evidence: fullReport,
-      persistence,
-    }, opts.pretty);
+      printJSON({
+        status: persistence?.error ? 'PARTIAL_SUCCESS' : 'success',
+        evidence: fullReport,
+        persistence,
+      }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
   });

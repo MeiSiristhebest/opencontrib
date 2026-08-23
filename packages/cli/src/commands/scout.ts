@@ -21,19 +21,24 @@ export const scoutCommand = new Command('scout')
     token?: string;
     pretty?: boolean;
   }) => {
-    const profile = {
-      techStack: opts.techStack ?? ['typescript', 'javascript'],
-      focusAreas: opts.focus ?? ['bugfix', 'testing', 'docs'],
-      proficiency: 'intermediate' as const,
-      minMatchScore: 60,
-    };
-    const isOrg = !target.includes('/');
-    const opportunities = await scoutOpportunities(profile, {
-      repo: isOrg ? undefined : target,
-      limit: opts.limit ?? 5,
-      minStars: opts.minStars ?? (isOrg ? 100 : 0),
-      githubToken: opts.token || process.env.GITHUB_TOKEN,
-    });
+    try {
+      const profile = {
+        techStack: opts.techStack ?? ['typescript', 'javascript'],
+        focusAreas: opts.focus ?? ['bugfix', 'testing', 'docs'],
+        proficiency: 'intermediate' as const,
+        minMatchScore: 60,
+      };
+      const isOrg = !target.includes('/');
+      const opportunities = await scoutOpportunities(profile, {
+        repo: isOrg ? undefined : target,
+        limit: opts.limit ?? 5,
+        minStars: opts.minStars ?? (isOrg ? 100 : 0),
+        githubToken: opts.token || process.env.GITHUB_TOKEN,
+      });
 
-    printJSON({ status: 'success', target, foundCount: opportunities.length, opportunities }, opts.pretty);
+      printJSON({ status: 'success', target, foundCount: opportunities.length, opportunities }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
   });

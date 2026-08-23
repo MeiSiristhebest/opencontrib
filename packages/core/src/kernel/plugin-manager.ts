@@ -3,6 +3,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { TOOL_REGISTRY, type ToolRegistryEntry } from './tool-registry.js';
 
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || os.homedir();
+}
+
 export interface PluginState {
   enabled: boolean;
   disabledAt?: string;
@@ -27,7 +31,7 @@ export class PluginManager {
   private state: Record<string, PluginState> = {};
 
   constructor(opts: PluginManagerOptions = {}) {
-    this.statePath = opts.statePath || path.join(os.homedir(), '.opencontrib', 'plugins-state.json');
+    this.statePath = opts.statePath || path.join(getOpenContribHome(), '.opencontrib', 'plugins-state.json');
     this.load();
   }
 

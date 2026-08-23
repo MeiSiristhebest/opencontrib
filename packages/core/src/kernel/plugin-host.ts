@@ -19,6 +19,10 @@ import { CapabilityRouter } from './capability-router.js';
 import { EvidenceGraph } from './evidence-graph.js';
 import { ProbeScanScheduler } from './scan-scheduler.js';
 
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || os.homedir();
+}
+
 const binaryCache = new Map<string, boolean>();
 
 function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string }> {
@@ -62,7 +66,7 @@ export class PluginHost implements ProbeRegistryApi {
 
   constructor(options: { workspacePath?: string; pluginsDir?: string } = {}) {
     this.workspacePath = options.workspacePath || process.cwd();
-    this.pluginsDir = options.pluginsDir || path.join(os.homedir(), '.opencontrib', 'plugins');
+    this.pluginsDir = options.pluginsDir || path.join(getOpenContribHome(), '.opencontrib', 'plugins');
     this.pointers = new SmartPointerStore(path.join(this.workspacePath, '.opencontrib', 'pointers'));
     this.events = new MicrokernelEventBus();
     this.router = new CapabilityRouter();
