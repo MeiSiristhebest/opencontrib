@@ -111,6 +111,7 @@ function safeParseJson(str: string): Record<string, any> {
   try {
     return JSON.parse(str);
   } catch {
+    console.warn(`[TrajectoryParser] Failed to parse tool call args, discarding: ${str.slice(0, 100)}`);
     return { raw: str };
   }
 }

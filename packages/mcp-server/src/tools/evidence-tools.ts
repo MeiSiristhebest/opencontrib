@@ -72,10 +72,11 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
       if (args.runId) {
         try {
           const run = runManager.getRun(args.runId);
-          if (run?.artifacts?.workspace?.workspacePath && !resolvedWorkspaceRoot) {
+          if (!run) {
+            console.warn(`[evidence-tools] Run "${args.runId}" not found; skipping workspaceRoot/baseline auto-resolution`);
+          } else if (run.artifacts?.workspace?.workspacePath && !resolvedWorkspaceRoot) {
             resolvedWorkspaceRoot = String(run.artifacts.workspace.workspacePath);
-          }
-          if (run?.artifacts?.workspace?.baseCommitSha && !resolvedBaselineCommitSha) {
+          } else if (run.artifacts?.workspace?.baseCommitSha && !resolvedBaselineCommitSha) {
             resolvedBaselineCommitSha = String(run.artifacts.workspace.baseCommitSha);
           }
         } catch {}
@@ -164,8 +165,22 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
     async (args) => {
       try {
         const { AutonomousPoCVerifier, SmartPointerStore } = await import('@opencontrib/core');
-        const path = await import('path');
-        const store = new SmartPointerStore(path.join(args.repoPath, '.opencontrib', 'pointers'));
+
+        // Validate repoPath against home directory boundary
+        const resolvedRepoPath = path.resolve(args.repoPath);
+        const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
+        const allowedRoot = path.resolve(home);
+        if (!resolvedRepoPath.startsWith(allowedRoot + path.sep) && resolvedRepoPath !== allowedRoot) {
+          return {
+            isError: true,
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ status: 'error', message: `repoPath "${resolvedRepoPath}" is outside the allowed workspace boundary` }, null, 2),
+            }],
+          };
+        }
+
+        const store = new SmartPointerStore(path.join(resolvedRepoPath, '.opencontrib', 'pointers'));
         
         let finding: any;
         try {
@@ -185,7 +200,7 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
           };
         }
 
-        const report = await AutonomousPoCVerifier.verifyFinding(args.repoPath, finding, {
+        const report = await AutonomousPoCVerifier.verifyFinding(resolvedRepoPath, finding, {
           testCommand: args.testCommand,
           timeoutMs: args.timeoutMs,
         });

@@ -96,9 +96,9 @@ export class ContributionPrService {
     });
     const baseTreeSha = baseCommit.data.tree.sha;
 
-    // 2. Validate and sanitize branch name
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,100}$/.test(branchName)) {
-      throw new Error(`Invalid branch name "${branchName}": must be 2-102 chars, alphanumeric with dots/underscores/hyphens`);
+    // 2. Validate and sanitize branch name (allow / for GitHub-standard namespace branches)
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,100}$/.test(branchName)) {
+      throw new Error(`Invalid branch name "${branchName}": must be 2-102 chars, alphanumeric with dots/underscores/hyphens/forward-slashes`);
     }
 
     try {
@@ -108,8 +108,11 @@ export class ContributionPrService {
         ref: `refs/heads/${branchName}`,
         sha: baseCommitSha,
       });
-    } catch {
-      // Branch may already exist; update ref
+    } catch (err) {
+      // Only fall through to updateRef for 409 Conflict (branch already exists)
+      if ((err as any).status !== 409) {
+        throw new Error(`Failed to create branch "${branchName}": ${err.message || String(err)}`);
+      }
       await this.octokit.rest.git.updateRef({
         owner: forkOwner,
         repo: upstreamRepo,

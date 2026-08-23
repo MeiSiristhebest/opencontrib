@@ -111,6 +111,7 @@ export class WorktreeSandbox {
       cwd: this.sandboxPath,
       encoding: 'utf8',
       timeout: timeoutMs,
+      shell: false,
     });
 
     return {
@@ -201,6 +202,7 @@ export class WorktreeSandbox {
     const entries = fs.readdirSync(src, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      if (entry.isSymbolicLink()) continue; // Block symlinks: can escape sandbox boundary
       const srcPath = path.join(src, entry.name);
       const destPath = path.join(dest, entry.name);
       if (entry.isDirectory()) {

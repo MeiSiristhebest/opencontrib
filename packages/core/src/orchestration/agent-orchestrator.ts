@@ -154,6 +154,7 @@ export class AgentOrchestrator {
   private llmService?: LLMService;
   private contextAssembler: ContextAssembler;
   private stateMachine: ContributionStateMachine;
+  private isRunning = false;
 
   constructor(options: {
     policy?: Partial<ExecutionPolicy>;
@@ -180,6 +181,27 @@ export class AgentOrchestrator {
 
 
   async runPipeline(input: {
+    profile: UserProfile;
+    targetRepo?: string;
+    humanApproved?: boolean;
+    stressLoopRuns?: number;
+  }): Promise<OrchestratorRunResult> {
+    if (this.isRunning) {
+      return {
+        status: 'BLOCKED',
+        stage: 'BLOCKED',
+        reportSummary: 'Orchestrator already in progress; instantiate a new AgentOrchestrator for concurrent runs.',
+      } as OrchestratorRunResult;
+    }
+    this.isRunning = true;
+    try {
+      return this._runPipeline(input);
+    } finally {
+      this.isRunning = false;
+    }
+  }
+
+  private async _runPipeline(input: {
     profile: UserProfile;
     targetRepo?: string;
     humanApproved?: boolean;

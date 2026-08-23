@@ -138,7 +138,7 @@ export class ContributionStateMachine {
     if (!validStages.includes(stage)) {
       return {
         allowed: false,
-        reason: `Current stage (${stage}) is not submission-ready (must be in HUMAN_GATE or PR_SUBMISSION)`,
+        reason: `Current stage (${stage}) is not submission-ready (must be in SUBAGENT_REVIEW, HUMAN_GATE, or PR_SUBMISSION)`,
       };
     }
 

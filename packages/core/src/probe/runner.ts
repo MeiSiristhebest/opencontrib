@@ -10,16 +10,20 @@ import type {
 } from './types.js';
 import { analyzeGitHotspots } from './forensics.js';
 import { generatePropertyTest } from './fuzz-generator.js';
+import { parseCommandSpec } from '../sandbox/command-spec.js';
 
 function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number; maxBuffer?: number }): Promise<{ stdout: string; stderr: string }> {
   const cwd = opts.cwd || process.cwd();
+  const parsed = parseCommandSpec(cmd);
+  if (!parsed.executable || parsed.executable.length === 0) {
+    return Promise.reject(new Error('Empty command'));
+  }
   return new Promise((resolve, reject) => {
-    const isWindows = process.platform === 'win32';
-    const shell = isWindows ? 'cmd.exe' : 'sh';
-    const shellArgs = isWindows ? ['/c', cmd] : ['-c', cmd];
-    const child = spawn(shell, shellArgs, {
+    const child = spawn(parsed.executable, parsed.args, {
       cwd,
       encoding: 'utf-8',
+      maxBuffer: opts.maxBuffer || 10 * 1024 * 1024,
+      shell: false,
     });
     let stdout = '';
     let stderr = '';
@@ -122,9 +126,10 @@ export async function runProbes(
           prPotentialScore: 90,
         });
       } else if (probe.execution.command) {
-        // Execute external probe command
+        // Execute external probe command — escape targetPath to prevent quote-escape injection
+        const escapedTarget = targetPath.replace(/"/g, '\\"');
         const formattedCmd = probe.execution.command
-          .replace('{target}', `"${targetPath}"`)
+          .replace('{target}', escapedTarget)
           .replace('{outputJson}', '');
 
         try {

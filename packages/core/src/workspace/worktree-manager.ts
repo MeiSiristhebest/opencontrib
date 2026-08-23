@@ -312,9 +312,11 @@ export class WorktreeManager {
       return true;
     }
 
-    const parts = resolved.split('/');
-    const lastPart = parts[parts.length - 1]?.toLowerCase() || '';
-    if (lastPart === 'scratch' || lastPart === '.scratch' || parts.includes('.opencontrib')) {
+    // Only allow under .opencontrib/scratch or os.tmpdir()/scratch — no name-based bypass
+    if (resolved.startsWith(opencontribHome + '/scratch') || resolved === opencontribHome + '/scratch') {
+      return true;
+    }
+    if (resolved.startsWith(tempDir + '/scratch') || resolved === tempDir + '/scratch') {
       return true;
     }
 

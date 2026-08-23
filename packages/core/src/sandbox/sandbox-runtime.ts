@@ -92,6 +92,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
    */
   buildSanitizedEnvironment(sandboxTempDir: string): NodeJS.ProcessEnv {
     const allowedVars = [
+      // OS/runtime essentials
       'PATH',
       'Path',
       'PATHEXT',
@@ -110,8 +111,43 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       'LANG',
       'LC_ALL',
       'TERM',
+      // Node.js
       'NODE_PATH',
+      'NODE_OPTIONS',
       'BUN_INSTALL',
+      // Go toolchain
+      'GOROOT',
+      'GOPATH',
+      'GOBIN',
+      'GOMODCACHE',
+      // Rust toolchain
+      'CARGO_HOME',
+      'RUSTUP_HOME',
+      'RUSTC_WRAPPER',
+      'RUSTFLAGS',
+      // Java / Android toolchain
+      'JAVA_HOME',
+      'M2_HOME',
+      'GRADLE_HOME',
+      'ANDROID_HOME',
+      'ANDROID_SDK_ROOT',
+      // Python
+      'PYTHONPATH',
+      'VIRTUAL_ENV',
+      'VIRTUAL_ENV_WRAPPER',
+      'PIP_CONFIG_FILE',
+      'CONDA_PREFIX',
+      'CONDA_DEFAULT_ENV',
+      // .NET
+      'DOTNET_ROOT',
+      'MSBUILD_EXE_PATH',
+      // Nix
+      'NIX_PATH',
+      'NIX_USER_PROFILE_DIR',
+      // Common toolchain cache / config dirs (non-credential)
+      'NPM_CONFIG_CACHE',
+      'BUNDLE_PATH',
+      'GEM_HOME',
     ];
 
     const sanitizedEnv: NodeJS.ProcessEnv = {};

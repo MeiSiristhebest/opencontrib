@@ -24,6 +24,40 @@ function getOpenContribHome(): string {
   return process.env.OPENCONTRIB_HOME || os.homedir();
 }
 
+/** Credential-bearing env var keys that must never be passed to plugin subprocesses. */
+const PLUGIN_CREDENTIAL_ENV_KEYS = new Set([
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+  'GITLAB_TOKEN',
+  'NPM_TOKEN',
+  'NPM_AUTH_TOKEN',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SESSION_TOKEN',
+  'AZURE_CLIENT_SECRET',
+  'AZURE_TENANT_ID',
+  'GCP_SERVICE_ACCOUNT_KEY',
+  'GOOGLE_APPLICATION_CREDENTIALS',
+  'SLACK_TOKEN',
+  'DOCKER_TOKEN',
+  'DOCKER_PASSWORD',
+  'PRIVATE_KEY',
+  'SSH_AUTH_SOCK',
+]);
+
+/** Return a credential-stripped copy of the process environment. */
+function buildSanitizedPluginEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!PLUGIN_CREDENTIAL_ENV_KEYS.has(key)) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
+const SANITIZED_PLUGIN_ENV = buildSanitizedPluginEnv();
+
 const binaryCache = new Map<string, boolean>();
 
 function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string }> {
@@ -42,6 +76,7 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): P
       maxBuffer: 10 * 1024 * 1024,
       encoding: 'utf-8',
       shell: false,
+      env: SANITIZED_PLUGIN_ENV,
     });
 
     const timer = opts.timeout
@@ -94,7 +129,7 @@ export class PluginHost implements ProbeRegistryApi {
       const isWindows = process.platform === 'win32';
       const cmd = isWindows ? 'where.exe' : 'command';
       const args = isWindows ? ['-q', bin] : ['-v', bin];
-      const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000 });
+      const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000, env: SANITIZED_PLUGIN_ENV });
       binaryCache.set(bin, result.status === 0);
       return result.status === 0;
     } catch {

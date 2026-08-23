@@ -372,7 +372,8 @@ export function queryTaxonomyCatalog(criteria?: {
   }
 
   if (criteria?.language) {
-    result = result.filter((p) => p.language === 'polyglot' || p.language === criteria.language);
+    const langLower = criteria.language.toLowerCase();
+    result = result.filter((p) => p.language === 'polyglot' || p.language.toLowerCase() === langLower);
   }
 
   if (criteria?.minSeverity) {

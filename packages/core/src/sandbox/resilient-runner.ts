@@ -100,15 +100,43 @@ export function runResilientCommand(options: ResilientRunOptions): ResilientRunR
   let exitCode: number | null = 1;
 
   try {
+    // SECURITY: Spread process.env to preserve toolchain vars (GOROOT, GOPATH,
+    // CARGO_HOME, RUSTUP_HOME, JAVA_HOME, NODE_PATH, PYTHONPATH, etc.) but
+    // strip credential-bearing keys to prevent secret leakage to subprocesses.
+    const CREDENTIAL_ENV_KEYS = new Set([
+      'GH_TOKEN',
+      'GITHUB_TOKEN',
+      'GITLAB_TOKEN',
+      'NPM_TOKEN',
+      'NPM_AUTH_TOKEN',
+      'AWS_SECRET_ACCESS_KEY',
+      'AWS_ACCESS_KEY_ID',
+      'AWS_SESSION_TOKEN',
+      'AZURE_CLIENT_SECRET',
+      'AZURE_TENANT_ID',
+      'GCP_SERVICE_ACCOUNT_KEY',
+      'GOOGLE_APPLICATION_CREDENTIALS',
+      'SLACK_TOKEN',
+      'DOCKER_TOKEN',
+      'DOCKER_PASSWORD',
+      'PRIVATE_KEY',
+      'SSH_AUTH_SOCK',
+    ]);
+
+    const sanitizedEnv: NodeJS.ProcessEnv = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (!CREDENTIAL_ENV_KEYS.has(key)) {
+        sanitizedEnv[key] = value;
+      }
+    }
+    sanitizedEnv.CI = 'true';
+    sanitizedEnv.FORCE_COLOR = '0';
+
     const res = spawnSync(sanitizedCommand, sanitizedArgs, {
       cwd,
       timeout: timeoutMs,
       encoding: 'utf-8',
-      env: {
-        PATH: process.env.PATH || '',
-        CI: 'true',
-        FORCE_COLOR: '0',
-      },
+      env: sanitizedEnv,
     });
 
     stdout = res.stdout || '';

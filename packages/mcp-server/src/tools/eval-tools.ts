@@ -12,6 +12,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { existsSync } from 'node:fs';
+import * as path from 'path';
+import * as os from 'os';
 import {
   parseTrajectoryFromJSONL,
   buildJudgePrompt,
@@ -43,14 +45,28 @@ export function registerEvalTools(server: McpServer): void {
     },
     async ({ transcriptPath, conversationId }) => {
       // Resolve path
-      let resolvedPath = transcriptPath;
+      let resolvedPath = path.resolve(transcriptPath);
+
+      // Validate resolvedPath against home directory boundary
+      const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
+      const allowedRoot = path.resolve(home);
+      if (!resolvedPath.startsWith(allowedRoot + path.sep) && resolvedPath !== allowedRoot) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Transcript path "${resolvedPath}" is outside the allowed workspace boundary. Set OPENCONTRIB_HOME to allow it.` }],
+        };
+      }
+
       if (!existsSync(resolvedPath) && conversationId) {
         const appData = process.env.APPDATA || process.env.HOME || '';
         const candidates = [
           `${appData}/.gemini/antigravity/brain/${conversationId}/.system_generated/logs/transcript.jsonl`,
           `${appData}/antigravity/brain/${conversationId}/.system_generated/logs/transcript.jsonl`,
         ];
-        resolvedPath = candidates.find(existsSync) ?? transcriptPath;
+        resolvedPath = candidates.find((c: string) => {
+          const r = path.resolve(c);
+          return r.startsWith(allowedRoot + path.sep) || r === allowedRoot ? existsSync(r) : false;
+        }) ?? resolvedPath;
       }
 
       if (!existsSync(resolvedPath)) {

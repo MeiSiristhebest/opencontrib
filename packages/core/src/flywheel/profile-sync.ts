@@ -22,18 +22,24 @@ export class ProfileFlywheel {
     try {
       const data = JSON.parse(readFileSync(this.ledgerPath, 'utf-8'));
       if (!Array.isArray(data)) {
-        console.warn('[ProfileSync] Ledger file is not an array, returning empty');
-        return [];
+        throw new Error(`[ProfileSync] Ledger file is not an array`);
       }
       return data;
     } catch (err: any) {
-      console.error(`[ProfileSync] CRITICAL: Failed to load ledger: ${err.message}`);
-      return [];
+      // Propagate to saveRecord() so it knows the read failed (vs genuinely empty).
+      // Returning [] from here and then writing back in saveRecord() causes total data wipe.
+      throw new Error(`[ProfileSync] CRITICAL: Failed to load ledger: ${err.message}`);
     }
   }
 
   saveRecord(record: ContributionRecord): void {
-    const records = this.loadRecords();
+    let records: ContributionRecord[];
+    try {
+      records = this.loadRecords();
+    } catch {
+      // If ledger is unreadable, we cannot safely append — would overwrite with a single entry.
+      throw new Error(`[ProfileSync] Cannot save record: failed to load existing ledger. Data loss prevention.`);
+    }
     const existingIndex = records.findIndex((r) => r.id === record.id || (r.prUrl && r.prUrl === record.prUrl));
     if (existingIndex >= 0) {
       records[existingIndex] = record;

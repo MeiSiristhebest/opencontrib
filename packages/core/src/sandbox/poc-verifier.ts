@@ -55,7 +55,7 @@ export class AutonomousPoCVerifier {
 
       // Phase 1: Pre-Fix Exploit Execution (Must fail according to expectedFailureAssertion)
       const preFixCmd = step.invocationExpression || options.testCommand || defaultCmd;
-      if (step.invocationExpression && /[$\|;&`(<>].*[a-zA-Z=]/.test(step.invocationExpression)) {
+      if (/[$\|;&`()<>\s*?]/.test(preFixCmd)) {
         report.status = 'SKIPPED';
         report.durationMs = Date.now() - startTime;
         sandbox.cleanup();
