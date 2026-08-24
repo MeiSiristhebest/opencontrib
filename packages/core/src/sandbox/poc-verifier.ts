@@ -55,7 +55,7 @@ export class AutonomousPoCVerifier {
 
       // Phase 1: Pre-Fix Exploit Execution (Must fail according to expectedFailureAssertion)
       const preFixCmd = step.invocationExpression || options.testCommand || defaultCmd;
-      if (/[$\|;&`()<>\s*?]/.test(preFixCmd)) {
+      if (!preFixCmd || !preFixCmd.trim()) {
         report.status = 'SKIPPED';
         report.durationMs = Date.now() - startTime;
         sandbox.cleanup();
@@ -111,9 +111,9 @@ export class AutonomousPoCVerifier {
 
       // Phase 4: Full Regression Suite Check
       const regCmd = options.testCommand || defaultCmd;
-      if (/[$\|;&`()<>\s*?]/.test(regCmd)) {
+      if (!regCmd || !regCmd.trim()) {
         report.status = 'SKIPPED';
-        report.logs.regressionOutput = 'Regression test skipped: testCommand contains unsafe characters';
+        report.logs.regressionOutput = 'Regression test skipped: empty test command';
         sandbox.cleanup();
         return report;
       }

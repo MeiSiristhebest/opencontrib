@@ -67,6 +67,7 @@ export function resolveSafePath(baseDir: string, userPath: string): string {
     const securityAstProbe: OpenContribPlugin = {
       name: 'security-ast-probe',
       version: '1.0.0',
+      permissions: ['fs:read'],
       activate: (ctx) => {
         ctx.probes.register({
           id: 'path-traversal-scanner',

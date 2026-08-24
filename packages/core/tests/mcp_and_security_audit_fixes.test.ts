@@ -86,7 +86,8 @@ describe('Audit Fixes: Lifecycle State Machine with PROBE and POC phases', () =>
       },
       artifacts: {
         probe: { findings: [] },
-      },
+      } as any,
+      availableArtifactFiles: [],
     };
 
     expect(() => validatePhaseGate(summary, 'PROBE_COMPLETED')).not.toThrow();
@@ -105,7 +106,8 @@ describe('Audit Fixes: Lifecycle State Machine with PROBE and POC phases', () =>
       artifacts: {
         workspace: { path: '/tmp/ws' },
         poc: { testFile: 'test.ts' },
-      },
+      } as any,
+      availableArtifactFiles: [],
     };
 
     expect(() => validatePhaseGate(summary, 'POC_GENERATED')).not.toThrow();

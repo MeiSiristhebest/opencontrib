@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'bun:test';
 
 /**
  * HIGH-QUALITY AUDIT: verifies the 14 claimed features actually work,
@@ -203,7 +203,7 @@ describe('quality-audit', () => {
         'packages/core/src/kernel/plugin-host.ts',
         'utf8',
       );
-      expect(code).toContain('spawn(shell, shellArgs, {');
+      expect(code).toContain('spawn(parsed.executable, parsed.args, {');
     });
 
     it('CRITICAL: isBinaryAvailable must NOT use execSync — caused data loss', async () => {
@@ -248,7 +248,8 @@ describe('quality-audit', () => {
         'packages/core/src/discovery/docker-discovery.ts',
         'utf8',
       );
-      expect(code).toContain('docker', ['info']);
+      expect(code).toContain('docker');
+      expect(code).toContain('info');
       expect(code).toContain('verifyDaemon');
     });
 

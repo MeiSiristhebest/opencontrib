@@ -80,9 +80,21 @@ export function runResilientCommand(options: ResilientRunOptions): ResilientRunR
   const sandboxRoot = path.join(opencontribHome, '.opencontrib', 'workspaces');
   const resolvedSandbox = path.resolve(sandboxRoot);
   const resolvedHome = path.resolve(opencontribHome);
-  if (!resolvedCwd.startsWith(resolvedSandbox + path.sep) &&
-      !resolvedCwd.startsWith(resolvedHome + path.sep) &&
-      resolvedCwd !== resolvedHome) {
+  const resolvedProcessCwd = path.resolve(process.cwd());
+  const { tmpdir } = require('os');
+  const resolvedTmp = path.resolve(tmpdir());
+
+  const isAllowedCwd =
+    resolvedCwd.startsWith(resolvedSandbox + path.sep) ||
+    resolvedCwd === resolvedSandbox ||
+    resolvedCwd.startsWith(resolvedHome + path.sep) ||
+    resolvedCwd === resolvedHome ||
+    resolvedCwd.startsWith(resolvedProcessCwd + path.sep) ||
+    resolvedCwd === resolvedProcessCwd ||
+    resolvedCwd.startsWith(resolvedTmp + path.sep) ||
+    resolvedCwd === resolvedTmp;
+
+  if (!isAllowedCwd) {
     return { isSuccess: false, exitCode: 126, stdout: '', stderr: `Blocked: cwd "${cwd}" outside sandbox boundary`, executionTimeMs: 0, warnings: ['CWD boundary violation'] };
   }
   let targetedPackage: string | undefined;

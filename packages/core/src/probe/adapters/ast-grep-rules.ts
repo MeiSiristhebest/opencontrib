@@ -70,6 +70,36 @@ function serializeSubRule(rule: ASTGrepSubRule, indent = 0): string {
  */
 export const STANDARD_AST_RELATIONAL_RULES: ASTGrepYamlRule[] = [
   {
+    id: 'go-unclosed-http-body',
+    language: 'go',
+    severity: 'error',
+    message: 'HTTP response body must be closed to prevent socket resource leaks',
+    rule: {
+      pattern: '$RESP, $ERR := http.Get($URL)',
+    },
+    fix: '$RESP, $ERR := http.Get($URL)\nif $ERR == nil { defer $RESP.Body.Close() }',
+    metadata: {
+      cwe: 'CWE-400',
+      category: 'lifecycle_leak',
+      impact: 'Unclosed response body leaks TCP socket file descriptors',
+    },
+  },
+  {
+    id: 'go-mutex-defer-in-loop',
+    language: 'go',
+    severity: 'warning',
+    message: 'defer mu.Unlock() inside for-loop delays unlock until outer function returns',
+    rule: {
+      pattern: 'for $COND { $MU.Lock(); defer $MU.Unlock(); $$$BODY }',
+    },
+    fix: 'for $COND { func() { $MU.Lock(); defer $MU.Unlock(); $$$BODY }() }',
+    metadata: {
+      cwe: 'CWE-667',
+      category: 'concurrency_deadlock',
+      impact: 'Mutex lock held for entire loop duration blocking concurrent goroutines',
+    },
+  },
+  {
     id: 'go-redis-zrange-order-trap',
     language: 'go',
     severity: 'warning',

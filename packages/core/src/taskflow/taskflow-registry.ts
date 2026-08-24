@@ -43,16 +43,22 @@ export class TaskActionRegistry {
   private registerBuiltinHandlers(): void {
     this.register('probe_scan', {
       execute: async (ctx) => {
-        const allProbes = typeof (ctx.host as any).listAll === 'function' ? (ctx.host as any).listAll() : [];
-        const scanRes = typeof (ctx.host as any).executeScan === 'function'
-          ? await (ctx.host as any).executeScan(ctx.repoPath, allProbes)
-          : { pointersCreated: [] };
+        try {
+          const allProbes = typeof (ctx.host as any).listAll === 'function' ? (ctx.host as any).listAll() : [];
+          const scanRes = typeof (ctx.host as any).executeScan === 'function'
+            ? await (ctx.host as any).executeScan(ctx.repoPath, allProbes)
+            : { pointersCreated: [] };
 
-        const firstFinding = scanRes.pointersCreated.length > 0 ? scanRes.pointersCreated[0] : undefined;
-        return {
-          output: { findingsCount: scanRes.pointersCreated.length },
-          updatedFinding: firstFinding,
-        };
+          const firstFinding = scanRes.pointersCreated && scanRes.pointersCreated.length > 0 ? scanRes.pointersCreated[0] : undefined;
+          return {
+            output: { findingsCount: scanRes.pointersCreated ? scanRes.pointersCreated.length : 0 },
+            updatedFinding: firstFinding,
+          };
+        } catch (err: any) {
+          return {
+            output: { findingsCount: 0, warning: err.message },
+          };
+        }
       },
     });
 

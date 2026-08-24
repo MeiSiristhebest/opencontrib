@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import { homedir, platform } from 'os';
 import { join } from 'path';
 import { discoverDocker } from './docker-discovery.js';
-import { isBinaryOnPath } from '../kernel/tool-registry.js';
+import { isBinaryOnPath, areBinariesOnPath } from '../kernel/tool-registry.js';
 import { defaultPluginManager } from '../kernel/plugin-manager.js';
 
 function getOpenContribHome(): string {
@@ -37,7 +37,18 @@ function run(cmd: string, args: string[], timeoutMs: number): string {
   return (result.stdout || '').trim();
 }
 
-export function runDoctorAudit(): DoctorReport {
+let cachedDoctorReport: { report: DoctorReport; expiresAt: number } | null = null;
+
+export function clearDoctorCache(): void {
+  cachedDoctorReport = null;
+}
+
+export function runDoctorAudit(forceRefresh = false): DoctorReport {
+  const now = Date.now();
+  if (!forceRefresh && cachedDoctorReport && cachedDoctorReport.expiresAt > now) {
+    return cachedDoctorReport.report;
+  }
+
   const checks: DoctorCheckResult[] = [];
   const currentOs = platform();
   const isWindows = currentOs === 'win32';
@@ -48,26 +59,30 @@ export function runDoctorAudit(): DoctorReport {
   let gitCmd = 'git';
 
   if (isWindows) {
-    const candidatePaths = [
-      'git', 'git.exe',
-      'C:\\Program Files\\Git\\cmd\\git.exe',
-      'C:\\Program Files\\Git\\bin\\git.exe',
-      'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
-      join(homedir(), 'AppData', 'Local', 'Programs', 'Git', 'cmd', 'git.exe'),
-    ];
-    for (const p of candidatePaths) {
+    if (isBinaryOnPath('git')) {
+      gitCmd = 'git';
       try {
-        const out = run('cmd.exe', ['/c', `"${p}" --version`], 3000);
-        if (out) {
-          gitCmd = p;
-          gitVersion = out;
-          break;
-        }
+        gitVersion = run('git', ['--version'], 1500);
       } catch {}
+    } else {
+      const candidatePaths = [
+        'C:\\Program Files\\Git\\cmd\\git.exe',
+        'C:\\Program Files\\Git\\bin\\git.exe',
+        join(homedir(), 'AppData', 'Local', 'Programs', 'Git', 'cmd', 'git.exe'),
+      ];
+      for (const p of candidatePaths) {
+        if (existsSync(p)) {
+          gitCmd = p;
+          try {
+            gitVersion = run(p, ['--version'], 1500);
+            if (gitVersion) break;
+          } catch {}
+        }
+      }
     }
   } else {
     try {
-      const out = run('git', ['--version'], 3000);
+      const out = run('git', ['--version'], 1500);
       if (out) gitVersion = out;
     } catch {}
   }
@@ -163,13 +178,15 @@ export function runDoctorAudit(): DoctorReport {
   let wslAvailable = false;
   if (isWindows) {
     try {
-      run('wsl', ['--status'], 4000);
-      wslAvailable = true;
+      const out = run('wsl', ['--status'], 1000);
+      wslAvailable = Boolean(out);
       checks.push({
         category: 'Sandbox',
         name: 'WSL2 Subsystem',
-        status: 'PASSED',
-        message: 'WSL2 Linux subsystem available for cross-platform POSIX verification',
+        status: wslAvailable ? 'PASSED' : 'WARNING',
+        message: wslAvailable
+          ? 'WSL2 Linux subsystem available for cross-platform POSIX verification'
+          : 'WSL2 not active; running in native Windows PowerShell sandbox',
       });
     } catch {
       checks.push({
@@ -199,9 +216,12 @@ export function runDoctorAudit(): DoctorReport {
     { name: 'Alibaba OpenCodeReview (ocr)', bin: 'ocr', id: 'ocr' },
   ];
 
+  const tcBins = toolchains.map((t) => t.bin);
+  const tcAvailability = areBinariesOnPath(tcBins);
+
   for (const tc of toolchains) {
     const state = pm.getState(tc.id);
-    const binaryAvailable = isBinaryOnPath(tc.bin);
+    const binaryAvailable = tcAvailability[tc.bin] ?? false;
 
     if (!state.enabled) {
       checks.push({
@@ -256,7 +276,7 @@ export function runDoctorAudit(): DoctorReport {
   const hasFailures = checks.some((c) => c.status === 'FAILED');
   const hasWarnings = checks.some((c) => c.status === 'WARNING');
 
-  return {
+  const report: DoctorReport = {
     overallHealth: hasFailures ? 'DEGRADED' : hasWarnings ? 'NEEDS_ATTENTION' : 'HEALTHY',
     checks,
     environment: {
@@ -269,4 +289,12 @@ export function runDoctorAudit(): DoctorReport {
       wslAvailable,
     },
   };
+
+  cachedDoctorReport = {
+    report,
+    expiresAt: Date.now() + 15000, // 15-second TTL cache
+  };
+
+  return report;
 }
+

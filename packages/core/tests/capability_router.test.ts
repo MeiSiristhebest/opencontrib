@@ -111,9 +111,12 @@ describe('Capability Router, Scoring Engine & Evidence Graph', () => {
     graph.link(findingPtr.uri, pocPtr.uri, 'reproduced_by_poc');
 
     const chain = graph.getEvidenceChain(findingPtr.uri);
-    expect(chain.findingUri).toBe('ptr://findings/sec-nil-auth-go');
-    expect(chain.hotspotUri).toBe('ptr://hotspots/hotspot-auth-go');
-    expect(chain.pocUri).toBe('ptr://poc/poc-nil-auth-go');
-    expect(chain.pointers.length).toBe(3);
+    expect('error' in chain).toBe(false);
+    if (!('error' in chain)) {
+      expect(chain.findingUri).toBe('ptr://findings/sec-nil-auth-go');
+      expect(chain.hotspotUri).toBe('ptr://hotspots/hotspot-auth-go');
+      expect(chain.pocUri).toBe('ptr://poc/poc-nil-auth-go');
+      expect(chain.pointers.length).toBe(3);
+    }
   });
 });

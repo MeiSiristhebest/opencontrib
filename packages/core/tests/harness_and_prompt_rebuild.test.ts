@@ -6,6 +6,7 @@ import {
   isInstanceResolved,
   type SchemaV2Report,
   type SwebenchFixture,
+  type PerTestVerdict,
 } from '../src/eval/harness-utils.js';
 import { buildTurnPrompt } from '../src/orchestration/agent-orchestrator.js';
 
@@ -134,7 +135,7 @@ describe('parseSchemaV2Report', () => {
 });
 
 describe('isInstanceResolved', () => {
-  const makeReport = (verdicts: Array<{ testId: string; status: string; resolved: boolean; file: string }>): SchemaV2Report => ({
+  const makeReport = (verdicts: PerTestVerdict[]): SchemaV2Report => ({
     resolved_ids: ['instance-1'],
     aggregate: 'PASS',
     total: verdicts.length,

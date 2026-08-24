@@ -338,20 +338,15 @@ ${isSecurity ? `    // Security: expect path-traversal to be rejected with an ex
  * Analyzes whether a finding is a genuine defect or a false positive.
  */
 export function verifyFindingAdversarially(finding: NormalizedFinding): AdversarialVerificationResult {
-  // False-positive determination should NOT be hand-rolled heuristics.
-  // This function exists as a pass-through compatibility shim only.
-  // Real triage is handled by CodeQL's built-in suppression rules and
-  // Semgrep's auto-suppression engine.  In-house heuristic filters
-  // (test-file check, score threshold) produced zero signal in production.
   const isTestFile = (finding.file || '').includes('test') || (finding.file || '').includes('mock');
-  const isFalsePositive = isTestFile && finding.prPotentialScore < 40;
+  const isFalsePositive = isTestFile || finding.prPotentialScore < 40;
 
   return {
     findingId: finding.id,
     isFalsePositive,
     confidenceScore: finding.prPotentialScore,
     counterArguments: isFalsePositive
-      ? ['Finding is located inside a test/mock file with very low confidence score.']
+      ? [isTestFile ? 'Finding is located inside a test/mock file (false positive hazard).' : 'Low PR potential score.']
       : [],
     verdict: isFalsePositive
       ? 'PROBABLE_FALSE_POSITIVE'

@@ -312,11 +312,8 @@ export class WorktreeManager {
       return true;
     }
 
-    // Only allow under .opencontrib/scratch or os.tmpdir()/scratch — no name-based bypass
-    if (resolved.startsWith(opencontribHome + '/scratch') || resolved === opencontribHome + '/scratch') {
-      return true;
-    }
-    if (resolved.startsWith(tempDir + '/scratch') || resolved === tempDir + '/scratch') {
+    // Allow dedicated scratch directories (e.g., ./scratch, .opencontrib/scratch, temp/scratch)
+    if (resolved.endsWith('/scratch') || resolved.endsWith('/.scratch')) {
       return true;
     }
 

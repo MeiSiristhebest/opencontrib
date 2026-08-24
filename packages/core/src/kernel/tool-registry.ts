@@ -259,8 +259,11 @@ export function getInstallSteps(toolId: string): ToolInstallStep[] {
   return entry.install[currentPlatform()] || [];
 }
 
+const binaryCache = new Map<string, boolean>();
+
 /** Check if a single binary is available on PATH or in OPENCONTRIB_DOCKER_BIN_DIR. */
 export function isBinaryOnPath(bin: string): boolean {
+  if (binaryCache.has(bin)) return binaryCache.get(bin)!;
   const { existsSync, readdirSync } = require('node:fs');
   const { spawnSync } = require('node:child_process');
   const { join, resolve } = require('node:path');
@@ -275,25 +278,36 @@ export function isBinaryOnPath(bin: string): boolean {
   const cmd = isWindows ? 'where.exe' : 'command';
   const args = isWindows ? ['-q', bin] : ['-v', bin];
   const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000, env: strippedEnv });
-  if (result.status === 0) return true;
+  if (result.status === 0) {
+    binaryCache.set(bin, true);
+    return true;
+  }
 
   // Fallback: check OPENCONTRIB_DOCKER_BIN_DIR for non-standard install paths
   const customDir = process.env.OPENCONTRIB_DOCKER_BIN_DIR;
   if (customDir) {
     const fullPath = resolve(customDir, bin);
     const winPath = resolve(customDir, `${bin}.exe`);
-    if (isWindows && existsSync(winPath)) return true;
-    if (existsSync(fullPath)) return true;
+    if (isWindows && existsSync(winPath)) {
+      binaryCache.set(bin, true);
+      return true;
+    }
+    if (existsSync(fullPath)) {
+      binaryCache.set(bin, true);
+      return true;
+    }
     // Also scan the directory for any matching name
     try {
       const files = readdirSync(customDir);
       if (files.some((f: string) => f.toLowerCase() === bin.toLowerCase() || f.toLowerCase().startsWith(bin.toLowerCase()))) {
+        binaryCache.set(bin, true);
         return true;
       }
     } catch {
       // Directory not readable
     }
   }
+  binaryCache.set(bin, false);
   return false;
 }
 

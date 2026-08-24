@@ -46,9 +46,24 @@ export class ClaimProtocol {
     authorName: string,
     authorType?: string,
   ): boolean {
-    // If authorType is already provided (e.g., from @octokit/rest GET /users/{username}),
-    // trust the API result directly.
-    if (authorType && authorType.toLowerCase() === 'bot') return true;
+    if (authorType) {
+      const typeLower = authorType.toLowerCase();
+      if (typeLower === 'bot') return true;
+      if (typeLower === 'user') return false;
+    }
+    if (authorName) {
+      const lower = authorName.toLowerCase();
+      if (
+        lower.endsWith('[bot]') ||
+        lower.endsWith('-bot') ||
+        lower === 'stale' ||
+        lower.includes('github-actions') ||
+        lower.includes('dependabot') ||
+        lower.includes('codecov')
+      ) {
+        return true;
+      }
+    }
     return false;
   }
 }

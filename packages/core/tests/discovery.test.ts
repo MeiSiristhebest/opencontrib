@@ -398,7 +398,7 @@ describe('Discovery & Qualification Engine', () => {
         hasDocker: false,
         hasWsl: false,
         hasHyperV: false,
-        toolchains: { node: false, bun: false, python: false, go: false, rust: false },
+        toolchains: { node: false, bun: false, python: false, go: false, rust: false, java: false, cpp: false, dotnet: false, ruby: false, php: false },
       },
     );
 

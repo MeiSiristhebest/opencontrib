@@ -68,7 +68,11 @@ export class PluginManager {
 
   /** Whether the plugin is currently enabled. Returns false for unknown IDs. */
   isEnabled(pluginId: string): boolean {
-    return this.state[pluginId]?.enabled !== false;
+    if (this.state[pluginId] !== undefined) {
+      return this.state[pluginId].enabled;
+    }
+    const isKnown = TOOL_REGISTRY.some((t) => t.id === pluginId);
+    return isKnown;
   }
 
   /** Return the reason a plugin was disabled, or undefined. */

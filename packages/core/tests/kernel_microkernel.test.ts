@@ -31,6 +31,7 @@ describe('OpenContrib Microkernel & Smart Pointer Architecture', () => {
     const mockPlugin: OpenContribPlugin = {
       name: 'mock-security-plugin',
       version: '1.0.0',
+      permissions: ['fs:read'],
       activate: (ctx: PluginContext) => {
         activated = true;
         ctx.probes.register({
@@ -124,7 +125,7 @@ describe('OpenContrib Microkernel & Smart Pointer Architecture', () => {
       totalFiles: 15,
     };
 
-    const negotiation = host.negotiate(goFingerprint, { checkBinaries: false });
+    const negotiation = host.negotiate(goFingerprint);
     const selectedIds = negotiation.selectedProbes.map((p) => p.id);
 
     // OCR, ast-grep, git-hotspot, property-fuzz match Go

@@ -7,7 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/Tests-29%20Suites%20%7C%20134%20Pass%20%7C%20908%20Assertions-success)](https://github.com/MeiSiristhebest/opencontrib)
+[![Tests](https://img.shields.io/badge/Tests-39%20Files%20%7C%20325%20Pass%20%7C%201507%20Assertions-success)](https://github.com/MeiSiristhebest/opencontrib)
+[![MCP Tools](https://img.shields.io/badge/MCP-34%20Tools%20%7C%209%20Domains-8A2BE2)](https://github.com/MeiSiristhebest/opencontrib/blob/main/README_zh.md#-%E5%AD%90%E5%91%BD%E4%BB%A4%E5%85%A8%E6%99%AF%E9%80%9F%E6%9F%A5%E8%A1%A8)
 [![CLI](https://img.shields.io/badge/CLI-24%20Commands-FF6B35)](https://github.com/MeiSiristhebest/opencontrib/blob/main/README_zh.md#-%E5%AD%90%E5%91%BD%E4%BB%A4%E5%85%A8%E6%99%AF%E9%80%9F%E6%9F%A5%E8%A1%A8)
 [![npm](https://img.shields.io/npm/v/opencontrib-cli.svg)](https://www.npmjs.com/package/opencontrib-cli)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md)
@@ -266,7 +267,7 @@ npx -y opencontrib-mcp setup
 }
 ```
 
-**MCP 能力清单**：20 个工具（`contrib_scout`、`contrib_prepare_workspace`、`contrib_collect_evidence`、`contrib_audit_governance` 等）、3 个资源（`opencontrib://doctor`、`opencontrib://memory`、`opencontrib://runs`）以及 1 个工作流指导 Prompt（`opencontrib_workflow_guide`）。
+**MCP 能力清单**：34 个可组合领域工具（`contrib_scout`、`contrib_prepare_workspace`、`contrib_collect_evidence`、`contrib_audit_governance` 等）、3 个资源（`opencontrib://doctor`、`opencontrib://memory`、`opencontrib://runs`）以及 1 个工作流指导 Prompt（`opencontrib_workflow_guide`）。
 
 ---
 

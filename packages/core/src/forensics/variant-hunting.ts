@@ -120,15 +120,16 @@ export class VariantHunter {
       `\\b${symbol}\\b`,
     ], { encoding: 'utf-8', timeout: 15000, cwd: repoPath });
 
+    const excludeRel = (path.isAbsolute(excludeFile) ? path.relative(repoPath, excludeFile) : excludeFile).replace(/\\/g, '/');
+
     if (rgResult.status === 0 && rgResult.stdout) {
-      const excludeRel = path.relative(repoPath, excludeFile).replace(/\\/g, '/');
       for (const rawLine of rgResult.stdout.split(/\r?\n/)) {
         const match = rawLine.match(/^([^:]+):(\d+):(.*)$/);
         if (!match) continue;
         const relPath = path.relative(repoPath, match[1]).replace(/\\/g, '/');
         const lineNum = parseInt(match[2], 10);
-        if (relPath === excludeRel && excludeLine && lineNum === excludeLine) continue;
-        results.push({ file: match[1], line: lineNum, snippet: match[3].trim() });
+        if (relPath === excludeRel && (!excludeLine || lineNum === excludeLine)) continue;
+        results.push({ file: relPath, line: lineNum, snippet: match[3].trim() });
       }
     }
 
@@ -156,18 +157,59 @@ export class VariantHunter {
             encoding: 'utf-8', timeout: 15000, cwd: repoPath,
           });
           if (result.stdout && result.stdout.trim().startsWith('[')) {
-            const excludeRel = path.relative(repoPath, excludeFile).replace(/\\/g, '/');
             const matches = JSON.parse(result.stdout);
             for (const m of matches) {
               const relPath = path.relative(repoPath, m.file).replace(/\\/g, '/');
               const line = m.range.start.line + 1;
-              if (relPath === excludeRel && excludeLine && line === excludeLine) continue;
+              if (relPath === excludeRel && (!excludeLine || line === excludeLine)) continue;
               results.push({ file: relPath, line, snippet: m.text });
             }
           }
         }
       } catch {
-        // No search tool available
+        // ast-grep search not available
+      }
+    }
+
+    // Pure JS Fallback: when neither rg nor sg is installed in PATH
+    if (results.length === 0) {
+      try {
+        const fs = require('fs');
+        const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const wordRegex = new RegExp(`\\b${escaped}\\b`);
+
+        const scanDir = (dir: string) => {
+          if (!fs.existsSync(dir)) return;
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const ent of entries) {
+            const full = path.join(dir, ent.name);
+            if (ent.isDirectory()) {
+              if (ent.name !== 'node_modules' && ent.name !== '.git' && ent.name !== 'dist' && ent.name !== 'target') {
+                scanDir(full);
+              }
+            } else if (ent.isFile()) {
+              if (!ext || ent.name.endsWith(ext)) {
+                const rel = path.relative(repoPath, full).replace(/\\/g, '/');
+                try {
+                  const content = fs.readFileSync(full, 'utf8');
+                  const lines = content.split(/\r?\n/);
+                  for (let i = 0; i < lines.length; i++) {
+                    const lineContent = lines[i];
+                    const lineNum = i + 1;
+                    if (rel === excludeRel && (!excludeLine || lineNum === excludeLine)) continue;
+                    if (wordRegex.test(lineContent)) {
+                      results.push({ file: rel, line: lineNum, snippet: lineContent.trim() });
+                    }
+                  }
+                } catch {}
+              }
+            }
+          }
+        };
+
+        scanDir(repoPath);
+      } catch {
+        // Safe ignore
       }
     }
 

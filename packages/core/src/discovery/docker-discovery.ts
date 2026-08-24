@@ -43,7 +43,18 @@ function verifyDaemon(dockerPath: string, remaining: () => number): boolean {
   return false;
 }
 
-export function discoverDocker(): DockerDiscoveryResult {
+let cachedDockerResult: { result: DockerDiscoveryResult; expiresAt: number } | null = null;
+
+export function clearDockerCache(): void {
+  cachedDockerResult = null;
+}
+
+export function discoverDocker(forceRefresh = false): DockerDiscoveryResult {
+  const now = Date.now();
+  if (!forceRefresh && cachedDockerResult && cachedDockerResult.expiresAt > now) {
+    return cachedDockerResult.result;
+  }
+
   const isWindows = platform() === 'win32';
   const budget = DISCOVERY_BUDGET_MS;
   let elapsed = 0;
@@ -171,5 +182,10 @@ export function discoverDocker(): DockerDiscoveryResult {
     if (isWindows) alternatives.push('WSL + native Docker inside WSL');
   }
 
-  return { found, method, path, alternatives };
+  const result: DockerDiscoveryResult = { found, method, path, alternatives };
+  cachedDockerResult = {
+    result,
+    expiresAt: Date.now() + 30000,
+  };
+  return result;
 }

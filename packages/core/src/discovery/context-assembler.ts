@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { RepoMemoryLedger } from '../memory/repo-memory.js';
-import { runDoctorAudit } from './doctor.js';
+import { runDoctorAudit, type DoctorReport } from './doctor.js';
 
 export interface RunnableCommands {
   testCommand?: string;
@@ -179,6 +179,7 @@ export class ContextAssembler {
     ciWorkflow?: string;
     primaryLanguage?: string;
     workspacePath?: string;
+    doctorReport?: DoctorReport;
   }): AssembledContributionContext {
     const {
       repoFullName,
@@ -190,6 +191,7 @@ export class ContextAssembler {
       ciWorkflow,
       primaryLanguage = 'TypeScript',
       workspacePath,
+      doctorReport,
     } = input;
 
     // 1. Extract memory context
@@ -199,7 +201,7 @@ export class ContextAssembler {
     const preferredPaths = (repoRecord?.conventions as any)?.preferredPaths || [];
 
     // 2. Extract environment context
-    const doctor = runDoctorAudit();
+    const doctor = doctorReport || runDoctorAudit();
 
     // 3. Infer runnable commands
     const runnableCommands = workspacePath
@@ -348,10 +350,10 @@ export class ContextAssembler {
     sections.push(`\n[UNTRUSTED_REPOSITORY_DATA - UNTRUSTED CODE, ISSUES & USER COMMENTS]`);
     sections.push(`### 1. Problem Specification`);
     sections.push(`- **Title**: ${ctx.problemContext.issueTitle}`);
-    sections.push(`- **Description**:\n${this.sanitizeUntrustedText(ctx.problemContext.issueBody, 5000)}`);
+    sections.push(`- **Description**:\n${this.sanitizeUntrustedText(ctx.problemContext.issueBody, 200000)}`);
 
     if (ctx.problemContext.linkedComments && ctx.problemContext.linkedComments.length > 0) {
-      const comments = ctx.problemContext.linkedComments.slice(0, 10).map((c) => this.sanitizeUntrustedText(c, 2000));
+      const comments = ctx.problemContext.linkedComments.map((c) => this.sanitizeUntrustedText(c, 10000));
       sections.push(`- **Discussion Insights**:\n${comments.join('\n')}`);
     }
 
@@ -396,12 +398,9 @@ export class ContextAssembler {
     return sections.join('\n');
   }
 
-  private sanitizeUntrustedText(text: string, maxLength: number = 5000): string {
+  private sanitizeUntrustedText(text: string, maxLength: number = 200000): string {
     if (!text) return '';
-    let sanitized = text
-      .replace(/```[\s\S]*?```/g, '[CODE_FENCE_REMOVED]')
-      .replace(/```[^\n]*\n[\s\S]*?```/g, '[CODE_FENCE_REMOVED]');
-    sanitized = sanitized.replace(/^\s*\n+/g, '').replace(/\n+\s*$/g, '');
+    let sanitized = text.replace(/^\s*\n+/g, '').replace(/\n+\s*$/g, '');
     if (sanitized.length > maxLength) {
       sanitized = sanitized.slice(0, maxLength) + `\n\n[TRUNCATED: ${sanitized.length - maxLength} chars removed]`;
     }

@@ -93,7 +93,7 @@ describe('Reflexion Flywheel — lessons come from LLM Judge output, not hardcod
     const report = makeReport({ overallScore: 90, verdict: 'EXEMPLARY' });
     const events = [
       {
-        stepIndex: 1, type: 'PLANNER_RESPONSE',
+        stepIndex: 1, type: 'PLANNER_RESPONSE' as const,
         toolCalls: [
           { name: 'run_command', args: { CommandLine: 'opencontrib probe run ./repo' } },
           { name: 'run_command', args: { CommandLine: 'gh issue create --body-file issue.md' } },

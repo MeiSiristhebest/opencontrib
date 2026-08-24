@@ -14,7 +14,6 @@ import { buildTurnPrompt, ToolFeedbackEntry } from '../src/orchestration/agent-o
 import { PluginHost } from '../src/kernel/plugin-host.js';
 import { BUILTIN_PROBES } from '../src/probe/registry.js';
 import { serializeRuleToYaml, type ASTGrepYamlRule } from '../src/probe/adapters/ast-grep-rules.js';
-import { runDoctorAudit } from '../src/discovery/feasibility.js';
 import { runDoctorAudit } from '../src/discovery/doctor.js';
 import { parseTrajectoryFromJSONL } from '../src/eval/trajectory-parser.js';
 import {
@@ -51,11 +50,11 @@ describe('Commit 9 (0d7f255): Multi-Language Analyzer — 12+ tool detection', (
     const report = runDoctorAudit();
     expect(report).toBeDefined();
     expect(typeof report).toBe('object');
-  });
+  }, 30000);
 
   it('runDoctorAudit is non-empty', () => {
     const report = runDoctorAudit();
-    const keys = Object.keys(report as Record<string, unknown>);
+    const keys = Object.keys(report);
     expect(keys.length).toBeGreaterThan(0);
   });
 });

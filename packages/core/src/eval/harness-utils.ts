@@ -24,8 +24,8 @@ import * as path from 'path';
 export function normalizePatchLineEndings(patch: string): string {
   // Strip any BOM that some Windows editors inject
   const withoutBom = patch.replace(/^\uFEFF/, '');
-  // Normalize CRLF → LF everywhere (preserve standalone \r characters)
-  return withoutBom.replace(/\r\n/g, '\n');
+  // Normalize CRLF → LF and bare CR → LF
+  return withoutBom.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
 /**

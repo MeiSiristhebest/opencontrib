@@ -82,8 +82,8 @@ export class ContributionStateMachine {
     // QUALIFICATION is a logical concept inlined in the orchestrator (ranking) and is not a separate transition.
     const validTransitions: Record<PipelineStage, PipelineStage[]> = {
       IDLE: ['DISCOVERY', 'BLOCKED'],
-      DISCOVERY: ['ONBOARDING', 'QUALIFICATION', 'PATCH_DESIGN', 'BLOCKED'],
-      QUALIFICATION: ['ONBOARDING', 'PATCH_DESIGN', 'BLOCKED'],
+      DISCOVERY: ['ONBOARDING', 'QUALIFICATION', 'PATCH_DESIGN', 'HUMAN_GATE', 'BLOCKED'],
+      QUALIFICATION: ['ONBOARDING', 'PATCH_DESIGN', 'HUMAN_GATE', 'BLOCKED'],
       ONBOARDING: ['PATCH_DESIGN', 'BLOCKED'],
       PATCH_DESIGN: ['SANDBOX_VALIDATION', 'BLOCKED'],
       SANDBOX_VALIDATION: ['SUBAGENT_REVIEW', 'PATCH_DESIGN', 'BLOCKED'],

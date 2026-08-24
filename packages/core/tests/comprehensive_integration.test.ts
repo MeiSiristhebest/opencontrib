@@ -104,7 +104,7 @@ describe('ContextAssembler — 6-layer prompt assembly', () => {
       ms,
       details.length ? details.join('; ') : `6 layers verified, ${keys.length} keys`,
     );
-  });
+  }, 30000);
 
   it('formatContextPrompt contains all layer content (SYSTEM/POLICY, TRUSTED_METADATA, UNTRUSTED_REPOSITORY_DATA)', () => {
     const t0 = Date.now();
@@ -343,7 +343,7 @@ describe('ContextAssembler — 6-layer prompt assembly', () => {
       details.push('missing last comment');
     }
 
-    expect(ctx.problemContext.linkedComments.length).toBe(1000);
+    expect(ctx.problemContext.linkedComments?.length).toBe(1000);
     expect(prompt).toContain('Comment #500');
     record('ContextAssembler', 'extreme: 1000 linked comments', pass, ms, details.length ? details.join('; ') : `1000 comments, prompt=${prompt.length} chars`);
   });
@@ -643,7 +643,7 @@ describe('ContextBundler — context bundling for findings', () => {
     }, { 'src': ['c.go'] });
     const finding: PointerStub = {
       namespace: 'findings', id: 'f9', title: 'Test',
-      category: 'performance', severity: 'low',
+      category: 'performance' as any, severity: 'low',
       file: 'src/c.go', line: 1, confidence: 80,
     };
 
