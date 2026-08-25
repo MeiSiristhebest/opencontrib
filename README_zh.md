@@ -17,13 +17,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/opencontrib-cli"><img src="https://img.shields.io/npm/v/opencontrib-cli.svg?color=blue" alt="npm version" /></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
-  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black" alt="Bun Version" /></a>
-  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white" alt="TypeScript" /></a>
-  <a href="https://github.com/MeiSiristhebest/opencontrib/actions"><img src="https://img.shields.io/badge/CI-passing-success.svg" alt="CI Status" /></a>
-  <a href="https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" /></a>
-  <a href="https://github.com/MeiSiristhebest/opencontrib/stargazers"><img src="https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=flat&logo=github&color=f59e0b" alt="GitHub Stars" /></a>
+  <a href="https://www.npmjs.com/package/opencontrib-cli"><img src="https://img.shields.io/npm/v/opencontrib-cli.svg?style=flat&color=3b82f6" alt="npm version" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat" alt="License: MIT" /></a>
 </p>
 
 <p align="center">
