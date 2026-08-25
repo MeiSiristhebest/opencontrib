@@ -2,9 +2,7 @@
   Designed & Built with ❤️ by MeiSiristhebest (https://github.com/MeiSiristhebest)
   If this repository helps your learning or engineering, please consider dropping a ⭐ Star!
 -->
-<div align="center">
-
-# 🚀 OpenContrib
+<h1 align="center">🚀 OpenContrib</h1>
 
 <p align="center">
   <b>English | <a href="./README_zh.md">简体中文</a></b>
@@ -14,15 +12,23 @@
 > 💡 **If this architecture, engineering implementation, or toolchain helps your learning or workflow, please drop a ⭐ Star!**
 > 📚 Explore the technical blueprint: [ARCHITECTURE.md](./ARCHITECTURE.md)
 
-
-**The Deterministic Open-Source Contribution Engine for Autonomous AI Coding Agents**
-
-[![npm version](https://img.shields.io/npm/v/opencontrib-cli.svg?color=blue)](https://www.npmjs.com/package/opencontrib-cli)
-[![<p align="center">
-  <b>A modular contribution infrastructure providing AI agents with discrete engineering primitives: 6-dimension deep defect probes, Smart Pointer progressive dereferencing, clean-room Git worktrees, concurrency stampede evidence verification, and RFC-100 anti-AI governance.</b>
+<p align="center">
+  <b>The Deterministic Open-Source Contribution Engine for Autonomous AI Coding Agents</b>
 </p>
 
-</div>
+<p align="center">
+  <a href="https://www.npmjs.com/package/opencontrib-cli"><img src="https://img.shields.io/npm/v/opencontrib-cli.svg?color=blue" alt="npm version" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black" alt="Bun Version" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white" alt="TypeScript" /></a>
+  <a href="https://github.com/MeiSiristhebest/opencontrib/actions"><img src="https://img.shields.io/badge/CI-passing-success.svg" alt="CI Status" /></a>
+  <a href="https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" /></a>
+  <a href="https://github.com/MeiSiristhebest/opencontrib/stargazers"><img src="https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=social" alt="GitHub Stars" /></a>
+</p>
+
+<p align="center">
+  <em>A modular contribution infrastructure providing AI agents with discrete engineering primitives: 6-dimension deep defect probes, Smart Pointer progressive dereferencing, clean-room Git worktrees, concurrency stampede evidence verification, and RFC-100 anti-AI governance.</em>
+</p>
 
 
 

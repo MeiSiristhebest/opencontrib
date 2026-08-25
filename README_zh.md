@@ -2,9 +2,7 @@
   Designed & Built with ❤️ by MeiSiristhebest (https://github.com/MeiSiristhebest)
   If this repository helps your learning or engineering, please consider dropping a ⭐ Star!
 -->
-<div align="center">
-
-# 🚀 OpenContrib
+<h1 align="center">🚀 OpenContrib</h1>
 
 <p align="center">
   <b><a href="./README.md">English</a> | 简体中文</b>
@@ -14,30 +12,23 @@
 > 💡 **如果本项目的架构设计、工程实践或开源基础设施对您有所启发，欢迎点亮右上角 ⭐ Star 支持创作者！**
 > 📚 查阅核心架构设计文档：[ARCHITECTURE_zh.md](./ARCHITECTURE_zh.md)
 
-
-**面向自主编程 AI Agent 的确定性开源贡献工业级引擎**
-
-[![npm version](https://img.shields.io/npm/v/opencontrib-cli.svg?color=blue)](https://www.npmjs.com/package/opencontrib-cli)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![CI Status](https://img.shields.io/badge/CI-passing-success.svg)](https://github.com/MeiSiristhebest/opencontrib/actions)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md)
-[![GitHub Stars](https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=social)](https://github.com/MeiSiristhebest/opencontrib/stargazers)
-
-License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![npm](https://img.shields.io/npm/v/opencontrib-cli.svg)](https://www.npmjs.com/package/opencontrib-cli)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md)
-
-
-
 <p align="center">
-  <b>为自主编程 AI Agent（如 Google Antigravity、Claude Code、Cursor、Devin 等）量身打造的开源贡献基础设施：提供 6 维深水区武器库探针、Smart Pointer 渐进式切片解引用、Worktree 沙盒隔离、并发抢占风暴物证校验、反 AI 噪音治理门禁、持久化会话状态与贡献飞轮。</b>
+  <b>面向自主编程 AI Agent 的确定性开源贡献工业级引擎</b>
 </p>
 
-</div>
+<p align="center">
+  <a href="https://www.npmjs.com/package/opencontrib-cli"><img src="https://img.shields.io/npm/v/opencontrib-cli.svg?color=blue" alt="npm version" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black" alt="Bun Version" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white" alt="TypeScript" /></a>
+  <a href="https://github.com/MeiSiristhebest/opencontrib/actions"><img src="https://img.shields.io/badge/CI-passing-success.svg" alt="CI Status" /></a>
+  <a href="https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" /></a>
+  <a href="https://github.com/MeiSiristhebest/opencontrib/stargazers"><img src="https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=social" alt="GitHub Stars" /></a>
+</p>
+
+<p align="center">
+  <em>为自主编程 AI Agent（如 Google Antigravity、Claude Code、Cursor、Devin 等）量身打造的开源贡献基础设施：提供 6 维深水区武器库探针、Smart Pointer 渐进式切片解引用、Worktree 沙盒隔离、并发抢占风暴物证校验、反 AI 噪音治理门禁、持久化会话状态与贡献飞轮。</em>
+</p>
 
 ---
 
