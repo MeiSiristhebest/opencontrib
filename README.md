@@ -24,6 +24,11 @@
 
 </div>
 
+> [!TIP]
+> 💡 **如果本项目的架构设计、工程实践或开源基础设施对您有所启发，欢迎点亮右上角 ⭐ Star 支持创作者！**
+> 📚 查阅核心架构推演：[ARCHITECTURE.md](./ARCHITECTURE.md)
+
+
 ---
 
 ## 📑 Table of Contents
@@ -302,6 +307,15 @@ bun x tsc --noEmit
 ---
 
 ## ⭐ Star & Support
+
+### 🌟 Stargazers Over Time
+[![Stargazers repo roster for @MeiSiristhebest/opencontrib](https://reporoster.com/stars/MeiSiristhebest/opencontrib)](https://github.com/MeiSiristhebest/opencontrib/stargazers)
+
+### 🤝 Contributors
+<a href="https://github.com/MeiSiristhebest/opencontrib/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=MeiSiristhebest/opencontrib" alt="Contributors" />
+</a>
+
 
 If OpenContrib assists your AI agent workflows or open-source research, please consider giving this repository a ⭐ **Star**! It helps the project gain visibility and motivates ongoing development.
 
