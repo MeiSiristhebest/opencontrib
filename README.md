@@ -341,3 +341,5 @@ If you find this project useful or inspiring, please consider giving it a ⭐ **
 
 Distributed under the [MIT License](LICENSE). Copyright (c) 2026 OpenContrib Contributors.
 
+<!-- Scarf Telemetry Pixel -->
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=p2L36r5iF7fAu6cd2J2Y41Cp6Z3YJHInGjzgouIZuLLHJhyoV9" />
