@@ -320,15 +320,9 @@ bun x tsc --noEmit
 
 If you find this project useful or inspiring, please consider giving it a ⭐ **Star** on GitHub! It helps more developers discover the work and supports continuous open-source maintenance.
 
-<p align="left">
-  <a href="https://github.com/MeiSiristhebest/opencontrib/stargazers">
-    <img src="https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=for-the-badge&logo=apachespark&color=f59e0b" alt="Stargazers" />
-  </a>
-  <a href="https://github.com/MeiSiristhebest/opencontrib/network/members">
-    <img src="https://img.shields.io/github/forks/MeiSiristhebest/opencontrib?style=for-the-badge&color=3b82f6" alt="Forks" />
-  </a>
+<p align="center">
   <a href="https://star-history.com/#MeiSiristhebest/opencontrib&Date">
-    <img src="https://img.shields.io/badge/Star%20History-View%20Interactive%20Chart-FF6B6B?style=for-the-badge&logo=github" alt="Star History" />
+    <img src="https://api.star-history.com/svg?repos=MeiSiristhebest/opencontrib&type=Date" alt="Star History Chart" width="100%" />
   </a>
 </p>
 
