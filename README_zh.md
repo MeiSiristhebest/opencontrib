@@ -8,6 +8,7 @@
 [![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Tests](https://img.shields.io/badge/Tests-39%20Files%20%7C%20325%20Pass%20%7C%201507%20Assertions-success)](https://github.com/MeiSiristhebest/opencontrib)
+[![GitHub Stars](https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=social)](https://github.com/MeiSiristhebest/opencontrib)
 [![MCP Tools](https://img.shields.io/badge/MCP-34%20Tools%20%7C%209%20Domains-8A2BE2)](https://github.com/MeiSiristhebest/opencontrib/blob/main/README_zh.md#-%E5%AD%90%E5%91%BD%E4%BB%A4%E5%85%A8%E6%99%AF%E9%80%9F%E6%9F%A5%E8%A1%A8)
 [![CLI](https://img.shields.io/badge/CLI-24%20Commands-FF6B35)](https://github.com/MeiSiristhebest/opencontrib/blob/main/README_zh.md#-%E5%AD%90%E5%91%BD%E4%BB%A4%E5%85%A8%E6%99%AF%E9%80%9F%E6%9F%A5%E8%A1%A8)
 [![npm](https://img.shields.io/npm/v/opencontrib-cli.svg)](https://www.npmjs.com/package/opencontrib-cli)
@@ -300,6 +301,14 @@ bun x tsc --noEmit
 
 ---
 
+## ⭐ 支持与 Star
+
+如果 OpenContrib 对您的 AI Agent 流程探索或开源工程有所启发与帮助，欢迎为本项目点亮一颗 ⭐ **Star**！这是对开源创作者最直接的鼓励与支持。
+
+[![Star History Chart](https://api.star-history.com/svg?repos=MeiSiristhebest/opencontrib&type=Date)](https://star-history.com/#MeiSiristhebest/opencontrib&Date)
+
+---
+
 ## 📜 开源协议
 
-本项目采用 [MIT License](LICENSE) 许可协议。Copyright (c) 2026 OpenContrib 贡献者。
+本项目采用 [MIT License](LICENSE) 开源协议。Copyright (c) 2026 OpenContrib Contributors.

@@ -34,7 +34,11 @@ program
   .configureHelp({
     subcommandTerm: (cmd) => cmd.name() + ((cmd.options as any[]).length ? ' [options]' : ''),
     argumentTerm: (arg) => `<${arg.name()}>`,
-  });
+  })
+  .addHelpText('after', `
+⭐ Star OpenContrib on GitHub: https://github.com/MeiSiristhebest/opencontrib
+💬 Found a defect or feature request? Open an issue: https://github.com/MeiSiristhebest/opencontrib/issues
+`);
 
 program.addCommand(doctorCommand);
 program.addCommand(discoveryCommand);
