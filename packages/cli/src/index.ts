@@ -18,6 +18,8 @@ import { scoutCommand } from './commands/scout.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { evalCommand } from './commands/eval.js';
 import { setupCommand } from './commands/setup.js';
+import { displayFirstRunBannerIfNeeded } from './utils/banner.js';
+import { sendAnonymousPing } from './utils/telemetry.js';
 
 const program = new Command();
 
@@ -26,10 +28,15 @@ program
   .description('Agent-Native Open Source Contribution Engine — CLI')
   .version('1.0.0')
   .option('--home <dir>', 'Set custom OpenContrib home directory (overrides ~/.opencontrib and OPENCONTRIB_HOME env)', process.env.OPENCONTRIB_HOME)
-  .hook('preAction', (parsed) => {
-    if ((parsed.options as any).home && typeof (parsed.options as any).home === 'string') {
-      process.env.OPENCONTRIB_HOME = (parsed.options as any).home;
+  .hook('preAction', (thisCommand, actionCommand) => {
+    if ((thisCommand.opts() as any).home && typeof (thisCommand.opts() as any).home === 'string') {
+      process.env.OPENCONTRIB_HOME = (thisCommand.opts() as any).home;
     }
+    // 1. Display onboarding banner on first interactive run
+    displayFirstRunBannerIfNeeded(process.env.OPENCONTRIB_HOME);
+    // 2. Dispatch lightweight non-blocking telemetry heartbeat
+    const cmdName = actionCommand ? actionCommand.name() : thisCommand.name();
+    sendAnonymousPing(cmdName, '1.0.0');
   })
   .configureHelp({
     subcommandTerm: (cmd) => cmd.name() + ((cmd.options as any[]).length ? ' [options]' : ''),
