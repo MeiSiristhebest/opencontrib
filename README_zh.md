@@ -23,7 +23,7 @@
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white" alt="TypeScript" /></a>
   <a href="https://github.com/MeiSiristhebest/opencontrib/actions"><img src="https://img.shields.io/badge/CI-passing-success.svg" alt="CI Status" /></a>
   <a href="https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" /></a>
-  <a href="https://github.com/MeiSiristhebest/opencontrib/stargazers"><img src="https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=social" alt="GitHub Stars" /></a>
+  <a href="https://github.com/MeiSiristhebest/opencontrib/stargazers"><img src="https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=flat&logo=github&color=f59e0b" alt="GitHub Stars" /></a>
 </p>
 
 <p align="center">
