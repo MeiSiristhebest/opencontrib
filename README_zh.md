@@ -17,13 +17,17 @@
 
 **面向自主编程 AI Agent 的确定性开源贡献工业级引擎**
 
+[![npm version](https://img.shields.io/npm/v/opencontrib-cli.svg?color=blue)](https://www.npmjs.com/package/opencontrib-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/Tests-39%20Files%20%7C%20325%20Pass%20%7C%201507%20Assertions-success)](https://github.com/MeiSiristhebest/opencontrib)
-[![GitHub Stars](https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=social)](https://github.com/MeiSiristhebest/opencontrib)
-[![MCP Tools](https://img.shields.io/badge/MCP-34%20Tools%20%7C%209%20Domains-8A2BE2)](https://github.com/MeiSiristhebest/opencontrib/blob/main/README_zh.md#-%E5%AD%90%E5%91%BD%E4%BB%A4%E5%85%A8%E6%99%AF%E9%80%9F%E6%9F%A5%E8%A1%A8)
-[![CLI](https://img.shields.io/badge/CLI-24%20Commands-FF6B35)](https://github.com/MeiSiristhebest/opencontrib/blob/main/README_zh.md#-%E5%AD%90%E5%91%BD%E4%BB%A4%E5%85%A8%E6%99%AF%E9%80%9F%E6%9F%A5%E8%A1%A8)
+[![CI Status](https://img.shields.io/badge/CI-passing-success.svg)](https://github.com/MeiSiristhebest/opencontrib/actions)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md)
+[![GitHub Stars](https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=social)](https://github.com/MeiSiristhebest/opencontrib/stargazers)
+
+License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Bun Version](https://img.shields.io/badge/Bun-v1.2%2B-FBF0DF?logo=bun&logoColor=black)](https://bun.sh)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![npm](https://img.shields.io/npm/v/opencontrib-cli.svg)](https://www.npmjs.com/package/opencontrib-cli)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md)
 
