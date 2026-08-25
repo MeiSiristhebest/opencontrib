@@ -1,6 +1,19 @@
+<!-- 
+  Designed & Built with ❤️ by MeiSiristhebest (https://github.com/MeiSiristhebest)
+  If this repository helps your learning or engineering, please consider dropping a ⭐ Star!
+-->
 <div align="center">
 
 # 🚀 OpenContrib
+
+<p align="center">
+  <b>English | <a href="./README_zh.md">简体中文</a></b>
+</p>
+
+> [!TIP]
+> 💡 **If this architecture, engineering implementation, or toolchain helps your learning or workflow, please drop a ⭐ Star!**
+> 📚 Explore the technical blueprint: [ARCHITECTURE.md](./ARCHITECTURE.md)
+
 
 **The Deterministic Open-Source Contribution Engine for Autonomous AI Coding Agents**
 
@@ -14,9 +27,7 @@
 [![npm](https://img.shields.io/npm/v/opencontrib-cli.svg)](https://www.npmjs.com/package/opencontrib-cli)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md)
 
-<p align="center">
-  <b>[ English | <a href="./README_zh.md">简体中文</a> ]</b>
-</p>
+
 
 <p align="center">
   <b>A modular contribution infrastructure providing AI agents with discrete engineering primitives: 6-dimension deep defect probes, Smart Pointer progressive dereferencing, clean-room Git worktrees, concurrency stampede evidence verification, and RFC-100 anti-AI governance.</b>
@@ -24,9 +35,6 @@
 
 </div>
 
-> [!TIP]
-> 💡 **如果本项目的架构设计、工程实践或开源基础设施对您有所启发，欢迎点亮右上角 ⭐ Star 支持创作者！**
-> 📚 查阅核心架构推演：[ARCHITECTURE.md](./ARCHITECTURE.md)
 
 
 ---
@@ -306,7 +314,13 @@ bun x tsc --noEmit
 
 ---
 
+---
+
 ## ⭐ Star & Support
+
+If you find this project useful or inspiring, please consider giving it a ⭐ **Star** on GitHub! It helps more developers discover the work and supports continuous open-source maintenance.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=MeiSiristhebest/opencontrib&type=Date)](https://star-history.com/#MeiSiristhebest/opencontrib&Date)
 
 ### 🌟 Stargazers Over Time
 [![Stargazers repo roster for @MeiSiristhebest/opencontrib](https://reporoster.com/stars/MeiSiristhebest/opencontrib)](https://github.com/MeiSiristhebest/opencontrib/stargazers)
@@ -315,13 +329,6 @@ bun x tsc --noEmit
 <a href="https://github.com/MeiSiristhebest/opencontrib/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=MeiSiristhebest/opencontrib" alt="Contributors" />
 </a>
-
-
-If OpenContrib assists your AI agent workflows or open-source research, please consider giving this repository a ⭐ **Star**! It helps the project gain visibility and motivates ongoing development.
-
-[![Star History Chart](https://api.star-history.com/svg?repos=MeiSiristhebest/opencontrib&type=Date)](https://star-history.com/#MeiSiristhebest/opencontrib&Date)
-
----
 
 ## 📜 License
 
