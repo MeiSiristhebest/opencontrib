@@ -1,6 +1,19 @@
+<!-- 
+  Designed & Built with ❤️ by MeiSiristhebest (https://github.com/MeiSiristhebest)
+  If this repository helps your learning or engineering, please consider dropping a ⭐ Star!
+-->
 <div align="center">
 
 # 🚀 OpenContrib
+
+<p align="center">
+  <b><a href="./README.md">English</a> | 简体中文</b>
+</p>
+
+> [!TIP]
+> 💡 **如果本项目的架构设计、工程实践或开源基础设施对您有所启发，欢迎点亮右上角 ⭐ Star 支持创作者！**
+> 📚 查阅核心架构设计文档：[ARCHITECTURE_zh.md](./ARCHITECTURE_zh.md)
+
 
 **面向自主编程 AI Agent 的确定性开源贡献工业级引擎**
 
@@ -14,9 +27,7 @@
 [![npm](https://img.shields.io/npm/v/opencontrib-cli.svg)](https://www.npmjs.com/package/opencontrib-cli)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/MeiSiristhebest/opencontrib/blob/main/CONTRIBUTING.md)
 
-<p align="center">
-  <b>[ <a href="./README.md">English</a> | 简体中文 ]</b>
-</p>
+
 
 <p align="center">
   <b>为自主编程 AI Agent（如 Google Antigravity、Claude Code、Cursor、Devin 等）量身打造的开源贡献基础设施：提供 6 维深水区武器库探针、Smart Pointer 渐进式切片解引用、Worktree 沙盒隔离、并发抢占风暴物证校验、反 AI 噪音治理门禁、持久化会话状态与贡献飞轮。</b>
@@ -301,13 +312,21 @@ bun x tsc --noEmit
 
 ---
 
+---
+
 ## ⭐ 支持与 Star
 
-如果 OpenContrib 对您的 AI Agent 流程探索或开源工程有所启发与帮助，欢迎为本项目点亮一颗 ⭐ **Star**！这是对开源创作者最直接的鼓励与支持。
+如果本项目对您的学习、研究或工程落地有所帮助，欢迎给本项目点亮一颗 ⭐ **Star**！这是对开源创作者最大的鼓励与支持。
 
 [![Star History Chart](https://api.star-history.com/svg?repos=MeiSiristhebest/opencontrib&type=Date)](https://star-history.com/#MeiSiristhebest/opencontrib&Date)
 
----
+### 🌟 Stargazers 排行榜
+[![Stargazers repo roster for @MeiSiristhebest/opencontrib](https://reporoster.com/stars/MeiSiristhebest/opencontrib)](https://github.com/MeiSiristhebest/opencontrib/stargazers)
+
+### 🤝 社区贡献者
+<a href="https://github.com/MeiSiristhebest/opencontrib/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=MeiSiristhebest/opencontrib" alt="Contributors" />
+</a>
 
 ## 📜 开源协议
 
