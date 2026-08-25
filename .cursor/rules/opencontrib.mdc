@@ -1,0 +1,52 @@
+---
+description: OpenContrib deterministic 9-phase open-source contribution engine for Cursor Agent
+globs: *
+alwaysApply: true
+---
+
+# OpenContrib Cursor Integration Rules
+
+You have access to the **OpenContrib Engine** via CLI and MCP tools. Follow these phase-gated instructions when performing open-source development, bug triaging, or PR submission.
+
+## 🛠️ Core Toolchain Primitives
+
+### 1. Code Navigation via Smart Pointers
+Avoid reading entire large files into context. Use OpenContrib smart pointers:
+```bash
+opencontrib pointer resolve "ptr://<relative_path>#L<start>-L<end>"
+```
+
+### 2. Deep AST / SAST Defect Probing
+Scan target repos or directories for deep concurrency bugs, memory leaks, and protocol violations:
+```bash
+opencontrib probe run --dir . --pack concurrency,goroutine_leak,type_narrowing
+```
+
+### 3. Isolated Workspace Management
+Always perform changes inside a clean git worktree sandbox:
+```bash
+opencontrib workspace create --branch fix/<issue_name>
+# To clean up:
+opencontrib workspace cleanup
+```
+
+### 4. Empirical Evidence Collection (Fail-First)
+Before applying a fix, establish a failing baseline test:
+```bash
+opencontrib evidence record --command "<test_runner_command>"
+```
+
+### 5. RFC-100 Governance Pre-Flight Check
+Before generating PRs, run automated anti-AI governance linting:
+```bash
+opencontrib governance audit --diff
+```
+
+## 🔌 MCP Tools Available
+When MCP is enabled in Cursor (`.cursor/mcp.json`):
+- `contrib_scout`: Scout issues with feasibility ranking
+- `contrib_assemble_context`: Gather minimal context bundle
+- `contrib_prepare_workspace`: Create clean worktree
+- `contrib_collect_evidence`: Record test assertion runs
+- `contrib_audit_governance`: Enforce maintainer guidelines
+- `contrib_render_pr_template`: Generate high-acceptance PR bodies

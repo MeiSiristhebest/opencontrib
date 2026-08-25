@@ -1,0 +1,8 @@
+# OpenContrib Engine Rules for Cursor
+
+When working on open-source contributions or triaging issues:
+1. Use `opencontrib capability list` and `opencontrib doctor` to inspect capabilities.
+2. Resolve code via Smart Pointers: `opencontrib pointer resolve "ptr://<file>#L<start>-L<end>"`.
+3. Use `opencontrib workspace create --branch <name>` to isolate changes in a clean git worktree.
+4. Always establish a fail-first test assertion with `opencontrib evidence record`.
+5. Run `opencontrib governance audit --diff` before proposing pull requests.

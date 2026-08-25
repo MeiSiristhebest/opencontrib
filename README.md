@@ -249,13 +249,38 @@ gh pr create --repo owner/repo --title "fix: ..." --body-file pr-body.md --draft
 
 ---
 
-## 🔌 MCP Protocol Integration
+## 🔌 Seamless Agent Integration
 
-For MCP-native agent environments (Claude Desktop, Cursor, Antigravity):
+OpenContrib works out-of-the-box as an autonomous toolchain and MCP engine across all leading AI coding assistants:
 
+### 1. Claude Code
+OpenContrib provides native `CLAUDE.md` instructions and MCP integration for Claude Code:
 ```bash
-# Auto-configure client
-npx -y opencontrib-mcp setup
+# Add OpenContrib MCP server to Claude Code
+claude mcp add opencontrib npx -y opencontrib-cli mcp
+```
+
+### 2. Cursor (Composer & Agent)
+OpenContrib includes pre-configured `.cursor/rules/opencontrib.mdc` and `.cursorrules`:
+```json
+// Add to ~/.cursor/mcp.json or .cursor/mcp.json:
+{
+  "mcpServers": {
+    "opencontrib": {
+      "command": "npx",
+      "args": ["-y", "opencontrib-cli", "mcp"]
+    }
+  }
+}
+```
+
+### 3. OpenAI Codex / Custom Assistants
+OpenContrib includes standard `AGENTS.md` and `CODEX.md` directives to orchestrate the 9-phase contribution pipeline deterministically.
+
+### 4. 1-Click Multi-Agent Setup
+```bash
+# Auto-configure MCP servers across all detected IDEs & agents
+npx -y opencontrib-cli setup
 ```
 
 Or add to client configuration:

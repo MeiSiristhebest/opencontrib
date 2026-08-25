@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "opencontrib": {
+      "command": "npx",
+      "args": ["-y", "opencontrib-cli", "mcp"]
+    }
+  }
+}

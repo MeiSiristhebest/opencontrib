@@ -247,13 +247,38 @@ gh pr create --repo owner/repo --title "fix: ..." --body-file pr-body.md --draft
 
 ---
 
-## 🔌 MCP 协议集成配置
+## 🔌 无缝接入主流 AI 编程智能体 (Claude Code · Cursor · Codex)
 
-针对 MCP 原生 Agent 环境（Claude Desktop、Cursor、Antigravity 等）：
+OpenContrib 开箱即用支持主流 AI 编程助手与自主智能体环境：
 
+### 1. Claude Code
+OpenContrib 原生内置 `CLAUDE.md` 执行规范与 MCP 协议：
 ```bash
-# 自动探测并写入配置文件
-npx -y opencontrib-mcp setup
+# 在 Claude Code 中一键添加 OpenContrib MCP 服务
+claude mcp add opencontrib npx -y opencontrib-cli mcp
+```
+
+### 2. Cursor (Composer & Agent)
+OpenContrib 预置了 `.cursor/rules/opencontrib.mdc` 与 `.cursorrules` 规则：
+```json
+// 在 ~/.cursor/mcp.json 或项目 .cursor/mcp.json 中添加：
+{
+  "mcpServers": {
+    "opencontrib": {
+      "command": "npx",
+      "args": ["-y", "opencontrib-cli", "mcp"]
+    }
+  }
+}
+```
+
+### 3. OpenAI Codex / 智能体助手
+内置标准 `AGENTS.md` 与 `CODEX.md`，为 Codex 与 GPT 助手提供高确定性的 9 阶段开源贡献指令。
+
+### 4. 一键全自动配置多 Agent 环境
+```bash
+# 自动检测本地已安装的 IDE 与 Agent 环境并写入 MCP 配置
+npx -y opencontrib-cli setup
 ```
 
 或手动添加到客户端 MCP 配置：
