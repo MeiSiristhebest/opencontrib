@@ -19,7 +19,7 @@ cd opencontrib
 # Install all monorepo dependencies
 bun install
 
-# Run the complete test matrix (29 suites, 134 tests, 908 assertions)
+# Run the complete test matrix (39 suites, 325 tests, 1507 assertions)
 bun test
 
 # Run TypeScript type check (0 errors)
