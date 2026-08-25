@@ -316,18 +316,19 @@ bun x tsc --noEmit
 
 ---
 
+## 📜 开源协议
+
+本项目采用 [MIT License](LICENSE) 开源协议。Copyright (c) 2026 OpenContrib Contributors.
+
 ---
 
 ## ⭐ 支持与 Star
 
 如果本项目对您的学习、研究或工程落地有所帮助，欢迎给本项目点亮一颗 ⭐ **Star**！这是对开源创作者最大的鼓励与支持。
 
-<p align="left">
-  <a href="https://github.com/MeiSiristhebest/opencontrib/stargazers">
-    <img src="https://img.shields.io/github/stars/MeiSiristhebest/opencontrib?style=for-the-badge&logo=apachespark&color=f59e0b" alt="Stargazers" />
-  </a>
-  <a href="https://github.com/MeiSiristhebest/opencontrib/network/members">
-    <img src="https://img.shields.io/github/forks/MeiSiristhebest/opencontrib?style=for-the-badge&color=3b82f6" alt="Forks" />
+<p align="center">
+  <a href="https://star-history.com/#MeiSiristhebest/opencontrib&Date">
+    <img src="https://api.star-history.com/svg?repos=MeiSiristhebest/opencontrib&type=Date" alt="Star History 趋势图" width="100%" />
   </a>
 </p>
 
@@ -335,10 +336,6 @@ bun x tsc --noEmit
 <a href="https://github.com/MeiSiristhebest/opencontrib/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=MeiSiristhebest/opencontrib" alt="Contributors" />
 </a>
-
-## 📜 开源协议
-
-本项目采用 [MIT License](LICENSE) 开源协议。Copyright (c) 2026 OpenContrib Contributors.
 
 <!-- Scarf Telemetry Pixel -->
 <img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=p2L36r5iF7fAu6cd2J2Y41Cp6Z3YJHInGjzgouIZuLLHJhyoV9" />
