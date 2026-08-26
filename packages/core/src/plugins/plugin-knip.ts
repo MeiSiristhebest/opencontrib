@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
+import { getToolTimeout } from '../kernel/config.js';
 
 export interface KnipJsonOutput {
   files?: string[];
@@ -61,7 +62,7 @@ export const knipPlugin: OpenContribPlugin = {
 
           const { stdout } = await host.exec(cmd, {
             cwd: targetPath,
-            timeout: 60000,
+            timeout: getToolTimeout('KNIP'),
           });
 
           if (!stdout || stdout.trim().length === 0) return;
@@ -72,7 +73,12 @@ export const knipPlugin: OpenContribPlugin = {
           if (jsonStart === -1 || jsonEnd === -1) return;
 
           const jsonText = stdout.substring(jsonStart, jsonEnd + 1);
-          const report: KnipJsonOutput = JSON.parse(jsonText);
+          let report: KnipJsonOutput;
+          try {
+            report = JSON.parse(jsonText);
+          } catch {
+            return;
+          }
 
           // 1. Normalize Unused Files
           if (Array.isArray(report.files)) {

@@ -12,7 +12,7 @@ import {
   type ProbeCost,
   type DefectCategory,
 } from '@opencontrib/core';
-import { printJSON } from '../utils/output.js';
+import { printJSON, printPhaseGuidance } from '../utils/output.js';
 
 export const probeCommand = new Command('probe')
   .description('Progressive probe discovery, repository fingerprinting, hotspot forensics, and targeted scanning');
@@ -107,6 +107,25 @@ probeCommand
         },
         opts.pretty,
       );
+
+      const firstPointer = triaged.topPointers[0];
+      const nextCmd = firstPointer
+        ? `opencontrib pointer resolve ${firstPointer.uri} --view slice`
+        : `opencontrib pointer list`;
+
+      printPhaseGuidance({
+        currentPhase: 'PROBE_COMPLETED',
+        status: 'SUCCESS',
+        humanCheckpoint: 'Checkpoint 1 (Review Smart Pointer Findings)',
+        nextCommand: nextCmd,
+        forbiddenActions: [
+          'DO NOT perform blind sequential file reads (> 3 views) across the repository.',
+          'Pinpoint symbols and defect context strictly via Smart Pointer slices (ptr://...).',
+        ],
+        invariants: [
+          'Pointers have been persisted to session store and can be dereferenced via opencontrib pointer resolve.',
+        ],
+      });
     } catch (err: any) {
       console.error(`❌ Probe execution failed: ${err.message}`);
       process.exit(1);

@@ -7,10 +7,13 @@ import {
   parseCiRawLogs,
   renderMasterPrTemplate,
   validateMarkdownIntegrity,
+  ContributionRunManager,
 } from '@opencontrib/core';
-import { printJSON, parseJSON, readStdin } from '../utils/output.js';
+import { printJSON, parseJSON, readStdin, printPhaseGuidance } from '../utils/output.js';
 
 import fs from 'node:fs';
+
+const runManager = new ContributionRunManager();
 
 // ─── governance audit ─────────────────────────────────────────────────────────
 const auditCommand = new Command('audit')
@@ -22,6 +25,8 @@ const auditCommand = new Command('audit')
   .option('--evidence <json>', 'Evidence JSON from collect_evidence')
   .option('--subagent-score <n>', 'External subagent quality score (0-100)', (v) => Number(v))
   .option('--is-autonomous', 'Whether preparing for autonomous PR submission', false)
+  .option('--run-id <id>', 'Contribution run ID (defaults to active session)')
+  .option('--allow-unverified', 'Allow bypass of quality gate threshold failure', false)
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: {
     patch: string;
@@ -31,6 +36,8 @@ const auditCommand = new Command('audit')
     evidence?: string;
     subagentScore?: number;
     isAutonomous?: boolean;
+    runId?: string;
+    allowUnverified?: boolean;
     pretty?: boolean;
   }) => {
     try {
@@ -65,10 +72,57 @@ const auditCommand = new Command('audit')
         subagentQualityScore: opts.subagentScore,
         isAutonomousPrSubmission: opts.isAutonomous ?? false,
       });
+
+      const isPassed = audit.overallConfidence.isPassed;
+      const runId = runManager.resolveRunId(opts.runId);
+
+      if (runId) {
+        try {
+          runManager.saveArtifact(
+            runId,
+            'governance',
+            audit as any,
+            isPassed ? 'GOVERNANCE_AUDITED' : undefined,
+          );
+        } catch {}
+      }
+
       printJSON({
-        status: audit.overallConfidence.isPassed ? 'passed' : 'failed',
+        status: isPassed ? 'passed' : 'failed',
         audit,
       }, opts.pretty);
+
+      if (!isPassed && !opts.allowUnverified) {
+        printPhaseGuidance({
+          currentPhase: 'GOVERNANCE_AUDITED',
+          runId,
+          status: 'GATED_BLOCKED',
+          humanCheckpoint: 'Checkpoint 3 (Governance Quality Gate Failure)',
+          forbiddenActions: [
+            `Overall Quality Score (${audit.overallScore.toFixed(1)}/100) is below required 90.0% threshold.`,
+            `Weakest dimension: ${audit.weakestDimension.dimension} (${audit.weakestDimension.score}/100).`,
+            'STRICTLY FORBIDDEN: Do NOT commit or create a PR with failing governance audit score.',
+          ],
+          invariants: [
+            'Improve test coverage or add negative assertion cases to increase confidence.',
+            'Run variant hunting across sister modules to verify no parallel defects.',
+            'To explicitly request human waiver, rerun with --allow-unverified.',
+          ],
+          nextCommand: 'opencontrib governance audit --patch <file> --pr-title <title> --allow-unverified',
+        });
+        process.exit(2);
+      }
+
+      printPhaseGuidance({
+        currentPhase: 'GOVERNANCE_AUDITED',
+        runId,
+        status: 'SUCCESS',
+        humanCheckpoint: 'Checkpoint 3 (Pre-Flight Review - Ready for PR)',
+        nextCommand: `opencontrib governance pr-template --issue <id> --issue-title "${opts.prTitle}" --summary "<summary>"`,
+        invariants: [
+          'Present the patch diff and audit report to the user at Checkpoint 3 before pushing.',
+        ],
+      });
     } catch (err: any) {
       printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);
@@ -148,6 +202,7 @@ const prTemplateCommand = new Command('pr-template')
   .option('--risk <level>', 'Risk tier', (v) => (['LOW', 'MEDIUM', 'HIGH'] as const).includes(v as any) ? v as 'LOW' | 'MEDIUM' | 'HIGH' : 'MEDIUM')
   .option('--is-docs-only', 'Documentation-only change', false)
   .option('--ai-disclosure', 'AI disclosure required by repo', false)
+  .option('--run-id <id>', 'Contribution run ID (defaults to active session)')
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: {
     issue: string;
@@ -156,15 +211,17 @@ const prTemplateCommand = new Command('pr-template')
     validationCmd?: string;
     validationOutput?: string;
     nativeTemplate?: string;
+    keyChanges?: string[];
     confidence?: number;
     risk?: 'LOW' | 'MEDIUM' | 'HIGH';
     isDocsOnly?: boolean;
     aiDisclosure?: boolean;
+    runId?: string;
     pretty?: boolean;
   }) => {
     try {
       const prBody = renderMasterPrTemplate({
-        keyChanges: ['Fixed the issue'],
+        keyChanges: opts.keyChanges || ['Defensive boundary and logic correction'],
         nativeTemplateContent: opts.nativeTemplate,
         issueNumber: parseInt(opts.issue, 10) || 1,
         issueTitle: opts.issueTitle,
@@ -176,7 +233,27 @@ const prTemplateCommand = new Command('pr-template')
         isDocumentationOnly: opts.isDocsOnly ?? false,
         aiDisclosureRequired: opts.aiDisclosure ?? false,
       });
+
+      const runId = runManager.resolveRunId(opts.runId);
+      if (runId) {
+        try {
+          runManager.saveArtifact(runId, 'pr_draft', { prBody } as any);
+        } catch {}
+      }
+
       printJSON({ status: 'success', prBody }, opts.pretty);
+
+      printPhaseGuidance({
+        currentPhase: 'PR_SUBMITTED',
+        runId,
+        status: 'SUCCESS',
+        humanCheckpoint: 'Checkpoint 3 (Final PR Ready for Submission)',
+        nextCommand: `gh pr create --title "${opts.issueTitle}" --body-file pr-body.md`,
+        invariants: [
+          'Ensure the PR description includes "Fixes #<issue_number>".',
+          'After PR submission, run "opencontrib flywheel sync" to record the contribution.',
+        ],
+      });
     } catch (err: any) {
       printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);

@@ -41,6 +41,8 @@ export interface ResumeRunResult {
   suggestedNextAction: string;
 }
 
+import { defaultActiveSessionManager } from './active-session.js';
+
 export class ContributionRunManager {
   private bundleManager: ArtifactBundleManager;
   private baseDir: string;
@@ -48,6 +50,11 @@ export class ContributionRunManager {
   constructor(customBaseDir?: string) {
     this.baseDir = customBaseDir || join(getOpenContribHome(), '.opencontrib', 'runs');
     this.bundleManager = new ArtifactBundleManager(this.baseDir);
+  }
+
+  resolveRunId(runId?: string): string | undefined {
+    if (runId) return runId;
+    return defaultActiveSessionManager.getActiveRunId() || undefined;
   }
 
   generateRunId(repoFullName: string, issueNumber?: number): string {
@@ -82,6 +89,14 @@ export class ContributionRunManager {
       payload: { repoFullName: input.repoFullName, issueNumber: input.issueNumber, issueTitle: input.issueTitle },
     });
 
+    defaultActiveSessionManager.setActiveSession({
+      runId,
+      repoFullName: input.repoFullName,
+      issueNumber: input.issueNumber,
+      issueTitle: input.issueTitle,
+      currentPhase: 'INITIALIZED',
+    });
+
     return manifest;
   }
 
@@ -101,6 +116,8 @@ export class ContributionRunManager {
       eventType: 'PHASE_TRANSITION',
       payload: { fromPhase: previousPhase, toPhase: newPhase },
     });
+
+    defaultActiveSessionManager.updatePhase(newPhase);
 
     return manifest;
   }
@@ -124,7 +141,7 @@ export class ContributionRunManager {
       payload: { artifactType: type, byteSize: saved.byteSize },
     });
 
-    if (autoAdvancePhase) {
+    if (autoAdvancePhase && autoAdvancePhase !== manifest.currentPhase) {
       this.updateRunPhase(runId, autoAdvancePhase);
     } else {
       manifest.updatedAt = new Date().toISOString();

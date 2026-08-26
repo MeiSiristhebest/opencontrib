@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process';
 import { dirname } from 'path';
 import * as path from 'path';
-import { homedir as osHomedir, platform } from 'os';
+import { homedir as osHomedir, platform, tmpdir } from 'os';
 
 export interface ResilientRunOptions {
   cwd: string;
@@ -51,7 +51,7 @@ export function sanitizeTestCommand(
   if (os === 'win32' && (command.includes('-race') || finalArgs.includes('-race'))) {
     const hasGcc = !forceNoGcc && (() => {
       try {
-        const gccCheck = spawnSync('gcc', ['--version'], { stdio: 'ignore' });
+        const gccCheck = spawnSync('gcc', ['--version'], { stdio: 'ignore', timeout: 3000 });
         return !gccCheck.error && gccCheck.status === 0;
       } catch {
         return false;
@@ -81,7 +81,6 @@ export function runResilientCommand(options: ResilientRunOptions): ResilientRunR
   const resolvedSandbox = path.resolve(sandboxRoot);
   const resolvedHome = path.resolve(opencontribHome);
   const resolvedProcessCwd = path.resolve(process.cwd());
-  const { tmpdir } = require('os');
   const resolvedTmp = path.resolve(tmpdir());
 
   const isAllowedCwd =
@@ -146,11 +145,20 @@ export function runResilientCommand(options: ResilientRunOptions): ResilientRunR
       'DOCKER_PASSWORD',
       'PRIVATE_KEY',
       'SSH_AUTH_SOCK',
+      'ANTHROPIC_API_KEY',
+      'OPENAI_API_KEY',
+      'GEMINI_API_KEY',
+      'DEEPSEEK_API_KEY',
+      'GROQ_API_KEY',
+      'COHERE_API_KEY',
+      'MISTRAL_API_KEY',
+      'HF_TOKEN',
+      'AZURE_OPENAI_API_KEY',
     ]);
 
     const sanitizedEnv: NodeJS.ProcessEnv = {};
     for (const [key, value] of Object.entries(process.env)) {
-      if (!CREDENTIAL_ENV_KEYS.has(key)) {
+      if (!CREDENTIAL_ENV_KEYS.has(key) && !/(?:_KEY|_TOKEN|_SECRET|_PASSWORD|_AUTH|_CREDENTIAL)$/i.test(key)) {
         sanitizedEnv[key] = value;
       }
     }

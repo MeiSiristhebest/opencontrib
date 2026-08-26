@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir as osHomedir, tmpdir } from 'os';
-import { join, resolve, sep } from 'path';
+import { dirname, join, resolve, sep } from 'path';
 import { sanitizeRunId } from '../run/artifact-bundle.js';
 import { ensureWorkspaceGuard, releaseWorkspaceGuard, isProtectedWorkspace } from './workspace-guard.js';
 
@@ -22,13 +22,16 @@ export function safeRmSync(
   const resolved = norm(resolve(targetPath));
   const homedirPath = norm(resolve(osHomedir()));
   const tempDir = norm(resolve(tmpdir()));
+  const customHome = getOpenContribHome();
   const opencontribHome = norm(resolve(homedirPath, '.opencontrib'));
+  const customOpencontribHome = norm(resolve(customHome.endsWith('.opencontrib') ? customHome : join(customHome, '.opencontrib')));
 
   const SEP = '/';
 
   // Allowlist: must be within one of these parents
   const defaultAllowed = [
     opencontribHome,
+    customOpencontribHome,
     tempDir,
     ...(allowedParents || []).map((p) => norm(resolve(p))),
   ];
@@ -44,7 +47,14 @@ export function safeRmSync(
   }
 
   // Never delete root directories themselves (only their children)
-  if (resolved === opencontribHome || resolved === homedirPath || resolved === tempDir || resolved === '/') {
+  if (
+    resolved === opencontribHome ||
+    resolved === customOpencontribHome ||
+    resolved === homedirPath ||
+    resolved === norm(resolve(customHome)) ||
+    resolved === tempDir ||
+    resolved === '/'
+  ) {
     console.error(`[SAFE_RMSNRC] BLOCKED: Refusing to delete root directory '${targetPath}'`);
     return false;
   }
@@ -235,6 +245,27 @@ export class WorktreeManager {
     }
   }
 
+  listWorkspaces(): Array<{
+    name: string;
+    path: string;
+    isProtected: boolean;
+  }> {
+    if (!existsSync(this.workspaceRoot)) return [];
+    try {
+      const items = readdirSync(this.workspaceRoot);
+      return items.map((item) => {
+        const fullPath = join(this.workspaceRoot, item);
+        return {
+          name: item,
+          path: fullPath,
+          isProtected: isProtectedWorkspace(fullPath),
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
   purgeAllWorkspaces(options: {
     cleanRepos?: boolean;
     cleanScratchDir?: string;
@@ -248,7 +279,6 @@ export class WorktreeManager {
     const purgedScratchFiles: string[] = [];
 
     if (existsSync(this.workspaceRoot)) {
-      const { readdirSync } = require('fs');
       const items = readdirSync(this.workspaceRoot);
       for (const item of items) {
         const itemPath = join(this.workspaceRoot, item);
@@ -276,7 +306,6 @@ export class WorktreeManager {
           `Security boundary violation: cleanScratchDir "${cleanScratchDir}" is not a permitted scratch location.`,
         );
       }
-      const { readdirSync } = require('fs');
       const scratchItems = readdirSync(cleanScratchDir);
       for (const item of scratchItems) {
         const itemPath = join(cleanScratchDir, item);
@@ -298,7 +327,6 @@ export class WorktreeManager {
   isSafeScratchDirectory(dirPath: string): boolean {
     const resolved = norm(resolve(dirPath));
     const opencontribHome = norm(resolve(getOpenContribHome(), '.opencontrib'));
-    const { tmpdir } = require('os');
     const tempDir = norm(resolve(tmpdir()));
 
     if (resolved === '/' || resolved === norm(resolve(getOpenContribHome()))) {
@@ -362,7 +390,6 @@ export class WorktreeManager {
 
       const fullPath = resolve(workspacePath, f.path);
       try {
-        const { dirname } = require('path');
         mkdirSync(dirname(fullPath), { recursive: true });
         writeFileSync(fullPath, f.content, 'utf8');
         appliedFiles.push({ path: f.path, operation: f.operation });

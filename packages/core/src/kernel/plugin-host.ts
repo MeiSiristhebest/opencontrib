@@ -43,13 +43,22 @@ const PLUGIN_CREDENTIAL_ENV_KEYS = new Set([
   'DOCKER_PASSWORD',
   'PRIVATE_KEY',
   'SSH_AUTH_SOCK',
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'GEMINI_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'GROQ_API_KEY',
+  'COHERE_API_KEY',
+  'MISTRAL_API_KEY',
+  'HF_TOKEN',
+  'AZURE_OPENAI_API_KEY',
 ]);
 
 /** Return a credential-stripped copy of the process environment. */
 function buildSanitizedPluginEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (!PLUGIN_CREDENTIAL_ENV_KEYS.has(key)) {
+    if (!PLUGIN_CREDENTIAL_ENV_KEYS.has(key) && !/(?:_KEY|_TOKEN|_SECRET|_PASSWORD|_AUTH|_CREDENTIAL)$/i.test(key)) {
       env[key] = value;
     }
   }
@@ -73,7 +82,7 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): P
 
     const child = spawn(parsed.executable, parsed.args, {
       cwd,
-      shell: false,
+      shell: process.platform === 'win32',
       env: SANITIZED_PLUGIN_ENV,
     });
 
@@ -81,7 +90,9 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): P
       ? setTimeout(() => {
           if (killed) return;
           killed = true;
-          child.kill('SIGKILL');
+          try {
+            child.kill(process.platform === 'win32' ? undefined : 'SIGKILL');
+          } catch {}
           reject(new Error(`Command timed out after ${opts.timeout}ms: ${parsed.executable}`));
         }, opts.timeout)
       : undefined;
@@ -112,7 +123,9 @@ export class PluginHost implements ProbeRegistryApi {
 
   constructor(options: { workspacePath?: string; pluginsDir?: string } = {}) {
     this.workspacePath = options.workspacePath || process.cwd();
-    this.pluginsDir = options.pluginsDir || path.join(getOpenContribHome(), '.opencontrib', 'plugins');
+    const home = getOpenContribHome();
+    const opencontribDir = home.endsWith('.opencontrib') ? home : path.join(home, '.opencontrib');
+    this.pluginsDir = options.pluginsDir || path.join(opencontribDir, 'plugins');
     this.pointers = new SmartPointerStore(path.join(this.workspacePath, '.opencontrib', 'pointers'));
     this.events = new MicrokernelEventBus();
     this.router = new CapabilityRouter();

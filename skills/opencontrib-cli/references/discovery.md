@@ -150,11 +150,18 @@ JSON
 ## LLM Agent Tips
 
 - `scout` is the only discovery command that requires a GitHub token. All others work offline with provided data.
-- Feed `scout` results directly into other discovery commands:
+- Feed `scout` results directly into `discovery qualify` or `discovery rank`:
 
 ```bash
+# Rank opportunity signals:
 opencontrib scout facebook/react --limit 3 | jq -r '.opportunities[0]' | \
-  opencontrib discovery feasibility --input -
+  opencontrib discovery rank
+
+# Assess environment feasibility:
+opencontrib discovery feasibility \
+  --title "Null pointer in parser module" \
+  --body "Unhandled edge case on empty input" \
+  --labels bug,parser
 ```
 
 - `discovery rank` and `discovery qualify` expect JSON from `gh issue view` output — adapt fields accordingly.

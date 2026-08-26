@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
+import { getToolTimeout } from '../kernel/config.js';
 
 export interface GoVetIssue {
   file: string;
@@ -42,7 +43,7 @@ export const goAnalyzersPlugin: OpenContribPlugin = {
         try {
           const { stderr, stdout } = await host.exec('go vet -json ./...', {
             cwd: targetPath,
-            timeout: 30000,
+            timeout: getToolTimeout('CARGO_DENY', 30000),
           });
 
           const rawOutput = (stderr || '') + '\n' + (stdout || '');
@@ -54,27 +55,21 @@ export const goAnalyzersPlugin: OpenContribPlugin = {
               const file = match[1].trim();
               const lineNum = parseInt(match[2], 10);
               const message = match[3].trim();
-              const isResourceLeak = message.toLowerCase().includes('body') || message.toLowerCase().includes('close') || message.toLowerCase().includes('leak');
-              const isContextLeak = message.toLowerCase().includes('context') || message.toLowerCase().includes('noctx');
 
               pointers.create({
                 namespace: 'findings',
                 id: `go-vet-${path.basename(file)}-${lineNum}`,
-                title: `[Go Analyzer] ${message}`,
-                category: isResourceLeak ? 'lifecycle_leak' : isContextLeak ? 'protocol_drift' : 'concurrency_race' as any,
-                severity: isResourceLeak || isContextLeak ? 'high' : 'medium',
+                title: `[go vet] ${message} in ${path.basename(file)}`,
+                category: 'lifecycle_leak',
+                severity: 'medium',
                 file: path.relative(targetPath, file),
                 line: lineNum,
-                confidence: 92,
-                affectedSymbol: path.basename(file),
+                confidence: 90,
+                affectedSymbol: 'go-vet-issue',
                 slice: {
-                  codeSnippet: `${file}:${lineNum}: ${message}`,
+                  codeSnippet: line,
                   ruleExplanation: message,
-                  remediationSuggestion: isResourceLeak
-                    ? 'Ensure response body is properly closed using `defer resp.Body.Close()` immediately after checking `err == nil`.'
-                    : isContextLeak
-                    ? 'Ensure `context.Context` is passed downstream using `http.NewRequestWithContext` or request context.'
-                    : 'Refactor identified concurrency or structural issue.',
+                  remediationSuggestion: 'Fix compiler/vet warning flagged by go vet.',
                 },
               });
             }
@@ -90,7 +85,7 @@ export const goAnalyzersPlugin: OpenContribPlugin = {
           try {
             const { stdout } = await host.exec(`${bin} run -p "http.NewRequest($$$ARGS)" --lang go --json=compact`, {
               cwd: targetPath,
-              timeout: 20000,
+              timeout: getToolTimeout('AST_GREP', 20000),
             });
 
             if (stdout && stdout.trim().startsWith('[')) {

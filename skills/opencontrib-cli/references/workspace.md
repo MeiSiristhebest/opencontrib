@@ -55,8 +55,21 @@ opencontrib workspace purge --clean-repos
 
 ---
 
+## `workspace list`
+
+List all active and cached workspace sandboxes and their tracking status.
+
+```bash
+opencontrib workspace list
+opencontrib workspace list --pretty
+```
+
+**Output**: `{"status":"success","count":N,"workspaces":[...]}`
+
+---
+
 ## LLM Agent Tips
 
 - `workspace prepare` without `--local-path` will clone the repo fresh — this is slower but guaranteed clean.
-- Always pass `--run-id` if you're using run sessions, so the workspace path is saved as an artifact and can be auto-resolved by later commands like `evidence`.
-- After `workspace purge`, any run that referenced the deleted workspace will have stale paths — use `run resume <runId>` to inspect before proceeding.
+- When an active session exists (via `run create`), `workspace prepare` automatically associates with the active session and saves the `workspacePath` for downstream commands. You can also explicitly specify `--run-id`.
+- After `workspace purge`, any run that referenced the deleted workspace will have stale paths — use `run resume` to inspect before proceeding.

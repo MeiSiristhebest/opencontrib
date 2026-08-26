@@ -2,25 +2,36 @@ import type { ConfidenceBreakdown, GovernanceAuditResult } from '../contracts/sc
 import { validateMarkdownIntegrity, type MarkdownValidationReport } from './markdown-validator.js';
 
 
-export const FORBIDDEN_AI_PHRASES = [
+/**
+ * Advanced Semantic & Behavioral Anti-AI Patterns
+ * Targets robotic tropes, AI disclaimers, boilerplate fluff, and mechanical comments.
+ */
+export const ANTI_AI_PHRASE_PATTERNS = [
   'as an ai language model',
   'as an ai assistant',
+  'i do not have access to',
+  'i apologize for the confusion',
   'i have carefully analyzed',
   'i have crafted a solution',
   'here is a breakdown of the changes',
-  '// helper function',
-  'google / bytedance standard',
+  'in this pull request, i have',
+  'in this pull request i have',
+  'this pr aims to fix',
   'hope this helps!',
   'let me know if you need anything else',
-  'this pr aims to fix',
-  'in this pull request, i have',
+  'feel free to ask if you have any questions',
   'ai-generated',
   'generated with claude',
   'generated with chatgpt',
   'generated with cursor',
-  'openmeta',
-  'opencontrib',
+  'generated with copilot',
+  '// helper function',
+  '// auto-generated function',
+  'google / bytedance standard',
+  'microsoft vscode standard',
 ];
+
+export const FORBIDDEN_AI_PHRASES = [...ANTI_AI_PHRASE_PATTERNS];
 
 export function lintAntiAiText(text: string): {
   isClean: boolean;
@@ -31,9 +42,23 @@ export function lintAntiAiText(text: string): {
   const lower = text.toLowerCase();
   const flaggedPhrases: string[] = [];
 
-  for (const phrase of FORBIDDEN_AI_PHRASES) {
+  for (const phrase of ANTI_AI_PHRASE_PATTERNS) {
     if (lower.includes(phrase)) {
       flaggedPhrases.push(phrase);
+    }
+  }
+
+  // Regex checks for generic patterns
+  const genericPatterns = [
+    /\b(?:as an ai(?:\s+language)?\s+model|as an ai assistant)\b/i,
+    /\b(?:generated with (?:claude|chatgpt|copilot|cursor|deepseek))\b/i,
+    /[🚀🔥✨🎉💯]{3,}/,
+  ];
+
+  for (const pat of genericPatterns) {
+    const m = text.match(pat);
+    if (m && !flaggedPhrases.includes(m[0].toLowerCase())) {
+      flaggedPhrases.push(m[0].toLowerCase());
     }
   }
 
@@ -189,6 +214,7 @@ export interface AuditGovernanceInput {
   prBody?: string;
   confidenceBreakdown?: ConfidenceBreakdown;
   lineCount?: number;
+  maxDiffLines?: number;
   humanApproved?: boolean;
   evidence?: any;
   subagentQualityScore?: number;
@@ -204,6 +230,7 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
   const prBody = input.prBodyText || input.prBody || '';
   const lines = typeof input.lineCount === 'number' ? input.lineCount : patch.split('\n').length;
   const humanApproved = input.humanApproved ?? !input.isAutonomousPrSubmission;
+  const maxDiffAllowed = input.maxDiffLines ?? 100;
 
   let breakdown = input.confidenceBreakdown;
   if (!breakdown) {
@@ -234,8 +261,8 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
   const markdownIntegrityPassed = integrityCheck.isClean;
   const corruptedMarkdownIssues = integrityCheck.corruptedIssues;
 
-  // 3. RFC 100-line Gate Check
-  const rfcGatePassed = lines <= 100;
+  // 3. RFC 100-line (or configured maxDiffLines) Gate Check
+  const rfcGatePassed = lines <= maxDiffAllowed;
 
   // 4. Mathematical Quality Rubric Calculation
   const confidence = calculateConfidenceScore(breakdown!);

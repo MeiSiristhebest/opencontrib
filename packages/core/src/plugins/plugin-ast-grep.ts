@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
+import { getToolTimeout } from '../kernel/config.js';
 import { STANDARD_AST_RELATIONAL_RULES, serializeRuleToYaml } from '../probe/adapters/ast-grep-rules.js';
 
 export interface ASTGrepMatch {
@@ -157,7 +158,7 @@ export const astGrepPlugin: OpenContribPlugin = {
               const cmd = `${bin} scan --rule "${yamlPath}" --lang ${langFlag} --json=compact`;
               const execResult = await host.exec(cmd, {
                 cwd: targetPath,
-                timeout: 20000,
+                timeout: getToolTimeout('AST_GREP'),
               });
               stdout = execResult.stdout;
               fs.unlinkSync(yamlPath);
@@ -166,42 +167,46 @@ export const astGrepPlugin: OpenContribPlugin = {
               const cmd = `${bin} run -p "${ruleDef.pattern}" --lang ${langFlag} --json=compact`;
               const execResult = await host.exec(cmd, {
                 cwd: targetPath,
-                timeout: 20000,
+                timeout: getToolTimeout('AST_GREP'),
               });
               stdout = execResult.stdout;
             }
 
             if (stdout && stdout.trim().startsWith('[')) {
-              const matches: ASTGrepMatch[] = JSON.parse(stdout);
-              for (const match of matches) {
-                const relFile = path.relative(targetPath, match.file);
-                const startLine = match.range.start.line + 1;
-                const startCol = match.range.start.column + 1;
+              try {
+                const matches: ASTGrepMatch[] = JSON.parse(stdout);
+                for (const match of matches) {
+                  const relFile = path.relative(targetPath, match.file);
+                  const startLine = match.range.start.line + 1;
+                  const startCol = match.range.start.column + 1;
 
-                pointers.create({
-                  namespace: 'findings',
-                  id: `ast-${rule.id}-${path.basename(match.file)}-${startLine}`,
-                  title: `[ast-grep] ${rule.message} in ${path.basename(match.file)}`,
-                  category: (rule.metadata?.category as any) || 'protocol_drift',
-                  severity: rule.severity === 'error' ? 'high' : 'medium',
-                  file: relFile,
-                  line: startLine,
-                  confidence: 95,
-                  affectedSymbol: match.text.slice(0, 40),
-                  callSite: match.text,
-                  slice: {
-                    codeSnippet: match.lines || match.text,
-                    ruleExplanation: `${rule.message} (${rule.metadata?.cwe || 'AST'})`,
-                    remediationSuggestion: rule.fix
-                      ? `Atomic AST Auto-Rewrite:\n${rule.fix}`
-                      : `Review AST pattern '${rule.rule.pattern}' at line ${startLine}:${startCol}.`,
-                  },
-                  evidence: {
-                    suggestedPatch: rule.fix,
-                    astDataFlow: `${match.text} -> ${rule.message}`,
-                    rawPayload: match as any,
-                  },
-                });
+                  pointers.create({
+                    namespace: 'findings',
+                    id: `ast-${rule.id}-${path.basename(match.file)}-${startLine}`,
+                    title: `[ast-grep] ${rule.message} in ${path.basename(match.file)}`,
+                    category: (rule.metadata?.category as any) || 'protocol_drift',
+                    severity: rule.severity === 'error' ? 'high' : 'medium',
+                    file: relFile,
+                    line: startLine,
+                    confidence: 95,
+                    affectedSymbol: match.text.slice(0, 40),
+                    callSite: match.text,
+                    slice: {
+                      codeSnippet: match.lines || match.text,
+                      ruleExplanation: `${rule.message} (${rule.metadata?.cwe || 'AST'})`,
+                      remediationSuggestion: rule.fix
+                        ? `Atomic AST Auto-Rewrite:\n${rule.fix}`
+                        : `Review AST pattern '${rule.rule.pattern}' at line ${startLine}:${startCol}.`,
+                    },
+                    evidence: {
+                      suggestedPatch: rule.fix,
+                      astDataFlow: `${match.text} -> ${rule.message}`,
+                      rawPayload: match as any,
+                    },
+                  });
+                }
+              } catch {
+                // Non-fatal parse failure
               }
             }
           } catch {

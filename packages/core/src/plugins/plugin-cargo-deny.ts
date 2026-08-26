@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
+import { getToolTimeout } from '../kernel/config.js';
 
 export interface CargoDenyFieldItem {
   advisory?: {
@@ -52,7 +53,7 @@ export const cargoDenyPlugin: OpenContribPlugin = {
         try {
           const { stdout } = await host.exec('cargo deny check advisories --format json', {
             cwd: targetPath,
-            timeout: 30000,
+            timeout: getToolTimeout('CARGO_DENY'),
           });
 
           if (!stdout) return;

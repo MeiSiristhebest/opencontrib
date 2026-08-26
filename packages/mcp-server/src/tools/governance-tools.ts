@@ -222,7 +222,7 @@ export function registerGovernanceTools(
     'contrib_sync_flywheel',
     'Persist completed or in-flight contribution memory, update developer skill weights, and refine repo-specific heuristics',
     {
-      repoFullName: z.string().describe('Target repository, e.g. "bytedance/flowgram.ai"'),
+      repoFullName: z.string().describe('Target repository, e.g. "owner/repo"'),
       record: z.object({
         runId: z.string().describe('Unique contribution run identifier'),
         issueNumber: z.number().optional().describe('GitHub issue number'),

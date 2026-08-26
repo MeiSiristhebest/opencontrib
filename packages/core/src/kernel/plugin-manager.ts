@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -39,7 +40,10 @@ export class PluginManager {
     try {
       if (fs.existsSync(this.statePath)) {
         const raw = fs.readFileSync(this.statePath, 'utf8');
-        this.state = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          this.state = parsed.plugins && typeof parsed.plugins === 'object' ? parsed.plugins : parsed;
+        }
       }
     } catch {
       this.state = {};
@@ -59,10 +63,12 @@ export class PluginManager {
     }
   }
 
-  /** Get the current state of a plugin. Unknown plugins return `{ enabled: false }`. */
+  /** Get the current state of a plugin. Unset plugins default to `{ enabled: true }`. */
   getState(pluginId: string): PluginState {
     const s = this.state[pluginId];
-    if (!s) return { enabled: false };
+    if (!s) {
+      return { enabled: true };
+    }
     return s;
   }
 
@@ -118,7 +124,6 @@ export class PluginManager {
 
   /** Check which tools from a given list are available. Returns { present, missing }. */
   checkTools(toolIds: string[]): { present: string[]; missing: string[] } {
-    const { spawnSync } = require('node:child_process');
     const isWindows = process.platform === 'win32';
 
     const present: string[] = [];

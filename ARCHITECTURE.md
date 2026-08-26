@@ -13,7 +13,7 @@ graph TD
     end
 
     subgraph "OpenContrib Ingress Layer"
-        CLI[OpenContrib CLI - 24 Commands]
+        CLI[OpenContrib CLI - 16 Command Domains]
         MCP[MCP Server - 34 JSON-RPC Tools]
     end
 
@@ -81,16 +81,26 @@ A patch is never submitted based on LLM "confidence". It must pass two determini
 
 ---
 
-## 🛡️ 4. Anti-Bandwagoning Governance (RFC-100 Gate)
+## 🛡️ 4. Anti-Bandwagoning Governance (RFC-100 Gate & Hard Barrier)
 
 To defend maintainer trust:
 - **100-Line Patch Ceiling**: Automatically rejects massive refactors or unrequested reformatting.
 - **Anti-AI Jargon Sanitizer**: Strips robotic explanations, emojis, and unverified speculative claims from PR drafts.
 - **Exclusive Claim Protocol**: Verifies whether an issue is already claimed or actively worked on before drafting.
+- **Exit Code 2 Hard Gate**: Failing quality checks physically terminate the CLI process, blocking non-compliant PRs.
 
 ---
 
-## 🔒 5. Telemetry & Privacy
+## ⚡ 5. Active Session Engine & Deterministic State Machine
+
+To guarantee unbroken traceability across multi-turn agent lifecycles:
+- **Active Session Bus (`~/.opencontrib/active_session.json`)**: Tracks active `runId`, repository, workspace directory, and current phase.
+- **Automatic Context Inheritance**: Subsequent CLI commands resolve `runId` and workspace automatically, persisting an append-only JSONL event log (`events.jsonl`) and real-time evidence (`evidence.json`).
+- **Self-Guiding Next Actions**: Each CLI response outputs deterministic next-step recommendations and human review checkpoints.
+
+---
+
+## 🔒 6. Telemetry & Privacy
 
 OpenContrib includes a minimal, anonymous ping mechanism to understand runtime adoption.
 - **Strictly Non-Sensitive**: Transmits only OS platform, runtime (`node`/`bun`), and CLI version.

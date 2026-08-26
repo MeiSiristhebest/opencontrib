@@ -7,13 +7,13 @@ import {
   ContributionRunManager,
   verifyDualStageReproduction,
 } from '@opencontrib/core';
-import { printJSON } from '../utils/output.js';
+import { printJSON, printPhaseGuidance } from '../utils/output.js';
 
 const runManager = new ContributionRunManager();
 
 export const evidenceCommand = new Command('evidence')
   .description('Execute dual-stage empirical verification (pre-fix baseline + post-fix stress loop)')
-  .requiredOption('--cwd <path>', 'Workspace directory to run tests in')
+  .option('--cwd <path>', 'Workspace directory to run tests in (defaults to active session workspace)')
   .requiredOption('--test-cmd <cmd>', 'Test command, e.g. "npm test" or "pytest"')
   .option('--pre-fix-cmd <cmd>', 'Separate command to trigger pre-fix failure baseline')
   .option('--assertion <regex>', 'Expected failure assertion regex before fix')
@@ -21,10 +21,10 @@ export const evidenceCommand = new Command('evidence')
   .option('--concurrency <n>', 'Concurrent stampede worker threads', (v) => Number(v), 1)
   .option('--workspace-root <path>', 'Root workspace for security boundary')
   .option('--baseline-sha <sha>', 'Baseline commit SHA before changes')
-  .option('--run-id <id>', 'Auto-resolve workspace from run and save evidence artifact')
+  .option('--run-id <id>', 'Auto-resolve workspace from run and save evidence artifact (defaults to active session)')
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: {
-    cwd: string;
+    cwd?: string;
     testCmd: string;
     preFixCmd?: string;
     assertion?: string;
@@ -36,32 +36,39 @@ export const evidenceCommand = new Command('evidence')
     pretty?: boolean;
   }) => {
     try {
+      const runId = runManager.resolveRunId(opts.runId);
       let workspaceRoot = opts.workspaceRoot;
       let baselineSha = opts.baselineSha;
+      let targetCwd = opts.cwd;
 
-      if (opts.runId) {
+      if (runId) {
         try {
-          const run = runManager.getRun(opts.runId);
-          if (run?.artifacts?.workspace?.workspacePath && !workspaceRoot) {
-            workspaceRoot = String(run.artifacts.workspace.workspacePath);
+          const run = runManager.getRun(runId);
+          if (run?.artifacts?.workspace?.workspacePath) {
+            if (!workspaceRoot) workspaceRoot = String(run.artifacts.workspace.workspacePath);
+            if (!targetCwd) targetCwd = String(run.artifacts.workspace.workspacePath);
           }
           if (run?.artifacts?.workspace?.baseCommitSha && !baselineSha) {
             baselineSha = String(run.artifacts.workspace.baseCommitSha);
           }
         } catch (err: any) {
-          console.warn(`Warning: Could not resolve run "${opts.runId}": ${err.message}`);
+          console.warn(`Warning: Could not resolve run "${runId}": ${err.message}`);
         }
+      }
+
+      if (!targetCwd) {
+        targetCwd = process.cwd();
       }
 
       let dualStage: any;
       if (opts.assertion) {
         const preFixCheck = capturePreFixAssertion(
-          opts.cwd,
+          targetCwd,
           opts.preFixCmd || opts.testCmd,
           workspaceRoot,
         );
         dualStage = await verifyDualStageReproduction({
-          cwd: opts.cwd,
+          cwd: targetCwd,
           workspaceRoot,
           testCommand: opts.testCmd,
           preFixBaselineCaptured: preFixCheck.assertionCaptured,
@@ -71,7 +78,7 @@ export const evidenceCommand = new Command('evidence')
       }
 
       const evidence = await collectEvidence({
-        cwd: opts.cwd,
+        cwd: targetCwd,
         workspaceRoot,
         baselineCommitSha: baselineSha,
         testCommand: opts.testCmd,
@@ -82,9 +89,9 @@ export const evidenceCommand = new Command('evidence')
       const fullReport = { ...evidence, dualStage };
 
       let persistence: { saved: boolean; error?: string } | undefined;
-      if (opts.runId) {
+      if (runId) {
         try {
-          runManager.saveArtifact(opts.runId, 'evidence', fullReport, 'EVIDENCE_COLLECTED');
+          runManager.saveArtifact(runId, 'evidence', fullReport, 'EVIDENCE_COLLECTED');
           persistence = { saved: true };
         } catch (err: any) {
           persistence = { saved: false, error: err.message };
@@ -96,6 +103,18 @@ export const evidenceCommand = new Command('evidence')
         evidence: fullReport,
         persistence,
       }, opts.pretty);
+
+      printPhaseGuidance({
+        currentPhase: 'EVIDENCE_COLLECTED',
+        runId,
+        status: 'SUCCESS',
+        humanCheckpoint: 'Checkpoint 2 (Empirical Reproduction Verified)',
+        nextCommand: 'opencontrib governance audit --patch <file> --pr-title "<title>"',
+        invariants: [
+          'Ensure unit test passed cleanly with 0 regressions before proceeding.',
+          'Next, execute Phase 7 Governance Audit to verify RFC-100 line limit and anti-AI rubric.',
+        ],
+      });
     } catch (err: any) {
       printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);

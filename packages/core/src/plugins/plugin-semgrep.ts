@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
+import { getToolTimeout } from '../kernel/config.js';
+import { discoverDocker } from '../discovery/docker-discovery.js';
 
 export interface SemgrepResultItem {
   check_id: string;
@@ -79,8 +81,11 @@ export const semgrepPlugin: OpenContribPlugin = {
       },
       scan: async (targetPath, pointers, host) => {
         const hasSemgrep = host.isBinaryAvailable('semgrep');
-        if (!hasSemgrep) {
-          host.log('[Semgrep Probe] semgrep binary not found in PATH. Install via: pip install semgrep or brew install semgrep', 'info');
+        const dockerDiscovery = !hasSemgrep ? discoverDocker() : { found: false };
+        const hasDockerDaemon = dockerDiscovery.found;
+
+        if (!hasSemgrep && !hasDockerDaemon) {
+          host.log('[Semgrep Probe] Neither semgrep binary nor active docker daemon found. Install via: pip install semgrep or start Docker Desktop.', 'info');
           return;
         }
 
@@ -99,14 +104,25 @@ export const semgrepPlugin: OpenContribPlugin = {
             ? '--config auto --config .semgrep.yml'
             : MULTI_SOURCE_SEMGREP_PACKS.join(' ');
 
-          const { stdout } = await host.exec(`semgrep scan --json ${configArgs} --quiet`, {
+          let cmd = `semgrep scan --json ${configArgs} --quiet`;
+          if (!hasSemgrep && hasDockerDaemon) {
+            const normalizedTarget = targetPath.replace(/\\/g, '/');
+            cmd = `docker run --rm -v "${normalizedTarget}:/src" -w /src returntocorp/semgrep semgrep scan --json ${configArgs} --quiet`;
+          }
+
+          const { stdout } = await host.exec(cmd, {
             cwd: targetPath,
-            timeout: 60000,
+            timeout: getToolTimeout('SEMGREP'),
           });
 
           if (!stdout || !stdout.trim().startsWith('{')) return;
 
-          const report: SemgrepOutput = JSON.parse(stdout);
+          let report: SemgrepOutput;
+          try {
+            report = JSON.parse(stdout);
+          } catch {
+            return;
+          }
           if (Array.isArray(report.results)) {
             for (const r of report.results) {
               const relFile = path.relative(targetPath, r.path);

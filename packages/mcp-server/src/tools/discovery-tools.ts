@@ -174,7 +174,7 @@ export function registerDiscoveryTools(server: McpServer): void {
       }),
       repository: z
         .object({
-          fullName: z.string().describe('Full name of repository, e.g. "facebook/react"'),
+          fullName: z.string().describe('Full name of repository, e.g. "owner/repo"'),
           stars: z.number().optional().describe('Repository star count'),
           forksCount: z.number().optional().describe('Repository fork count'),
           openIssuesCount: z.number().optional().describe('Total open issues'),
@@ -294,7 +294,7 @@ export function registerDiscoveryTools(server: McpServer): void {
     'contrib_scout',
     'Scout high-value, unclaimed contribution opportunities for an organization or repository, filtered by feasibility and developer profile',
     {
-      target: z.string().describe('GitHub repository full name (e.g. "bytedance/flowgram.ai") or organization name (e.g. "bytedance")'),
+      target: z.string().describe('GitHub repository full name (e.g. "owner/repo") or organization name (e.g. "org-name")'),
       techStack: z.array(z.string()).optional().describe('Developer tech stack keywords (e.g. ["typescript", "react"])'),
       focusAreas: z.array(z.string()).optional().describe('Developer focus areas (e.g. ["bugfix", "testing", "docs"])'),
       limit: z.number().optional().describe('Maximum number of ranked candidates to return (default 5)'),

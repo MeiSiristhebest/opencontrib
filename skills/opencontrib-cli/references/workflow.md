@@ -41,8 +41,10 @@ Use Track A when the user asks to "audit", "find deep-water bugs", "scan reposit
 ### Phase 1: Initialize Run Session
 ```bash
 opencontrib doctor --pretty
-opencontrib run create --repo <owner>/<repo> --pretty
+opencontrib run create --repo <owner>/<repo> --issue <issue_number> --title "<title>" --pretty
 ```
+> [!NOTE]
+> `run create` initializes the **Active Session** at `~/.opencontrib/active_session.json`. All subsequent commands automatically inherit this `runId` and tracking context without requiring `--run-id` manually.
 
 ---
 
@@ -53,6 +55,7 @@ Execute `opencontrib probe run` to trigger matching language analyzers:
 opencontrib probe run ./<repo_dir> --limit 5 --pretty
 ```
 - **Output**: Triaged Top-K Smart Pointers (`ptr://...`), categorized by defect archetype (e.g. `lifecycle_leak`, `protocol_drift`, `concurrency_race`).
+- **Next Step**: Follow the `▶ NEXT RECOMMENDED COMMAND` output by the CLI.
 
 ---
 
@@ -73,15 +76,14 @@ opencontrib pointer resolve ptr://<namespace>/<defect_id>/<file>:<line> --view e
 ---
 
 ### Phase 4: Prepare Clean-Room Worktree Sandbox
-Create an isolated git worktree for the contribution run:
+Create an isolated git worktree for the contribution run (automatically bound to the active session):
 
 ```bash
 opencontrib workspace prepare \
   --repo <owner>/<repo> \
-  --issue 0 \
-  --run-id "$RUN_ID"
+  --issue <issue_number>
 ```
-- **Capture**: Save the returned `workspacePath` for all subsequent operations.
+- **Capture**: The returned `workspacePath` is automatically registered to the active session.
 
 ---
 
@@ -98,6 +100,7 @@ bun test packages/core/tests/specific.test.ts
 # For Python:
 pytest tests/test_specific.py -k test_defect
 ```
+
 > [!IMPORTANT]
 > **Subsystem Isolation**: Never run un-isolated full repo tests (`go test ./...` or `npm test` at repo root) to avoid upstream flaky test interference.
 
@@ -109,18 +112,15 @@ Apply the minimal, idiomatic code modification (strictly $\le 100$ lines). Then 
 ```bash
 # Standard targeted verification (1x clean run):
 opencontrib evidence \
-  --cwd "<workspacePath>" \
-  --test-cmd "<targeted_test_command>" \
-  --run-id "$RUN_ID"
+  --test-cmd "<targeted_test_command>"
 
 # Optional: For concurrency / race condition / flaky defects:
 opencontrib evidence \
-  --cwd "<workspacePath>" \
   --test-cmd "<targeted_test_command>" \
   --concurrency 5 \
-  --stress-loop 5 \
-  --run-id "$RUN_ID"
+  --stress-loop 5
 ```
+- **Auto-Sync**: `--cwd` and `--run-id` are automatically resolved from the active session.
 
 ---
 
@@ -136,6 +136,10 @@ opencontrib governance audit \
   --pretty
 ```
 
+> [!CAUTION]
+> **Hard Quality Gate (Exit Code 2)**:
+> If the Governance Quality score is $<90\%$ or any dimension is $<80\%$, the CLI prints `🛑 GATED_BLOCKED` and **exits with Code 2**. You MUST fix the quality issues before proceeding to PR submission, or obtain explicit human approval with `--allow-unverified`.
+
 ---
 
 ### Phase 8: Mandatory Issue-First Registration & PR Submission
@@ -144,7 +148,7 @@ Before opening a PR, publicly register the bug in GitHub Issues with an idiomati
 ```bash
 # 1. Generate Claim statement / Issue draft
 opencontrib governance claim \
-  --issue 0 \
+  --issue <issue_number> \
   --title "[Bug]: <Precise Defect Title>" \
   --finding "Root cause in <file>:<line>" \
   --pretty
@@ -155,7 +159,7 @@ gh issue create \
   --title "[Bug]: <Precise Defect Title>" \
   --body-file issue_body.md
 
-# 3. Render PR template and submit PR
+# 3. Render PR template and submit PR (auto-saves pr_draft to active run)
 opencontrib governance pr-template \
   --issue <new_issue_id> \
   --issue-title "<Precise Defect Title>" \
@@ -175,34 +179,40 @@ gh pr create \
 Record the in-flight or completed contribution in local ledger memory:
 
 ```bash
-opencontrib flywheel sync \
-  --repo <owner>/<repo> \
-  --run-id "$RUN_ID" \
-  --status "open" \
-  --pr <pr_number> \
-  --issue <issue_number>
+cat <<JSON | opencontrib flywheel sync --repo <owner>/<repo>
+{
+  "status": "submitted",
+  "techStack": ["typescript"],
+  "prNumber": <pr_number>,
+  "issueNumber": <issue_number>,
+  "issueTitle": "<Precise Defect Title>"
+}
+JSON
 ```
+- Advances the active session to `COMPLETED`.
 
 ---
 
 ## Resume a Paused Pipeline
 
-If the process was interrupted, resume from where it left off:
+If the process was interrupted, resume from where it left off (auto-resolves active session if ID is omitted):
 
 ```bash
-opencontrib run resume "$RUN_ID"
+opencontrib run resume
 # → Output includes suggestedNextAction and availableArtifacts
 ```
 
 ## Error Recovery
 
 ```bash
-# Inspect what artifacts exist
-opencontrib run get "$RUN_ID"
+# Inspect what artifacts exist in current session
+opencontrib run get
 
 # If workspace was purged, recreate it
-opencontrib workspace prepare --repo facebook/react --issue 42 --run-id "$RUN_ID"
+opencontrib workspace prepare --repo facebook/react --issue 42
 
 # If evidence was lost, re-run from the patch phase
-opencontrib evidence --cwd "$WORKSPACE" --test-cmd "bun test" --run-id "$RUN_ID"
+opencontrib evidence --test-cmd "bun test"
+```
+"bun test" --run-id "$RUN_ID"
 ```

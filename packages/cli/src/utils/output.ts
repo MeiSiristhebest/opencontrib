@@ -10,13 +10,40 @@ export function printCompact(value: unknown): void {
   console.log(JSON.stringify(value));
 }
 
-/** Read the full stdin stream into a string. */
-export async function readStdin(): Promise<string> {
-  let data = '';
-  for await (const chunk of process.stdin) {
-    data += chunk;
+/** Read the full stdin stream into a string with TTY check and timeout protection. */
+export async function readStdin(timeoutMs = 500): Promise<string> {
+  if (process.stdin.isTTY) {
+    throw new Error('No input provided in interactive terminal. Pass --input <json> or pipe JSON via stdin.');
   }
-  return data.trim();
+  return new Promise((resolve, reject) => {
+    let data = '';
+    let hasData = false;
+
+    const timer = setTimeout(() => {
+      if (!hasData) {
+        process.stdin.pause();
+        reject(new Error('No input received on stdin. Pass --input <json> or pipe JSON via stdin.'));
+      }
+    }, timeoutMs);
+
+    process.stdin.setEncoding('utf-8');
+    process.stdin.on('data', (chunk) => {
+      hasData = true;
+      data += chunk;
+    });
+
+    process.stdin.on('end', () => {
+      clearTimeout(timer);
+      resolve(data.trim());
+    });
+
+    process.stdin.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    process.stdin.resume();
+  });
 }
 
 /** Parse a JSON string; return null and print a usage error on failure. */
@@ -69,3 +96,52 @@ export function printTable(rows: TableRow[], columns: string[]): void {
 
   console.log(footer);
 }
+
+export interface PhaseGuidanceOptions {
+  currentPhase?: string;
+  runId?: string;
+  status?: 'SUCCESS' | 'GATED_BLOCKED' | 'WARNING' | 'FAILED';
+  nextCommand?: string;
+  humanCheckpoint?: string;
+  forbiddenActions?: string[];
+  invariants?: string[];
+}
+
+export function printPhaseGuidance(options: PhaseGuidanceOptions): void {
+  const statusEmoji =
+    options.status === 'GATED_BLOCKED'
+      ? '🛑 GATED_BLOCKED'
+      : options.status === 'WARNING'
+      ? '⚠️ WARNING'
+      : options.status === 'FAILED'
+      ? '❌ FAILED'
+      : '✅ SUCCESS';
+
+  console.log('\n' + '─'.repeat(78));
+  if (options.currentPhase || options.runId) {
+    console.log(
+      `📍 PHASE: ${options.currentPhase || 'IN_PROGRESS'} | RUN: ${options.runId || '(active session)'} | STATUS: ${statusEmoji}`,
+    );
+  }
+  if (options.humanCheckpoint) {
+    console.log(`🎯 HUMAN CHECKPOINT: ${options.humanCheckpoint}`);
+  }
+  if (options.nextCommand) {
+    console.log(`▶ NEXT RECOMMENDED COMMAND:`);
+    console.log(`  ${options.nextCommand}`);
+  }
+  if (options.forbiddenActions && options.forbiddenActions.length > 0) {
+    console.log(`🛑 FORBIDDEN IN THIS PHASE:`);
+    for (const f of options.forbiddenActions) {
+      console.log(`  • ${f}`);
+    }
+  }
+  if (options.invariants && options.invariants.length > 0) {
+    console.log(`📋 PHASE INVARIANTS:`);
+    for (const inv of options.invariants) {
+      console.log(`  • ${inv}`);
+    }
+  }
+  console.log('─'.repeat(78) + '\n');
+}
+

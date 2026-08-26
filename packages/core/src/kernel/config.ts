@@ -14,6 +14,30 @@ export interface OpenContribPolicy {
   allowMutation: boolean;
 }
 
+/**
+ * Global and tool-specific default timeouts (in milliseconds).
+ * Can be overridden via process.env.OPENCONTRIB_SCAN_TIMEOUT_MS or workspace policy.
+ */
+export const DEFAULT_TOOL_TIMEOUTS = {
+  AST_GREP: 20_000,
+  SEMGREP: 60_000,
+  KNIP: 60_000,
+  RUFF: 20_000,
+  CARGO_DENY: 30_000,
+  ESLINT_SECURITY: 30_000,
+  VARIANT_HUNT: 20_000,
+  BINARY_CHECK: 3_000,
+  GIT_DISCOVERY: 5_000,
+} as const;
+
+export function getToolTimeout(tool: keyof typeof DEFAULT_TOOL_TIMEOUTS, defaultFallback = 30_000): number {
+  if (process.env.OPENCONTRIB_SCAN_TIMEOUT_MS) {
+    const parsed = parseInt(process.env.OPENCONTRIB_SCAN_TIMEOUT_MS, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_TOOL_TIMEOUTS[tool] ?? defaultFallback;
+}
+
 export interface OpenContribConfig {
   version: string;
   enabledCapabilities: CapabilityType[];

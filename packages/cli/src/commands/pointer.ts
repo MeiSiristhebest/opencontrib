@@ -13,7 +13,7 @@ pointerCommand
   .option('--pretty', 'Pretty-print JSON output', false)
   .action((namespace, opts) => {
     try {
-      const store = new SmartPointerStore(path.join(process.cwd(), '.opencontrib', 'pointers'));
+      const store = new SmartPointerStore();
       const pointers = store.list(namespace);
 
       printJSON(
@@ -37,7 +37,7 @@ pointerCommand
   .option('--pretty', 'Pretty-print JSON output', false)
   .action((uri, opts) => {
     try {
-      const store = new SmartPointerStore(path.join(process.cwd(), '.opencontrib', 'pointers'));
+      const store = new SmartPointerStore();
       const result = store.resolve(uri, opts.view as PointerView);
 
       printJSON(

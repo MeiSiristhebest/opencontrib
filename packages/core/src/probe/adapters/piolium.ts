@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import type { NormalizedFinding } from '../types.js';
 import type { VerificationStep } from '../../kernel/contract.js';
 
@@ -50,8 +52,6 @@ export function constructPoCForFinding(finding: NormalizedFinding): PoCArtifact 
   // Read source context at the finding location for accurate PoC generation
   let sourceContext = '';
   if (finding.file && finding.line) {
-    const fs = require('node:fs');
-    const path = require('node:path');
     try {
       const fullPath = path.resolve(finding.file);
       if (fs.existsSync(fullPath)) {
@@ -288,7 +288,7 @@ public class Repro${cleanId}Test {
 
   if (isSecurity) {
     verificationSteps.push({
-      setupCode: 'const baseDir = "/tmp/safe_root";',
+      setupCode: 'const baseDir = path.join(os.tmpdir(), "safe_root");',
       exploitPayload: '"../../../etc/passwd"',
       targetCall: `resolveSafePath(baseDir, "../../../etc/passwd")`,
       expectedFailureAssertion: 'result escapes baseDir (Path Traversal confirmed)',

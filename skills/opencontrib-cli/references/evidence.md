@@ -24,7 +24,7 @@ opencontrib evidence \
 
 | Flag | Type | Required | Default | Description |
 | :--- | :--- | :---: | :---: | :--- |
-| `--cwd` | string | ✓ | — | Workspace directory to run tests in |
+| `--cwd` | string | — | Active Session | Workspace directory to run tests in (auto-resolved from active session) |
 | `--test-cmd` | string | ✓ | — | Targeted test command (e.g. `go test ./pkg/...`, `bun test ...`) |
 | `--concurrency` | number | — | `1` | Concurrent worker threads (use $>1$ only for race/concurrency tests) |
 | `--stress-loop` | number | — | `1` | Stress loop iterations (use $>1$ only for concurrency/flaky tests) |
@@ -32,7 +32,7 @@ opencontrib evidence \
 | `--assertion` | string | — | — | Regex for expected failure before fix |
 | `--workspace-root` | string | — | — | Root workspace for security boundary |
 | `--baseline-sha` | string | — | — | Baseline commit SHA before changes |
-| `--run-id` | string | — | — | Auto-resolve workspace from run session |
+| `--run-id` | string | — | Active Session | Auto-resolved from active session if omitted |
 | `--pretty` | flag | — | false | Pretty-print output |
 
 ---

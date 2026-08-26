@@ -84,7 +84,9 @@ export class GitHubClient {
     this.octokit = new Octokit({ auth: token || undefined, baseUrl: options.host ? `https://${options.host}/api/v3` : undefined });
     this.cacheTtlMs = options.cacheTtlMs ?? 10 * 60 * 1000; // 10 minutes
 
-    this.cacheDir = join(getOpenContribHome(), '.opencontrib', 'cache');
+    const home = getOpenContribHome();
+    const opencontribDir = home.endsWith('.opencontrib') ? home : join(home, '.opencontrib');
+    this.cacheDir = join(opencontribDir, 'cache');
     if (!existsSync(this.cacheDir)) {
       mkdirSync(this.cacheDir, { recursive: true });
     }
@@ -218,7 +220,7 @@ export class GitHubClient {
 
     for (let page = 1; page <= maxPages; page++) {
       const res = await this.requestWithRetry(async () => {
-        return await this.octokit.rest.search.issuesAndPullRequests({
+        return await this.octokit.request('GET /search/issues', {
           q: query,
           per_page: 30,
           page,

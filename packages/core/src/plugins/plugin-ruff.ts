@@ -1,6 +1,7 @@
 import * as path from 'path';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
+import { getToolTimeout } from '../kernel/config.js';
 
 export interface RuffDiagnosticItem {
   code: string;
@@ -63,12 +64,17 @@ export const ruffPlugin: OpenContribPlugin = {
 
           const { stdout } = await host.exec(cmd, {
             cwd: targetPath,
-            timeout: 20000,
+            timeout: getToolTimeout('RUFF'),
           });
 
           if (!stdout || !stdout.trim().startsWith('[')) return;
 
-          const diagnostics: RuffDiagnosticItem[] = JSON.parse(stdout);
+          let diagnostics: RuffDiagnosticItem[];
+          try {
+            diagnostics = JSON.parse(stdout);
+          } catch {
+            return;
+          }
           for (const item of diagnostics) {
             const relFile = path.relative(targetPath, item.filename);
             const isSecurity = item.code.startsWith('S') || item.code.startsWith('B');

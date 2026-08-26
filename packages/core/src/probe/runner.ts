@@ -10,7 +10,31 @@ import type {
 } from './types.js';
 import { analyzeGitHotspots } from './forensics.js';
 import { generatePropertyTest } from './fuzz-generator.js';
+import { constructPoCForFinding, verifyFindingAdversarially } from './adapters/piolium.js';
 import { parseCommandSpec } from '../sandbox/command-spec.js';
+import { isBinaryOnPath } from '../kernel/tool-registry.js';
+
+function getEphemeralFallbackCommand(probeName: string, targetPath: string): string | undefined {
+  const hasUv = isBinaryOnPath('uv');
+  const hasNpx = isBinaryOnPath('npx');
+  const hasBun = isBinaryOnPath('bun');
+
+  if (probeName === 'semgrep' && hasUv) {
+    return `uvx semgrep scan --config auto --config p/security-audit --config p/owasp-top-ten --json --quiet ${targetPath}`;
+  }
+  if (probeName === 'ruff' && hasUv) {
+    return `uvx ruff check --output-format json ${targetPath}`;
+  }
+  if (probeName === 'knip') {
+    if (hasBun) return `bun x knip --reporter json`;
+    if (hasNpx) return `npx knip --reporter json`;
+  }
+  if (probeName === 'ast-grep') {
+    if (hasBun) return `bun x @ast-grep/cli scan ${targetPath}`;
+    if (hasNpx) return `npx @ast-grep/cli scan ${targetPath}`;
+  }
+  return undefined;
+}
 
 function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number; maxBuffer?: number }): Promise<{ stdout: string; stderr: string }> {
   const cwd = opts.cwd || process.cwd();
@@ -21,7 +45,8 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number; maxB
   return new Promise((resolve, reject) => {
     const child = spawn(parsed.executable, parsed.args, {
       cwd,
-      shell: false,
+      shell: process.platform === 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
@@ -32,7 +57,9 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number; maxB
       ? setTimeout(() => {
           if (killed) return;
           killed = true;
-          child.kill('SIGKILL');
+          try {
+            child.kill(process.platform === 'win32' ? undefined : 'SIGKILL');
+          } catch {}
           reject(new Error(`Command timed out after ${opts.timeout}ms: ${cmd}`));
         }, opts.timeout)
       : undefined;
@@ -40,7 +67,10 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number; maxB
     child.stdout.on('data', (d) => {
       const chunk = d.toString();
       if (stdout.length + chunk.length > maxLen) {
-        if (!killed) { killed = true; child.kill('SIGKILL'); }
+        if (!killed) {
+          killed = true;
+          try { child.kill(process.platform === 'win32' ? undefined : 'SIGKILL'); } catch {}
+        }
         clearTimeout(timer);
         reject(new Error(`Output exceeded ${maxLen} bytes`));
         return;
@@ -50,7 +80,10 @@ function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number; maxB
     child.stderr.on('data', (d) => {
       const chunk = d.toString();
       if (stderr.length + chunk.length > maxLen) {
-        if (!killed) { killed = true; child.kill('SIGKILL'); }
+        if (!killed) {
+          killed = true;
+          try { child.kill(process.platform === 'win32' ? undefined : 'SIGKILL'); } catch {}
+        }
         clearTimeout(timer);
         reject(new Error(`Output exceeded ${maxLen} bytes`));
         return;
@@ -123,43 +156,90 @@ export async function runProbes(
           pocSnippet: fuzzSpec.codeSnippet,
           prPotentialScore: 90,
         });
+      } else if (probe.name === 'piolium' || probe.execution.transformer === 'builtin:piolium') {
+        const targetFinding: NormalizedFinding = findings[0] || {
+          id: `piolium-${plan.fingerprint.primaryLanguage.toLowerCase()}`,
+          probeName: 'piolium',
+          category: 'security_cwe',
+          title: `Adversarial PoC & Invariant Verification: ${plan.fingerprint.primaryLanguage}`,
+          file: 'tests/property_bounds.test',
+          line: 1,
+          severity: 'medium',
+          prPotentialScore: 92,
+        };
+        const poc = constructPoCForFinding(targetFinding);
+        const adv = verifyFindingAdversarially(targetFinding);
+        findings.push({
+          id: `poc-${targetFinding.id}`,
+          probeName: 'piolium',
+          category: targetFinding.category,
+          title: `Autonomous Fail-First Reproduction PoC: ${targetFinding.title}`,
+          description: `Constructed executable failure reproduction harness targeting boundary vulnerabilities with adversarial validation (Confidence: ${adv.confidenceScore}%).`,
+          file: poc.pocFileName,
+          line: 1,
+          severity: targetFinding.severity,
+          pocSnippet: poc.pocCode,
+          remediation: `Verify with: ${poc.executionCommand}`,
+          prPotentialScore: adv.confidenceScore,
+        });
       } else if (probe.execution.command) {
-        // Execute external probe command — escape targetPath to prevent quote-escape injection
-        const escapedTarget = targetPath.replace(/"/g, '\\"');
+        // Execute external probe command — normalize to forward slashes & wrap in quotes
+        const normalizedTarget = `"${targetPath.replace(/\\/g, '/').replace(/"/g, '\\"')}"`;
         const formattedCmd = probe.execution.command
-          .replace('{target}', escapedTarget)
+          .replace('{target}', normalizedTarget)
           .replace('{outputJson}', '');
 
+        let stdoutResult: string | undefined;
+        let executionError: any;
+
         try {
-          const { stdout } = await execWithSpawn(formattedCmd, {
+          const res = await execWithSpawn(formattedCmd, {
             cwd: targetPath,
             timeout: probe.execution.timeoutMs || timeoutMs,
             maxBuffer: 10 * 1024 * 1024,
           });
-
-          const parsed = parseProbeOutput(probe, stdout, targetPath);
-          findings.push(...parsed);
+          stdoutResult = res.stdout;
         } catch (err: any) {
-          if (err.stdout) {
-            const parsed = parseProbeOutput(probe, err.stdout, targetPath);
-            findings.push(...parsed);
-            // Record partial failure even when some output was recovered
-            if (parsed.length > 0) {
-              failedProbes.push({
-                name: probe.name,
-                error: `Partial failure (recovered ${parsed.length} finding(s)): ${err.message || String(err)}`,
-              });
-            } else {
-              failedProbes.push({
-                name: probe.name,
-                error: err.message || String(err),
-              });
-            }
-            continue;
+          executionError = err;
+          if (err.stdout && typeof err.stdout === 'string' && err.stdout.trim().length > 0) {
+            stdoutResult = err.stdout;
           }
+        }
+
+        // Ephemeral fallback (uvx / npx / bunx) when primary binary fails
+        if (!stdoutResult && executionError) {
+          const fallbackCmd = getEphemeralFallbackCommand(probe.name, normalizedTarget);
+          if (fallbackCmd) {
+            try {
+              const res = await execWithSpawn(fallbackCmd, {
+                cwd: targetPath,
+                timeout: (probe.execution.timeoutMs || timeoutMs) * 2,
+                maxBuffer: 10 * 1024 * 1024,
+              });
+              stdoutResult = res.stdout;
+              executionError = undefined;
+            } catch (fallbackErr: any) {
+              if (fallbackErr.stdout && typeof fallbackErr.stdout === 'string' && fallbackErr.stdout.trim().length > 0) {
+                stdoutResult = fallbackErr.stdout;
+                executionError = undefined;
+              }
+            }
+          }
+        }
+
+        if (stdoutResult) {
+          const parsed = parseProbeOutput(probe, stdoutResult, targetPath);
+          findings.push(...parsed);
+          if (executionError) {
+            failedProbes.push({
+              name: probe.name,
+              error: `Executed with warnings (recovered ${parsed.length} finding(s)): ${executionError.message || String(executionError)}`,
+            });
+          }
+        } else if (executionError) {
           failedProbes.push({
             name: probe.name,
-            error: err.message || String(err),
+            error: executionError.message || String(executionError),
           });
         }
       }

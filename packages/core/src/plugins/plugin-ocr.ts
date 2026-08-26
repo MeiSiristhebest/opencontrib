@@ -25,7 +25,7 @@ export const ocrPlugin: OpenContribPlugin = {
         // If ocr binary is installed on host, execute it
         if (host.isBinaryAvailable('ocr')) {
           try {
-            const { stdout } = await host.exec(`ocr scan --path "${targetPath}" --json`, {
+            const { stdout } = await host.exec(`ocr scan --path "${targetPath}" -f json`, {
               cwd: targetPath,
             });
             const data = JSON.parse(stdout);

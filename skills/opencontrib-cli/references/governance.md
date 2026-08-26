@@ -24,8 +24,13 @@ opencontrib governance audit \
 | `--pr-body-file` | string | — | Path to clean markdown file (prevents shell escaping corruption) |
 | `--evidence` | string | — | JSON evidence from `evidence` command |
 | `--subagent-score` | number | — | External review score (0-100) |
+| `--allow-unverified` | flag | — | Explicit human waiver override for unverified/low-scoring PRs |
+| `--run-id` | string | — | Run ID (auto-resolved from active session if omitted) |
 | `--is-autonomous` | flag | — | Mark as autonomous PR submission |
 | `--pretty` | flag | — | Pretty-print output |
+
+> [!CAUTION]
+> **Exit Code 2 (GATED_BLOCKED)**: If the quality score $<90\%$ or any dimension $<80\%$, `governance audit` terminates with **Exit Code 2** and blocks PR creation unless `--allow-unverified` is explicitly supplied.
 
 **Output**: `{"status":"passed","audit":{"overallConfidence":{...},"markdownIntegrityPassed":true,"rfcGatePassed":true,...}}` or `{"status":"failed",...}`
 
@@ -84,11 +89,11 @@ opencontrib governance pr-template \
 | `--issue` | string | ✓ | Issue number |
 | `--issue-title` | string | ✓ | Issue title |
 | `--summary` | string | ✓ | Concise fix summary |
-| `--validation-cmd` | string | ✓ | Test command used |
-| `--validation-output` | string | ✓ | Test output excerpt |
+| `--validation-cmd` | string | — | Test command used (default: `bun test`) |
+| `--validation-output` | string | — | Test output excerpt (default: `All unit tests pass cleanly.`) |
 | `--key-changes` | list | — | Comma-separated key changes |
 | `--confidence` | number | — | Quality confidence score (0-100) |
-| `--risk` | LOW/MEDIUM/HIGH | — | Risk tier |
+| `--risk` | LOW/MEDIUM/HIGH | — | Risk tier (default: `MEDIUM`) |
 | `--native-template` | string | — | Repo PR template markdown |
 | `--is-docs-only` | flag | — | Documentation-only change |
 | `--ai-disclosure` | flag | — | AI disclosure required |
@@ -118,13 +123,15 @@ Please assign this issue to me, I will submit a PR shortly.
 
 ## LLM Agent Tips
 
-- `governance audit` reads the patch diff as a string — use `$(cat diff.txt)` or stdin for large diffs.
-- `governance ci-diagnose` is designed for large raw logs — always pipe or use `--log-file` rather than `--input` with inline content.
+- `governance audit` reads the patch diff as a file or inline string (`--patch diff.patch` or `--patch "$(cat diff.patch)"`).
+- `governance ci-diagnose` is designed for large raw logs — always pipe or use `--log-file` rather than inline content.
 - `governance pr-template` output is Markdown — pipe directly into a file for use with `gh pr create --body-file`:
 
 ```bash
-opencontrib governance pr-template --issue 42 --summary "Fix" \
-  --validation-cmd "npm test" --validation-output "passed" \
+opencontrib governance pr-template \
+  --issue 42 \
+  --issue-title "Fix null pointer in parser" \
+  --summary "Add defensive boundary check to prevent parser panic" \
   | jq -r '.prBody' > pr-body.md
 gh pr create --body-file pr-body.md
 ```

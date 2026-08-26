@@ -14,7 +14,10 @@
  *  - PluginManager — tracks which tools each plugin depends on
  */
 
+import { existsSync, readdirSync } from 'fs';
+import { spawnSync } from 'child_process';
 import { platform } from 'os';
+import { join, resolve } from 'path';
 
 /** Credential keys stripped from binary-detection subprocesses. */
 const TOOL_REGISTRY_CREDENTIAL_KEYS = new Set([
@@ -23,6 +26,8 @@ const TOOL_REGISTRY_CREDENTIAL_KEYS = new Set([
   'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID', 'GCP_SERVICE_ACCOUNT_KEY',
   'GOOGLE_APPLICATION_CREDENTIALS', 'SLACK_TOKEN', 'DOCKER_TOKEN', 'DOCKER_PASSWORD',
   'PRIVATE_KEY', 'SSH_AUTH_SOCK',
+  'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'DEEPSEEK_API_KEY',
+  'GROQ_API_KEY', 'COHERE_API_KEY', 'MISTRAL_API_KEY', 'HF_TOKEN', 'AZURE_OPENAI_API_KEY',
 ]);
 
 function buildToolRegistryEnv(): NodeJS.ProcessEnv {
@@ -264,9 +269,6 @@ const binaryCache = new Map<string, boolean>();
 /** Check if a single binary is available on PATH or in OPENCONTRIB_DOCKER_BIN_DIR. */
 export function isBinaryOnPath(bin: string): boolean {
   if (binaryCache.has(bin)) return binaryCache.get(bin)!;
-  const { existsSync, readdirSync } = require('node:fs');
-  const { spawnSync } = require('node:child_process');
-  const { join, resolve } = require('node:path');
 
   // Strip credentials from subprocess env
   const strippedEnv: NodeJS.ProcessEnv = {};
@@ -321,8 +323,6 @@ export function areBinariesOnPath(bins: string[]): Record<string, boolean> {
 
   const results: Record<string, boolean> = {};
   const isWindows = currentPlatform() === 'win32';
-  const { existsSync } = require('node:fs');
-  const { spawnSync } = require('node:child_process');
 
   if (bins.length === 1) {
     results[bins[0]] = isBinaryOnPath(bins[0]);

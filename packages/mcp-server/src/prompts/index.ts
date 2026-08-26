@@ -6,7 +6,7 @@ export function registerPrompts(server: McpServer): void {
     'opencontrib_workflow_guide',
     'Standard Phase-Gated execution protocol for autonomous open-source contribution',
     {
-      repoFullName: z.string().optional().describe('Target repository, e.g. "bytedance/flowgram.ai"'),
+      repoFullName: z.string().optional().describe('Target repository, e.g. "owner/repo"'),
       issueNumber: z.string().optional().describe('Target issue number if known'),
     },
     async (args) => {

@@ -1,8 +1,8 @@
 /** `opencontrib workspace <sub>` — Git worktree sandbox management. */
 
 import { Command } from 'commander';
-import { WorktreeManager, ContributionRunManager } from '@opencontrib/core';
-import { printJSON } from '../utils/output.js';
+import { WorktreeManager, ContributionRunManager, defaultActiveSessionManager } from '@opencontrib/core';
+import { printJSON, printPhaseGuidance } from '../utils/output.js';
 
 const worktreeManager = new WorktreeManager();
 const runManager = new ContributionRunManager();
@@ -13,7 +13,7 @@ const workspacePrepare = new Command('prepare')
   .requiredOption('--repo <name>', 'Repository full name, e.g. "microsoft/vscode"')
   .requiredOption('--issue <id>', 'Issue number or task identifier')
   .option('--local-path <path>', 'Local path of existing repo to create worktree from')
-  .option('--run-id <id>', 'Run ID to auto-save workspace artifact')
+  .option('--run-id <id>', 'Run ID to auto-save workspace artifact (defaults to active session)')
   .option('--pretty', 'Pretty-print', false)
   .action(async (opts: {
     repo: string;
@@ -23,18 +23,26 @@ const workspacePrepare = new Command('prepare')
     pretty?: boolean;
   }) => {
     try {
+      const runId = runManager.resolveRunId(opts.runId);
       const context = worktreeManager.createIsolatedWorkspace({
         repoFullName: opts.repo,
         issueOrTaskId: opts.issue,
         localRepoPath: opts.localPath,
-        runId: opts.runId,
+        runId,
+      });
+
+      defaultActiveSessionManager.setActiveSession({
+        runId: runId || `run_${Date.now()}_${opts.repo.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        repoFullName: opts.repo,
+        workspacePath: context.workspacePath,
+        currentPhase: 'WORKSPACE_PREPARED',
       });
 
       let persistence: { saved: boolean; error?: string } | undefined;
-      if (opts.runId) {
+      if (runId) {
         try {
           runManager.saveArtifact(
-            opts.runId,
+            runId,
             'workspace',
             {
               workspacePath: context.workspacePath,
@@ -60,6 +68,21 @@ const workspacePrepare = new Command('prepare')
         baseCommitSha: context.baseCommitSha,
         persistence,
       }, opts.pretty);
+
+      printPhaseGuidance({
+        currentPhase: 'WORKSPACE_PREPARED',
+        runId,
+        status: 'SUCCESS',
+        humanCheckpoint: 'Checkpoint 1 (Sandbox Isolated & Ready)',
+        nextCommand: `opencontrib evidence --cwd "${context.workspacePath}" --test-cmd "<test_command>"`,
+        forbiddenActions: [
+          'DO NOT edit source code files before reproducing a failing unit test (RED Phase).',
+          'DO NOT run wide root tests (npm test / go test ./...) without scoping to the subpackage.',
+        ],
+        invariants: [
+          `All development must take place inside isolated worktree: ${context.workspacePath}`,
+        ],
+      });
     } catch (err: any) {
       printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);
@@ -87,9 +110,28 @@ const workspacePurge = new Command('purge')
     }
   });
 
+// ─── workspace list ───────────────────────────────────────────────────────────
+const workspaceList = new Command('list')
+  .description('List all active and cached workspace sandboxes')
+  .option('--pretty', 'Pretty-print', false)
+  .action((opts: { pretty?: boolean }) => {
+    try {
+      const workspaces = worktreeManager.listWorkspaces();
+      printJSON({
+        status: 'success',
+        count: workspaces.length,
+        workspaces,
+      }, opts.pretty);
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      process.exit(1);
+    }
+  });
+
 // ─── Top-level command ────────────────────────────────────────────────────────
 
 export const workspaceCommand = new Command('workspace')
   .description('Manage isolated Git worktree sandboxes')
   .addCommand(workspacePrepare)
-  .addCommand(workspacePurge);
+  .addCommand(workspacePurge)
+  .addCommand(workspaceList);

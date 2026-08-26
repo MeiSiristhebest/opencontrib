@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
+import { getToolTimeout } from '../kernel/config.js';
 
 export interface ESLintSecurityMessage {
   ruleId: string;
@@ -62,33 +63,42 @@ export const eslintSecurityPlugin: OpenContribPlugin = {
             const ruleFlags = ESLINT_SECURITY_RULES.map((r) => `--rule "${r.id}: error"`).join(' ');
             const { stdout } = await host.exec(
               `eslint ${ruleFlags} --no-config-lookup --format json .`,
-              { cwd: targetPath, timeout: 30000 },
+              { cwd: targetPath, timeout: getToolTimeout('ESLINT_SECURITY') },
             );
             if (stdout && stdout.trim().startsWith('[')) {
-              const results = JSON.parse(stdout);
-              for (const fileResult of results) {
-                if (!fileResult.messages) continue;
-                for (const msg of fileResult.messages) {
-                  const relFile = path.relative(targetPath, fileResult.filePath);
-                  const rule = ESLINT_SECURITY_RULES.find((r) => r.id === msg.ruleId);
-                  if (!rule) continue;
-                  pointers.create({
-                    namespace: 'findings',
-                    id: `eslint-${msg.ruleId}-${path.basename(relFile)}-${msg.line}`,
-                    title: `[Security] ${msg.message || msg.ruleId} in ${path.basename(relFile)}`,
-                    category: 'security_cwe',
-                    severity: rule.severity,
-                    file: relFile,
-                    line: msg.line,
-                    confidence: 93,
-                    affectedSymbol: msg.ruleId,
-                    slice: {
-                      codeSnippet: '',
-                      ruleExplanation: `${msg.ruleId} - ${rule.category}`,
-                      remediationSuggestion: `Fix ${msg.ruleId} violation`,
-                    },
-                  });
+              try {
+                const results = JSON.parse(stdout);
+                for (const fileResult of results) {
+                  if (!fileResult.messages) continue;
+                  for (const msg of fileResult.messages) {
+                    const relFile = path.relative(targetPath, fileResult.filePath);
+                    const rule = ESLINT_SECURITY_RULES.find((r) => r.id === msg.ruleId);
+                    if (!rule) continue;
+                    pointers.create({
+                      namespace: 'findings',
+                      id: `sec-${rule.cwe}-${path.basename(fileResult.filePath)}-${msg.line}`,
+                      title: `[${rule.id}] ${msg.message} in ${path.basename(fileResult.filePath)}`,
+                      category: 'security_cwe',
+                      severity: msg.severity === 2 ? 'high' : 'medium',
+                      file: relFile,
+                      line: msg.line,
+                      confidence: 96,
+                      affectedSymbol: rule.id,
+                      callSite: msg.source || rule.id,
+                      slice: {
+                        codeSnippet: msg.source || `${msg.ruleId} at ${msg.line}:${msg.column}`,
+                        ruleExplanation: `${rule.category} (${rule.cwe})`,
+                        remediationSuggestion: `Audit and sanitize potential security hazard for rule ${rule.id}.`,
+                      },
+                      evidence: {
+                        astDataFlow: `${msg.source || ''} -> ${rule.category}`,
+                        rawPayload: msg as any,
+                      },
+                    });
+                  }
                 }
+              } catch {
+                // Non-fatal parse failure
               }
             }
           } catch {
@@ -139,39 +149,44 @@ export const eslintSecurityPlugin: OpenContribPlugin = {
           try {
             const { stdout } = await host.exec(`${bin} run -p "${sec.pattern}" --lang ts --json=compact`, {
               cwd: targetPath,
-              timeout: 15000,
+              timeout: getToolTimeout('ESLINT_SECURITY'),
             });
 
             if (stdout && stdout.trim().startsWith('[')) {
-              const matches = JSON.parse(stdout);
-              for (const m of matches) {
-                const relFile = path.relative(targetPath, m.file);
-                const startLine = m.range.start.line + 1;
+              try {
+                const matches = JSON.parse(stdout);
+                for (const m of matches) {
+                  const relFile = path.relative(targetPath, m.file);
+                  const startLine = m.range.start.line + 1;
 
-                pointers.create({
-                  namespace: 'findings',
-                  id: `sec-${sec.ruleId}-${path.basename(m.file)}-${startLine}`,
-                  title: `[Security] ${sec.message} in ${path.basename(m.file)}`,
-                  category: 'security_cwe',
-                  severity: sec.severity,
-                  file: relFile,
-                  line: startLine,
-                  confidence: 93,
-                  affectedSymbol: sec.ruleId,
-                  callSite: m.text,
-                  slice: {
-                    codeSnippet: m.lines || m.text,
-                    ruleExplanation: sec.message,
-                    remediationSuggestion: 'Use safe alternatives (execFile, structured parsing, avoid eval)',
-                  },
-                  evidence: {
-                    astDataFlow: `${m.text} -> ${sec.ruleId}`,
-                  },
-                });
+                  pointers.create({
+                    namespace: 'findings',
+                    id: `sec-${sec.ruleId}-${path.basename(m.file)}-${startLine}`,
+                    title: `[Security] ${sec.message} in ${path.basename(m.file)}`,
+                    category: 'security_cwe',
+                    severity: sec.severity,
+                    file: relFile,
+                    line: startLine,
+                    confidence: 93,
+                    affectedSymbol: sec.ruleId,
+                    callSite: m.text,
+                    slice: {
+                      codeSnippet: m.text,
+                      ruleExplanation: sec.message,
+                      remediationSuggestion: `Review dynamic execution vulnerability for pattern ${sec.pattern}.`,
+                    },
+                    evidence: {
+                      astDataFlow: `${m.text} -> ${sec.message}`,
+                      rawPayload: m as any,
+                    },
+                  });
+                }
+              } catch {
+                // Non-fatal parse failure
               }
             }
           } catch {
-            // Handled
+            // Ignored
           }
         }
       },

@@ -19,16 +19,16 @@ cd opencontrib
 # Install all monorepo dependencies
 bun install
 
-# Run the complete test matrix (39 suites, 325 tests, 1507 assertions)
+# Run the complete test matrix (40 suites, 329 tests, 1514 assertions)
 bun test
 
 # Run TypeScript type check (0 errors)
 bun x tsc --noEmit
 ```
 
-### 3. Local Services
-* **Start Web Studio**: `bun run studio` (defaults to `http://localhost:3000`)
+### 3. Local Services & Interfaces
 * **Start MCP Server**: `bun run mcp` (exposes stdio MCP protocol)
+* **Run CLI in dev mode**: `bun run cli -- --help`
 
 ---
 

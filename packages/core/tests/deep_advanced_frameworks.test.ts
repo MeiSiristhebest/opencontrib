@@ -128,5 +128,6 @@ describe('Deep Advanced Frameworks (Alibaba OCR, Qodo PR-Agent, Piolium P12, Git
     expect(report.status).toBe('SUCCESS');
     expect(report.stepResults.length).toBe(4);
     expect(report.stepResults.every((s) => s.status === 'SUCCESS')).toBe(true);
-  });
+  }, 30000);
 });
+

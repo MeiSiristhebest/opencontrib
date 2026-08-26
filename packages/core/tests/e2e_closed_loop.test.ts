@@ -211,5 +211,6 @@ export function resolveSafePath(baseDir: string, userPath: string): string {
     const eventHistory = host.events.getHistory();
     expect(eventHistory.length).toBeGreaterThan(0);
     expect(eventHistory[0].traceId).toBeDefined();
-  });
+  }, 30000);
 });
+

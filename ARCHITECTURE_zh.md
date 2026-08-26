@@ -13,7 +13,7 @@ graph TD
     end
 
     subgraph "OpenContrib 接入层"
-        CLI[OpenContrib CLI - 24 个工业级子命令]
+        CLI[OpenContrib CLI - 16 大工业级命令域]
         MCP[MCP 服务端 - 34 个 JSON-RPC 协议工具]
     end
 
@@ -76,12 +76,22 @@ graph TD
 
 ---
 
-## 🛡️ 4. 防跟风抢占治理与 RFC-100 门禁
+## 🛡️ 4. 防跟风抢占治理与 RFC-100 刚性门禁
 
 坚决捍卫开源社区维护者的信任：
 - **100 行 Diff 上限**：自动拦截大范围重构与无关格式化。
 - **反 AI 行话过滤**：自动剥除机械式空话、Emoji 堆砌和无依据的主观推断。
 - **排他性认领协议**：发 PR 前严格校验 Issue 是否已被其他开发者锁定。
+- **Exit Code 2 刚性阻断**：未达质量标杆（总分 $<90\%$ 或单项 $<80\%$）时直接退出并阻断提 PR 通道。
+
+---
+
+## ⚡ 5. 活跃会话引擎与自驱状态机 (Active Session Engine)
+
+确保跨多轮对话与命令执行时上下文零丢失：
+- **全局活跃会话总线 (`~/.opencontrib/active_session.json`)**：实时同步记录当前 `runId`、关联仓库、沙盒路径与生命周期阶段。
+- **上下文自动继承**：后续所有 CLI 命令免传参数自动寻址工作区与活跃会话，追加写入只增事件流（`events.jsonl`）与物证快照（`evidence.json`）。
+- **保姆级自驱指令推荐**：终端每步输出确切的 `▶ NEXT RECOMMENDED COMMAND`，驱动智能体精准流转。
 
 ---
 

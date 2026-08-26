@@ -119,7 +119,23 @@ graph TD
 opencontrib pointer resolve ptr://findings/ast-ts-unhandled-promise-catch-foo-108 --view slice
 ```
 
-### 3. 并发抢占风暴与混沌抖动物证
+### 3. 活跃会话引擎与上下文自动继承 (Active Session Engine)
+
+通过 `opencontrib run create` 初始化会话后，系统自动在 `~/.opencontrib/active_session.json` 维持当前活跃会话。后续所有子命令（`workspace prepare`、`evidence`、`governance audit`、`governance pr-template`、`flywheel sync`）均**免传 `--run-id` 与 `--cwd`**，自动绑定上下文并将事件流与物证实时写盘。
+
+### 4. 刚性质量门禁与非零返回码硬阻断 (Hard Gating Exit Code 2)
+
+`opencontrib governance audit` 严格执行工业级门禁标准（综合评分 $\ge 90\%$、所有单项 $\ge 80\%$、RFC-100 行内修改、零 AI 模板痕迹）。若未达到标准，CLI 打印醒目的 `🛑 GATED_BLOCKED` 警告并以 **Exit Code 2 强制终止**，物理阻断违规 PR 生成。
+
+### 5. 自驱状态机终端保姆级引导 (Self-Guiding Next Actions)
+
+每条 CLI 命令执行完成后，强制在终端末尾输出统一引导看板：
+- `📍 PHASE`：当前生命周期阶段；
+- `▶ NEXT RECOMMENDED COMMAND`：下一个确切推荐执行的 Shell 命令；
+- `🛑 FORBIDDEN IN THIS PHASE`：当前阶段严禁违规行为与防御约束；
+- `🎯 HUMAN CHECKPOINT`：涉及向 GitHub 提交公开内容前的人工审批提示。
+
+### 6. 并发抢占风暴与混沌抖动物证
 
 废除无意义的单线程简单重跑，引入真正的多并发抢占风暴：
 - **`concurrencyWorkers`**：多线程/协程并发抢占共享资源；
@@ -127,7 +143,7 @@ opencontrib pointer resolve ptr://findings/ast-ts-unhandled-promise-catch-foo-10
 - **`latencyJitterMs`**：记录并发执行延迟方差与抖动；
 - **`zeroAssertionWarning`**：自动识别并拦截 0 断言的空跑测试。
 
-### 4. 领域内姊妹模块变种猎杀
+### 7. 领域内姊妹模块变种猎杀
 
 当修复了某一适配器（如 `mongodb-adapter.ts`）的并发缺陷时，治理审计会自动审查同目录下的姊妹组件（`sqlite-adapter.ts`、`pg-adapter.ts`）是否同步完成同类反模式排查。
 
@@ -199,21 +215,31 @@ opencontrib evidence \
 
 ```bash
 # 验证 RFC-100 行限制、反 AI 行话与 7 维质量得分 >= 90
-git -C "$WORKSPACE_PATH" diff | opencontrib governance audit --line-count 40 --subagent-score 95
+git -C "$WORKSPACE_PATH" diff > diff.patch
+opencontrib governance audit \
+  --patch diff.patch \
+  --pr-title "fix: resolve unhandled nil pointer in parser" \
+  --pr-body-file pr-body.md \
+  --subagent-score 95 \
+  --pretty
 
 # 0-Day 缺陷必须先创建带有认领声明的 GitHub Issue
-gh issue create --repo owner/repo --body-file issue_body.md
+gh issue create --repo owner/repo --title "[Bug]: Unhandled nil pointer in parser" --body-file issue_body.md
 
 # 渲染原生 PR 模板并提交 Draft PR
-opencontrib governance pr-template --issue 42 --summary "..." | jq -r '.prBody' > pr-body.md
-gh pr create --repo owner/repo --title "fix: ..." --body-file pr-body.md --draft
+opencontrib governance pr-template \
+  --issue 42 \
+  --issue-title "Unhandled nil pointer in parser" \
+  --summary "Add defensive boundary check to prevent parser panic" \
+  | jq -r '.prBody' > pr-body.md
+gh pr create --repo owner/repo --title "fix: resolve unhandled nil pointer in parser" --body-file pr-body.md --draft
 ```
 
 ---
 
 ## 🗺️ 子命令全景速查表
 
-涵盖 10 大核心能力域的 24 个子命令：
+涵盖 16 大功能域的工业级命令集：
 
 | 领域 | 核心子命令 | 功能说明 |
 | :--- | :--- | :--- |
@@ -221,29 +247,40 @@ gh pr create --repo owner/repo --title "fix: ..." --body-file pr-body.md --draft
 | | `probe plan [target]` | 提取仓库指纹并协商探针执行规划 |
 | | `probe hotspot [target]`| 运行 Code as a Crime Scene 代码犯罪现场热点分析 |
 | | `probe fuzz [target]` | 自动生成针对特定缺陷类别的属性模糊测试脚手架 |
-| **Pointer（智能指针）**| `pointer resolve <uri>` | 3 级渐进式切片解引用（`--view summary\|slice\|evidence`） |
-| | `pointer list` | 列出当前会话存储的指针清单 |
-| **Capability（微内核）**| `capability list` | 列出微内核已注册的能力适配器 |
-| | `capability route` | 基于仓库技术栈指纹动态路由能力 |
-| | `capability score` | 计算多信号加权能力匹配分 |
+| **Pointer（智能指针）**| `pointer resolve <uri>` | 3 级渐进式切片解引用（`--view stub&#124;slice&#124;evidence`） |
+| | `pointer list [namespace]` | 列出当前会话存储的智能指针清单 |
+| **Capability（微内核）**| `capability list` | 列出微内核已注册的能力领域与 Provider |
+| | `capability plan [target]` | 运行能力评分引擎生成最佳执行路由计划 |
 | **Evidence（物证）** | `evidence` | 并发抢占风暴混沌验证、延迟抖动与双阶段红绿断言物证收集 |
 | **Workspace（沙盒）**| `workspace prepare` | 创建 Clean-Room Git Worktree 物理隔离沙盒 |
-| | `workspace purge` | 安全销毁临时沙盒工作区 |
-| **Governance（治理）**| `governance audit` | RFC-100 行限制审计、反 AI 噪音检测、姊妹模块变种排查 |
+| | `workspace purge` | 安全销毁临时沙盒工作区与缓存 |
+| | `workspace list` | 列出当前活跃的沙盒工作区 |
+| **Governance（治理）**| `governance audit` | RFC-100 行限制审计、反 AI 噪音检测、7 维置信度评估 |
 | | `governance impact` | 360° 跨平台路径/换行符/姊妹模块风险检测 |
 | | `governance ci-diagnose`| GitHub Actions CI 原始日志根因诊断与失败用例提取 |
 | | `governance pr-template`| 合并贡献数据至目标仓库原生 PR 模板 |
-| **Discovery（发现）** | `scout <repo>` | 多源检索机会 Issue 与意图分析 |
-| | `discovery rank` | 多维机会加权排序 |
+| | `governance claim` | 生成权威 Issue-First 认领声明与缺陷提案 |
+| | `governance lint-md` | Markdown 编码完整性与静态格式校验 |
+| **Discovery（发现）** | `scout <repo>` | 多源检索机会 Issue 与意图分析（顶级独立命令） |
+| | `discovery rank` | 多维机会概率信号加权排序 |
 | | `discovery qualify` | 防跟风抢占排他性认领资格判定 |
 | | `discovery feasibility`| 环境与工具链可行性评估 |
 | | `discovery context` | 跨文件上下文打包与最优阅读链提取 |
-| | `discovery manifests` | 诊断仓库依赖清单 |
-| **Plugin（插件）** | `plugin list` | 列出已注册的 SAST 与 AST 扫描插件 |
-| **Run（会话）** | `run create` | 在 `~/.opencontrib/runs/` 下初始化审计会话 |
-| | `run resume` | 恢复被中断的贡献流水线会话 |
-| **Flywheel（飞轮）** | `flywheel sync` | 同步仓库贡献记忆账本与维护者信任飞轮 |
-| | `doctor` | 诊断本地环境、探针二进制可执行性与系统健康度 |
+| | `discovery manifests` | 诊断仓库依赖清单与 CI 配置缺陷 |
+| **Plugin（插件）** | `plugin list` / `status` | 列出已注册的 SAST 与 AST 扫描插件及其启停状态 |
+| | `plugin enable` / `disable` | 动态启用或禁用特定探针/工具 |
+| | `plugin install <id>` | 一键安装探针所需的宿主工具链与二进制依赖 |
+| | `plugin reset` / `info` | 重置插件状态或查看指定探针元数据 |
+| **Run（会话）** | `run create` / `get` / `list`| 在 `~/.opencontrib/runs/` 下创建、查看与列出会话 |
+| | `run resume <id>` | 恢复被中断的贡献流水线会话与推荐下一步 |
+| | `run save <id>` | 持久化阶段工件至审计会话 |
+| **Flywheel（飞轮）** | `flywheel sync` | 同步仓库贡献记忆账本与开发者技能飞轮 |
+| | `flywheel pr-track` | 追踪 PR 合入就绪度、CI Checks 与评审意见 |
+| **Eval（评测）** | `eval judge` / `parse-judgment` | G-Eval 轨迹压缩与 Agent 盲评判定解析 |
+| | `eval reflexion` / `benchmark` | 提取反思沉淀至记忆库，执行基准场景评测 |
+| **System（系统）** | `doctor` | 诊断本地环境、探针二进制可执行性与系统健康度 |
+| | `setup` | 自动配置 Claude Code、Cursor、Windsurf 的 MCP 契约 |
+| | `config` / `verify` | 查看工作区配置，执行双阶段经验物证校验 |
 
 ---
 
@@ -298,17 +335,19 @@ npx -y opencontrib-cli setup
 
 ---
 
-## 🛡️ 5 大绝对工程防线（零容忍红线）
+## 🛡️ 6 大绝对工程防线（零容忍红线）
 
-1. **防脱轨熔断机制（严禁超过 3 次盲目 view_file）**：
+1. **CLI 优先与双通道就绪原则（CLI-First & Dual-Ingress）**：
+   在智能体协作流程中，优先推荐调用终端 CLI 命令（`opencontrib <command>`），以享受活跃会话继承与自驱状态机流转。同时 OpenContrib MCP 34 大工具集全面作为一等公民受支持，兼容 MCP 客户端。
+2. **防脱轨熔断机制（严禁超过 3 次盲目 view_file）**：
    杜绝连续盲读文件。定位代码必须通过 Smart Pointer 切片（`ptr://...`）或 `grep_search` 精准查找。
-2. **0-Day 漏洞 Issue-First 铁律（严禁裸提 PR）**：
+3. **0-Day 漏洞 Issue-First 铁律（严禁裸提 PR）**：
    对于主动挖掘的缺陷，**必须先创建带有 Claim 认领声明的 GitHub Issue**（`gh issue create --body-file ...`），并在随后的 PR 中强绑定 `Fixes #<id>`。
-3. **单测子包精准隔离（严禁全仓盲跑 Flaky 测试）**：
+4. **单测子包精准隔离（严禁全仓盲跑 Flaky 测试）**：
    严禁在仓库根目录下运行宽泛的全局测试（如 `go test ./...` 或 `npm test`）。测试必须严格限定在修改的最小子包路径内。
-4. **终端防卡死路径规约**：
+5. **终端防卡死路径规约**：
    执行 `rg` 或 `fd` 搜索时**必须显式提供搜索目标目录**（如 `rg "pattern" .`），严禁缺省路径导致 stdin 永久阻塞。
-5. **GitHub CLI 本地 Markdown 规约**：
+6. **GitHub CLI 本地 Markdown 规约**：
    Issue 与 PR 正文必须先写入本地 `.md` 文件并使用 `--body-file <file>` 传入，杜绝 PowerShell 转义字符导致的乱码或中断。
 
 ---
@@ -318,7 +357,7 @@ npx -y opencontrib-cli setup
 欢迎参与 OpenContrib 建设！提交代码前请仔细阅读 [`CONTRIBUTING.md`](./CONTRIBUTING.md) 与 [`DEVELOPMENT_SOP.md`](./DEVELOPMENT_SOP.md)。
 
 ```bash
-# 运行全量测试矩阵（29 个套件全部通过）
+# 运行全量测试矩阵（40 个套件、329 个测试用例全部通过）
 bun test
 
 # 静态类型检查

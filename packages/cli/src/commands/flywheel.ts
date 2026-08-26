@@ -1,10 +1,11 @@
 /** `opencontrib flywheel <sub>` — Profile flywheel and PR tracking. */
 
 import { Command } from 'commander';
-import { ProfileFlywheel } from '@opencontrib/core';
-import { printJSON, parseJSON, readStdin } from '../utils/output.js';
+import { ProfileFlywheel, ContributionRunManager, defaultActiveSessionManager } from '@opencontrib/core';
+import { printJSON, parseJSON, readStdin, printPhaseGuidance } from '../utils/output.js';
 
 const flywheel = new ProfileFlywheel();
+const runManager = new ContributionRunManager();
 
 // ─── flywheel sync ────────────────────────────────────────────────────────────
 const flywheelSync = new Command('sync')
@@ -15,19 +16,24 @@ const flywheelSync = new Command('sync')
   .action(async (opts: { repo: string; input?: string; pretty?: boolean }) => {
     try {
       const input = opts.input || await readStdin();
-      const parsed = parseJSON(input, 'stdin/--input') as any;
-      if (!parsed?.runId || !parsed.status || !parsed.techStack) {
-        console.error('❌ Missing required fields: runId, status, techStack');
+      const parsed = (parseJSON(input, 'stdin/--input') as any) || {};
+      const runId = parsed.runId || runManager.resolveRunId();
+      const status = parsed.status || 'submitted';
+      const techStack = parsed.techStack && parsed.techStack.length > 0 ? parsed.techStack : ['general'];
+
+      if (!runId) {
+        console.error('❌ Missing runId (no active session found and not provided in input JSON)');
         process.exit(1);
       }
+
       const result = await flywheel.recordContribution(opts.repo, {
-        id: parsed.runId,
+        id: runId,
         repoFullName: opts.repo,
         issueNumber: parsed.issueNumber,
         issueTitle: parsed.issueTitle || '',
         prNumber: parsed.prNumber,
         prUrl: parsed.prUrl || '',
-        status: parsed.status,
+        status,
         provenance: parsed.provenance || { source: 'agent_claim', verified: false },
         submittedAt: parsed.submittedAt || new Date().toISOString(),
         mergedAt: parsed.mergedAt,
@@ -35,7 +41,23 @@ const flywheelSync = new Command('sync')
         diffStat: parsed.diffStat || '',
         evidenceSummary: parsed.evidenceSummary || '',
       } as any);
+
+      try {
+        runManager.saveArtifact(runId, 'result', { flywheelResult: result, status } as any, 'COMPLETED');
+        defaultActiveSessionManager.updatePhase('COMPLETED');
+      } catch {}
+
       printJSON({ status: 'success', flywheelResult: result }, opts.pretty);
+
+      printPhaseGuidance({
+        currentPhase: 'COMPLETED',
+        runId,
+        status: 'SUCCESS',
+        invariants: [
+          'All 9 phases of OpenContrib contribution engine completed successfully.',
+          'Memory ledger and developer heuristics synchronized.',
+        ],
+      });
     } catch (err: any) {
       printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);

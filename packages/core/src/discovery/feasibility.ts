@@ -99,6 +99,109 @@ export function detectSystemCapabilities(): SystemCapabilities {
   };
 }
 
+function inferScope(text: string): FeasibilityAssessment['scope'] {
+  if (text.includes('documentation') || text.includes('readme') || text.includes('typo') || text.includes('docs')) {
+    return 'docs_only';
+  }
+  if (text.includes('leak') || text.includes('oom') || text.includes('memory') || text.includes('performance') || text.includes('benchmark')) {
+    return 'performance';
+  }
+  if (text.includes('crash') || text.includes('panic') || text.includes('typeerror') || text.includes('unhandled')) {
+    return 'runtime_bug';
+  }
+  if (text.includes('refactor') || text.includes('architecture') || text.includes('redesign')) {
+    return 'complex_refactor';
+  }
+  if (text.includes('hardware') || text.includes('gpu') || text.includes('cuda') || text.includes('bluetooth')) {
+    return 'hardware_specific';
+  }
+  return 'small_code_change';
+}
+
+function evaluatePlatformRequirements(
+  text: string,
+  caps: SystemCapabilities,
+  detectedRisks: string[],
+  missingCaps: string[],
+  mitigations: string[],
+): number {
+  let penalty = 0;
+
+  if (text.includes('macos') || text.includes('darwin') || text.includes('m1') || text.includes('m2') || text.includes('apple silicon')) {
+    detectedRisks.push('macos_specific');
+    if (caps.os !== 'darwin') {
+      missingCaps.push('macos_surface');
+      penalty += 30;
+    }
+  }
+
+  if (text.includes('linux') || text.includes('cgroup') || text.includes('systemd') || text.includes('epoll')) {
+    detectedRisks.push('linux_specific');
+    if (caps.os !== 'linux') {
+      if (caps.hasWsl) {
+        mitigations.push('linux_possible_via_wsl');
+        penalty += 5;
+      } else {
+        missingCaps.push('linux_surface');
+        penalty += 25;
+      }
+    }
+  }
+
+  if (text.includes('windows') || text.includes('win32') || text.includes('powershell')) {
+    detectedRisks.push('windows_specific');
+    if (caps.os !== 'win32') {
+      missingCaps.push('windows_surface');
+      penalty += 20;
+    }
+  }
+
+  if (text.includes('docker') || text.includes('container') || text.includes('k8s') || text.includes('kubernetes')) {
+    detectedRisks.push('docker_integration');
+    if (!caps.hasDocker) {
+      missingCaps.push('docker_runtime');
+      penalty += 20;
+    } else {
+      mitigations.push('docker_available');
+    }
+  }
+
+  if (text.includes('playwright') || text.includes('cypress') || text.includes('puppeteer') || text.includes('e2e')) {
+    detectedRisks.push('browser_e2e_tests');
+    penalty += 5;
+  }
+
+  return penalty;
+}
+
+function evaluateLanguageToolchains(
+  text: string,
+  caps: SystemCapabilities,
+  detectedRisks: string[],
+  missingCaps: string[],
+): number {
+  let penalty = 0;
+  const tcRules: Array<{ regex: RegExp; available: boolean; capName: string }> = [
+    { regex: /golang|goroutine|channel |\b\.go\b|go\.mod/, available: caps.toolchains.go, capName: 'go_toolchain' },
+    { regex: /rust|cargo |crates\.io|\b\.rs\b/, available: caps.toolchains.rust, capName: 'rust_toolchain' },
+    { regex: /python|pip |pypi|pytest|\b\.py\b/, available: caps.toolchains.python, capName: 'python_toolchain' },
+    { regex: /java|maven|gradle|spring|\b\.java\b/, available: caps.toolchains.java, capName: 'java_toolchain' },
+    { regex: /cpp|c\+\+|gcc|clang|\b\.cpp\b|\b\.cc\b/, available: caps.toolchains.cpp, capName: 'cpp_toolchain' },
+    { regex: /dotnet|csharp|nuget|\b\.cs\b/, available: caps.toolchains.dotnet, capName: 'dotnet_toolchain' },
+    { regex: /node\.js|npm |typescript|bun |\b\.ts\b/, available: caps.toolchains.node || caps.toolchains.bun, capName: 'node_toolchain' },
+  ];
+
+  for (const rule of tcRules) {
+    if (rule.regex.test(text) && !rule.available) {
+      missingCaps.push(rule.capName);
+      if (!detectedRisks.includes('toolchain_missing')) detectedRisks.push('toolchain_missing');
+      penalty += 25;
+    }
+  }
+
+  return penalty;
+}
+
 export function assessFeasibility(
   issueTitle: string,
   issueBody: string,
@@ -110,125 +213,12 @@ export function assessFeasibility(
   const detectedRisks: string[] = [];
   const missingCapabilities: string[] = [];
   const mitigations: string[] = [];
+
+  const scope = inferScope(text);
   let scorePenalty = 0;
-  let scope: FeasibilityAssessment['scope'] = 'small_code_change';
 
-  if (text.includes('documentation') || text.includes('readme') || text.includes('typo') || text.includes('docs')) {
-    scope = 'docs_only';
-  } else if (text.includes('leak') || text.includes('oom') || text.includes('memory') || text.includes('performance') || text.includes('benchmark')) {
-    scope = 'performance';
-  } else if (text.includes('crash') || text.includes('panic') || text.includes('typeerror') || text.includes('unhandled')) {
-    scope = 'runtime_bug';
-  } else if (text.includes('refactor') || text.includes('architecture') || text.includes('redesign')) {
-    scope = 'complex_refactor';
-  } else if (text.includes('hardware') || text.includes('gpu') || text.includes('cuda') || text.includes('bluetooth')) {
-    scope = 'hardware_specific';
-  }
-
-  const requiresMac = text.includes('macos') || text.includes('darwin') || text.includes('m1') || text.includes('m2') || text.includes('apple silicon');
-  const requiresLinux = text.includes('linux') || text.includes('cgroup') || text.includes('systemd') || text.includes('epoll');
-  const requiresWindows = text.includes('windows') || text.includes('win32') || text.includes('powershell');
-  const requiresDocker = text.includes('docker') || text.includes('container') || text.includes('k8s') || text.includes('kubernetes');
-  const requiresBrowserE2E = text.includes('playwright') || text.includes('cypress') || text.includes('puppeteer') || text.includes('e2e');
-
-  // Detect language-specific requirements from issue text
-  const requiresGo = text.includes('golang') || text.includes('goroutine') || text.includes('channel ') || /\b\.go\b/.test(text) || text.includes('go.mod');
-  const requiresRust = text.includes('rust') || text.includes('cargo ') || text.includes('crates.io') || /\b\.rs\b/.test(text);
-  const requiresPython = text.includes('python') || text.includes('pip ') || text.includes('pypi') || text.includes('pytest') || /\b\.py\b/.test(text);
-  const requiresJava = text.includes('java') || text.includes('maven') || text.includes('gradle') || text.includes('spring') || /\b\.java\b/.test(text);
-  const requiresCpp = text.includes('cpp') || text.includes('c++') || text.includes('gcc') || text.includes('clang') || /\b\.cpp\b/.test(text) || /\b\.cc\b/.test(text);
-  const requiresDotnet = text.includes('dotnet') || text.includes('csharp') || text.includes('nuget') || /\b\.cs\b/.test(text);
-  const requiresNode = text.includes('node.js') || text.includes('npm ') || text.includes('typescript') || text.includes('bun ') || /\b\.ts\b/.test(text);
-
-  if (requiresMac) {
-    detectedRisks.push('macos_specific');
-    if (capabilities.os !== 'darwin') {
-      missingCapabilities.push('macos_surface');
-      scorePenalty += 30;
-    }
-  }
-
-  if (requiresLinux) {
-    detectedRisks.push('linux_specific');
-    if (capabilities.os !== 'linux') {
-      if (capabilities.hasWsl) {
-        mitigations.push('linux_possible_via_wsl');
-        scorePenalty += 5;
-      } else {
-        missingCapabilities.push('linux_surface');
-        scorePenalty += 25;
-      }
-    }
-  }
-
-  if (requiresWindows) {
-    detectedRisks.push('windows_specific');
-    if (capabilities.os !== 'win32') {
-      missingCapabilities.push('windows_surface');
-      scorePenalty += 20;
-    }
-  }
-
-  if (requiresDocker) {
-    detectedRisks.push('docker_integration');
-    if (!capabilities.hasDocker) {
-      missingCapabilities.push('docker_runtime');
-      scorePenalty += 20;
-    } else {
-      mitigations.push('docker_available');
-    }
-  }
-
-  if (requiresBrowserE2E) {
-    detectedRisks.push('browser_e2e_tests');
-    scorePenalty += 5;
-  }
-
-  // Language-specific toolchain checks
-  const toolchainChecks: Array<{ name: string; available: boolean }> = [
-    { name: 'go', available: capabilities.toolchains.go },
-    { name: 'rust', available: capabilities.toolchains.rust },
-    { name: 'python', available: capabilities.toolchains.python },
-    { name: 'java', available: capabilities.toolchains.java },
-    { name: 'cpp', available: capabilities.toolchains.cpp },
-    { name: 'dotnet', available: capabilities.toolchains.dotnet },
-    { name: 'node', available: capabilities.toolchains.node || capabilities.toolchains.bun },
-  ];
-  if (requiresGo && !capabilities.toolchains.go) {
-    missingCapabilities.push('go_toolchain');
-    detectedRisks.push('toolchain_missing');
-    scorePenalty += 25;
-  }
-  if (requiresRust && !capabilities.toolchains.rust) {
-    missingCapabilities.push('rust_toolchain');
-    detectedRisks.push('toolchain_missing');
-    scorePenalty += 25;
-  }
-  if (requiresPython && !capabilities.toolchains.python) {
-    missingCapabilities.push('python_toolchain');
-    detectedRisks.push('toolchain_missing');
-    scorePenalty += 25;
-  }
-  if (requiresJava && !capabilities.toolchains.java) {
-    missingCapabilities.push('java_toolchain');
-    detectedRisks.push('toolchain_missing');
-    scorePenalty += 25;
-  }
-  if (requiresCpp && !capabilities.toolchains.cpp) {
-    missingCapabilities.push('cpp_toolchain');
-    detectedRisks.push('toolchain_missing');
-    scorePenalty += 25;
-  }
-  if (requiresDotnet && !capabilities.toolchains.dotnet) {
-    missingCapabilities.push('dotnet_toolchain');
-    detectedRisks.push('toolchain_missing');
-    scorePenalty += 25;
-  }
-  if (requiresNode && !capabilities.toolchains.node && !capabilities.toolchains.bun) {
-    missingCapabilities.push('node_toolchain');
-    detectedRisks.push('toolchain_missing');
-    scorePenalty += 25;
-  }
+  scorePenalty += evaluatePlatformRequirements(text, capabilities, detectedRisks, missingCapabilities, mitigations);
+  scorePenalty += evaluateLanguageToolchains(text, capabilities, detectedRisks, missingCapabilities);
 
   let level: FeasibilityLevel = 'fully_feasible';
   if (scorePenalty >= 30 || scope === 'hardware_specific') {

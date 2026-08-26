@@ -53,81 +53,66 @@ export interface AssembledContributionContext {
 }
 
 
+function detectNodePackageManager(files: string[], pkg: any): 'npm' | 'pnpm' | 'yarn' | 'bun' {
+  if (pkg.packageManager) {
+    if (pkg.packageManager.startsWith('pnpm')) return 'pnpm';
+    if (pkg.packageManager.startsWith('yarn')) return 'yarn';
+    if (pkg.packageManager.startsWith('bun')) return 'bun';
+  }
+  if (files.includes('pnpm-lock.yaml')) return 'pnpm';
+  if (files.includes('yarn.lock')) return 'yarn';
+  if (files.includes('bun.lock') || files.includes('bun.lockb')) return 'bun';
+  return 'npm';
+}
+
+function detectNodeCommands(files: string[], dirPath: string, commands: RunnableCommands): void {
+  if (!files.includes('package.json')) return;
+  try {
+    const pkg = JSON.parse(readFileSync(join(dirPath, 'package.json'), 'utf-8'));
+    const scripts = pkg.scripts || {};
+    const pm = detectNodePackageManager(files, pkg);
+    commands.packageManager = pm;
+
+    if (scripts.test) commands.testCommand = pm === 'npm' ? 'npm test' : `${pm} test`;
+    if (scripts.build) commands.buildCommand = pm === 'npm' ? 'npm run build' : `${pm} run build`;
+    if (scripts.lint) commands.lintCommand = pm === 'npm' ? 'npm run lint' : `${pm} run lint`;
+  } catch {}
+}
+
+function detectCompiledEcosystemCommands(files: string[], commands: RunnableCommands): void {
+  if (files.includes('Cargo.toml')) {
+    commands.packageManager = 'cargo';
+    commands.testCommand = 'cargo test';
+    commands.buildCommand = 'cargo build';
+    commands.lintCommand = 'cargo clippy';
+  } else if (files.includes('go.mod')) {
+    commands.packageManager = 'go';
+    commands.testCommand = 'go test ./...';
+    commands.buildCommand = 'go build ./...';
+    commands.lintCommand = 'golangci-lint run';
+  } else if (files.includes('pyproject.toml') || files.includes('requirements.txt')) {
+    commands.packageManager = 'pytest';
+    commands.testCommand = 'pytest';
+    commands.lintCommand = 'ruff check .';
+  } else if (files.includes('CMakeLists.txt')) {
+    commands.packageManager = 'cmake';
+    commands.buildCommand = 'cmake -B build && cmake --build build';
+    commands.testCommand = 'ctest --test-dir build';
+  }
+}
+
 /**
  * Detects actual runnable commands by inspecting manifest files, package managers, and lockfiles.
  */
 export function detectRunnableCommandsFromDir(dirPath: string): RunnableCommands {
   const commands: RunnableCommands = {};
-
   if (!existsSync(dirPath)) return commands;
 
   try {
     const files = readdirSync(dirPath);
-
-    // 1. Node.js / TypeScript Ecosystem
-    if (files.includes('package.json')) {
-      try {
-        const pkg = JSON.parse(readFileSync(join(dirPath, 'package.json'), 'utf-8'));
-        const scripts = pkg.scripts || {};
-
-        // Detect package manager
-        let pm: 'npm' | 'pnpm' | 'yarn' | 'bun' = 'npm';
-        if (pkg.packageManager) {
-          if (pkg.packageManager.startsWith('pnpm')) pm = 'pnpm';
-          else if (pkg.packageManager.startsWith('yarn')) pm = 'yarn';
-          else if (pkg.packageManager.startsWith('bun')) pm = 'bun';
-        } else if (files.includes('pnpm-lock.yaml')) {
-          pm = 'pnpm';
-        } else if (files.includes('yarn.lock')) {
-          pm = 'yarn';
-        } else if (files.includes('bun.lock') || files.includes('bun.lockb')) {
-          pm = 'bun';
-        } else if (files.includes('package-lock.json')) {
-          pm = 'npm';
-        }
-
-        commands.packageManager = pm;
-
-        if (scripts.test) {
-          commands.testCommand = pm === 'npm' ? 'npm test' : `${pm} test`;
-        }
-        if (scripts.build) {
-          commands.buildCommand = pm === 'npm' ? 'npm run build' : `${pm} run build`;
-        }
-        if (scripts.lint) {
-          commands.lintCommand = pm === 'npm' ? 'npm run lint' : `${pm} run lint`;
-        }
-      } catch {}
-    }
-
-    // 2. Rust Ecosystem
-    if (files.includes('Cargo.toml')) {
-      commands.packageManager = 'cargo';
-      commands.testCommand = 'cargo test';
-      commands.buildCommand = 'cargo build';
-      commands.lintCommand = 'cargo clippy';
-    }
-
-    // 3. Go Ecosystem
-    if (files.includes('go.mod')) {
-      commands.packageManager = 'go';
-      commands.testCommand = 'go test ./...';
-      commands.buildCommand = 'go build ./...';
-      commands.lintCommand = 'golangci-lint run';
-    }
-
-    // 4. Python Ecosystem
-    if (files.includes('pyproject.toml') || files.includes('requirements.txt')) {
-      commands.packageManager = 'pytest';
-      commands.testCommand = 'pytest';
-      commands.lintCommand = 'ruff check .';
-    }
-
-    // 5. C/C++ CMake Ecosystem
-    if (files.includes('CMakeLists.txt')) {
-      commands.packageManager = 'cmake';
-      commands.buildCommand = 'cmake -B build && cmake --build build';
-      commands.testCommand = 'ctest --test-dir build';
+    detectNodeCommands(files, dirPath, commands);
+    if (!commands.testCommand) {
+      detectCompiledEcosystemCommands(files, commands);
     }
   } catch {}
 
@@ -162,6 +147,74 @@ export function extractContributingGuidelines(dirPath: string): string | undefin
   return undefined;
 }
 
+function buildExplorationGuidance(
+  detectedSkeletonFiles: string[],
+  preferredPaths: string[],
+  packageManifest?: string,
+  contributingSnippet?: string,
+  issueTitle: string = '',
+): ContributionGuidance {
+  const suggestedReadingOrder: string[] = [];
+  const targetTestFiles: string[] = [];
+  const sensitivePaths: string[] = [];
+
+  if (packageManifest) {
+    if (packageManifest.includes('package.json')) suggestedReadingOrder.push('package.json');
+    if (packageManifest.includes('Cargo.toml')) suggestedReadingOrder.push('Cargo.toml');
+    if (packageManifest.includes('go.mod')) suggestedReadingOrder.push('go.mod');
+  }
+  if (contributingSnippet) {
+    suggestedReadingOrder.push('CONTRIBUTING.md');
+  }
+
+  for (const file of detectedSkeletonFiles) {
+    if (file.toLowerCase().includes('readme')) {
+      suggestedReadingOrder.push(file);
+    } else if (file === 'src' || file === 'lib' || file === 'packages') {
+      suggestedReadingOrder.push(file);
+    } else if (file.toLowerCase().includes('test') || file.toLowerCase().includes('spec')) {
+      targetTestFiles.push(file);
+    } else if (file.startsWith('.github') || file === 'scripts') {
+      sensitivePaths.push(file);
+    }
+  }
+
+  for (const pref of preferredPaths) {
+    if (pref.includes('test') || pref.includes('spec')) {
+      targetTestFiles.push(pref);
+    } else {
+      suggestedReadingOrder.push(pref);
+    }
+  }
+
+  const isHighRisk =
+    issueTitle.toLowerCase().includes('breaking') ||
+    issueTitle.toLowerCase().includes('security') ||
+    sensitivePaths.length > 2;
+
+  return {
+    suggestedReadingOrder: Array.from(new Set(suggestedReadingOrder)).slice(0, 5),
+    targetTestFiles: Array.from(new Set(targetTestFiles)),
+    riskSurface: {
+      level: isHighRisk ? 'HIGH' : sensitivePaths.length > 0 ? 'MEDIUM' : 'LOW',
+      rationale: isHighRisk
+        ? 'Potentially high blast radius or security/breaking boundary'
+        : sensitivePaths.length > 0
+          ? 'Touches build or workflow infrastructure files'
+          : 'Standard scoped module improvement',
+      sensitivePaths: Array.from(new Set(sensitivePaths)),
+    },
+  };
+}
+
+let cachedDoctorReport: DoctorReport | null = null;
+function getOrCachedDoctorReport(): DoctorReport {
+  if (!cachedDoctorReport) {
+    cachedDoctorReport = runDoctorAudit();
+  }
+  return cachedDoctorReport;
+}
+
 export class ContextAssembler {
   private memory: RepoMemoryLedger;
 
@@ -179,6 +232,7 @@ export class ContextAssembler {
     ciWorkflow?: string;
     primaryLanguage?: string;
     workspacePath?: string;
+    skeletonFiles?: string[];
     doctorReport?: DoctorReport;
   }): AssembledContributionContext {
     const {
@@ -191,6 +245,7 @@ export class ContextAssembler {
       ciWorkflow,
       primaryLanguage = 'TypeScript',
       workspacePath,
+      skeletonFiles,
       doctorReport,
     } = input;
 
@@ -201,7 +256,7 @@ export class ContextAssembler {
     const preferredPaths = (repoRecord?.conventions as any)?.preferredPaths || [];
 
     // 2. Extract environment context
-    const doctor = doctorReport || runDoctorAudit();
+    const doctor = doctorReport || getOrCachedDoctorReport();
 
     // 3. Infer runnable commands
     const runnableCommands = workspacePath
@@ -233,60 +288,18 @@ export class ContextAssembler {
         }
         contributingGuidelinesSnippet = extractContributingGuidelines(workspacePath);
       } catch {}
+    } else if (skeletonFiles && skeletonFiles.length > 0) {
+      detectedSkeletonFiles.push(...skeletonFiles.slice(0, 20));
     }
 
     // 5. Generate Exploration Guidance (suggested reading order, target tests, risk surface)
-    const suggestedReadingOrder: string[] = [];
-    const targetTestFiles: string[] = [];
-    const sensitivePaths: string[] = [];
-
-    if (packageManifest) {
-      if (packageManifest.includes('package.json')) suggestedReadingOrder.push('package.json');
-      if (packageManifest.includes('Cargo.toml')) suggestedReadingOrder.push('Cargo.toml');
-      if (packageManifest.includes('go.mod')) suggestedReadingOrder.push('go.mod');
-    }
-    if (contributingGuidelinesSnippet) {
-      suggestedReadingOrder.push('CONTRIBUTING.md');
-    }
-
-    for (const file of detectedSkeletonFiles) {
-      if (file.toLowerCase().includes('readme')) {
-        suggestedReadingOrder.push(file);
-      } else if (file === 'src' || file === 'lib' || file === 'packages') {
-        suggestedReadingOrder.push(file);
-      } else if (file.toLowerCase().includes('test') || file.toLowerCase().includes('spec')) {
-        targetTestFiles.push(file);
-      } else if (file.startsWith('.github') || file === 'scripts') {
-        sensitivePaths.push(file);
-      }
-    }
-
-    for (const pref of preferredPaths) {
-      if (pref.includes('test') || pref.includes('spec')) {
-        targetTestFiles.push(pref);
-      } else {
-        suggestedReadingOrder.push(pref);
-      }
-    }
-
-    const isHighRisk =
-      issueTitle.toLowerCase().includes('breaking') ||
-      issueTitle.toLowerCase().includes('security') ||
-      sensitivePaths.length > 2;
-
-    const guidance: ContributionGuidance = {
-      suggestedReadingOrder: Array.from(new Set(suggestedReadingOrder)).slice(0, 5),
-      targetTestFiles: Array.from(new Set(targetTestFiles)),
-      riskSurface: {
-        level: isHighRisk ? 'HIGH' : sensitivePaths.length > 0 ? 'MEDIUM' : 'LOW',
-        rationale: isHighRisk
-          ? 'Potentially high blast radius or security/breaking boundary'
-          : sensitivePaths.length > 0
-            ? 'Touches build or workflow infrastructure files'
-            : 'Standard scoped module improvement',
-        sensitivePaths: Array.from(new Set(sensitivePaths)),
-      },
-    };
+    const guidance = buildExplorationGuidance(
+      detectedSkeletonFiles,
+      preferredPaths,
+      packageManifest,
+      contributingGuidelinesSnippet,
+      issueTitle
+    );
 
     return {
       problemContext: {
@@ -413,6 +426,17 @@ export class ContextAssembler {
     const manifests = input.manifests || {};
     const repoFullName = repoDetails.fullName || `${repoDetails.owner}/${repoDetails.repo}` || 'unknown/repo';
 
+    const repoTree = input.repoTree || [];
+    const virtualSkeleton: string[] = [];
+    if (Array.isArray(repoTree)) {
+      for (const item of repoTree) {
+        const p = typeof item === 'string' ? item : item.path;
+        if (p && !p.includes('/') && !p.startsWith('.') && p !== 'node_modules') {
+          virtualSkeleton.push(p);
+        }
+      }
+    }
+
     return this.assemble({
       repoFullName,
       issueTitle: issue.title || '',
@@ -423,6 +447,7 @@ export class ContextAssembler {
       ciWorkflow: manifests.ciWorkflow,
       primaryLanguage: repoDetails.primaryLanguage || 'TypeScript',
       workspacePath: input.workspacePath,
+      skeletonFiles: virtualSkeleton.length > 0 ? virtualSkeleton : undefined,
     });
   }
 }

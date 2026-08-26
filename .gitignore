@@ -44,9 +44,11 @@ Thumbs.db
 ehthumbs.db
 
 # Scratch and Ephemeral Test Artifacts
+.trash/
 scratch/
 temp/
 tmp/
 *.tmp
 coverage/
 .nyc_output/
+

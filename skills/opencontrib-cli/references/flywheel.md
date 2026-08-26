@@ -33,7 +33,7 @@ cat <<'JSON' | opencontrib flywheel sync --repo facebook/react
 JSON
 ```
 
-**Required fields** in the input JSON: `runId`, `status`, `techStack`.
+**Input fields**: `status` and `techStack` (required); `runId` (optional, auto-resolved from active session); `prNumber`, `issueNumber`, `failureLessons`.
 
 **Output**: `{"status":"success","flywheelResult":{...}}`
 

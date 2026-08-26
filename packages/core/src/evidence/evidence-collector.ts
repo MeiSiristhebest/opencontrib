@@ -1,4 +1,5 @@
 import { defaultSandboxRuntime, type SandboxExecutionResult } from '../sandbox/sandbox-runtime.js';
+import { parseCommandSpec } from '../sandbox/command-spec.js';
 import type { EvidenceReport, FlakyTestRecord } from '../contracts/schemas.js';
 import { defaultTestOutputParserRegistry, TestOutputParserRegistry } from './parsers/registry.js';
 import { defaultVcsDeltaAdapter, type VcsDeltaPort } from './vcs-delta.port.js';
@@ -64,16 +65,13 @@ export function recordFlakyBaseline(
   workspaceRoot?: string,
 ): FlakyTestRecord[] {
   const testRunResults = new Map<string, { runCount: number; failCount: number }>();
-  const parts = testCommand.split(' ');
-  const cmd = parts[0];
-  const args = parts.slice(1);
+  const spec = parseCommandSpec(testCommand);
 
   for (let i = 0; i < runs; i++) {
     const res = defaultSandboxRuntime.executeInSandbox({
       cwd,
       workspaceRoot,
-      command: cmd,
-      args,
+      commandSpec: spec,
       timeoutMs: 30000,
     });
 
@@ -133,17 +131,14 @@ export function runStressLoop(
     testCommand.trim() === 'cargo test';
 
   const targetCount = count !== undefined ? count : isBroadSuite ? 1 : 3;
-  const parts = testCommand.split(' ');
-  const cmd = parts[0];
-  const args = parts.slice(1);
+  const spec = parseCommandSpec(testCommand);
 
   for (let i = 0; i < targetCount; i++) {
     const startTime = Date.now();
     const res = defaultSandboxRuntime.executeInSandbox({
       cwd,
       workspaceRoot,
-      command: cmd,
-      args,
+      commandSpec: spec,
       timeoutMs: 30000,
     });
     const elapsed = Date.now() - startTime;
@@ -208,12 +203,11 @@ export function verifyEmpiricalReproduction(input: {
       timeoutMs: 15000,
     });
   } else if (testCommand) {
-    const parts = testCommand.split(' ');
+    const spec = parseCommandSpec(testCommand);
     res = defaultSandboxRuntime.executeInSandbox({
       cwd,
       workspaceRoot,
-      command: parts[0],
-      args: parts.slice(1),
+      commandSpec: spec,
       timeoutMs: 20000,
     });
   } else {

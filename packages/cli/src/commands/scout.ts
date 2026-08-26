@@ -2,7 +2,7 @@
 
 import { Command, Argument } from 'commander';
 import { scoutOpportunities } from '@opencontrib/core';
-import { printJSON } from '../utils/output.js';
+import { printJSON, printPhaseGuidance } from '../utils/output.js';
 
 export const scoutCommand = new Command('scout')
   .description('Scout high-value, unclaimed contribution opportunities for a repo or org')
@@ -37,6 +37,22 @@ export const scoutCommand = new Command('scout')
       });
 
       printJSON({ status: 'success', target, foundCount: opportunities.length, opportunities }, opts.pretty);
+
+      const top = opportunities[0];
+      const nextCmd = top
+        ? `opencontrib workspace prepare --repo ${top.repoFullName} --issue ${top.issueNumber}`
+        : `opencontrib workspace prepare --repo ${target} --issue <id>`;
+
+      printPhaseGuidance({
+        currentPhase: 'OPPORTUNITY_SCOUTED',
+        status: 'SUCCESS',
+        humanCheckpoint: 'Checkpoint 1 (Candidate Issue Selection)',
+        nextCommand: nextCmd,
+        forbiddenActions: [
+          'DO NOT select issues that have existing PRs or active claims by other developers.',
+          'DO NOT begin editing without preparing an isolated Git worktree.',
+        ],
+      });
     } catch (err: any) {
       printJSON({ status: 'error', message: err.message }, opts.pretty);
       process.exit(1);

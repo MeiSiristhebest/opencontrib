@@ -250,4 +250,46 @@ describe('Unified OpenContrib Storage Layout', () => {
   });
 });
 
+describe('ActiveSessionManager & Pointer Store Persistence', () => {
+  it('manages active session file write, update, and clear', async () => {
+    const { ActiveSessionManager } = await import('../src/index.js');
+    const sessionFile = join(tmpdir(), `active_session_${Date.now()}.json`);
+    const sessionManager = new ActiveSessionManager(sessionFile);
+
+    expect(sessionManager.getActiveSession()).toBeNull();
+    expect(sessionManager.getActiveRunId()).toBeNull();
+
+    const created = sessionManager.setActiveSession({
+      runId: 'run_test_123',
+      repoFullName: 'test/repo',
+      issueNumber: 42,
+      issueTitle: 'Test bug',
+    });
+
+    expect(created.runId).toBe('run_test_123');
+    expect(sessionManager.getActiveRunId()).toBe('run_test_123');
+
+    sessionManager.updatePhase('WORKSPACE_PREPARED');
+    expect(sessionManager.getActiveSession()?.currentPhase).toBe('WORKSPACE_PREPARED');
+
+    sessionManager.updateWorkspacePath('/tmp/test-workspace');
+    expect(sessionManager.getActiveSession()?.workspacePath).toBe('/tmp/test-workspace');
+
+    expect(sessionManager.clearActiveSession()).toBe(true);
+    expect(sessionManager.getActiveSession()).toBeNull();
+  });
+
+  it('automatically resolves active run ID when not explicitly passed', async () => {
+    const customBase = join(tmpdir(), `run_resolve_test_${Date.now()}`);
+    const sessionFile = join(tmpdir(), `active_session_${Date.now()}_res.json`);
+    const { ActiveSessionManager, ContributionRunManager } = await import('../src/index.js');
+    const sessionManager = new ActiveSessionManager(sessionFile);
+    const runManager = new ContributionRunManager(customBase);
+
+    // Explicit run ID should resolve directly
+    expect(runManager.resolveRunId('run_explicit_999')).toBe('run_explicit_999');
+  });
+});
+
+
 

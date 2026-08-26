@@ -37,6 +37,8 @@ export function displayFirstRunBannerIfNeeded(homeDir?: string): void {
 
     fs.writeFileSync(markerFile, new Date().toISOString(), 'utf-8');
 
+    const repoUrl = process.env.OPENCONTRIB_REPO_URL || 'https://github.com/MeiSiristhebest/opencontrib';
+
     console.log(`
 ┌────────────────────────────────────────────────────────┐
 │  🚀 Welcome to OpenContrib!                            │
@@ -44,7 +46,7 @@ export function displayFirstRunBannerIfNeeded(homeDir?: string): void {
 │  for Autonomous AI Coding Agents.                      │
 │                                                        │
 │  ⭐ Star us on GitHub if this tool saves your time:     │
-│     https://github.com/MeiSiristhebest/opencontrib     │
+│     ${repoUrl.padEnd(50, ' ')} │
 │                                                        │
 │  💡 Tip: Run 'opencontrib doctor' to audit your setup. │
 └────────────────────────────────────────────────────────┘

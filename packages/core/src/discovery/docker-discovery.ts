@@ -33,12 +33,16 @@ function run(cmd: string, args: string[], timeoutMs: number, cwd?: string): { ok
 function verifyDaemon(dockerPath: string, remaining: () => number): boolean {
   // Verify daemon actually responds — avoids false positive when CLI exists but daemon is down
   if (remaining() > 0) {
-    const result = spawnSync(dockerPath, ['info'], {
-      encoding: 'utf-8',
-      timeout: Math.min(5000, remaining()),
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return result.status === 0;
+    try {
+      const result = spawnSync(dockerPath, ['info'], {
+        encoding: 'utf-8',
+        timeout: Math.min(1500, remaining()),
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      return result.status === 0;
+    } catch {
+      return false;
+    }
   }
   return false;
 }
@@ -63,24 +67,27 @@ export function discoverDocker(forceRefresh = false): DockerDiscoveryResult {
   let found = false;
   let method: string | undefined;
   let path: string | undefined;
+  let daemonCheckedAndFailed = false;
 
   // ── Layer 1: PATH ──
   if (remaining() > 0) {
     const start = Date.now();
-    const result = run(isWindows ? 'where.exe' : 'command', ['-q', isWindows ? 'docker' : '-v', 'docker'].filter(Boolean), Math.min(3000, remaining()));
+    const result = run(isWindows ? 'where.exe' : 'command', ['-q', isWindows ? 'docker' : '-v', 'docker'].filter(Boolean), Math.min(2000, remaining()));
     if (result.ok) {
       if (verifyDaemon('docker', remaining)) {
         found = true;
         method = 'PATH';
+      } else {
+        daemonCheckedAndFailed = true;
       }
     }
-    elapsed = Date.now() - start;
+    elapsed += Date.now() - start;
   }
 
   // ── Layer 2: Windows registry ──
-  if (!found && isWindows && remaining() > 0) {
+  if (!found && !daemonCheckedAndFailed && isWindows && remaining() > 0) {
     const start = Date.now();
-    const result = run('reg', ['query', 'HKLM\\SOFTWARE\\Docker Inc.', '/reg:32'], Math.min(3000, remaining()));
+    const result = run('reg', ['query', 'HKLM\\SOFTWARE\\Docker Inc.', '/reg:32'], Math.min(2000, remaining()));
     if (result.ok) {
       const pathMatch = result.stdout.match(/InstallLocation\s+REG_SZ\s+(.+)/i);
       if (pathMatch) {
@@ -90,32 +97,36 @@ export function discoverDocker(forceRefresh = false): DockerDiscoveryResult {
           found = true;
           path = bin;
           method = 'Windows Registry';
+        } else {
+          daemonCheckedAndFailed = true;
         }
       }
     }
-    elapsed = Date.now() - start;
+    elapsed += Date.now() - start;
   }
 
   // ── Layer 3: PowerShell Get-Command ──
-  if (!found && isWindows && remaining() > 0) {
+  if (!found && !daemonCheckedAndFailed && isWindows && remaining() > 0) {
     const start = Date.now();
-    const result = run('powershell', ['-NoProfile', '-Command', 'Get-Command docker -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source'], Math.min(3000, remaining()));
+    const result = run('powershell', ['-NoProfile', '-Command', 'Get-Command docker -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source'], Math.min(2000, remaining()));
     if (result.ok && result.stdout.length > 0) {
       const dockerPath = result.stdout.trim();
       if (existsSync(dockerPath) && verifyDaemon(dockerPath, remaining)) {
         found = true;
         path = dockerPath;
         method = 'PowerShell Get-Command';
+      } else {
+        daemonCheckedAndFailed = true;
       }
     }
-    elapsed = Date.now() - start;
+    elapsed += Date.now() - start;
   }
 
   // ── Layer 4: Drive scan (Windows only) ──
   // Accepts both "C:" and "C:\\" from WMI — normalizes trailing backslash
-  if (!found && isWindows && remaining() > 0) {
+  if (!found && !daemonCheckedAndFailed && isWindows && remaining() > 0) {
     const start = Date.now();
-    const drives = run('powershell', ['-NoProfile', '-Command', 'Get-WmiObject Win32_LogicalDisk | Select-Object -ExpandProperty DeviceID'], Math.min(5000, remaining()));
+    const drives = run('powershell', ['-NoProfile', '-Command', 'Get-WmiObject Win32_LogicalDisk | Select-Object -ExpandProperty DeviceID'], Math.min(2000, remaining()));
     if (drives.ok) {
       const driveLetters = drives.stdout.split('\r\n').filter((d) => d.match(/^[A-Z]:\\?$/i));
       for (const rawDrive of driveLetters) {
@@ -130,12 +141,13 @@ export function discoverDocker(forceRefresh = false): DockerDiscoveryResult {
             found = true;
             path = candidate;
             method = `Drive scan (${rawDrive})`;
+            break;
           }
         }
         if (found) break;
       }
     }
-    elapsed = Date.now() - start;
+    elapsed += Date.now() - start;
   }
 
   // ── Layer 5: WSL ──

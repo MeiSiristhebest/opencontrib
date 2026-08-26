@@ -1,0 +1,29 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    "packages/core": {
+      "project": ["src/**/*.ts"]
+    },
+    "packages/cli": {
+      "project": ["src/**/*.ts"]
+    },
+    "packages/mcp-server": {
+      "project": ["src/**/*.ts"]
+    }
+  },
+  "ignoreDependencies": [
+    "@opencontrib/core"
+  ],
+  "ignoreBinaries": [
+    "wsl",
+    "rg",
+    "where.exe",
+    "gcc"
+  ],
+  "ignore": [
+    ".trash/**"
+  ],
+  "rules": {
+    "duplicates": "off"
+  }
+}

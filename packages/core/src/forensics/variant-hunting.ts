@@ -1,6 +1,8 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import type { PointerStub, PluginHostContract } from '../kernel/contract.js';
+import { getToolTimeout } from '../kernel/config.js';
 
 export interface DiscoveredVariant {
   sourceFindingId: string;
@@ -52,24 +54,28 @@ export class VariantHunter {
         const pattern = `${finding.affectedSymbol}($ARGS)`;
         const { stdout } = await (host as any).exec(`${bin} run -p "${pattern}" --lang ${lang} --json=compact`, {
           cwd: repoPath,
-          timeout: 20000,
+          timeout: getToolTimeout('VARIANT_HUNT'),
         });
 
         if (stdout && stdout.trim().startsWith('[')) {
-          const matches = JSON.parse(stdout);
-          for (const m of matches) {
-            const relPath = path.relative(repoPath, m.file).replace(/\\/g, '/');
-            const targetFileNorm = finding.file.replace(/\\/g, '/');
-            const line = m.range.start.line + 1;
-            if (relPath === targetFileNorm && line === finding.line) continue;
+          try {
+            const matches = JSON.parse(stdout);
+            for (const m of matches) {
+              const relPath = path.relative(repoPath, m.file).replace(/\\/g, '/');
+              const targetFileNorm = finding.file.replace(/\\/g, '/');
+              const line = m.range.start.line + 1;
+              if (relPath === targetFileNorm && line === finding.line) continue;
 
-            variants.push({
-              sourceFindingId: finding.id,
-              variantFile: relPath,
-              variantLine: line,
-              snippet: m.text,
-              confidence: 90,
-            });
+              variants.push({
+                sourceFindingId: finding.id,
+                variantFile: relPath,
+                variantLine: line,
+                snippet: m.text,
+                confidence: 90,
+              });
+            }
+          } catch {
+            // Non-fatal parse failure
           }
         }
       } catch {
@@ -118,7 +124,7 @@ export class VariantHunter {
       '--glob', '!node_modules', '--glob', '!.git', '--glob', '!dist',
       ...(extGlob ? [extGlob] : []),
       `\\b${symbol}\\b`,
-    ], { encoding: 'utf-8', timeout: 15000, cwd: repoPath });
+    ], { encoding: 'utf-8', timeout: getToolTimeout('VARIANT_HUNT'), cwd: repoPath });
 
     const excludeRel = (path.isAbsolute(excludeFile) ? path.relative(repoPath, excludeFile) : excludeFile).replace(/\\/g, '/');
 
@@ -154,15 +160,19 @@ export class VariantHunter {
 
         if (bin) {
           const result = spawnSync(bin, ['run', '-p', symbol, `--lang`, lang, '--json=compact'], {
-            encoding: 'utf-8', timeout: 15000, cwd: repoPath,
+            encoding: 'utf-8', timeout: getToolTimeout('VARIANT_HUNT'), cwd: repoPath,
           });
           if (result.stdout && result.stdout.trim().startsWith('[')) {
-            const matches = JSON.parse(result.stdout);
-            for (const m of matches) {
-              const relPath = path.relative(repoPath, m.file).replace(/\\/g, '/');
-              const line = m.range.start.line + 1;
-              if (relPath === excludeRel && (!excludeLine || line === excludeLine)) continue;
-              results.push({ file: relPath, line, snippet: m.text });
+            try {
+              const matches = JSON.parse(result.stdout);
+              for (const m of matches) {
+                const relPath = path.relative(repoPath, m.file).replace(/\\/g, '/');
+                const line = m.range.start.line + 1;
+                if (relPath === excludeRel && (!excludeLine || line === excludeLine)) continue;
+                results.push({ file: relPath, line, snippet: m.text });
+              }
+            } catch {
+              // Non-fatal parse failure
             }
           }
         }
@@ -174,9 +184,9 @@ export class VariantHunter {
     // Pure JS Fallback: when neither rg nor sg is installed in PATH
     if (results.length === 0) {
       try {
-        const fs = require('fs');
-        const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const wordRegex = new RegExp(`\\b${escaped}\\b`);
+        const safeSymbol = symbol.slice(0, 100);
+        const isCleanIdentifier = /^[a-zA-Z0-9_$#-]+$/.test(safeSymbol);
+        const wordRegex = isCleanIdentifier ? new RegExp(`\\b${safeSymbol}\\b`) : null;
 
         const scanDir = (dir: string) => {
           if (!fs.existsSync(dir)) return;
@@ -195,9 +205,10 @@ export class VariantHunter {
                   const lines = content.split(/\r?\n/);
                   for (let i = 0; i < lines.length; i++) {
                     const lineContent = lines[i];
-                    const lineNum = i + 1;
-                    if (rel === excludeRel && (!excludeLine || lineNum === excludeLine)) continue;
-                    if (wordRegex.test(lineContent)) {
+                    const isMatch = wordRegex ? wordRegex.test(lineContent) : lineContent.includes(safeSymbol);
+                    if (isMatch) {
+                      const lineNum = i + 1;
+                      if (rel === excludeRel && (!excludeLine || lineNum === excludeLine)) continue;
                       results.push({ file: rel, line: lineNum, snippet: lineContent.trim() });
                     }
                   }
@@ -209,7 +220,7 @@ export class VariantHunter {
 
         scanDir(repoPath);
       } catch {
-        // Safe ignore
+        // Fallback directory traversal failed
       }
     }
 

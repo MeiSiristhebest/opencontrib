@@ -22,7 +22,7 @@ export const BUILTIN_PROBES: ProbeManifest[] = [
     execution: {
       cost: 'medium',
       stage: 'scout',
-      command: 'ocr scan --path {target} --json',
+      command: 'ocr scan --path {target} -f json',
       timeoutMs: 30000,
       transformer: 'ocr',
     },
@@ -35,14 +35,13 @@ export const BUILTIN_PROBES: ProbeManifest[] = [
     author: 'Vigolium / OpenContrib',
     activation: {
       languages: ['*'],
-      requiresBinaries: ['pi', 'piolium'],
+      requiresBinaries: [],
     },
     execution: {
-      cost: 'deep',
+      cost: 'medium',
       stage: 'audit',
-      command: 'pi -p "/piolium-lite {target} --fresh"',
-      timeoutMs: 60000,
-      transformer: 'piolium',
+      timeoutMs: 30000,
+      transformer: 'builtin:piolium',
     },
   },
   {

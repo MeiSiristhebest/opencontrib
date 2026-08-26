@@ -10,7 +10,7 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
     'contrib_create_run',
     'Initialize an auditable contribution run session under ~/.opencontrib/runs/<runId>/ for structured state and artifact tracking',
     {
-      repoFullName: z.string().describe('Target repository full name, e.g. "facebook/react"'),
+      repoFullName: z.string().describe('Target repository full name, e.g. "owner/repo"'),
       issueNumber: z.number().optional().describe('Optional issue number associated with this contribution run'),
       issueTitle: z.string().optional().describe('Optional issue title'),
       tags: z.array(z.string()).optional().describe('Optional tags for indexing and telemetry'),

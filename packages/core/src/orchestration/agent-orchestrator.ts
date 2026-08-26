@@ -341,6 +341,7 @@ export class AgentOrchestrator {
     let validationPassed = false;
     let validationStatus: ValidationStatus = 'NO_TEST_AVAILABLE';
     let appliedFiles: Array<{ path: string; operation: string }> = [];
+    const accumulatedAppliedFiles: Array<{ path: string; operation: string }> = [];
     let filesToSubmit: Array<{ path: string; content: string }> = [];
     let evidenceReport: any;
     let lastFailureOutput = '';
@@ -358,7 +359,7 @@ export class AgentOrchestrator {
             basePrompt: prompt,
             testCommand: testCmd,
             feedback: toolFeedback,
-            appliedFiles,
+            appliedFiles: accumulatedAppliedFiles,
             attemptNumber: implementationAttempts,
             maxAttempts,
           })
@@ -392,6 +393,7 @@ export class AgentOrchestrator {
       );
 
       appliedFiles = safeApplyResult.appliedFiles;
+      accumulatedAppliedFiles.push(...appliedFiles);
       filesToSubmit = activePatch.files.map((f) => ({ path: f.path, content: f.content }));
 
       if (safeApplyResult.errors.length > 0) {

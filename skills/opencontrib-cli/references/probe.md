@@ -41,7 +41,7 @@ URI Syntax: ptr://<namespace>/<defect_id>/<file>:<line>[?view=<stub|slice|eviden
 
 ---
 
-## 🛠️ CLI Commands & MCP Equivalents
+## 🛠️ CLI Commands
 
 ### 1. Pointer Management (`opencontrib pointer` / `ptr`)
 
@@ -55,7 +55,6 @@ opencontrib pointer resolve ptr://ast-grep/ssrf-ipv6-bypass/src/fetch.ts:42 --vi
 # Resolve a pointer to Level 3 deep evidence / PoC script
 opencontrib pointer resolve ptr://ast-grep/ssrf-ipv6-bypass/src/fetch.ts:42 --view evidence --pretty
 ```
-*MCP Tool Equivalent:* `contrib_resolve_pointer`, `contrib_list_pointers`
 
 ---
 
@@ -71,7 +70,6 @@ opencontrib capability plan . --pretty
 # Plan with explicit intent and optional heavy tools
 opencontrib capability plan . --intent deep_security --enable-heavy --pretty
 ```
-*MCP Tool Equivalent:* `contrib_plan_capabilities`
 
 ---
 
@@ -84,7 +82,6 @@ opencontrib plugin list --pretty
 # Inspect a specific probe's capabilities
 opencontrib plugin info ocr --pretty
 ```
-*MCP Tool Equivalent:* `contrib_list_plugins`, `contrib_plugin_info`
 
 ---
 
@@ -103,4 +100,4 @@ opencontrib probe hotspot . --limit 5 --pretty
 # Generate property-based boundary fuzzing test harness
 opencontrib probe fuzz . --category numerical_bounds --pretty
 ```
-*MCP Tool Equivalent:* `contrib_probe_plan`, `contrib_probe_run`, `contrib_probe_hotspot`, `contrib_probe_fuzz`
+

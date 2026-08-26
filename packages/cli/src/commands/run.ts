@@ -1,15 +1,13 @@
-/** `opencontrib run <sub>` — Manage contribution run sessions. */
-
 import { Command, Argument } from 'commander';
 import { ContributionRunManager } from '@opencontrib/core';
-import { printJSON, parseJSON, readStdin } from '../utils/output.js';
+import { printJSON, parseJSON, readStdin, printPhaseGuidance } from '../utils/output.js';
 
 const runManager = new ContributionRunManager();
 
 // ─── run create ───────────────────────────────────────────────────────────────
 const runCreate = new Command('create')
   .description('Initialize a new contribution run')
-  .requiredOption('--repo <name>', 'Repository full name, e.g. "facebook/react"')
+  .requiredOption('--repo <name>', 'Repository full name, e.g. "owner/repo"')
   .option('--issue <num>', 'Issue number')
   .option('--title <text>', 'Issue title')
   .option('--tags <list>', 'Comma-separated tags', (v) => v.split(','))
@@ -23,6 +21,18 @@ const runCreate = new Command('create')
         tags: opts.tags,
       });
       printJSON({ status: 'success', manifest }, opts.pretty);
+
+      printPhaseGuidance({
+        currentPhase: 'INITIALIZED',
+        runId: manifest.runId,
+        status: 'SUCCESS',
+        humanCheckpoint: 'Checkpoint 1 (Initialize Session)',
+        nextCommand: `opencontrib probe plan . --pretty (Track A) OR opencontrib scout ${opts.repo} (Track B)`,
+        invariants: [
+          `Session active: ${manifest.runId}`,
+          'All subsequent commands will automatically inherit this active session.',
+        ],
+      });
     } catch (err: any) {
       console.error(`❌ ${err.message}`);
       process.exit(1);
@@ -32,16 +42,21 @@ const runCreate = new Command('create')
 // ─── run get <runId> ─────────────────────────────────────────────────────────
 const runGet = new Command('get')
   .description('Retrieve full manifest and artifacts for a run')
-  .addArgument(new Argument('<runId>', 'Run ID'))
+  .addArgument(new Argument('[runId]', 'Run ID (defaults to active session)'))
   .option('--pretty', 'Pretty-print', false)
-  .action(async (runId: string, opts: { pretty?: boolean }) => {
+  .action(async (targetRunId?: string, opts?: { pretty?: boolean }) => {
     try {
+      const runId = runManager.resolveRunId(targetRunId);
+      if (!runId) {
+        console.error('❌ No run ID provided and no active session found');
+        process.exit(1);
+      }
       const run = runManager.getRun(runId);
       if (!run) {
         console.error(`❌ Run "${runId}" not found`);
         process.exit(1);
       }
-      printJSON({ status: 'success', run }, opts.pretty);
+      printJSON({ status: 'success', run }, opts?.pretty);
     } catch (err: any) {
       console.error(`❌ ${err.message}`);
       process.exit(1);
@@ -51,12 +66,17 @@ const runGet = new Command('get')
 // ─── run resume <runId> ──────────────────────────────────────────────────────
 const runResume = new Command('resume')
   .description('Resume an interrupted run with latest phase, artifacts, and suggested next action')
-  .addArgument(new Argument('<runId>', 'Run ID'))
+  .addArgument(new Argument('[runId]', 'Run ID (defaults to active session)'))
   .option('--pretty', 'Pretty-print', false)
-  .action(async (runId: string, opts: { pretty?: boolean }) => {
+  .action(async (targetRunId?: string, opts?: { pretty?: boolean }) => {
     try {
+      const runId = runManager.resolveRunId(targetRunId);
+      if (!runId) {
+        console.error('❌ No run ID provided and no active session found');
+        process.exit(1);
+      }
       const resume = runManager.resumeRun(runId);
-      printJSON({ status: 'success', resume }, opts.pretty);
+      printJSON({ status: 'success', resume }, opts?.pretty);
     } catch (err: any) {
       console.error(`❌ ${err.message}`);
       process.exit(1);
@@ -106,6 +126,26 @@ const runSave = new Command('save')
     }
   });
 
+// ─── run list ─────────────────────────────────────────────────────────────────
+const runList = new Command('list')
+  .description('List all tracked contribution runs under ~/.opencontrib/runs/')
+  .option('--limit <n>', 'Maximum number of runs to return', '20')
+  .option('--pretty', 'Pretty-print', false)
+  .action((opts: { limit?: string; pretty?: boolean }) => {
+    try {
+      const limit = parseInt(opts.limit || '20', 10);
+      const runs = runManager.listRuns().slice(0, limit);
+      printJSON({
+        status: 'success',
+        count: runs.length,
+        runs,
+      }, opts.pretty);
+    } catch (err: any) {
+      console.error(`❌ ${err.message}`);
+      process.exit(1);
+    }
+  });
+
 // ─── Top-level command ────────────────────────────────────────────────────────
 
 export const runCommand = new Command('run')
@@ -113,4 +153,5 @@ export const runCommand = new Command('run')
   .addCommand(runCreate)
   .addCommand(runGet)
   .addCommand(runResume)
-  .addCommand(runSave);
+  .addCommand(runSave)
+  .addCommand(runList);

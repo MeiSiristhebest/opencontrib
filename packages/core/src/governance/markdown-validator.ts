@@ -237,9 +237,12 @@ export function validateMarkdownIntegrity(text: string): MarkdownValidationRepor
     }
     if (inCodeBlock) return;
 
+    // Strip inline backtick code spans so `pointer resolve <uri>` is not parsed as raw HTML
+    const lineWithoutCodeSpans = line.replace(/`[^`]+`/g, '');
+
     let match: RegExpExecArray | null;
     tagRegex.lastIndex = 0;
-    while ((match = tagRegex.exec(line)) !== null) {
+    while ((match = tagRegex.exec(lineWithoutCodeSpans)) !== null) {
       const fullTag = match[0];
       const tagName = match[1].toLowerCase();
       const isClosing = fullTag.startsWith('</');

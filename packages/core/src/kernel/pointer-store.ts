@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import type {
   SmartPointer,
   PointerStoreApi,
@@ -9,16 +10,43 @@ import type {
   PointerEvidence,
 } from './contract.js';
 
+function getOpenContribHome(): string {
+  return process.env.OPENCONTRIB_HOME || os.homedir();
+}
+
 export class SmartPointerStore implements PointerStoreApi {
   private memoryMap = new Map<string, SmartPointer>();
-  private storageDir?: string;
+  private storageDir: string;
   private idCounters = new Map<string, number>();
 
   constructor(storageDir?: string) {
-    this.storageDir = storageDir;
-    if (this.storageDir && !fs.existsSync(this.storageDir)) {
-      fs.mkdirSync(this.storageDir, { recursive: true });
+    this.storageDir = storageDir || path.join(getOpenContribHome(), '.opencontrib', 'pointers');
+    if (!fs.existsSync(this.storageDir)) {
+      try {
+        fs.mkdirSync(this.storageDir, { recursive: true });
+      } catch {}
+    } else {
+      this.hydrateFromDisk();
     }
+  }
+
+  public hydrateFromDisk(): void {
+    if (!this.storageDir || !fs.existsSync(this.storageDir)) return;
+    try {
+      const files = fs.readdirSync(this.storageDir);
+      for (const file of files) {
+        if (file.endsWith('.json')) {
+          const filePath = path.join(this.storageDir, file);
+          try {
+            const content = fs.readFileSync(filePath, 'utf8');
+            const pointer = JSON.parse(content) as SmartPointer;
+            if (pointer && pointer.uri) {
+              this.memoryMap.set(pointer.uri, pointer);
+            }
+          } catch {}
+        }
+      }
+    } catch {}
   }
 
   public create(params: PointerCreateOptions): SmartPointer {
@@ -64,6 +92,9 @@ export class SmartPointerStore implements PointerStoreApi {
 
   public get(uri: string): SmartPointer | undefined {
     const parsedUri = this.normalizeUri(uri);
+    if (!this.memoryMap.has(parsedUri)) {
+      this.hydrateFromDisk();
+    }
     return this.memoryMap.get(parsedUri);
   }
 
@@ -109,6 +140,7 @@ export class SmartPointerStore implements PointerStoreApi {
   }
 
   public list(namespace?: string): SmartPointer[] {
+    this.hydrateFromDisk();
     const all = Array.from(this.memoryMap.values());
     if (!namespace) return all;
     return all.filter((p) => p.namespace === namespace);

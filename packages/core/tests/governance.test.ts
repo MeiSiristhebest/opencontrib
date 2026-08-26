@@ -18,7 +18,7 @@ describe('Governance & Anti-AI Audit Engine', () => {
   });
 
   it('passes clean, direct humanized engineering text', () => {
-    const cleanText = 'Fixes #402 by adding null checks in parseStream and releasing socket descriptors in finally block.';
+    const cleanText = 'Fixes #402 in opencontrib core by adding null checks in parseStream and releasing socket descriptors in finally block.';
     const result = lintAntiAiText(cleanText);
 
     expect(result.isClean).toBe(true);
