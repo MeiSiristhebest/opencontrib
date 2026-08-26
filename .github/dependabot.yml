@@ -1,0 +1,22 @@
+version: 2
+
+updates:
+  # Keep GitHub Actions pinned SHAs in sync with their latest releases.
+  # Prevents the kind of invalid-SHA failure that blocked CI on 156e84b.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: ci
+      prefix-development: ci
+    groups:
+      actions:
+        patterns:
+          - actions/*
+          - oven-sh/*
