@@ -13,6 +13,7 @@ import { generatePropertyTest } from './fuzz-generator.js';
 import { constructPoCForFinding, verifyFindingAdversarially } from './adapters/piolium.js';
 import { parseCommandSpec } from '../sandbox/command-spec.js';
 import { isBinaryOnPath } from '../kernel/tool-registry.js';
+import { discoverDocker } from '../discovery/docker-discovery.js';
 
 function getEphemeralFallbackCommand(probeName: string, targetPath: string): string | undefined {
   const hasUv = isBinaryOnPath('uv');
@@ -32,6 +33,23 @@ function getEphemeralFallbackCommand(probeName: string, targetPath: string): str
   if (probeName === 'ast-grep') {
     if (hasBun) return `bun x @ast-grep/cli scan ${targetPath}`;
     if (hasNpx) return `npx @ast-grep/cli scan ${targetPath}`;
+  }
+  return undefined;
+}
+
+function getDockerFallbackCommand(probeName: string, targetPath: string): string | undefined {
+  const normalizedTarget = targetPath.replace(/\\/g, '/');
+  if (probeName === 'semgrep') {
+    return `docker run --rm -v "${normalizedTarget}:/src" -w /src returntocorp/semgrep semgrep scan --config auto --config p/security-audit --config p/owasp-top-ten --json --quiet /src`;
+  }
+  if (probeName === 'ruff') {
+    return `docker run --rm -v "${normalizedTarget}:/src" -w /src ghcr.io/astral-sh/ruff check --output-format json /src`;
+  }
+  if (probeName === 'knip') {
+    return `docker run --rm -v "${normalizedTarget}:/src" -w /src node:alpine npx --yes knip --reporter json`;
+  }
+  if (probeName === 'ast-grep') {
+    return `docker run --rm -v "${normalizedTarget}:/src" -w /src node:alpine npx --yes @ast-grep/cli scan /src`;
   }
   return undefined;
 }
@@ -225,6 +243,32 @@ export async function runProbes(
               }
             }
           }
+        }
+
+        // Docker container sandbox fallback when both primary & ephemeral fallbacks fail
+        if (!stdoutResult && executionError) {
+          try {
+            const dockerDiscovery = discoverDocker();
+            if (dockerDiscovery.found) {
+              const dockerCmd = getDockerFallbackCommand(probe.name, targetPath);
+              if (dockerCmd) {
+                try {
+                  const res = await execWithSpawn(dockerCmd, {
+                    cwd: targetPath,
+                    timeout: (probe.execution.timeoutMs || timeoutMs) * 2,
+                    maxBuffer: 10 * 1024 * 1024,
+                  });
+                  stdoutResult = res.stdout;
+                  executionError = undefined;
+                } catch (dockerErr: any) {
+                  if (dockerErr.stdout && typeof dockerErr.stdout === 'string' && dockerErr.stdout.trim().length > 0) {
+                    stdoutResult = dockerErr.stdout;
+                    executionError = undefined;
+                  }
+                }
+              }
+            }
+          } catch {}
         }
 
         if (stdoutResult) {

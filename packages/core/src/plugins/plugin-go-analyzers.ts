@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
 import { getToolTimeout } from '../kernel/config.js';
+import { discoverDocker } from '../discovery/docker-discovery.js';
 
 export interface GoVetIssue {
   file: string;
@@ -34,14 +35,21 @@ export const goAnalyzersPlugin: OpenContribPlugin = {
         if (!fs.existsSync(goMod)) return;
 
         const hasGo = host.isBinaryAvailable('go');
-        if (!hasGo) {
-          host.log('[Go Analyzers Probe] go compiler binary not found in PATH.', 'info');
+        const dockerDiscovery = !hasGo ? discoverDocker() : { found: false };
+        const hasDockerDaemon = dockerDiscovery.found;
+
+        if (!hasGo && !hasDockerDaemon) {
+          host.log('[Go Analyzers Probe] Neither go binary nor active docker daemon found.', 'info');
           return;
         }
 
         // 1. Run bodyclose / go vet analyzers
         try {
-          const { stderr, stdout } = await host.exec('go vet -json ./...', {
+          const vetCmd = hasGo
+            ? 'go vet -json ./...'
+            : `docker run --rm -v "${targetPath.replace(/\\/g, '/')}:/src" -w /src golang:latest go vet -json ./...`;
+
+          const { stderr, stdout } = await host.exec(vetCmd, {
             cwd: targetPath,
             timeout: getToolTimeout('CARGO_DENY', 30000),
           });

@@ -2,6 +2,7 @@ import * as path from 'path';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
 import { getToolTimeout } from '../kernel/config.js';
+import { discoverDocker } from '../discovery/docker-discovery.js';
 
 export interface RuffDiagnosticItem {
   code: string;
@@ -52,15 +53,21 @@ export const ruffPlugin: OpenContribPlugin = {
         fp.manifests.includes('requirements.txt'),
       scan: async (targetPath, pointers, host) => {
         const hasRuff = host.isBinaryAvailable('ruff') || host.isBinaryAvailable('uv');
-        if (!hasRuff) {
-          host.log('[Ruff Probe] ruff/uv not found in PATH. Install via: pip install ruff or curl -LsSf https://astral.sh/uv/install.sh', 'info');
+        const dockerDiscovery = !hasRuff ? discoverDocker() : { found: false };
+        const hasDockerDaemon = dockerDiscovery.found;
+
+        if (!hasRuff && !hasDockerDaemon) {
+          host.log('[Ruff Probe] Neither ruff/uv nor active docker daemon found. Install via: pip install ruff or curl -LsSf https://astral.sh/uv/install.sh', 'info');
           return;
         }
 
         try {
-          const cmd = host.isBinaryAvailable('ruff')
+          const isRuffGlobal = host.isBinaryAvailable('ruff');
+          let cmd = isRuffGlobal
             ? `ruff check --select ${RUFF_RULE_SELECTORS} --output-format json --no-fix .`
-            : `uv run ruff check --select ${RUFF_RULE_SELECTORS} --output-format json --no-fix .`;
+            : (hasRuff
+                ? `uv run ruff check --select ${RUFF_RULE_SELECTORS} --output-format json --no-fix .`
+                : `docker run --rm -v "${targetPath.replace(/\\/g, '/')}:/src" -w /src ghcr.io/astral-sh/ruff check --select ${RUFF_RULE_SELECTORS} --output-format json --no-fix .`);
 
           const { stdout } = await host.exec(cmd, {
             cwd: targetPath,

@@ -1,6 +1,7 @@
 import { spawnSync } from 'child_process';
 import type { ProbeManifest, RepoFingerprint, ProbeNegotiationPlan, SkippedProbeInfo, ProbeCost, ProbeStage } from './types.js';
 import { ProbeRegistry } from './registry.js';
+import { discoverDocker } from '../discovery/docker-discovery.js';
 
 export interface NegotiateOptions {
   only?: string[];
@@ -33,6 +34,45 @@ function isBinaryAvailable(binary: string): boolean {
     binaryCache.set(binary, false);
     return false;
   }
+}
+
+const DOCKER_SUPPORTED_PROBES = new Set([
+  'semgrep',
+  'ruff',
+  'knip',
+  'ast-grep',
+  'go-analyzers',
+  'nilaway',
+  'bodyclose',
+  'cargo-deny',
+]);
+
+function canExecuteProbe(probe: ProbeManifest): boolean {
+  if (!probe.activation.requiresBinaries || probe.activation.requiresBinaries.length === 0) {
+    return true;
+  }
+
+  // 1. Direct host binary match
+  const anyDirect = probe.activation.requiresBinaries.some((bin) => isBinaryAvailable(bin));
+  if (anyDirect) return true;
+
+  // 2. Ephemeral fallbacks (uvx for semgrep/ruff, npx/bun for knip/ast-grep)
+  if (probe.name === 'semgrep' || probe.name === 'ruff') {
+    if (isBinaryAvailable('uv')) return true;
+  }
+  if (probe.name === 'knip' || probe.name === 'ast-grep') {
+    if (isBinaryAvailable('npx') || isBinaryAvailable('bun')) return true;
+  }
+
+  // 3. Docker container fallback if Docker daemon is active
+  if (DOCKER_SUPPORTED_PROBES.has(probe.name)) {
+    try {
+      const docker = discoverDocker();
+      if (docker.found) return true;
+    } catch {}
+  }
+
+  return false;
 }
 
 export function negotiateProbes(
@@ -106,16 +146,13 @@ export function negotiateProbes(
     }
 
     const checkBin = options.checkBinaries !== false;
-    if (checkBin && probe.activation.requiresBinaries && probe.activation.requiresBinaries.length > 0) {
-      const anyBinaryFound = probe.activation.requiresBinaries.some((bin) => isBinaryAvailable(bin));
-      if (!anyBinaryFound) {
-        skippedProbes.push({
-          name: probe.name,
-          reason: 'binary_not_found',
-          details: `Required binary [${probe.activation.requiresBinaries.join(' or ')}] is not installed or not in PATH`,
-        });
-        continue;
-      }
+    if (checkBin && !canExecuteProbe(probe)) {
+      skippedProbes.push({
+        name: probe.name,
+        reason: 'binary_not_found',
+        details: `Required binary [${probe.activation.requiresBinaries?.join(' or ')}] is not installed in PATH, available via ephemeral runners, or supported via Docker`,
+      });
+      continue;
     }
 
     selectedProbes.push(probe);

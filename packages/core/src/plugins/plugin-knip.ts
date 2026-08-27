@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import type { CapabilityProviderDescriptor } from '../kernel/capability.js';
 import { getToolTimeout } from '../kernel/config.js';
+import { discoverDocker } from '../discovery/docker-discovery.js';
 
 export interface KnipJsonOutput {
   files?: string[];
@@ -49,16 +50,21 @@ export const knipPlugin: OpenContribPlugin = {
         if (!fs.existsSync(pkgJson)) return;
 
         const hasKnip = host.isBinaryAvailable('knip') || host.isBinaryAvailable('npx');
-        if (!hasKnip) {
-          host.log('[Knip Probe] Neither knip nor npx is available in PATH. Skipping dead code analysis.', 'warn');
+        const dockerDiscovery = !hasKnip ? discoverDocker() : { found: false };
+        const hasDockerDaemon = dockerDiscovery.found;
+
+        if (!hasKnip && !hasDockerDaemon) {
+          host.log('[Knip Probe] Neither knip/npx nor active docker daemon found. Skipping dead code analysis.', 'warn');
           return;
         }
 
         try {
           const isKnipGlobal = host.isBinaryAvailable('knip');
-          const cmd = isKnipGlobal
+          let cmd = isKnipGlobal
             ? 'knip --reporter json --no-exit-code'
-            : 'npx --yes knip --reporter json --no-exit-code';
+            : (hasKnip
+                ? 'npx --yes knip --reporter json --no-exit-code'
+                : `docker run --rm -v "${targetPath.replace(/\\/g, '/')}:/src" -w /src node:alpine npx --yes knip --reporter json --no-exit-code`);
 
           const { stdout } = await host.exec(cmd, {
             cwd: targetPath,
