@@ -8,12 +8,17 @@ import {
   renderMasterPrTemplate,
   validateMarkdownIntegrity,
   ContributionRunManager,
+  detectCommunityGate,
+  ActiveSessionManager,
 } from '@opencontrib/core';
-import { printJSON, parseJSON, readStdin, printPhaseGuidance } from '../utils/output.js';
+
+import { printJSON, parseJSON, readStdin, printPhaseGuidance, printCommunityGateAlert } from '../utils/output.js';
 
 import fs from 'node:fs';
+import path from 'node:path';
 
 const runManager = new ContributionRunManager();
+
 
 // ─── governance audit ─────────────────────────────────────────────────────────
 const auditCommand = new Command('audit')
@@ -317,13 +322,44 @@ const lintMdCommand = new Command('lint-md')
     }
   });
 
+// ─── governance gate ──────────────────────────────────────────────────────────
+const gateCommand = new Command('gate')
+  .description('Detect community contribution rules, auto-close policies, and issue approval requirements')
+  .argument('[target]', 'Path to target repository workspace', '.')
+  .option('--pretty', 'Pretty-print JSON output', false)
+  .action(async (target = '.', opts: { pretty?: boolean }) => {
+    try {
+      const active = ActiveSessionManager.getActiveSession();
+      const resolved = (target === '.' && active?.workspacePath && fs.existsSync(active.workspacePath))
+        ? active.workspacePath
+        : path.resolve(target);
+
+
+      const gate = await detectCommunityGate(resolved);
+      printJSON({ status: 'success', target: resolved, gate }, opts?.pretty);
+
+      if (gate.hasGatingRules) {
+        printCommunityGateAlert({
+          repo: active?.repoFullName || path.basename(resolved),
+          reasons: gate.reasons,
+          suggestedAction: gate.suggestedContributorAction,
+          isPaused: gate.requiresIssueApprovalBeforePr,
+        });
+      }
+    } catch (err: any) {
+      printJSON({ status: 'error', message: err.message }, opts?.pretty);
+      process.exit(1);
+    }
+  });
+
 // ─── Top-level command ────────────────────────────────────────────────────────
 
 export const governanceCommand = new Command('governance')
-  .description('Governance audit, impact analysis, CI diagnosis, PR template rendering, Issue Claim generation, and Markdown linting')
+  .description('Governance audit, impact analysis, CI diagnosis, PR template rendering, Issue Claim generation, community gate detection, and Markdown linting')
   .addCommand(auditCommand)
+  .addCommand(gateCommand)
   .addCommand(impactCommand)
   .addCommand(ciDiagnoseCommand)
   .addCommand(prTemplateCommand)
   .addCommand(claimCommand)
-  .addCommand(lintMdCommand);
+  .addCommand(lintMdCommand);

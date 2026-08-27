@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import { Command } from 'commander';
 import {
@@ -9,10 +10,22 @@ import {
   ProbeRegistry,
   createDefaultPluginHost,
   triagePointerFindings,
+  ActiveSessionManager,
   type ProbeCost,
   type DefectCategory,
 } from '@opencontrib/core';
 import { printJSON, printPhaseGuidance } from '../utils/output.js';
+
+function resolveTargetDirectory(target?: string): string {
+  if (target && target !== '.') {
+    return path.resolve(target);
+  }
+  const active = ActiveSessionManager.getActiveSession();
+  if (active?.workspacePath && fs.existsSync(active.workspacePath)) {
+    return active.workspacePath;
+  }
+  return path.resolve('.');
+}
 
 export const probeCommand = new Command('probe')
   .description('Progressive probe discovery, repository fingerprinting, hotspot forensics, and targeted scanning');
@@ -25,9 +38,11 @@ probeCommand
   .option('--max-cost <cost>', 'Maximum allowed execution cost: fast, medium, deep', 'medium')
   .option('--no-check-binaries', 'Skip checking host binary existence')
   .option('--pretty', 'Pretty-print JSON output', false)
-  .action(async (target = '.', opts) => {
+  .action(async (target, opts) => {
     try {
-      const fingerprint = await extractRepoFingerprint(target);
+      const resolved = resolveTargetDirectory(target);
+      const fingerprint = await extractRepoFingerprint(resolved);
+
       const only = opts.only ? opts.only.split(',').map((s: string) => s.trim()) : undefined;
       const skip = opts.skip ? opts.skip.split(',').map((s: string) => s.trim()) : undefined;
 
@@ -67,9 +82,9 @@ probeCommand
   .option('--all', 'Output all raw pointers without top-K triage', false)
   .option('--timeout <ms>', 'Per-probe execution timeout in ms', '30000')
   .option('--pretty', 'Pretty-print JSON output', false)
-  .action(async (target = '.', opts) => {
+  .action(async (target, opts) => {
     try {
-      const resolved = path.resolve(target);
+      const resolved = resolveTargetDirectory(target);
       const fingerprint = await extractRepoFingerprint(resolved);
       const host = await createDefaultPluginHost({ workspacePath: resolved });
       
@@ -138,9 +153,10 @@ probeCommand
   .option('--limit <number>', 'Number of top hotspot files to return', '5')
   .option('--since-months <number>', 'Months of commit history to inspect', '6')
   .option('--pretty', 'Pretty-print JSON output', false)
-  .action((target = '.', opts) => {
+  .action((target, opts) => {
     try {
-      const result = analyzeGitHotspots(target, {
+      const resolved = resolveTargetDirectory(target);
+      const result = analyzeGitHotspots(resolved, {
         limit: parseInt(opts.limit, 10),
         sinceMonths: parseInt(opts.sinceMonths, 10),
       });
@@ -164,9 +180,11 @@ probeCommand
   .option('--category <category>', 'Target defect category (e.g. numerical_bounds, protocol_drift, distributed_cache)', 'numerical_bounds')
   .option('--function-name <name>', 'Target function to fuzz', 'processInput')
   .option('--pretty', 'Pretty-print JSON output', false)
-  .action(async (target = '.', opts) => {
+  .action(async (target, opts) => {
     try {
-      const fingerprint = await extractRepoFingerprint(target);
+      const resolved = resolveTargetDirectory(target);
+      const fingerprint = await extractRepoFingerprint(resolved);
+
       const langLower = fingerprint.primaryLanguage.toLowerCase();
       const lang = ['typescript', 'javascript', 'python', 'rust', 'go'].includes(langLower)
         ? (langLower as any)

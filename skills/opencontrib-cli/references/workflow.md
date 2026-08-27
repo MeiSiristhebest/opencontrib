@@ -57,7 +57,14 @@ opencontrib probe run ./<repo_dir> --limit 5 --pretty
 - **Output**: Triaged Top-K Smart Pointers (`ptr://...`), categorized by defect archetype (e.g. `lifecycle_leak`, `protocol_drift`, `concurrency_race`).
 - **Next Step**: Follow the `▶ NEXT RECOMMENDED COMMAND` output by the CLI.
 
----
+> [!CAUTION]
+> **Track A Isolation Rule**: During proactive 0-day auditing, you are strictly **code-driven**. Defects MUST be discovered through probe scan results and source code analysis only. **NEVER** execute:
+> - `opencontrib scout` (Track B only — reactive issue scouting)
+> - `gh issue list` / `gh issue view` (Track B only — browsing existing issues)
+> - `opencontrib discovery qualify` / `opencontrib discovery rank` (Track B only)
+>
+> Running these commands during Track A wastes API calls and fundamentally changes the contribution from "proactive deep-water bug discovery" to "cherry-picking easy existing issues" — which is NOT what the user requested.
+
 
 ### Phase 3: Dereference Smart Pointer & Context Assembly
 Inspect the top Smart Pointer finding using progressive dereferencing:

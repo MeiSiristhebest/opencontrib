@@ -93,6 +93,50 @@ export async function extractRepoFingerprint(repoPath: string): Promise<RepoFing
     }
   }
 
+  // 1.1 Check for Monorepo sub-manifests in packages/*, modules/*, crates/*, apps/*, libs/*
+  const monorepoSubDirs = ['packages', 'modules', 'crates', 'apps', 'libs', 'submodules'];
+  for (const subDir of monorepoSubDirs) {
+    const subDirPath = path.join(resolvedPath, subDir);
+    if (fs.existsSync(subDirPath)) {
+      try {
+        const subEntries = fs.readdirSync(subDirPath, { withFileTypes: true });
+        for (const subEntry of subEntries) {
+          if (subEntry.isDirectory() && !subEntry.name.startsWith('.')) {
+            const subPkgPath = path.join(subDirPath, subEntry.name);
+            for (const manifest of MANIFEST_FILES) {
+              const subManifestPath = path.join(subPkgPath, manifest);
+              if (fs.existsSync(subManifestPath)) {
+                manifestsFound.push(`${subDir}/${subEntry.name}/${manifest}`);
+                if (!manifestsFound.includes(manifest)) {
+                  manifestsFound.push(manifest);
+                }
+
+                // Inspect sub-package.json for dependencies
+                if (manifest === 'package.json') {
+                  try {
+                    const subPkg = JSON.parse(fs.readFileSync(subManifestPath, 'utf8'));
+                    const subDeps = { ...(subPkg.dependencies || {}), ...(subPkg.devDependencies || {}) };
+                    if (subDeps['react']) frameworksFound.add('React');
+                    if (subDeps['vue']) frameworksFound.add('Vue');
+                    if (subDeps['next']) frameworksFound.add('Next.js');
+                    if (subDeps['express']) frameworksFound.add('Express');
+                    if (subDeps['@nestjs/core']) frameworksFound.add('NestJS');
+                    if (subDeps['jest'] || subDeps['vitest'] || subDeps['mocha']) hasTests = true;
+                  } catch {
+                    // Ignore JSON parse errors
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore errors reading monorepo directory
+      }
+    }
+  }
+
+
   // 2. Check for CI workflows
   const workflowsDir = path.join(resolvedPath, '.github', 'workflows');
   if (fs.existsSync(workflowsDir)) {

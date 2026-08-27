@@ -21,11 +21,20 @@ export interface ActiveSessionData {
 export class ActiveSessionManager {
   private sessionFilePath: string;
 
+  public static getActiveSession(customPath?: string): ActiveSessionData | null {
+    return new ActiveSessionManager(customPath).getActiveSession();
+  }
+
+  public static getActiveRunId(customPath?: string): string | null {
+    return new ActiveSessionManager(customPath).getActiveRunId();
+  }
+
   constructor(customPath?: string) {
     this.sessionFilePath = customPath || path.join(getOpenContribHome(), '.opencontrib', 'active_session.json');
   }
 
   public getActiveSession(): ActiveSessionData | null {
+
     try {
       if (!fs.existsSync(this.sessionFilePath)) {
         return null;

@@ -145,3 +145,60 @@ export function printPhaseGuidance(options: PhaseGuidanceOptions): void {
   console.log('─'.repeat(78) + '\n');
 }
 
+export interface DefectCardOptions {
+  file: string;
+  line: number;
+  category: string;
+  summary: string;
+  reproCommand?: string;
+  fixScopeSnippet?: string;
+  atomicSingleConcernNote?: string;
+}
+
+export function printDefectCard(options: DefectCardOptions): void {
+  console.log('\n┌' + '─'.repeat(76) + '┐');
+  console.log('│' + ' 🎯 SINGLE DEFECT SUMMARY CARD (RFC-100 ATOMIC GATE) '.padEnd(76) + '│');
+  console.log('├' + '─'.repeat(76) + '┤');
+  console.log(`│ 📍 Target File:   ${(options.file + ':' + options.line).padEnd(58)} │`);
+  console.log(`│ 🏷️  Category:      ${options.category.padEnd(58)} │`);
+  console.log(`│ 💥 Core Defect:   ${options.summary.slice(0, 58).padEnd(58)} │`);
+  if (options.summary.length > 58) {
+    console.log(`│                   ${options.summary.slice(58, 116).padEnd(58)} │`);
+  }
+  if (options.reproCommand) {
+    console.log(`│ 🧪 Repro Command: ${options.reproCommand.slice(0, 58).padEnd(58)} │`);
+  }
+  if (options.fixScopeSnippet) {
+    console.log(`│ 💡 Fix Scope:     ${options.fixScopeSnippet.slice(0, 58).padEnd(58)} │`);
+  }
+  const note = options.atomicSingleConcernNote || 'Atomic focus: 1 single issue, minimal targeted patch (<=30 lines)';
+  console.log(`│ 🎯 Invariant:     ${note.slice(0, 58).padEnd(58)} │`);
+  console.log('└' + '─'.repeat(76) + '┘\n');
+}
+
+export interface CommunityGateAlertOptions {
+  repo: string;
+  reasons: string[];
+  suggestedAction: string;
+  isPaused?: boolean;
+}
+
+export function printCommunityGateAlert(options: CommunityGateAlertOptions): void {
+  console.log('\n┌' + '─'.repeat(76) + '┐');
+  console.log('│' + ' 🛡️ COMMUNITY CONTRIBUTION GATE ACTIVE '.padEnd(76) + '│');
+  console.log('├' + '─'.repeat(76) + '┤');
+  console.log(`│ 📦 Target Repo:   ${options.repo.padEnd(58)} │`);
+  console.log(`│ 🚦 Gate Status:   ${(options.isPaused ? '🛑 HARD-PAUSED (Wait for Maintainer Approval)' : '⚠️ Active Review Rules').padEnd(58)} │`);
+  for (const reason of options.reasons) {
+    console.log(`│ • ${reason.slice(0, 72).padEnd(74)} │`);
+  }
+  console.log('├' + '─'.repeat(76) + '┤');
+  console.log(`│ ▶ REQUIRED ACTION:                                                         │`);
+  console.log(`│   ${options.suggestedAction.slice(0, 72).padEnd(73)}│`);
+  if (options.suggestedAction.length > 72) {
+    console.log(`│   ${options.suggestedAction.slice(72, 144).padEnd(73)}│`);
+  }
+  console.log('└' + '─'.repeat(76) + '┘\n');
+}
+
+

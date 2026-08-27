@@ -138,6 +138,7 @@ export function deriveEvidenceBackedQualityRubric(input: {
   hasReproductionAssertion?: boolean;
   testsPassed?: boolean;
   passedTestsCount?: number;
+  testCoveragePercent?: number;
   diffLines?: number;
   styleScore?: number;
   securityScore?: number;
@@ -150,6 +151,7 @@ export function deriveEvidenceBackedQualityRubric(input: {
     hasReproductionAssertion = false,
     testsPassed = false,
     passedTestsCount = 0,
+    testCoveragePercent,
     diffLines = 15,
     styleScore,
     securityScore,
@@ -162,9 +164,18 @@ export function deriveEvidenceBackedQualityRubric(input: {
   const implementation = diffLines <= 100 ? 94 : Math.max(60, 94 - Math.round((diffLines - 100) * 0.25));
   // Regression confidence: based on actual test passes
   const regression = testsPassed ? 93 : 50;
-  // Defensive and test coverage: based on real passed unit tests count or clean lint analysis
+  // Defensive and test coverage: based on real passed unit tests count and test coverage percentage (>=85% required)
   const defensiveCoverage = passedTestsCount > 0 ? 91 : subagentReviewAvailable ? 86 : 75;
-  const testCoverage = passedTestsCount > 0 ? 92 : subagentReviewAvailable ? 85 : 70;
+  let testCoverage = passedTestsCount > 0 ? 92 : subagentReviewAvailable ? 85 : 70;
+  if (typeof testCoveragePercent === 'number') {
+    if (testCoveragePercent >= 85) {
+      testCoverage = Math.min(100, Math.round(85 + (testCoveragePercent - 85) * 1.0));
+    } else {
+      // Under 85% test coverage strictly caps score below 80 to enforce Gated Block
+      testCoverage = Math.max(50, Math.round(testCoveragePercent * 0.85));
+    }
+  }
+
   // Style and Security scores: grounded in Subagent Review if available, or calibrated conservative defaults if not
   const styleMatch =
     typeof styleScore === 'number'
@@ -238,6 +249,7 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
       hasReproductionAssertion: Boolean(input.evidence?.reproductionVerified),
       testsPassed: Boolean(input.evidence?.allTestsPassing),
       passedTestsCount: input.evidence?.passedTestsCount || (input.evidence?.allTestsPassing ? 5 : 0),
+      testCoveragePercent: input.evidence?.testCoveragePercent,
       diffLines: lines,
       styleScore: input.subagentQualityScore,
       securityScore: input.subagentQualityScore,
@@ -287,11 +299,22 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
   if (!rfcGatePassed) {
     remediationSuggestions.push(`Diff exceeds 100 lines (${lines} lines). Split into RFC Discussion issue first.`);
   }
+  if (typeof input.evidence?.testCoveragePercent === 'number' && input.evidence.testCoveragePercent < 85) {
+    remediationSuggestions.push(
+      `PR accompanying test coverage is below mandatory 85% threshold (Current: ${input.evidence.testCoveragePercent}%). Must add additional unit tests to cover all modified branches.`,
+    );
+  }
   if (!confidence.isPassed) {
     remediationSuggestions.push(
       `Confidence score requirement not met (Overall: ${confidence.overallScore}%, Weakest: ${confidence.weakestDimension.dimension} at ${confidence.weakestDimension.score}%). Must reach >=90% overall and >=80% on all dimensions.`,
     );
+    if (!input.evidence) {
+      remediationSuggestions.push(
+        "Missing empirical evidence artifact: Run 'opencontrib evidence --test-cmd <cmd>' before governance audit to record fail-first and post-fix assertions.",
+      );
+    }
   }
+
   if (!input.variantHuntConducted) {
     remediationSuggestions.push('In-Domain Defense Recommendation: Run Variant Hunting sweep across sister modules to ensure zero parallel structural defects.');
   }

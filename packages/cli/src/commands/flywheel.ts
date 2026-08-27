@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import { ProfileFlywheel, ContributionRunManager, defaultActiveSessionManager } from '@opencontrib/core';
 import { printJSON, parseJSON, readStdin, printPhaseGuidance } from '../utils/output.js';
+import * as fs from 'fs';
 
 const flywheel = new ProfileFlywheel();
 const runManager = new ContributionRunManager();
@@ -11,12 +12,21 @@ const runManager = new ContributionRunManager();
 const flywheelSync = new Command('sync')
   .description('Persist contribution memory, update skill weights, refine heuristics')
   .requiredOption('--repo <name>', 'Repository full name')
+  .option('-f, --input-file <path>', 'Path to JSON file containing record')
   .option('--input <json>', 'Record JSON (runId, status, techStack, etc.)')
   .option('--pretty', 'Pretty-print', false)
-  .action(async (opts: { repo: string; input?: string; pretty?: boolean }) => {
+  .action(async (opts: { repo: string; inputFile?: string; input?: string; pretty?: boolean }) => {
     try {
-      const input = opts.input || await readStdin();
+      let input = '';
+      if (opts.inputFile && fs.existsSync(opts.inputFile)) {
+        input = fs.readFileSync(opts.inputFile, 'utf-8');
+      } else if (opts.input) {
+        input = opts.input;
+      } else {
+        input = await readStdin();
+      }
       const parsed = (parseJSON(input, 'stdin/--input') as any) || {};
+
       const runId = parsed.runId || runManager.resolveRunId();
       const status = parsed.status || 'submitted';
       const techStack = parsed.techStack && parsed.techStack.length > 0 ? parsed.techStack : ['general'];
@@ -67,12 +77,21 @@ const flywheelSync = new Command('sync')
 // ─── flywheel pr-track ────────────────────────────────────────────────────────
 const prTrackCommand = new Command('pr-track')
   .description('Track PR merge readiness, CI checks, and review feedback')
+  .option('-f, --input-file <path>', 'Path to JSON file containing PR track data')
   .option('--input <json>', 'JSON with pr, reviews, checkRuns, comments')
   .option('--pretty', 'Pretty-print', false)
-  .action(async (opts: { input?: string; pretty?: boolean }) => {
+  .action(async (opts: { inputFile?: string; input?: string; pretty?: boolean }) => {
     try {
-      const input = opts.input || await readStdin();
+      let input = '';
+      if (opts.inputFile && fs.existsSync(opts.inputFile)) {
+        input = fs.readFileSync(opts.inputFile, 'utf-8');
+      } else if (opts.input) {
+        input = opts.input;
+      } else {
+        input = await readStdin();
+      }
       const parsed = parseJSON(input, 'stdin/--input') as any;
+
       if (!parsed?.pr) {
         console.error('❌ Missing required "pr" field in input JSON');
         process.exit(1);

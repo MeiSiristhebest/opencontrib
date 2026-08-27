@@ -178,5 +178,45 @@ Fixes #1106
     expect(auditCorrupted.corruptedMarkdownIssues?.length).toBeGreaterThanOrEqual(2);
     expect(auditCorrupted.remediationSuggestions.some(s => s.includes('Markdown encoding/corruption'))).toBe(true);
   });
+
+  it('strictly enforces >=85% test coverage requirement on PR accompanying tests', () => {
+    // 1. Coverage < 85% (e.g. 70%) must fail the gate
+    const failAudit = auditGovernance({
+      patchContent: 'diff --git a/foo b/foo\n+const a = 1;',
+      prTitle: 'fix(ai): match subdomains',
+      prBody: 'Fixes #8736\n\n### Problem\nSubdomain proxy bug.',
+      evidence: {
+        reproductionVerified: true,
+        allTestsPassing: true,
+        passedTestsCount: 5,
+        testCoveragePercent: 70, // Below 85% threshold
+      },
+      lineCount: 15,
+      humanApproved: true,
+    });
+
+    expect(failAudit.isGatedPassed).toBe(false);
+    expect(failAudit.weakestDimension.score).toBeLessThan(80);
+    expect(failAudit.remediationSuggestions.some(s => s.includes('PR accompanying test coverage is below mandatory 85% threshold'))).toBe(true);
+
+    // 2. Coverage >= 85% (e.g. 95%) must pass the gate
+    const passAudit = auditGovernance({
+      patchContent: 'diff --git a/foo b/foo\n+const a = 1;',
+      prTitle: 'fix(ai): match subdomains',
+      prBody: 'Fixes #8736\n\n### Problem\nSubdomain proxy bug.',
+      evidence: {
+        reproductionVerified: true,
+        allTestsPassing: true,
+        passedTestsCount: 5,
+        testCoveragePercent: 95, // Above 85% threshold
+      },
+      lineCount: 15,
+      humanApproved: true,
+    });
+
+    expect(passAudit.isGatedPassed).toBe(true);
+    expect(passAudit.overallScore).toBeGreaterThanOrEqual(90);
+  });
 });
+
 

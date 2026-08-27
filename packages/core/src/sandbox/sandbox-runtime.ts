@@ -312,7 +312,118 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
   }
 }
 
+export class DockerSandboxProvider implements SandboxProvider {
+  public readonly name = 'docker_container';
+  private readonly defaultTimeoutMs = 120_000;
+  private readonly defaultImage = 'node:22-alpine';
+
+  getDeniedPaths(): string[] {
+    return [];
+  }
+
+  getAvailability(): SandboxAvailability {
+    try {
+      const res = spawnSync('docker', ['info'], { timeout: 3000, stdio: 'ignore' });
+      if (res.status === 0 && !res.error) {
+        return {
+          available: true,
+          isolationMode: 'CONTAINER_ISOLATION',
+          warnings: [],
+        };
+      }
+    } catch {}
+    return {
+      available: false,
+      isolationMode: 'UNAVAILABLE',
+      reason: 'Docker daemon is not reachable or not running.',
+      warnings: ['Docker is not available on host'],
+    };
+  }
+
+  isPathWithinBoundary(targetPath: string, rootBoundary: string): boolean {
+    const resolvedTarget = resolve(targetPath);
+    const resolvedRoot = resolve(rootBoundary);
+    return resolvedTarget.startsWith(resolvedRoot + sep) || resolvedTarget === resolvedRoot;
+  }
+
+  execute(options: SandboxExecutionOptions): SandboxExecutionResult {
+    const { cwd, command, args = [], commandSpec, timeoutMs = this.defaultTimeoutMs } = options;
+    const resolvedCwd = resolve(cwd);
+
+    let finalCommand = command || '';
+    let finalArgs = [...args];
+    if (commandSpec) {
+      finalCommand = commandSpec.executable;
+      finalArgs = [...commandSpec.args];
+    } else if (finalCommand && finalArgs.length === 0) {
+      const parsed = parseCommandSpec(finalCommand);
+      finalCommand = parsed.executable;
+      finalArgs = parsed.args;
+    }
+
+    const commandDisplay = `${finalCommand} ${finalArgs.join(' ')}`.trim();
+    const dockerArgs = [
+      'run',
+      '--rm',
+      '-i',
+      '-v',
+      `${resolvedCwd}:/workspace`,
+      '-w',
+      '/workspace',
+      this.defaultImage,
+      finalCommand,
+      ...finalArgs,
+    ];
+
+    try {
+      const result = spawnSync('docker', dockerArgs, {
+        encoding: 'utf-8',
+        timeout: timeoutMs,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      const stdout = String(result.stdout || '');
+      const stderr = String(result.stderr || '');
+      const errorText = result.error ? `\n${result.error.message}` : '';
+      const combinedOutput = `${stdout}\n${stderr}${errorText}`.trim();
+      const exitCode = typeof result.status === 'number' ? result.status : 1;
+
+      return {
+        command: commandDisplay,
+        exitCode,
+        passed: exitCode === 0,
+        stdout,
+        stderr,
+        output: combinedOutput,
+        isSandboxed: true,
+        isolationWarnings: [],
+      };
+    } catch (err: any) {
+      return {
+        command: commandDisplay,
+        exitCode: 1,
+        passed: false,
+        stdout: '',
+        stderr: err.message,
+        output: err.message,
+        isSandboxed: false,
+        isolationWarnings: [`Docker execution failed: ${err.message}`],
+      };
+    }
+  }
+}
+
 // Backward-compatible aliases and default instance
 export { SanitizedLocalSandboxProvider as SandboxRuntime };
 export const defaultSandboxRuntime = new SanitizedLocalSandboxProvider();
 export const defaultSandboxProvider = defaultSandboxRuntime;
+
+export function getAutoSandboxProvider(preferDocker = true): SandboxProvider {
+  if (preferDocker) {
+    const dockerProvider = new DockerSandboxProvider();
+    if (dockerProvider.getAvailability().available) {
+      return dockerProvider;
+    }
+  }
+  return defaultSandboxRuntime;
+}
