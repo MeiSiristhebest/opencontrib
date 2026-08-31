@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/opencontrib-cli"><img src="https://img.shields.io/npm/v/opencontrib-cli.svg?style=flat&color=3b82f6" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@opencontrib/cli"><img src="https://img.shields.io/npm/v/@opencontrib/cli.svg?style=flat&color=3b82f6" alt="npm version" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat" alt="License: MIT" /></a>
 </p>
 
@@ -90,7 +90,7 @@ OpenContrib is a **domain engine for open-source software contributions**. It eq
     └──────────────────────────────────────────────────────────────────┘
 ```
 
-> **Design Principle**: `packages/core/` maintains zero dependencies on interface layers. The CLI (`opencontrib-cli`) is the primary interface, while the MCP server (`opencontrib-mcp`) acts as an adapter for MCP-native agents.
+> **Design Principle**: `packages/core/` maintains zero dependencies on interface layers. The CLI (`@opencontrib/cli`) is the primary interface, while the MCP server (`@opencontrib/mcp`) acts as an adapter for MCP-native agents.
 
 ---
 
@@ -165,7 +165,7 @@ When a defect is remediated in one module (e.g. `mongodb-adapter.ts`), the gover
 
 ```bash
 # Global install via npm
-npm install -g opencontrib-cli
+npm install -g @opencontrib/cli
 
 # Verify environment & installed toolchains
 opencontrib doctor --pretty
@@ -174,7 +174,7 @@ opencontrib doctor --pretty
 Or run directly with `npx`:
 
 ```bash
-npx -y opencontrib-cli doctor
+npx -y @opencontrib/cli doctor
 ```
 
 ---
@@ -294,7 +294,7 @@ OpenContrib works out-of-the-box as an autonomous toolchain and MCP engine acros
 OpenContrib provides native `CLAUDE.md` instructions and MCP integration for Claude Code:
 ```bash
 # Add OpenContrib MCP server to Claude Code
-claude mcp add opencontrib npx -y opencontrib-cli mcp
+claude mcp add opencontrib npx -y @opencontrib/cli mcp
 ```
 
 ### 2. Cursor (Composer & Agent)
@@ -305,7 +305,7 @@ OpenContrib includes pre-configured `.cursor/rules/opencontrib.mdc` and `.cursor
   "mcpServers": {
     "opencontrib": {
       "command": "npx",
-      "args": ["-y", "opencontrib-cli", "mcp"]
+      "args": ["-y", "@opencontrib/cli", "mcp"]
     }
   }
 }
@@ -317,7 +317,7 @@ OpenContrib includes standard `AGENTS.md` and `CODEX.md` directives to orchestra
 ### 4. 1-Click Multi-Agent Setup
 ```bash
 # Auto-configure MCP servers across all detected IDEs & agents
-npx -y opencontrib-cli setup
+npx -y @opencontrib/cli setup
 ```
 
 Or add to client configuration:
@@ -327,7 +327,7 @@ Or add to client configuration:
   "mcpServers": {
     "opencontrib": {
       "command": "npx",
-      "args": ["-y", "opencontrib-mcp"]
+      "args": ["-y", "@opencontrib/mcp"]
     }
   }
 }
@@ -340,7 +340,7 @@ Or add to client configuration:
 ## 🛡️ The 6 Absolute Engineering Invariants
 
 1. **CLI-First Execution Priority (Dual-Ingress Ready)**:
-   Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 34 composable tools of `opencontrib-mcp` remain first-class supported for MCP-native agents.
+   Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 34 composable tools of `@opencontrib/mcp` remain first-class supported for MCP-native agents.
 2. **Anti-Drift Circuit Breaker (Max 3 `view_file` calls)**:
    Avoid blind sequential file reads (> 3 views). Pinpoint symbols strictly via Smart Pointer slices (`ptr://...`) or `grep_search`.
 3. **Mandatory Issue-First on 0-Days (No Blind PRs)**:

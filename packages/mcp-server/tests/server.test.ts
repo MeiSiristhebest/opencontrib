@@ -48,9 +48,9 @@ describe('OpenContrib MCP Installer', () => {
     const npxConfig = generateStandardMcpConfig('npx');
     const bunxConfig = generateStandardMcpConfig('bunx');
 
-    expect(OPENCONTRIB_MCP_PACKAGE).toBe('opencontrib-mcp');
-    expect(npxConfig.mcpServers.opencontrib.args).toEqual(['-y', 'opencontrib-mcp']);
-    expect(bunxConfig.mcpServers.opencontrib.args).toEqual(['opencontrib-mcp']);
+    expect(OPENCONTRIB_MCP_PACKAGE).toBe('@opencontrib/mcp');
+    expect(npxConfig.mcpServers.opencontrib.args).toEqual(['-y', '@opencontrib/mcp']);
+    expect(bunxConfig.mcpServers.opencontrib.args).toEqual(['@opencontrib/mcp']);
   });
 
   it('writes client configuration with the published npm package name', () => {
@@ -67,7 +67,7 @@ describe('OpenContrib MCP Installer', () => {
       const config = JSON.parse(readFileSync(target.configPath, 'utf-8'));
 
       expect(result.success).toBe(true);
-      expect(config.mcpServers.opencontrib.args).toEqual(['-y', 'opencontrib-mcp']);
+      expect(config.mcpServers.opencontrib.args).toEqual(['-y', '@opencontrib/mcp']);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

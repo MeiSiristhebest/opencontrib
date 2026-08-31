@@ -1,5 +1,5 @@
 ---
-name: opencontrib-cli
+name: @opencontrib/cli
 description: Use the `opencontrib` CLI to execute the 9-phase open source contribution engine. Activate when the user asks to find, develop, verify, or submit contributions/PRs to open source repositories, audit open source code, fix upstream issues, or interact with GitHub projects using OpenContrib. This skill enforces a strict phase-gated workflow with mandatory human approval at key checkpoints, long-term craftsmanship, and open source community etiquette.
 ---
 
@@ -53,7 +53,7 @@ Load these modular references into context **only when entering that specific ph
 
 1. **CLI-First Execution Priority (Dual-Ingress Architecture)**:
    - **CLI-First Priority**: Always prioritize executing `opencontrib <subcommand>` via terminal commands (`run_command`). The CLI provides automated active session inheritance, immediate log streaming, and deterministic `▶ NEXT RECOMMENDED COMMAND` prompts.
-   - **MCP First-Class Support**: The OpenContrib MCP Server (`opencontrib-mcp`) provides 34 composable JSON-RPC tools and resources when operating in MCP-only client environments.
+   - **MCP First-Class Support**: The OpenContrib MCP Server (`@opencontrib/mcp`) provides 34 composable JSON-RPC tools and resources when operating in MCP-only client environments.
 
 2. **File-First Markdown Protocol (No Inline String Markdown)**:
    - **NEVER** pass Markdown, multi-line text, or quotes as inline string arguments in CLI/PowerShell (e.g. `-f body="..."` or `--body "..."`).

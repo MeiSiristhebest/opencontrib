@@ -1,5 +1,5 @@
 {
-  "skill_name": "opencontrib-cli",
+  "skill_name": "@opencontrib/cli",
   "evals": [
     {
       "id": "eval_01_proactive_0day_probe",

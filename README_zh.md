@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/opencontrib-cli"><img src="https://img.shields.io/npm/v/opencontrib-cli.svg?style=flat&color=3b82f6" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@opencontrib/cli"><img src="https://img.shields.io/npm/v/@opencontrib/cli.svg?style=flat&color=3b82f6" alt="npm version" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat" alt="License: MIT" /></a>
 </p>
 
@@ -88,7 +88,7 @@ OpenContrib 是一套**开源贡献领域专用引擎**。它不试图替代大�
     └──────────────────────────────────────────────────────────────────┘
 ```
 
-> **设计原则**：`packages/core/` 对上层接口完全解耦。CLI（`opencontrib-cli`）作为无摩擦的第一类公民接口；同时提供标准 MCP 服务（`opencontrib-mcp`）以无缝接入 MCP 原生 Agent。
+> **设计原则**：`packages/core/` 对上层接口完全解耦。CLI（`@opencontrib/cli`）作为无摩擦的第一类公民接口；同时提供标准 MCP 服务（`@opencontrib/mcp`）以无缝接入 MCP 原生 Agent。
 
 ---
 
@@ -163,7 +163,7 @@ opencontrib pointer resolve ptr://findings/ast-ts-unhandled-promise-catch-foo-10
 
 ```bash
 # 通过 npm 全局安装
-npm install -g opencontrib-cli
+npm install -g @opencontrib/cli
 
 # 运行环境自检（检查宿主已安装的 SAST 探针与工具链）
 opencontrib doctor --pretty
@@ -172,7 +172,7 @@ opencontrib doctor --pretty
 也可以免安装通过 `npx` 直接运行：
 
 ```bash
-npx -y opencontrib-cli doctor
+npx -y @opencontrib/cli doctor
 ```
 
 ---
@@ -292,7 +292,7 @@ OpenContrib 开箱即用支持主流 AI 编程助手与自主智能体环境：
 OpenContrib 原生内置 `CLAUDE.md` 执行规范与 MCP 协议：
 ```bash
 # 在 Claude Code 中一键添加 OpenContrib MCP 服务
-claude mcp add opencontrib npx -y opencontrib-cli mcp
+claude mcp add opencontrib npx -y @opencontrib/cli mcp
 ```
 
 ### 2. Cursor (Composer & Agent)
@@ -303,7 +303,7 @@ OpenContrib 预置了 `.cursor/rules/opencontrib.mdc` 与 `.cursorrules` 规则�
   "mcpServers": {
     "opencontrib": {
       "command": "npx",
-      "args": ["-y", "opencontrib-cli", "mcp"]
+      "args": ["-y", "@opencontrib/cli", "mcp"]
     }
   }
 }
@@ -315,7 +315,7 @@ OpenContrib 预置了 `.cursor/rules/opencontrib.mdc` 与 `.cursorrules` 规则�
 ### 4. 一键全自动配置多 Agent 环境
 ```bash
 # 自动检测本地已安装的 IDE 与 Agent 环境并写入 MCP 配置
-npx -y opencontrib-cli setup
+npx -y @opencontrib/cli setup
 ```
 
 或手动添加到客户端 MCP 配置：
@@ -325,7 +325,7 @@ npx -y opencontrib-cli setup
   "mcpServers": {
     "opencontrib": {
       "command": "npx",
-      "args": ["-y", "opencontrib-mcp"]
+      "args": ["-y", "@opencontrib/mcp"]
     }
   }
 }

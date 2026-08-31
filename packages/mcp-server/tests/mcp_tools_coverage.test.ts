@@ -81,7 +81,7 @@ describe('MCP Tools Comprehensive Handler Coverage', () => {
   });
 
   it('executes eval tools handlers with temporary transcript', async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencontrib-mcp-eval-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), '@opencontrib/mcp-eval-'));
     const transcriptFile = path.join(tempDir, 'transcript.jsonl');
     fs.writeFileSync(
       transcriptFile,

@@ -1,11 +1,11 @@
 {
-  "name": "opencontrib-mcp",
+  "name": "@opencontrib/mcp",
   "version": "1.0.1",
   "description": "Agent-Native Open Source Contribution Engine & Model Context Protocol (MCP) Server",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "opencontrib-mcp": "dist/index.js"
+    "@opencontrib/mcp": "dist/index.js"
   },
   "files": [
     "dist/index.js",

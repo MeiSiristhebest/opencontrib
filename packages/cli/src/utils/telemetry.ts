@@ -54,13 +54,13 @@ export function sendAnonymousPing(commandName: string, cliVersion = '1.0.0'): vo
       const timeoutId = controller ? setTimeout(() => controller.abort(), 1500) : null;
 
       // Scarf Gateway telemetry pixel endpoint
-      const scarfUrl = `https://static.scarf.sh/a.png?x-pxid=p2L36r5iF7fAu6cd2J2Y41Cp6Z3YJHInGjzgouIZuLLHJhyoV9&package=opencontrib-cli&cmd=${encodeURIComponent(payload.command)}&os=${encodeURIComponent(payload.os)}&arch=${encodeURIComponent(payload.arch)}&runtime=${encodeURIComponent(payload.runtime)}`;
+      const scarfUrl = `https://static.scarf.sh/a.png?x-pxid=p2L36r5iF7fAu6cd2J2Y41Cp6Z3YJHInGjzgouIZuLLHJhyoV9&package=@opencontrib/cli&cmd=${encodeURIComponent(payload.command)}&os=${encodeURIComponent(payload.os)}&arch=${encodeURIComponent(payload.arch)}&runtime=${encodeURIComponent(payload.runtime)}`;
 
       fetch(scarfUrl, {
         method: 'GET',
         signal: controller?.signal,
         headers: {
-          'User-Agent': `opencontrib-cli/${cliVersion} (${payload.os}; ${payload.arch}; ${payload.runtime})`,
+          'User-Agent': `@opencontrib/cli/${cliVersion} (${payload.os}; ${payload.arch}; ${payload.runtime})`,
         },
       })
         .catch(() => {

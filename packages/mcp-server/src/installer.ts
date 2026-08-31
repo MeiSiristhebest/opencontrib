@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { homedir, platform } from 'os';
 
-export const OPENCONTRIB_MCP_PACKAGE = 'opencontrib-mcp';
+export const OPENCONTRIB_MCP_PACKAGE = '@opencontrib/mcp';
 
 export interface IdeConfigTarget {
   id: 'claude' | 'cursor' | 'windsurf' | 'antigravity' | 'vscode';
