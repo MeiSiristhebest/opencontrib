@@ -29,5 +29,16 @@
   "devDependencies": {
     "@types/node": "^22.13.4",
     "typescript": "^5.7.3"
-  }
+  },
+  "description": "Agent-Native Open Source Contribution Engine — Core domain algorithms, governance verification & risk engine",
+  "author": "OpenContrib Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MeiSiristhebest/opencontrib.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MeiSiristhebest/opencontrib/issues"
+  },
+  "homepage": "https://github.com/MeiSiristhebest/opencontrib#readme"
 }
