@@ -40,5 +40,14 @@
   "bugs": {
     "url": "https://github.com/MeiSiristhebest/opencontrib/issues"
   },
-  "homepage": "https://github.com/MeiSiristhebest/opencontrib#readme"
+  "homepage": "https://github.com/MeiSiristhebest/opencontrib#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "package.json"
+  ]
 }
