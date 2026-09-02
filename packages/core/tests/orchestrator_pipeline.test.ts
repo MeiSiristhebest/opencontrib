@@ -86,7 +86,13 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     estimatedWorkload: '30m-1h',
     coreDemand: 'Fix memory leak in listeners',
     discoveryMode: 'targeted_repo' as const,
-    matchedSignals: ['typescript', 'tooling'],
+    matchedSignals: {
+      techStack: ['typescript'],
+      focusAreas: ['tooling'],
+      labels: ['good first issue'],
+      freshnessModifier: 0,
+      actionabilityModifier: 0,
+    },
   };
 
   it('runs full AgentOrchestrator contribution pipeline with explicit MockLLMProvider in dry_run mode', async () => {
