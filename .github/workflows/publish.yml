@@ -1,15 +1,6 @@
 name: Publish to NPM
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/publish.yml"
-      - "bun.lock"
-      - "package.json"
-      - "packages/core/**"
-      - "packages/mcp-server/**"
-      - "packages/cli/**"
   release:
     types: [published]
   workflow_dispatch:
