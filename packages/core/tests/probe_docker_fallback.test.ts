@@ -6,12 +6,10 @@ describe('Probe Docker Fallback & Progressive Negotiation', () => {
   const sampleFingerprint: RepoFingerprint = {
     repoPath: process.cwd(),
     primaryLanguage: 'typescript',
-    languages: [{ language: 'typescript', filesCount: 10, linesCount: 1000 }],
+    languages: [{ language: 'typescript', filesCount: 10, percentage: 100 }],
     manifests: ['package.json'],
-    buildSystems: ['npm'],
-    testFrameworks: ['vitest'],
-    hasCiWorkflows: false,
-    fileTreeSample: ['package.json', 'src/index.ts'],
+    frameworks: ['vitest'],
+    hasTests: true,
   };
 
   it('negotiates semgrep, ast-grep, knip via Docker or ephemeral fallbacks', () => {
@@ -27,12 +25,10 @@ describe('Probe Docker Fallback & Progressive Negotiation', () => {
     const pyFingerprint: RepoFingerprint = {
       repoPath: process.cwd(),
       primaryLanguage: 'python',
-      languages: [{ language: 'python', filesCount: 5, linesCount: 500 }],
+      languages: [{ language: 'python', filesCount: 5, percentage: 100 }],
       manifests: ['pyproject.toml'],
-      buildSystems: ['pip'],
-      testFrameworks: ['pytest'],
-      hasCiWorkflows: false,
-      fileTreeSample: ['pyproject.toml', 'main.py'],
+      frameworks: ['pytest'],
+      hasTests: true,
     };
 
     const plan = negotiateProbes(pyFingerprint);
