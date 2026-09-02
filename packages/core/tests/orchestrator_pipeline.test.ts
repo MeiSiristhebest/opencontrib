@@ -50,6 +50,45 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     expect(result.data.targetFiles.length).toBe(1);
   });
 
+  const mockOpportunity = {
+    repoFullName: 'bytedance/flowgram.ai',
+    repoStars: 1200,
+    issueNumber: 42,
+    title: 'fix(tooling): clean up listeners on unmount',
+    url: 'https://github.com/bytedance/flowgram.ai/issues/42',
+    body: 'Fix memory leak by cleaning up event listeners on unmount',
+    labels: ['good first issue', 'typescript'],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    matchScore: 85,
+    rawScore: 85,
+    adjustedScore: 85,
+    rankScore: 85,
+    diversityPenalty: 0,
+    feasibility: {
+      level: 'fully_feasible' as const,
+      scorePenalty: 0,
+      scope: 'small_code_change' as const,
+      detectedRisks: [],
+      missingCapabilities: [],
+      mitigations: [],
+      rationale: 'Self-contained code fix',
+    },
+    qualification: {
+      isQualified: true,
+      track: 'fast_track' as const,
+      hasExistingPr: false,
+      hasClaimant: false,
+      authorFirstRightActive: false,
+      inspectedCommentsCount: 0,
+      botRules: [],
+    },
+    estimatedWorkload: '30m-1h',
+    coreDemand: 'Fix memory leak in listeners',
+    discoveryMode: 'targeted_repo' as const,
+    matchedSignals: ['typescript', 'tooling'],
+  };
+
   it('runs full AgentOrchestrator contribution pipeline with explicit MockLLMProvider in dry_run mode', async () => {
     const mockLlm = new LLMService(new MockLLMProvider());
     const orchestrator = new AgentOrchestrator({
@@ -70,6 +109,7 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
       },
       targetRepo: 'bytedance/flowgram.ai',
       humanApproved: true,
+      seedOpportunities: [mockOpportunity],
     });
 
     expect(result.status).toBe('DRY_RUN_COMPLETED');
@@ -102,6 +142,7 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
       },
       targetRepo: 'bytedance/flowgram.ai',
       humanApproved: false,
+      seedOpportunities: [mockOpportunity],
     });
 
     expect(result.status).toBe('HUMAN_APPROVAL_REQUIRED');
@@ -128,6 +169,7 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
       },
       targetRepo: 'bytedance/flowgram.ai',
       humanApproved: true,
+      seedOpportunities: [mockOpportunity],
     });
 
     expect(result.status).toBe('BLOCKED');

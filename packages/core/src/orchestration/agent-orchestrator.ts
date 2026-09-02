@@ -185,6 +185,7 @@ export class AgentOrchestrator {
     targetRepo?: string;
     humanApproved?: boolean;
     stressLoopRuns?: number;
+    seedOpportunities?: Opportunity[];
   }): Promise<OrchestratorRunResult> {
     if (this.isRunning) {
       return {
@@ -206,6 +207,7 @@ export class AgentOrchestrator {
     targetRepo?: string;
     humanApproved?: boolean;
     stressLoopRuns?: number;
+    seedOpportunities?: Opportunity[];
   }): Promise<OrchestratorRunResult> {
     const startTime = Date.now();
     const policy = this.stateMachine.getState().policy;
@@ -214,10 +216,12 @@ export class AgentOrchestrator {
     // Phase 0: Discovery & Scout
     // ─────────────────────────────────────────────────────────────
     this.stateMachine.transition('DISCOVERY', 'Scouting candidate issues with live GitHub search');
-    const opportunities = await scoutOpportunities(input.profile, {
-      repo: input.targetRepo,
-      limit: 5,
-    });
+    const opportunities = input.seedOpportunities && input.seedOpportunities.length > 0
+      ? input.seedOpportunities
+      : await scoutOpportunities(input.profile, {
+          repo: input.targetRepo,
+          limit: 5,
+        });
 
     if (opportunities.length === 0) {
       this.stateMachine.transition('BLOCKED', 'No qualified issues found');

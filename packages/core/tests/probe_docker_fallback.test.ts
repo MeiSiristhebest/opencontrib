@@ -13,7 +13,7 @@ describe('Probe Docker Fallback & Progressive Negotiation', () => {
   };
 
   it('negotiates semgrep, ast-grep, knip via Docker or ephemeral fallbacks', () => {
-    const plan = negotiateProbes(sampleFingerprint);
+    const plan = negotiateProbes(sampleFingerprint, { checkBinaries: false });
     const selectedNames = plan.selectedProbes.map((p) => p.name);
     expect(selectedNames).toContain('semgrep');
     expect(selectedNames).toContain('ast-grep');
