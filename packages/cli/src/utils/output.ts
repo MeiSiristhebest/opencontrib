@@ -1,13 +1,15 @@
 /** Shared output helpers for the CLI. */
 
-/** Pretty-print JSON with indented output. */
+import { renderJson } from '@opencontrib/core';
+
+/** Pretty-print JSON with indented output. Delegates to the shared core renderer. */
 export function printJSON(value: unknown, pretty = false): void {
-  console.log(JSON.stringify(value, null, pretty ? 2 : undefined));
+  console.log(renderJson(value, pretty));
 }
 
 /** Print a single-line compact JSON (best for pipeline consumption). */
 export function printCompact(value: unknown): void {
-  console.log(JSON.stringify(value));
+  console.log(renderJson(value));
 }
 
 /** Read the full stdin stream into a string with TTY check and timeout protection. */

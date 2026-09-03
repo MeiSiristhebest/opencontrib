@@ -3,10 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { TOOL_REGISTRY, type ToolRegistryEntry } from './tool-registry.js';
+import { getOpenContribHome } from './home.js';
 
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || os.homedir();
-}
 
 export interface PluginState {
   enabled: boolean;

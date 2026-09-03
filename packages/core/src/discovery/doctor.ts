@@ -5,10 +5,8 @@ import { join } from 'path';
 import { discoverDocker } from './docker-discovery.js';
 import { isBinaryOnPath, areBinariesOnPath } from '../kernel/tool-registry.js';
 import { defaultPluginManager } from '../kernel/plugin-manager.js';
-
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || homedir();
-}
+import { getOpenContribHome } from '../kernel/home.js';
+
 
 export interface ContingencyPlanInfo {
   activePlan: string;

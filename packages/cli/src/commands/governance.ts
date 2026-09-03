@@ -13,6 +13,7 @@ import {
 } from '@opencontrib/core';
 
 import { printJSON, parseJSON, readStdin, printPhaseGuidance, printCommunityGateAlert } from '../utils/output.js';
+import { CliExitError } from '../utils/exit.js';
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,7 +53,7 @@ const auditCommand = new Command('audit')
           patchContent = fs.readFileSync(opts.patch, 'utf-8');
         } catch (err: any) {
           console.error(`Failed to read patch file "${opts.patch}": ${err.message}`);
-          process.exit(1);
+          throw new CliExitError(1);
         }
       }
 
@@ -62,7 +63,7 @@ const auditCommand = new Command('audit')
           prBodyContent = fs.readFileSync(opts.prBodyFile, 'utf-8');
         } catch (err: any) {
           console.error(`Failed to read PR body file "${opts.prBodyFile}": ${err.message}`);
-          process.exit(1);
+          throw new CliExitError(1);
         }
       }
 
@@ -115,7 +116,9 @@ const auditCommand = new Command('audit')
           ],
           nextCommand: 'opencontrib governance audit --patch <file> --pr-title <title> --allow-unverified',
         });
-        process.exit(2);
+        // Signal the boundary to exit(2). The command action itself must not
+        // call process.exit — the CLI entry point owns process lifecycle.
+        throw new CliExitError(2);
       }
 
       printPhaseGuidance({
@@ -129,8 +132,9 @@ const auditCommand = new Command('audit')
         ],
       });
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       printJSON({ status: 'error', message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -158,8 +162,9 @@ const impactCommand = new Command('impact')
         analysis,
       }, opts.pretty);
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       printJSON({ status: 'error', message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -180,7 +185,7 @@ const ciDiagnoseCommand = new Command('ci-diagnose')
       }
       if (!rawLog) {
         console.error('❌ No log input. Use --log-file <path> or pipe via stdin');
-        process.exit(1);
+        throw new CliExitError(1);
       }
       const report = parseCiRawLogs(rawLog);
       printJSON({
@@ -188,8 +193,9 @@ const ciDiagnoseCommand = new Command('ci-diagnose')
         report,
       }, opts.pretty);
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       printJSON({ status: 'error', message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -260,8 +266,9 @@ const prTemplateCommand = new Command('pr-template')
         ],
       });
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       printJSON({ status: 'error', message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -293,8 +300,9 @@ const claimCommand = new Command('claim')
       }
       printJSON({ status: 'success', payload }, opts.pretty);
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       printJSON({ status: 'error', message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -317,8 +325,9 @@ const lintMdCommand = new Command('lint-md')
         report,
       }, opts?.pretty);
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       printJSON({ status: 'error', message: err.message }, opts?.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -347,8 +356,9 @@ const gateCommand = new Command('gate')
         });
       }
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       printJSON({ status: 'error', message: err.message }, opts?.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 

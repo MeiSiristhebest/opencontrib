@@ -1,12 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir as osHomedir } from 'os';
 import { join } from 'path';
-
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || osHomedir();
-}
+
 
 import type { ContributionRecord } from '../contracts/schemas.js';
+import { getOpenContribHome } from '../kernel/home.js';
 
 export class ProfileFlywheel {
   private ledgerPath: string;

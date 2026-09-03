@@ -93,101 +93,34 @@ export class OpenAICompatibleProvider implements LLMProvider {
 }
 
 /**
- * Mock LLM Provider strictly for testing or offline simulations.
- * Must be explicitly instantiated or opted-in; never silently masquerades in production.
+ * MockLLMProvider is intentionally NOT defined here. It lives in
+ * `./testkit/mock-llm.ts` (TEST-ONLY) so it can never be wired into a
+ * production code path. The governance engine is an anti-fabrication gate;
+ * shipping a provider that returns hard-coded ~94 confidence scores would
+ * silently defeat that gate.
  */
-export class MockLLMProvider implements LLMProvider {
-  private fallbackHandler?: (prompt: string) => Promise<string>;
-
-  constructor(fallbackHandler?: (prompt: string) => Promise<string>) {
-    this.fallbackHandler = fallbackHandler;
-  }
-
-  async complete(prompt: string, systemPrompt?: string): Promise<string> {
-    if (this.fallbackHandler) {
-      return this.fallbackHandler(prompt);
-    }
-
-    // 1. Subagent Review Evaluation
-    if (
-      prompt.includes('SubagentReviewEvaluationSchema') ||
-      prompt.includes('Maintainer Reviewer') ||
-      prompt.includes('Maintainer/Security/QA') ||
-      prompt.includes('confidence breakdown') ||
-      prompt.includes('confidenceBreakdown') ||
-      prompt.includes('maintainerPerspective')
-    ) {
-      return JSON.stringify({
-        maintainerPerspective: {
-          acceptanceLikelihood: 'HIGH',
-          styleConformance: 'Conforms to repository standards',
-          concerns: [],
-        },
-        securityPerspective: {
-          vulnerabilitiesDetected: false,
-          findings: [],
-        },
-        qaPerspective: {
-          testAdequacy: 'Comprehensive test plan',
-          flakyRisk: 'Low',
-        },
-        confidenceBreakdown: {
-          rootCause: 94,
-          implementation: 93,
-          regression: 91,
-          defensiveCoverage: 89,
-          testCoverage: 92,
-          styleMatch: 95,
-          securityAudit: 94,
-        },
-      });
-    }
-
-    // 2. Patch Draft
-    if (
-      prompt.includes('PatchDraftSchema') ||
-      prompt.includes('surgical patch') ||
-      prompt.includes('targetFiles') ||
-      prompt.includes('Generate patch') ||
-      prompt.includes('generate a minimal surgical patch')
-    ) {
-      return JSON.stringify({
-        title: 'fix: address issue with surgical patch',
-        summary: 'Surgical bugfix addressing root cause.',
-        rationale: 'Minimal surgical patch adhering to style rules.',
-        targetFiles: [{ path: 'src/index.ts', reason: 'Primary implementation' }],
-        files: [
-          {
-            path: 'src/index.ts',
-            operation: 'MODIFY',
-            content: '// Surgical bugfix patch\n',
-            explanation: 'Surgical fix.',
-          },
-        ],
-        implementationSteps: ['Apply fix', 'Run tests'],
-        regressionTestPlan: ['Run regression tests'],
-        estimatedDiffLines: 12,
-      });
-    }
-
-    return '{}';
-  }
-}
-
-// Backward compatibility alias for legacy tests
-export const MockOrDirectLLMProvider = MockLLMProvider;
+import { MockLLMProvider } from '../testkit/mock-llm.js';
+export { MockLLMProvider };
 
 export class LLMService {
   private provider: LLMProvider;
 
   constructor(provider?: LLMProvider) {
     if (provider) {
+      // Guard: a fabricating mock provider must never reach a production run.
+      if (provider instanceof MockLLMProvider && process.env.NODE_ENV === 'production') {
+        throw new Error(
+          '[Security] MockLLMProvider is forbidden in production (NODE_ENV=production). ' +
+            'Use a real LLMProvider (e.g. OpenAICompatibleProvider).',
+        );
+      }
       this.provider = provider;
     } else if (process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || process.env.ANTHROPIC_API_KEY) {
       this.provider = new OpenAICompatibleProvider();
     } else {
       throw new Error(
-        'LLMService: No LLM Provider configured. Pass an explicit provider (e.g. new OpenAICompatibleProvider() or new MockLLMProvider() in tests) or set OPENAI_API_KEY / LLM_API_KEY.',
+        'LLMService: No LLM Provider configured. Pass an explicit provider ' +
+          '(e.g. new OpenAICompatibleProvider()) or set OPENAI_API_KEY / LLM_API_KEY.',
       );
     }
   }

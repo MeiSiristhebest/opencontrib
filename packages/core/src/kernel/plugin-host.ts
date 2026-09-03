@@ -1,4 +1,3 @@
-import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -19,10 +18,9 @@ import { CapabilityRouter } from './capability-router.js';
 import { EvidenceGraph } from './evidence-graph.js';
 import { ProbeScanScheduler } from './scan-scheduler.js';
 import { parseCommandSpec } from '../sandbox/command-spec.js';
+import { getOpenContribHome } from './home.js';
+import { execWithSpawn, defaultBinaryProbe } from './process-runner.js';
 
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || os.homedir();
-}
 
 /** Credential-bearing env var keys that must never be passed to plugin subprocesses. */
 const PLUGIN_CREDENTIAL_ENV_KEYS = new Set([
@@ -67,48 +65,6 @@ function buildSanitizedPluginEnv(): NodeJS.ProcessEnv {
 
 const SANITIZED_PLUGIN_ENV = buildSanitizedPluginEnv();
 
-const binaryCache = new Map<string, boolean>();
-
-function execWithSpawn(cmd: string, opts: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string }> {
-  const cwd = opts.cwd || process.cwd();
-  const parsed = parseCommandSpec(cmd);
-  if (!parsed.executable) {
-    return Promise.reject(new Error('Empty command'));
-  }
-  return new Promise((resolve, reject) => {
-    let stdout = '';
-    let stderr = '';
-    let killed = false;
-
-    const child = spawn(parsed.executable, parsed.args, {
-      cwd,
-      shell: process.platform === 'win32',
-      env: SANITIZED_PLUGIN_ENV,
-    });
-
-    const timer = opts.timeout
-      ? setTimeout(() => {
-          if (killed) return;
-          killed = true;
-          try {
-            child.kill(process.platform === 'win32' ? undefined : 'SIGKILL');
-          } catch {}
-          reject(new Error(`Command timed out after ${opts.timeout}ms: ${parsed.executable}`));
-        }, opts.timeout)
-      : undefined;
-
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', (err) => { clearTimeout(timer); reject(err); });
-    child.on('close', (code: number | null) => {
-      clearTimeout(timer);
-      if (killed) return;
-      if (code !== 0) reject(new Error(stderr || `Command exited with code ${code}: ${parsed.executable}`));
-      else resolve({ stdout, stderr });
-    });
-  });
-}
-
 export class PluginHost implements ProbeRegistryApi {
   private plugins = new Map<string, OpenContribPlugin>();
   private pluginCapabilities = new Map<string, { probes: string[]; tools: string[] }>();
@@ -135,23 +91,17 @@ export class PluginHost implements ProbeRegistryApi {
   // ── ProbeRegistryApi Implementation ──
 
   public isBinaryAvailable(bin: string): boolean {
-    if (binaryCache.has(bin)) return binaryCache.get(bin)!;
-    try {
-      const isWindows = process.platform === 'win32';
-      const cmd = isWindows ? 'where.exe' : 'command';
-      const args = isWindows ? ['-q', bin] : ['-v', bin];
-      const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000, env: SANITIZED_PLUGIN_ENV });
-      binaryCache.set(bin, result.status === 0);
-      return result.status === 0;
-    } catch {
-      binaryCache.set(bin, false);
-      return false;
-    }
+    return defaultBinaryProbe.isAvailable(bin);
   }
 
   public async exec(cmd: string, opts: { cwd?: string; timeout?: number } = {}): Promise<{ stdout: string; stderr: string }> {
     const cwd = opts.cwd || this.workspacePath;
-    return execWithSpawn(cmd, { ...opts, cwd });
+    return execWithSpawn(cmd, {
+      ...opts,
+      cwd,
+      shell: process.platform === 'win32',
+      env: SANITIZED_PLUGIN_ENV,
+    });
   }
 
   public register(probe: ProbeDescriptor): void {
@@ -184,6 +134,14 @@ export class PluginHost implements ProbeRegistryApi {
 
   // ── Plugin Lifecycle & Host Services ──
 
+  /**
+   * @deprecated Code-driven plugin registration is being consolidated onto the
+   * data-driven {@link ProbeRegistry} (the single source of truth for probe
+   * *definitions*, per architecture review §16 stage 4). New capabilities should
+   * be declared as `ProbeManifest`s via `ProbeRegistry.register(manifest)`;
+   * this runtime `OpenContribPlugin` path is retained only for backward
+   * compatibility and will be removed in a later phase.
+   */
   public async registerPlugin(plugin: OpenContribPlugin): Promise<void> {
     if (this.plugins.has(plugin.name)) {
       await this.unregisterPlugin(plugin.name);
@@ -215,20 +173,7 @@ export class PluginHost implements ProbeRegistryApi {
       log: (msg: string, level = 'info') => {
         console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](msg);
       },
-      isBinaryAvailable: (bin: string) => {
-        if (binaryCache.has(bin)) return binaryCache.get(bin)!;
-        try {
-          const isWindows = process.platform === 'win32';
-          const cmd = isWindows ? 'where.exe' : 'command';
-          const args = isWindows ? ['-q', bin] : ['-v', bin];
-          const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000 });
-          binaryCache.set(bin, result.status === 0);
-          return result.status === 0;
-        } catch {
-          binaryCache.set(bin, false);
-          return false;
-        }
-      },
+      isBinaryAvailable: (bin: string) => defaultBinaryProbe.isAvailable(bin),
     };
 
     const registeredProbes: string[] = [];
@@ -323,6 +268,9 @@ export class PluginHost implements ProbeRegistryApi {
   /**
    * Progressive Capability Negotiation:
    * Match all registered probes against the target repository fingerprint.
+   *
+   * @deprecated Prefer `negotiateProbes` from `probe/negotiator.ts`, which
+   * negotiates against the canonical `ProbeRegistry` (single source of truth).
    */
   public negotiate(
     fingerprint: RepoFingerprint,

@@ -7,6 +7,7 @@ import type { BenchmarkResult, BenchmarkScenario } from './types.js';
 export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
   {
     id: 'track-a-0day-ssrf-ipv6',
+    isSynthetic: true,
     name: 'Track A: Proactive 0-Day WHATWG IPv6 SSRF Defect Discovery & Remediation',
     track: 'TRACK_A_PROACTIVE_PROBE',
     targetRepo: 'mock/agent-memory-hub',
@@ -24,6 +25,7 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
   },
   {
     id: 'track-b-reactive-mutex-leak',
+    isSynthetic: true,
     name: 'Track B: Reactive Open Issue Scouting, Qualification & Mutex Fix',
     track: 'TRACK_B_ISSUE_DISCOVERY',
     targetRepo: 'mock/microservice-go',

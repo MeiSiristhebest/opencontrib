@@ -2,10 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { CapabilityType } from './capability.js';
-
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || os.homedir();
-}
+import { getOpenContribHome } from './home.js';
+
 
 export interface OpenContribPolicy {
   network: 'allowed' | 'denied';

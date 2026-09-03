@@ -2,10 +2,17 @@ import { beforeAll, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { LLMService, MockLLMProvider, MockOrDirectLLMProvider } from '../src/llm/llm-service.js';
+import { LLMService, MockLLMProvider } from '../src/llm/llm-service.js';
 import { PatchDraftSchema } from '../src/contracts/llm-schemas.js';
 import { AgentOrchestrator } from '../src/orchestration/agent-orchestrator.js';
 import { OpenContribStorage } from '../src/storage/storage-layout.js';
+import { isIntegrationEnabled } from './helpers/integration-guard.js';
+
+// The three pipeline tests depend on live GitHub returning issues that match a
+// specific profile for bytedance/flowgram.ai, so they are opt-in only
+// (OPENCONTRIB_NETWORK_TESTS=1) — skipped by default even when network+auth are
+// present, because the live data may not satisfy the test's assumptions.
+const integrationEnabled = isIntegrationEnabled();
 
 describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
   beforeAll(() => {
@@ -39,7 +46,7 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
       estimatedDiffLines: 15,
     });
 
-    const llm = new LLMService(new MockOrDirectLLMProvider(async () => `\`\`\`json\n${validJson}\n\`\`\``));
+    const llm = new LLMService(new MockLLMProvider(async () => `\`\`\`json\n${validJson}\n\`\`\``));
     const result = await llm.generateStructured({
       prompt: 'Generate patch',
       schema: PatchDraftSchema,
@@ -50,7 +57,7 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     expect(result.data.targetFiles.length).toBe(1);
   });
 
-  it('runs full AgentOrchestrator contribution pipeline with explicit MockLLMProvider in dry_run mode', async () => {
+  it.skipIf(!integrationEnabled)('runs full AgentOrchestrator contribution pipeline with explicit MockLLMProvider in dry_run mode', async () => {
     const mockLlm = new LLMService(new MockLLMProvider());
     const orchestrator = new AgentOrchestrator({
       policy: {
@@ -83,7 +90,7 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
     expect(result.reportSummary).toContain('Dry run completed');
   }, { timeout: 60000 });
 
-  it('pauses at HUMAN_GATE when humanApproved is false in interactive mode', async () => {
+  it.skipIf(!integrationEnabled)('pauses at HUMAN_GATE when humanApproved is false in interactive mode', async () => {
     const mockLlm = new LLMService(new MockLLMProvider());
     const orchestrator = new AgentOrchestrator({
       policy: {
@@ -111,7 +118,7 @@ describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
 
   }, { timeout: 60000 });
 
-  it('strictly blocks execution when no LLM provider is configured (no fake patches)', async () => {
+  it.skipIf(!integrationEnabled)('strictly blocks execution when no LLM provider is configured (no fake patches)', async () => {
     const orchestratorWithoutLlm = new AgentOrchestrator({
       policy: {
         mode: 'dry_run',

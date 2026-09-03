@@ -74,6 +74,8 @@ export interface BenchmarkScenario {
   expectedDefectCwe?: string;
   maxAllowedSteps: number;
   requiredPhaseSequence: string[];
+  /** True for built-in reference repos (e.g. 'mock/agent-memory-hub'); false for real evaluation targets. */
+  isSynthetic?: boolean;
 }
 
 export interface BenchmarkResult {

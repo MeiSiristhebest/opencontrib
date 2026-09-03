@@ -25,7 +25,7 @@ describe('Contribution Run & Artifact Bundle Primitives', () => {
 
   it('creates an auditable contribution run session with manifest.json', () => {
     const customBase = makeTempDir();
-    const manager = new ContributionRunManager(customBase);
+    const manager = new ContributionRunManager({ baseDir: customBase });
 
     const manifest = manager.createRun({
       repoFullName: 'bytedance/flowgram.ai',
@@ -47,7 +47,7 @@ describe('Contribution Run & Artifact Bundle Primitives', () => {
 
   it('saves discrete stage artifacts and advances run phase seamlessly', () => {
     const customBase = makeTempDir();
-    const manager = new ContributionRunManager(customBase);
+    const manager = new ContributionRunManager({ baseDir: customBase });
 
     const manifest = manager.createRun({
       repoFullName: 'cloudwego/kitex',
@@ -104,7 +104,7 @@ describe('Contribution Run & Artifact Bundle Primitives', () => {
 
   it('resumes interrupted contribution run with state and suggested next action', () => {
     const customBase = makeTempDir();
-    const manager = new ContributionRunManager(customBase);
+    const manager = new ContributionRunManager({ baseDir: customBase });
 
     const manifest = manager.createRun({
       repoFullName: 'facebook/react',
@@ -284,7 +284,7 @@ describe('ActiveSessionManager & Pointer Store Persistence', () => {
     const sessionFile = join(tmpdir(), `active_session_${Date.now()}_res.json`);
     const { ActiveSessionManager, ContributionRunManager } = await import('../src/index.js');
     const sessionManager = new ActiveSessionManager(sessionFile);
-    const runManager = new ContributionRunManager(customBase);
+    const runManager = new ContributionRunManager({ baseDir: customBase });
 
     // Explicit run ID should resolve directly
     expect(runManager.resolveRunId('run_explicit_999')).toBe('run_explicit_999');

@@ -274,7 +274,7 @@ export function registerDiscoveryTools(server: McpServer): void {
           path: item.path,
           mode: '100644',
           type: item.type as any,
-          sha: 'placeholder',
+          ...(item.sha ? { sha: item.sha } : {}),
         })),
       });
 

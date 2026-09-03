@@ -1,13 +1,11 @@
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { homedir as osHomedir } from 'os';
 import { join } from 'path';
-
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || osHomedir();
-}
+
 
 import type { RepoMemoryEntry } from '../contracts/schemas.js';
 import { writeAtomic } from '../run/artifact-bundle.js';
+import { getOpenContribHome } from '../kernel/home.js';
 
 export interface ContributionSubmissionInput {
   prUrl: string;

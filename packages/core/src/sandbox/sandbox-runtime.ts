@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'os';
 import { join, resolve, sep } from 'path';
 import { parseCommandSpec, type CommandSpec } from './command-spec.js';
 import { safeRmSync } from '../workspace/worktree-manager.js';
+import { sensitiveDeniedPaths } from './denied-paths.js';
 
 export interface SandboxExecutionOptions {
   cwd: string;
@@ -318,7 +319,7 @@ export class DockerSandboxProvider implements SandboxProvider {
   private readonly defaultImage = 'node:22-alpine';
 
   getDeniedPaths(): string[] {
-    return [];
+    return sensitiveDeniedPaths();
   }
 
   getAvailability(): SandboxAvailability {

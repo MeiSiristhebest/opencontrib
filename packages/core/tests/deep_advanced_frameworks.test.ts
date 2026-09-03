@@ -10,6 +10,9 @@ import {
   createDefaultPluginHost,
   type PointerStub,
 } from '../src/index.js';
+import { isTaskflowAvailable } from './helpers/integration-guard.js';
+
+const taskflowAvailable = isTaskflowAvailable();
 
 describe('Deep Advanced Frameworks (Alibaba OCR, Qodo PR-Agent, Piolium P12, GitHub SecLab Taskflow)', () => {
   let tempRepo: string;
@@ -110,7 +113,7 @@ describe('Deep Advanced Frameworks (Alibaba OCR, Qodo PR-Agent, Piolium P12, Git
     expect(variants[0].variantFile).toContain('v2.go');
   });
 
-  it('TaskflowEngine: executes declarative multi-step audit pipeline (GitHub SecLab)', async () => {
+  it.skipIf(!taskflowAvailable)('TaskflowEngine: executes declarative multi-step audit pipeline (GitHub SecLab)', async () => {
     const host = await createDefaultPluginHost({ workspacePath: tempRepo });
 
     const report = await TaskflowEngine.executeFlow(

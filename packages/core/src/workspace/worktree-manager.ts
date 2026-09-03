@@ -4,10 +4,8 @@ import { homedir as osHomedir, tmpdir } from 'os';
 import { dirname, join, resolve, sep } from 'path';
 import { sanitizeRunId } from '../run/artifact-bundle.js';
 import { ensureWorkspaceGuard, releaseWorkspaceGuard, isProtectedWorkspace } from './workspace-guard.js';
-
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || osHomedir();
-}
+import { getOpenContribHome } from '../kernel/home.js';
+
 
 /** Normalize path separators to forward slashes for consistent comparison on all platforms. */
 function norm(p: string): string {

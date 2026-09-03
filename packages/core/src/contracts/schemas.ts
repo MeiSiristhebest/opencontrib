@@ -48,7 +48,7 @@ export const QualificationResultSchema = z.object({
 });
 export type QualificationResult = z.infer<typeof QualificationResultSchema>;
 
-export const OpportunityOpportunitySchema = z.object({
+export const OpportunitySchema = z.object({
   repoFullName: z.string(),
   repoStars: z.number(),
   issueNumber: z.number(),
@@ -76,7 +76,7 @@ export const OpportunityOpportunitySchema = z.object({
     actionabilityModifier: z.number(),
   }).optional(),
 });
-export type Opportunity = z.infer<typeof OpportunityOpportunitySchema>;
+export type Opportunity = z.infer<typeof OpportunitySchema>;
 
 // ==========================================
 // 3. Proactive Probe Contracts

@@ -2,10 +2,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { ProbeManifest } from './types.js';
+import { getOpenContribHome } from '../kernel/home.js';
+import { defaultPluginManager } from '../kernel/plugin-manager.js';
 
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || os.homedir();
+/** Authority consulted to decide whether a probe is enabled. */
+export interface PluginStateProvider {
+  isEnabled(pluginId: string): boolean;
 }
+
 
 export const BUILTIN_PROBES: ProbeManifest[] = [
   // ── Dimension 1: AI-Native / Agentic Security & Review Frameworks ──
@@ -431,13 +435,15 @@ export const BUILTIN_PROBES: ProbeManifest[] = [
 export class ProbeRegistry {
   private pluginsDir: string;
   private memoryProbes: Map<string, ProbeManifest> = new Map();
+  private stateProvider: PluginStateProvider;
 
-  constructor(customPluginsDir?: string) {
+  constructor(customPluginsDir?: string, stateProvider: PluginStateProvider = defaultPluginManager) {
     this.pluginsDir = customPluginsDir || path.join(getOpenContribHome(), '.opencontrib', 'plugins');
     // Load built-in probes
     for (const probe of BUILTIN_PROBES) {
       this.memoryProbes.set(probe.name, probe);
     }
+    this.stateProvider = stateProvider;
     this.loadCustomPlugins();
   }
 
@@ -447,6 +453,21 @@ export class ProbeRegistry {
 
   public listAll(): ProbeManifest[] {
     return Array.from(this.memoryProbes.values());
+  }
+
+  /**
+   * Whether a probe is currently enabled. Delegates to the single enable/disable
+   * authority (`PluginManager` by default) so there is exactly one source of
+   * truth for plugin state — `ProbeRegistry` owns *definitions*, `PluginManager`
+   * owns *state* (architecture review §16 stage 4: avoid two sources of truth).
+   */
+  public isEnabled(name: string): boolean {
+    return this.stateProvider.isEnabled(name);
+  }
+
+  /** All registered probe definitions that are currently enabled. */
+  public listEnabled(): ProbeManifest[] {
+    return this.listAll().filter((p) => this.isEnabled(p.name));
   }
 
   public register(manifest: ProbeManifest): void {

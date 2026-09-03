@@ -113,7 +113,7 @@ const contextCommand = new Command('context')
         path: item.path,
         mode: '100644',
         type: item.type as any,
-        sha: item.sha || 'placeholder',
+        ...(item.sha ? { sha: item.sha } : {}),
       }));
       const context = await assembler.assembleContext({
         issue: {

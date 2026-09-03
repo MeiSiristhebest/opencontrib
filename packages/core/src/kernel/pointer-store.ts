@@ -9,10 +9,8 @@ import type {
   PointerSlice,
   PointerEvidence,
 } from './contract.js';
+import { getOpenContribHome } from './home.js';
 
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || os.homedir();
-}
 
 export class SmartPointerStore implements PointerStoreApi {
   private memoryMap = new Map<string, SmartPointer>();

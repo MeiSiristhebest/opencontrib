@@ -4,9 +4,6 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renam
 import { homedir as osHomedir } from 'os';
 import { basename, dirname, join, resolve, sep } from 'path';
 
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || osHomedir();
-}
 import type {
   ArtifactType,
   ContributionRunManifest,
@@ -15,6 +12,7 @@ import type {
   RunEvent,
   SavedArtifactResult,
 } from './types.js';
+import { getOpenContribHome } from '../kernel/home.js';
 
 export function writeAtomic(filePath: string, content: string): void {
   const dir = dirname(filePath);

@@ -3,6 +3,8 @@
  * Unified capability hierarchy, runtime-enforced scoped permissions, typed KernelEventMap, and runtime verification steps.
  */
 
+import type { PluginHost } from './plugin-host.js';
+
 export type DefectCategory =
   | 'protocol_drift'
   | 'lifecycle_leak'
@@ -156,7 +158,12 @@ export interface ProbeRegistryApi {
   listAll(): ProbeDescriptor[];
 }
 
-export type PluginHostContract = any;
+/**
+ * The contract a plugin host must satisfy. Previously typed as `any`, which silently
+ * defeated every compile-time safety check on the plugin execution surface.
+ * Now aliased to the concrete `PluginHost` class so assignments are actually verified.
+ */
+export type PluginHostContract = PluginHost;
 
 export type PluginPermission =
   | 'fs:read'

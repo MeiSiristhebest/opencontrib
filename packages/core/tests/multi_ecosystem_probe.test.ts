@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { probeRepository } from '../src/probe/probe-scanner.js';
+import { isGitHubReachable } from './helpers/integration-guard.js';
+
+const githubReachable = isGitHubReachable();
 
 describe('Multi-Ecosystem Deep Probe Scanner', () => {
-  it('identifies Go, Rust, Java, and CMake hygiene and workflow defects', async () => {
+  it.skipIf(!githubReachable)('identifies Go, Rust, Java, and CMake hygiene and workflow defects', async () => {
     // Tests scanner logic against bytedance/flowgram.ai
     const result = await probeRepository('bytedance/flowgram.ai');
 

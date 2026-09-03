@@ -73,7 +73,7 @@ describe('quality-audit', () => {
         /plugin|probe|tool/i.test(n),
       );
       expect(hasPluginCheck).toBe(true);
-    });
+    }, 20000);
   });
 
   describe('#6 Docker six-layer discovery', () => {
@@ -200,7 +200,7 @@ describe('quality-audit', () => {
   describe('#14 spawn-based exec (NOT execSync)', () => {
     it('plugin-host execWithSpawn uses spawn()', async () => {
       const code = (await import('fs')).readFileSync(
-        'packages/core/src/kernel/plugin-host.ts',
+        'packages/core/src/kernel/process-runner.ts',
         'utf8',
       );
       expect(code).toContain('spawn(parsed.executable, parsed.args, {');

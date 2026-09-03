@@ -3,25 +3,36 @@ import { homedir as osHomedir } from 'os';
 import { join } from 'path';
 import { ArtifactBundleManager } from './artifact-bundle.js';
 
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || osHomedir();
-}
 
 import type {
   ArtifactType,
   ContributionRunManifest,
   ContributionRunPhase,
   ContributionRunSummary,
+  CreateRunInput,
   SavedArtifactResult,
 } from './types.js';
+import { SystemClock, type Clock } from '../ports/clock.port.js';
+import { RandomIdGenerator, type IdGenerator } from '../ports/id-generator.port.js';
+import { ActiveSessionManager, defaultActiveSessionManager } from './active-session.js';
 
-export interface CreateRunInput {
-  repoFullName: string;
-  issueNumber?: number;
-  issueTitle?: string;
-  tags?: string[];
-  metadata?: Record<string, unknown>;
-}
+/** Phase → next suggested CLI/MCP action. Replaces the 10-branch switch (OCP). */
+const PHASE_TRANSITIONS: Record<ContributionRunPhase, string> = {
+  INITIALIZED: 'scout_opportunity',
+  OPPORTUNITY_SCOUTED: 'assemble_context',
+  PROBE_COMPLETED: 'assemble_context',
+  CONTEXT_ASSEMBLED: 'prepare_workspace',
+  WORKSPACE_PREPARED: 'draft_patch',
+  POC_GENERATED: 'draft_patch',
+  PATCH_DRAFTED: 'collect_evidence',
+  EVIDENCE_COLLECTED: 'audit_governance',
+  GOVERNANCE_AUDITED: 'render_pr_and_submit',
+  PR_SUBMITTED: 'sync_flywheel',
+  COMPLETED: 'none (run completed)',
+  FAILED: 'inspect_failure_and_replan',
+};
+
+export type { CreateRunInput };
 
 export interface ResumeRunResult {
   runId: string;
@@ -41,33 +52,46 @@ export interface ResumeRunResult {
   suggestedNextAction: string;
 }
 
-import { defaultActiveSessionManager } from './active-session.js';
+import { getOpenContribHome } from '../kernel/home.js';
 
 export class ContributionRunManager {
   private bundleManager: ArtifactBundleManager;
   private baseDir: string;
+  private readonly clock: Clock;
+  private readonly idGenerator: IdGenerator;
+  private readonly activeSession: ActiveSessionManager;
 
-  constructor(customBaseDir?: string) {
-    this.baseDir = customBaseDir || join(getOpenContribHome(), '.opencontrib', 'runs');
+  constructor(
+    deps: {
+      baseDir?: string;
+      clock?: Clock;
+      idGenerator?: IdGenerator;
+      activeSession?: ActiveSessionManager;
+    } = {},
+  ) {
+    this.baseDir = deps.baseDir || join(getOpenContribHome(), '.opencontrib', 'runs');
     this.bundleManager = new ArtifactBundleManager(this.baseDir);
+    this.clock = deps.clock ?? new SystemClock();
+    this.idGenerator = deps.idGenerator ?? new RandomIdGenerator();
+    this.activeSession = deps.activeSession ?? defaultActiveSessionManager;
   }
 
   resolveRunId(runId?: string): string | undefined {
     if (runId) return runId;
-    return defaultActiveSessionManager.getActiveRunId() || undefined;
+    return this.activeSession.getActiveRunId() || undefined;
   }
 
   generateRunId(repoFullName: string, issueNumber?: number): string {
-    const timestamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+    const timestamp = this.clock.nowIso().replace(/[-:T]/g, '').slice(0, 14);
     const cleanRepo = repoFullName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
     const issueSuffix = issueNumber ? `_issue_${issueNumber}` : '';
-    const randomSuffix = Math.random().toString(36).substring(2, 6);
+    const randomSuffix = this.idGenerator.generate();
     return `run_${timestamp}_${cleanRepo}${issueSuffix}_${randomSuffix}`;
   }
 
   createRun(input: CreateRunInput): ContributionRunManifest {
     const runId = this.generateRunId(input.repoFullName, input.issueNumber);
-    const now = new Date().toISOString();
+    const now = this.clock.nowIso();
 
     const manifest: ContributionRunManifest = {
       schemaVersion: '1.0.0',
@@ -108,7 +132,7 @@ export class ContributionRunManager {
 
     const previousPhase = manifest.currentPhase;
     manifest.currentPhase = newPhase;
-    manifest.updatedAt = new Date().toISOString();
+    manifest.updatedAt = this.clock.nowIso();
     this.bundleManager.saveManifest(manifest);
 
     this.bundleManager.appendEvent(runId, {
@@ -144,7 +168,7 @@ export class ContributionRunManager {
     if (autoAdvancePhase && autoAdvancePhase !== manifest.currentPhase) {
       this.updateRunPhase(runId, autoAdvancePhase);
     } else {
-      manifest.updatedAt = new Date().toISOString();
+      manifest.updatedAt = this.clock.nowIso();
       this.bundleManager.saveManifest(manifest);
     }
 
@@ -203,39 +227,7 @@ export class ContributionRunManager {
       hasResult: !!artifacts.result,
     };
 
-    let suggestedNextAction = 'scout_opportunity';
-    switch (summary.manifest.currentPhase) {
-      case 'INITIALIZED':
-        suggestedNextAction = 'scout_opportunity';
-        break;
-      case 'OPPORTUNITY_SCOUTED':
-        suggestedNextAction = 'assemble_context';
-        break;
-      case 'CONTEXT_ASSEMBLED':
-        suggestedNextAction = 'prepare_workspace';
-        break;
-      case 'WORKSPACE_PREPARED':
-        suggestedNextAction = 'draft_patch';
-        break;
-      case 'PATCH_DRAFTED':
-        suggestedNextAction = 'collect_evidence';
-        break;
-      case 'EVIDENCE_COLLECTED':
-        suggestedNextAction = 'audit_governance';
-        break;
-      case 'GOVERNANCE_AUDITED':
-        suggestedNextAction = 'render_pr_and_submit';
-        break;
-      case 'PR_SUBMITTED':
-        suggestedNextAction = 'sync_flywheel';
-        break;
-      case 'COMPLETED':
-        suggestedNextAction = 'none (run completed)';
-        break;
-      case 'FAILED':
-        suggestedNextAction = 'inspect_failure_and_replan';
-        break;
-    }
+    const suggestedNextAction = PHASE_TRANSITIONS[summary.manifest.currentPhase];
 
     return {
       runId,

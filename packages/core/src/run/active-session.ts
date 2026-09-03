@@ -2,10 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { homedir as osHomedir } from 'os';
 import type { ContributionRunPhase } from './types.js';
+import { getOpenContribHome } from '../kernel/home.js';
 
-function getOpenContribHome(): string {
-  return process.env.OPENCONTRIB_HOME || osHomedir();
-}
 
 export interface ActiveSessionData {
   runId: string;

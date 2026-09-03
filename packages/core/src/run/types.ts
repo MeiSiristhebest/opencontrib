@@ -25,6 +25,14 @@ export interface ContributionRunManifest {
   metadata?: Record<string, unknown>;
 }
 
+export interface CreateRunInput {
+  repoFullName: string;
+  issueNumber?: number;
+  issueTitle?: string;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+}
+
 export type ArtifactType =
   | 'opportunity'
   | 'probe'

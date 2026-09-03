@@ -31,6 +31,12 @@
     "typescript": "^5.7.3"
   },
   "description": "Agent-Native Open Source Contribution Engine — Core domain algorithms, governance verification & risk engine",
+  "scripts": {
+    "test": "bun test",
+    "test:integration": "OPENCONTRIB_NETWORK_TESTS=1 bun test --timeout 60000",
+    "coverage": "bun test --coverage --coverage-reporter=text packages/core/tests",
+    "coverage:gate": "bun scripts/check-domain-coverage.ts"
+  },
   "author": "OpenContrib Contributors",
   "license": "MIT",
   "repository": {
