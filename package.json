@@ -29,6 +29,8 @@
   ],
   "scripts": {
     "test": "bun test --timeout 30000",
+    "test:integration": "OPENCONTRIB_NETWORK_TESTS=1 bun test --timeout 60000",
+    "coverage:domain": "bun run --filter @opencontrib/core coverage:gate",
     "build": "bun run --filter '*' build",
     "mcp": "bun run packages/mcp-server/src/index.ts",
     "cli": "bun run packages/cli/src/index.ts"
