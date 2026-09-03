@@ -1,351 +1,456 @@
 /** `opencontrib governance <sub>` — Audit, impact, CI diagnosis, PR template. */
 
-import { Command } from 'commander';
+import { Command } from "commander";
 import {
   auditGovernance,
   analyzePatchImpactAndConsistency,
   parseCiRawLogs,
   renderMasterPrTemplate,
   validateMarkdownIntegrity,
-  ContributionRunManager,
+  buildContributionRunManager,
   detectCommunityGate,
   ActiveSessionManager,
-} from '@opencontrib/core';
+  type ContributionRunManager,
+} from "@opencontrib/core";
 
-import { printJSON, parseJSON, readStdin, printPhaseGuidance, printCommunityGateAlert } from '../utils/output.js';
-import { CliExitError } from '../utils/exit.js';
+import {
+  printJSON,
+  parseJSON,
+  readStdin,
+  printPhaseGuidance,
+  printCommunityGateAlert,
+} from "../utils/output.js";
+import { CliExitError } from "../utils/exit.js";
 
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-const runManager = new ContributionRunManager();
-
+// Lazy factory: constructed on first use, not at module load time.
+let _runManager: ContributionRunManager | null = null;
+const getRunManager = (): ContributionRunManager =>
+  (_runManager ??= buildContributionRunManager());
 
 // ─── governance audit ─────────────────────────────────────────────────────────
-const auditCommand = new Command('audit')
-  .description('Audit patch for anti-AI patterns, diff size, markdown integrity, and quality confidence rubric')
-  .requiredOption('--patch <file-or-text>', 'Git unified diff content or path to .diff/.patch file')
-  .requiredOption('--pr-title <text>', 'Proposed PR title')
-  .option('--pr-body <text>', 'Proposed PR body text')
-  .option('--pr-body-file <path>', 'Path to markdown file containing proposed PR body')
-  .option('--evidence <json>', 'Evidence JSON from collect_evidence')
-  .option('--subagent-score <n>', 'External subagent quality score (0-100)', (v) => Number(v))
-  .option('--is-autonomous', 'Whether preparing for autonomous PR submission', false)
-  .option('--run-id <id>', 'Contribution run ID (defaults to active session)')
-  .option('--allow-unverified', 'Allow bypass of quality gate threshold failure', false)
-  .option('--pretty', 'Pretty-print', false)
-  .action(async (opts: {
-    patch: string;
-    prTitle: string;
-    prBody?: string;
-    prBodyFile?: string;
-    evidence?: string;
-    subagentScore?: number;
-    isAutonomous?: boolean;
-    runId?: string;
-    allowUnverified?: boolean;
-    pretty?: boolean;
-  }) => {
-    try {
-      let patchContent = opts.patch;
-      if (fs.existsSync(opts.patch)) {
-        try {
-          patchContent = fs.readFileSync(opts.patch, 'utf-8');
-        } catch (err: any) {
-          console.error(`Failed to read patch file "${opts.patch}": ${err.message}`);
-          throw new CliExitError(1);
+const auditCommand = new Command("audit")
+  .description(
+    "Audit patch for anti-AI patterns, diff size, markdown integrity, and quality confidence rubric",
+  )
+  .requiredOption(
+    "--patch <file-or-text>",
+    "Git unified diff content or path to .diff/.patch file",
+  )
+  .requiredOption("--pr-title <text>", "Proposed PR title")
+  .option("--pr-body <text>", "Proposed PR body text")
+  .option(
+    "--pr-body-file <path>",
+    "Path to markdown file containing proposed PR body",
+  )
+  .option("--evidence <json>", "Evidence JSON from collect_evidence")
+  .option(
+    "--subagent-score <n>",
+    "External subagent quality score (0-100)",
+    (v) => Number(v),
+  )
+  .option(
+    "--is-autonomous",
+    "Whether preparing for autonomous PR submission",
+    false,
+  )
+  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
+  .option(
+    "--allow-unverified",
+    "Allow bypass of quality gate threshold failure",
+    false,
+  )
+  .option("--pretty", "Pretty-print", false)
+  .action(
+    async (opts: {
+      patch: string;
+      prTitle: string;
+      prBody?: string;
+      prBodyFile?: string;
+      evidence?: string;
+      subagentScore?: number;
+      isAutonomous?: boolean;
+      runId?: string;
+      allowUnverified?: boolean;
+      pretty?: boolean;
+    }) => {
+      try {
+        let patchContent = opts.patch;
+        if (fs.existsSync(opts.patch)) {
+          try {
+            patchContent = fs.readFileSync(opts.patch, "utf-8");
+          } catch (err: any) {
+            console.error(
+              `Failed to read patch file "${opts.patch}": ${err.message}`,
+            );
+            throw new CliExitError(1);
+          }
         }
-      }
 
-      let prBodyContent = opts.prBody || '';
-      if (opts.prBodyFile && fs.existsSync(opts.prBodyFile)) {
-        try {
-          prBodyContent = fs.readFileSync(opts.prBodyFile, 'utf-8');
-        } catch (err: any) {
-          console.error(`Failed to read PR body file "${opts.prBodyFile}": ${err.message}`);
-          throw new CliExitError(1);
+        let prBodyContent = opts.prBody || "";
+        if (opts.prBodyFile && fs.existsSync(opts.prBodyFile)) {
+          try {
+            prBodyContent = fs.readFileSync(opts.prBodyFile, "utf-8");
+          } catch (err: any) {
+            console.error(
+              `Failed to read PR body file "${opts.prBodyFile}": ${err.message}`,
+            );
+            throw new CliExitError(1);
+          }
         }
-      }
 
-      const evidence = opts.evidence
-        ? (parseJSON(opts.evidence, '--evidence') as any) || undefined
-        : undefined;
-      const audit = auditGovernance({
-        patchContent,
-        prTitle: opts.prTitle,
-        prBody: prBodyContent,
-        evidence,
-        subagentQualityScore: opts.subagentScore,
-        isAutonomousPrSubmission: opts.isAutonomous ?? false,
-      });
-
-      const isPassed = audit.overallConfidence.isPassed;
-      const runId = runManager.resolveRunId(opts.runId);
-
-      if (runId) {
-        try {
-          runManager.saveArtifact(
-            runId,
-            'governance',
-            audit as any,
-            isPassed ? 'GOVERNANCE_AUDITED' : undefined,
-          );
-        } catch {}
-      }
-
-      printJSON({
-        status: isPassed ? 'passed' : 'failed',
-        audit,
-      }, opts.pretty);
-
-      if (!isPassed && !opts.allowUnverified) {
-        printPhaseGuidance({
-          currentPhase: 'GOVERNANCE_AUDITED',
-          runId,
-          status: 'GATED_BLOCKED',
-          humanCheckpoint: 'Checkpoint 3 (Governance Quality Gate Failure)',
-          forbiddenActions: [
-            `Overall Quality Score (${audit.overallScore.toFixed(1)}/100) is below required 90.0% threshold.`,
-            `Weakest dimension: ${audit.weakestDimension.dimension} (${audit.weakestDimension.score}/100).`,
-            'STRICTLY FORBIDDEN: Do NOT commit or create a PR with failing governance audit score.',
-          ],
-          invariants: [
-            'Improve test coverage or add negative assertion cases to increase confidence.',
-            'Run variant hunting across sister modules to verify no parallel defects.',
-            'To explicitly request human waiver, rerun with --allow-unverified.',
-          ],
-          nextCommand: 'opencontrib governance audit --patch <file> --pr-title <title> --allow-unverified',
+        const evidence = opts.evidence
+          ? (parseJSON(opts.evidence, "--evidence") as any) || undefined
+          : undefined;
+        const audit = auditGovernance({
+          patchContent,
+          prTitle: opts.prTitle,
+          prBody: prBodyContent,
+          evidence,
+          subagentQualityScore: opts.subagentScore,
+          isAutonomousPrSubmission: opts.isAutonomous ?? false,
         });
-        // Signal the boundary to exit(2). The command action itself must not
-        // call process.exit — the CLI entry point owns process lifecycle.
-        throw new CliExitError(2);
-      }
 
-      printPhaseGuidance({
-        currentPhase: 'GOVERNANCE_AUDITED',
-        runId,
-        status: 'SUCCESS',
-        humanCheckpoint: 'Checkpoint 3 (Pre-Flight Review - Ready for PR)',
-        nextCommand: `opencontrib governance pr-template --issue <id> --issue-title "${opts.prTitle}" --summary "<summary>"`,
-        invariants: [
-          'Present the patch diff and audit report to the user at Checkpoint 3 before pushing.',
-        ],
-      });
-    } catch (err: any) {
-      if (err instanceof CliExitError) throw err;
-      printJSON({ status: 'error', message: err.message }, opts.pretty);
-      throw new CliExitError(1);
-    }
-  });
+        const isPassed = audit.overallConfidence.isPassed;
+        const runId = getRunManager().resolveRunId(opts.runId);
+
+        if (runId) {
+          try {
+            getRunManager().saveArtifact(
+              runId,
+              "governance",
+              audit as any,
+              isPassed ? "GOVERNANCE_AUDITED" : undefined,
+            );
+          } catch {
+            // Artifact persistence is best-effort; audit results still output to stdout
+          }
+        }
+
+        printJSON(
+          {
+            status: isPassed ? "passed" : "failed",
+            audit,
+          },
+          opts.pretty,
+        );
+
+        if (!isPassed && !opts.allowUnverified) {
+          printPhaseGuidance({
+            currentPhase: "GOVERNANCE_AUDITED",
+            runId,
+            status: "GATED_BLOCKED",
+            humanCheckpoint: "Checkpoint 3 (Governance Quality Gate Failure)",
+            forbiddenActions: audit.guidance.forbiddenActions,
+            invariants: audit.guidance.invariants,
+            nextCommand: audit.guidance.nextCommand,
+          });
+          // Signal the boundary to exit(2). The command action itself must not
+          // call process.exit — the CLI entry point owns process lifecycle.
+          throw new CliExitError(2);
+        }
+
+        printPhaseGuidance({
+          currentPhase: "GOVERNANCE_AUDITED",
+          runId,
+          status: "SUCCESS",
+          humanCheckpoint: "Checkpoint 3 (Pre-Flight Review - Ready for PR)",
+          nextCommand: `opencontrib governance pr-template --issue <id> --issue-title "${opts.prTitle}" --summary "<summary>"`,
+          invariants: audit.guidance.invariants,
+        });
+      } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
+        printJSON({ status: "error", message: err.message }, opts.pretty);
+        throw new CliExitError(1);
+      }
+    },
+  );
 
 // ─── governance impact ────────────────────────────────────────────────────────
-const impactCommand = new Command('impact')
-  .description('Analyze patch for cross-platform anti-patterns and overlooked sibling files')
-  .requiredOption('--patch <file-or-text>', 'Git unified diff content')
-  .requiredOption('--modified-files <list>', 'Comma-separated list of modified files', (v) => v.split(','))
-  .option('--repo-context <list>', 'Comma-separated repo file paths for sibling detection', (v) => v.split(','))
-  .option('--pretty', 'Pretty-print', false)
-  .action(async (opts: {
-    patch: string;
-    modifiedFiles: string[];
-    repoContext?: string[];
-    pretty?: boolean;
-  }) => {
-    try {
-      const analysis = analyzePatchImpactAndConsistency({
-        modifiedFiles: opts.modifiedFiles,
-        patchContent: opts.patch,
-        repoContextFiles: opts.repoContext,
-      });
-      printJSON({
-        status: analysis.isCompliant ? 'compliant' : 'warnings_found',
-        analysis,
-      }, opts.pretty);
-    } catch (err: any) {
-      if (err instanceof CliExitError) throw err;
-      printJSON({ status: 'error', message: err.message }, opts.pretty);
-      throw new CliExitError(1);
-    }
-  });
+const impactCommand = new Command("impact")
+  .description(
+    "Analyze patch for cross-platform anti-patterns and overlooked sibling files",
+  )
+  .requiredOption("--patch <file-or-text>", "Git unified diff content")
+  .requiredOption(
+    "--modified-files <list>",
+    "Comma-separated list of modified files",
+    (v) => v.split(","),
+  )
+  .option(
+    "--repo-context <list>",
+    "Comma-separated repo file paths for sibling detection",
+    (v) => v.split(","),
+  )
+  .option("--pretty", "Pretty-print", false)
+  .action(
+    async (opts: {
+      patch: string;
+      modifiedFiles: string[];
+      repoContext?: string[];
+      pretty?: boolean;
+    }) => {
+      try {
+        const analysis = analyzePatchImpactAndConsistency({
+          modifiedFiles: opts.modifiedFiles,
+          patchContent: opts.patch,
+          repoContextFiles: opts.repoContext,
+        });
+        printJSON(
+          {
+            status: analysis.isCompliant ? "compliant" : "warnings_found",
+            analysis,
+          },
+          opts.pretty,
+        );
+      } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
+        printJSON({ status: "error", message: err.message }, opts.pretty);
+        throw new CliExitError(1);
+      }
+    },
+  );
 
 // ─── governance ci-diagnose ───────────────────────────────────────────────────
-const ciDiagnoseCommand = new Command('ci-diagnose')
-  .description('Parse CI logs to extract failing test names, line numbers, and root causes')
-  .option('--log-file <path>', 'Path to raw CI/terminal log file (or pipe via stdin)')
-  .option('--pretty', 'Pretty-print', false)
-  .action(async (opts: { pretty?: boolean }, cmd: Command) => {
+const ciDiagnoseCommand = new Command("ci-diagnose")
+  .description(
+    "Parse CI logs to extract failing test names, line numbers, and root causes",
+  )
+  .option(
+    "--log-file <path>",
+    "Path to raw CI/terminal log file (or pipe via stdin)",
+  )
+  .option("--pretty", "Pretty-print", false)
+  .action(async (opts: { pretty?: boolean }, _cmd: Command) => {
     try {
-      const logFile = (opts as any)['log-file'];
+      const logFile = (opts as any)["log-file"];
       let rawLog: string;
       if (logFile) {
-        const fsLib = await import('fs');
-        rawLog = fsLib.readFileSync(logFile, 'utf-8');
+        const fsLib = await import("fs");
+        rawLog = fsLib.readFileSync(logFile, "utf-8");
       } else {
         rawLog = await readStdin();
       }
       if (!rawLog) {
-        console.error('❌ No log input. Use --log-file <path> or pipe via stdin');
+        console.error(
+          "❌ No log input. Use --log-file <path> or pipe via stdin",
+        );
         throw new CliExitError(1);
       }
       const report = parseCiRawLogs(rawLog);
-      printJSON({
-        status: report.hasFailure ? 'failure_detected' : 'healthy',
-        report,
-      }, opts.pretty);
+      printJSON(
+        {
+          status: report.hasFailure ? "failure_detected" : "healthy",
+          report,
+        },
+        opts.pretty,
+      );
     } catch (err: any) {
       if (err instanceof CliExitError) throw err;
-      printJSON({ status: 'error', message: err.message }, opts.pretty);
+      printJSON({ status: "error", message: err.message }, opts.pretty);
       throw new CliExitError(1);
     }
   });
 
 // ─── governance pr-template ───────────────────────────────────────────────────
-const prTemplateCommand = new Command('pr-template')
-  .description('Render a clean PR description following target repo template or Master 6-Tier standard')
-  .requiredOption('--issue <num>', 'Fixed issue number')
-  .requiredOption('--issue-title <text>', 'Title of the issue')
-  .requiredOption('--summary <text>', 'Concise fix summary')
-  .option('--validation-cmd <cmd>', 'Command used to verify the fix', 'bun test')
-  .option('--validation-output <text>', 'Test passing log excerpt', 'All unit tests pass cleanly.')
-  .option('--native-template <text>', 'Raw markdown of target repo PULL_REQUEST_TEMPLATE.md')
-  .option('--key-changes <list>', 'Comma-separated list of key changes made', (v) => v.split(','))
-  .option('--confidence <n>', 'Quality confidence score (0-100)', (v) => Number(v))
-  .option('--risk <level>', 'Risk tier', (v) => (['LOW', 'MEDIUM', 'HIGH'] as const).includes(v as any) ? v as 'LOW' | 'MEDIUM' | 'HIGH' : 'MEDIUM')
-  .option('--is-docs-only', 'Documentation-only change', false)
-  .option('--ai-disclosure', 'AI disclosure required by repo', false)
-  .option('--run-id <id>', 'Contribution run ID (defaults to active session)')
-  .option('--pretty', 'Pretty-print', false)
-  .action(async (opts: {
-    issue: string;
-    issueTitle: string;
-    summary: string;
-    validationCmd?: string;
-    validationOutput?: string;
-    nativeTemplate?: string;
-    keyChanges?: string[];
-    confidence?: number;
-    risk?: 'LOW' | 'MEDIUM' | 'HIGH';
-    isDocsOnly?: boolean;
-    aiDisclosure?: boolean;
-    runId?: string;
-    pretty?: boolean;
-  }) => {
-    try {
-      const prBody = renderMasterPrTemplate({
-        keyChanges: opts.keyChanges || ['Defensive boundary and logic correction'],
-        nativeTemplateContent: opts.nativeTemplate,
-        issueNumber: parseInt(opts.issue, 10) || 1,
-        issueTitle: opts.issueTitle,
-        summary: opts.summary,
-        validationCommand: opts.validationCmd || 'bun test',
-        validationOutputSnippet: opts.validationOutput || 'All unit tests pass cleanly.',
-        confidenceScore: opts.confidence,
-        riskLevel: opts.risk,
-        isDocumentationOnly: opts.isDocsOnly ?? false,
-        aiDisclosureRequired: opts.aiDisclosure ?? false,
-      });
+const prTemplateCommand = new Command("pr-template")
+  .description(
+    "Render a clean PR description following target repo template or Master 6-Tier standard",
+  )
+  .requiredOption("--issue <num>", "Fixed issue number")
+  .requiredOption("--issue-title <text>", "Title of the issue")
+  .requiredOption("--summary <text>", "Concise fix summary")
+  .option(
+    "--validation-cmd <cmd>",
+    "Command used to verify the fix",
+    "bun test",
+  )
+  .option(
+    "--validation-output <text>",
+    "Test passing log excerpt",
+    "All unit tests pass cleanly.",
+  )
+  .option(
+    "--native-template <text>",
+    "Raw markdown of target repo PULL_REQUEST_TEMPLATE.md",
+  )
+  .option(
+    "--key-changes <list>",
+    "Comma-separated list of key changes made",
+    (v) => v.split(","),
+  )
+  .option("--confidence <n>", "Quality confidence score (0-100)", (v) =>
+    Number(v),
+  )
+  .option("--risk <level>", "Risk tier", (v) =>
+    (["LOW", "MEDIUM", "HIGH"] as const).includes(v as any)
+      ? (v as "LOW" | "MEDIUM" | "HIGH")
+      : "MEDIUM",
+  )
+  .option("--is-docs-only", "Documentation-only change", false)
+  .option("--ai-disclosure", "AI disclosure required by repo", false)
+  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
+  .option("--pretty", "Pretty-print", false)
+  .action(
+    async (opts: {
+      issue: string;
+      issueTitle: string;
+      summary: string;
+      validationCmd?: string;
+      validationOutput?: string;
+      nativeTemplate?: string;
+      keyChanges?: string[];
+      confidence?: number;
+      risk?: "LOW" | "MEDIUM" | "HIGH";
+      isDocsOnly?: boolean;
+      aiDisclosure?: boolean;
+      runId?: string;
+      pretty?: boolean;
+    }) => {
+      try {
+        const prBody = renderMasterPrTemplate({
+          keyChanges: opts.keyChanges || [
+            "Defensive boundary and logic correction",
+          ],
+          nativeTemplateContent: opts.nativeTemplate,
+          issueNumber: parseInt(opts.issue, 10) || 1,
+          issueTitle: opts.issueTitle,
+          summary: opts.summary,
+          validationCommand: opts.validationCmd || "bun test",
+          validationOutputSnippet:
+            opts.validationOutput || "All unit tests pass cleanly.",
+          confidenceScore: opts.confidence,
+          riskLevel: opts.risk,
+          isDocumentationOnly: opts.isDocsOnly ?? false,
+          aiDisclosureRequired: opts.aiDisclosure ?? false,
+        });
 
-      const runId = runManager.resolveRunId(opts.runId);
-      if (runId) {
-        try {
-          runManager.saveArtifact(runId, 'pr_draft', { prBody } as any);
-        } catch {}
+        const runId = getRunManager().resolveRunId(opts.runId);
+        if (runId) {
+          try {
+            getRunManager().saveArtifact(runId, "pr_draft", { prBody } as any);
+          } catch {
+            // PR draft persistence is best-effort; template content still output to stdout
+          }
+        }
+
+        printJSON({ status: "success", prBody }, opts.pretty);
+
+        printPhaseGuidance({
+          currentPhase: "PR_SUBMITTED",
+          runId,
+          status: "SUCCESS",
+          humanCheckpoint: "Checkpoint 3 (Final PR Ready for Submission)",
+          nextCommand: `gh pr create --title "${opts.issueTitle}" --body-file pr-body.md`,
+          invariants: [
+            'Ensure the PR description includes "Fixes #<issue_number>".',
+            'After PR submission, run "opencontrib flywheel sync" to record the contribution.',
+          ],
+        });
+      } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
+        printJSON({ status: "error", message: err.message }, opts.pretty);
+        throw new CliExitError(1);
       }
-
-      printJSON({ status: 'success', prBody }, opts.pretty);
-
-      printPhaseGuidance({
-        currentPhase: 'PR_SUBMITTED',
-        runId,
-        status: 'SUCCESS',
-        humanCheckpoint: 'Checkpoint 3 (Final PR Ready for Submission)',
-        nextCommand: `gh pr create --title "${opts.issueTitle}" --body-file pr-body.md`,
-        invariants: [
-          'Ensure the PR description includes "Fixes #<issue_number>".',
-          'After PR submission, run "opencontrib flywheel sync" to record the contribution.',
-        ],
-      });
-    } catch (err: any) {
-      if (err instanceof CliExitError) throw err;
-      printJSON({ status: 'error', message: err.message }, opts.pretty);
-      throw new CliExitError(1);
-    }
-  });
+    },
+  );
 
 // ─── governance claim / render-issue ─────────────────────────────────────────
-const claimCommand = new Command('claim')
-  .alias('render-issue')
-  .description('Generate an authoritative Issue-First Claim statement or 0-day issue proposal')
-  .requiredOption('--issue <num>', 'Target issue number (or temporary ID for 0-day)', '0')
-  .requiredOption('--title <text>', 'Title of the issue')
-  .option('--finding <summary>', 'Summary of root cause and file/line location')
-  .option('--test-snippet <snippet>', 'Reproduction test code snippet')
-  .option('--pretty', 'Pretty-print JSON output', false)
-  .action(async (opts: {
-    issue: string;
-    title: string;
-    finding?: string;
-    testSnippet?: string;
-    pretty?: boolean;
-  }) => {
-    try {
-      const { ClaimProtocol } = await import('@opencontrib/core');
-      const num = parseInt(opts.issue, 10) || 0;
-      const payload = ClaimProtocol.generateClaimPayload(num, opts.title);
-      if (opts.finding) {
-        payload.findingSummary = opts.finding;
+const claimCommand = new Command("claim")
+  .alias("render-issue")
+  .description(
+    "Generate an authoritative Issue-First Claim statement or 0-day issue proposal",
+  )
+  .requiredOption(
+    "--issue <num>",
+    "Target issue number (or temporary ID for 0-day)",
+    "0",
+  )
+  .requiredOption("--title <text>", "Title of the issue")
+  .option("--finding <summary>", "Summary of root cause and file/line location")
+  .option("--test-snippet <snippet>", "Reproduction test code snippet")
+  .option("--pretty", "Pretty-print JSON output", false)
+  .action(
+    async (opts: {
+      issue: string;
+      title: string;
+      finding?: string;
+      testSnippet?: string;
+      pretty?: boolean;
+    }) => {
+      try {
+        const { ClaimProtocol } = await import("@opencontrib/core");
+        const num = parseInt(opts.issue, 10) || 0;
+        const payload = ClaimProtocol.generateClaimPayload(num, opts.title);
+        if (opts.finding) {
+          payload.findingSummary = opts.finding;
+        }
+        if (opts.testSnippet) {
+          payload.claimComment += `\n\n\`\`\`\n${opts.testSnippet}\n\`\`\``;
+        }
+        printJSON({ status: "success", payload }, opts.pretty);
+      } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
+        printJSON({ status: "error", message: err.message }, opts.pretty);
+        throw new CliExitError(1);
       }
-      if (opts.testSnippet) {
-        payload.claimComment += `\n\n\`\`\`\n${opts.testSnippet}\n\`\`\``;
-      }
-      printJSON({ status: 'success', payload }, opts.pretty);
-    } catch (err: any) {
-      if (err instanceof CliExitError) throw err;
-      printJSON({ status: 'error', message: err.message }, opts.pretty);
-      throw new CliExitError(1);
-    }
-  });
+    },
+  );
 
 // ─── governance lint-md ───────────────────────────────────────────────────────
-const lintMdCommand = new Command('lint-md')
-  .description('Run 5-layer industrial static validation on Markdown file or stdin')
-  .argument('[file]', 'Path to markdown file to validate (reads from stdin if omitted)')
-  .option('--pretty', 'Pretty-print', false)
+const lintMdCommand = new Command("lint-md")
+  .description(
+    "Run 5-layer industrial static validation on Markdown file or stdin",
+  )
+  .argument(
+    "[file]",
+    "Path to markdown file to validate (reads from stdin if omitted)",
+  )
+  .option("--pretty", "Pretty-print", false)
   .action(async (file?: string, opts?: { pretty?: boolean }) => {
     try {
-      let content = '';
+      let content = "";
       if (file && fs.existsSync(file)) {
-        content = fs.readFileSync(file, 'utf-8');
+        content = fs.readFileSync(file, "utf-8");
       } else {
         content = await readStdin();
       }
       const report = validateMarkdownIntegrity(content);
-      printJSON({
-        status: report.isValid ? 'passed' : 'failed',
-        report,
-      }, opts?.pretty);
+      printJSON(
+        {
+          status: report.isValid ? "passed" : "failed",
+          report,
+        },
+        opts?.pretty,
+      );
     } catch (err: any) {
       if (err instanceof CliExitError) throw err;
-      printJSON({ status: 'error', message: err.message }, opts?.pretty);
+      printJSON({ status: "error", message: err.message }, opts?.pretty);
       throw new CliExitError(1);
     }
   });
 
 // ─── governance gate ──────────────────────────────────────────────────────────
-const gateCommand = new Command('gate')
-  .description('Detect community contribution rules, auto-close policies, and issue approval requirements')
-  .argument('[target]', 'Path to target repository workspace', '.')
-  .option('--pretty', 'Pretty-print JSON output', false)
-  .action(async (target = '.', opts: { pretty?: boolean }) => {
+const gateCommand = new Command("gate")
+  .description(
+    "Detect community contribution rules, auto-close policies, and issue approval requirements",
+  )
+  .argument("[target]", "Path to target repository workspace", ".")
+  .option("--pretty", "Pretty-print JSON output", false)
+  .action(async (target = ".", opts: { pretty?: boolean }) => {
     try {
       const active = ActiveSessionManager.getActiveSession();
-      const resolved = (target === '.' && active?.workspacePath && fs.existsSync(active.workspacePath))
-        ? active.workspacePath
-        : path.resolve(target);
-
+      const resolved =
+        target === "." &&
+        active?.workspacePath &&
+        fs.existsSync(active.workspacePath)
+          ? active.workspacePath
+          : path.resolve(target);
 
       const gate = await detectCommunityGate(resolved);
-      printJSON({ status: 'success', target: resolved, gate }, opts?.pretty);
+      printJSON({ status: "success", target: resolved, gate }, opts?.pretty);
 
       if (gate.hasGatingRules) {
         printCommunityGateAlert({
@@ -357,19 +462,21 @@ const gateCommand = new Command('gate')
       }
     } catch (err: any) {
       if (err instanceof CliExitError) throw err;
-      printJSON({ status: 'error', message: err.message }, opts?.pretty);
+      printJSON({ status: "error", message: err.message }, opts?.pretty);
       throw new CliExitError(1);
     }
   });
 
 // ─── Top-level command ────────────────────────────────────────────────────────
 
-export const governanceCommand = new Command('governance')
-  .description('Governance audit, impact analysis, CI diagnosis, PR template rendering, Issue Claim generation, community gate detection, and Markdown linting')
+export const governanceCommand = new Command("governance")
+  .description(
+    "Governance audit, impact analysis, CI diagnosis, PR template rendering, Issue Claim generation, community gate detection, and Markdown linting",
+  )
   .addCommand(auditCommand)
   .addCommand(gateCommand)
   .addCommand(impactCommand)
   .addCommand(ciDiagnoseCommand)
   .addCommand(prTemplateCommand)
   .addCommand(claimCommand)
-  .addCommand(lintMdCommand);
+  .addCommand(lintMdCommand);

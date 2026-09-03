@@ -1,12 +1,15 @@
 /** `opencontrib flywheel <sub>` — Profile flywheel and PR tracking. */
 
 import { Command } from 'commander';
-import { ProfileFlywheel, ContributionRunManager, defaultActiveSessionManager } from '@opencontrib/core';
+import { ProfileFlywheel, buildContributionRunManager, defaultActiveSessionManager, type ContributionRunManager } from '@opencontrib/core';
 import { printJSON, parseJSON, readStdin, printPhaseGuidance } from '../utils/output.js';
 import * as fs from 'fs';
 
 const flywheel = new ProfileFlywheel();
-const runManager = new ContributionRunManager();
+// Lazy factory: constructed on first use, not at module load time.
+let _runManager: ContributionRunManager | null = null;
+const getRunManager = (): ContributionRunManager =>
+  (_runManager ??= buildContributionRunManager());
 
 // ─── flywheel sync ────────────────────────────────────────────────────────────
 const flywheelSync = new Command('sync')
@@ -27,7 +30,7 @@ const flywheelSync = new Command('sync')
       }
       const parsed = (parseJSON(input, 'stdin/--input') as any) || {};
 
-      const runId = parsed.runId || runManager.resolveRunId();
+      const runId = parsed.runId || getRunManager().resolveRunId();
       const status = parsed.status || 'submitted';
       const techStack = parsed.techStack && parsed.techStack.length > 0 ? parsed.techStack : ['general'];
 
@@ -53,9 +56,12 @@ const flywheelSync = new Command('sync')
       } as any);
 
       try {
-        runManager.saveArtifact(runId, 'result', { flywheelResult: result, status } as any, 'COMPLETED');
+        getRunManager().saveArtifact(runId, 'result', { flywheelResult: result, status } as any, 'COMPLETED');
         defaultActiveSessionManager.updatePhase('COMPLETED');
-      } catch {}
+      } catch {
+        // Flywheel artifact persistence is best-effort; the result is still
+        // reported to stdout below even if the manifest write fails.
+      }
 
       printJSON({ status: 'success', flywheelResult: result }, opts.pretty);
 

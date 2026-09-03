@@ -1,11 +1,9 @@
-import { existsSync, mkdirSync, readFileSync } from 'fs';
-import { homedir as osHomedir } from 'os';
-import { join } from 'path';
-
+import { existsSync, mkdirSync, readFileSync } from "fs";
+import { join } from "path";
 
-import type { RepoMemoryEntry } from '../contracts/schemas.js';
-import { writeAtomic } from '../run/artifact-bundle.js';
-import { getOpenContribHome } from '../kernel/home.js';
+import type { RepoMemoryEntry } from "../contracts/schemas.js";
+import { writeAtomic } from "../run/artifact-bundle.js";
+import { getOpenContribHome } from "../kernel/home.js";
 
 export interface ContributionSubmissionInput {
   prUrl: string;
@@ -13,7 +11,7 @@ export interface ContributionSubmissionInput {
   prNumber?: number;
   issueNumber?: number;
   provenance?: {
-    source: 'agent_claim' | 'github_verified' | 'system_recorded';
+    source: "agent_claim" | "github_verified" | "system_recorded";
     verified: boolean;
     verifiedAt?: string;
   };
@@ -24,30 +22,32 @@ export class RepoMemoryLedger {
   private cache: Map<string, RepoMemoryEntry> = new Map();
 
   constructor(customDir?: string) {
-    const dir = customDir || join(getOpenContribHome(), '.opencontrib');
+    const dir = customDir || join(getOpenContribHome(), ".opencontrib");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    this.memoryFilePath = join(dir, 'repo-memory.json');
+    this.memoryFilePath = join(dir, "repo-memory.json");
     this.load();
   }
 
   private load(): void {
     if (!existsSync(this.memoryFilePath)) return;
     try {
-      const data = JSON.parse(readFileSync(this.memoryFilePath, 'utf-8'));
+      const data = JSON.parse(readFileSync(this.memoryFilePath, "utf-8"));
       if (!Array.isArray(data)) {
-        console.warn('[RepoMemory] Cache file is not an array, resetting');
+        console.warn("[RepoMemory] Cache file is not an array, resetting");
         this.cache.clear();
         return;
       }
       for (const entry of data) {
-        if (entry && typeof entry.repoFullName === 'string') {
+        if (entry && typeof entry.repoFullName === "string") {
           this.cache.set(entry.repoFullName, entry);
         } else {
-          console.warn('[RepoMemory] Skipping entry with invalid repoFullName');
+          console.warn("[RepoMemory] Skipping entry with invalid repoFullName");
         }
       }
     } catch (err: any) {
-      console.error(`[RepoMemory] CRITICAL: Failed to load cache: ${err.message}. Throwing to prevent silent data loss.`);
+      console.error(
+        `[RepoMemory] CRITICAL: Failed to load cache: ${err.message}. Throwing to prevent silent data loss.`,
+      );
       throw err;
     }
   }
@@ -57,7 +57,9 @@ export class RepoMemoryLedger {
     try {
       writeAtomic(this.memoryFilePath, JSON.stringify(entries, null, 2));
     } catch (err: any) {
-      console.error(`[RepoMemory] CRITICAL: Failed to persist memory to ${this.memoryFilePath}: ${err.message}`);
+      console.error(
+        `[RepoMemory] CRITICAL: Failed to persist memory to ${this.memoryFilePath}: ${err.message}`,
+      );
       throw err;
     }
   }
@@ -92,42 +94,53 @@ export class RepoMemoryLedger {
     this.save();
   }
 
-  recordReflexionInsight(repoFullName: string, insight: { failureMode: string; rootCause: string; lessonsLearned: string[] }): void {
+  recordReflexionInsight(
+    repoFullName: string,
+    insight: {
+      failureMode: string;
+      rootCause: string;
+      lessonsLearned: string[];
+    },
+  ): void {
     const entry = this.getMemory(repoFullName);
     entry.pastFailures.push({
       date: new Date().toISOString(),
       reason: insight.failureMode,
-      context: `${insight.rootCause} | Lessons: ${insight.lessonsLearned.join('; ')}`,
+      context: `${insight.rootCause} | Lessons: ${insight.lessonsLearned.join("; ")}`,
     });
     this.cache.set(repoFullName, entry);
     this.save();
   }
 
-
   /**
    * Record that a PR has been opened/submitted.
    * Differentiates unverified agent claim vs verified fact.
    */
-  recordSubmission(repoFullName: string, contrib: ContributionSubmissionInput): void {
+  recordSubmission(
+    repoFullName: string,
+    contrib: ContributionSubmissionInput,
+  ): void {
     const entry = this.getMemory(repoFullName);
     const existing = entry.successfulContributions.find(
-      (c) => (contrib.prNumber && c.prNumber === contrib.prNumber) || c.prUrl === contrib.prUrl,
+      (c) =>
+        (contrib.prNumber && c.prNumber === contrib.prNumber) ||
+        c.prUrl === contrib.prUrl,
     );
 
     const prov = contrib.provenance || {
-      source: 'agent_claim' as const,
+      source: "agent_claim" as const,
       verified: false,
     };
 
     if (existing) {
-      existing.status = 'submitted';
+      existing.status = "submitted";
       existing.title = contrib.title;
       existing.provenance = prov;
       existing.submittedAt = existing.submittedAt || new Date().toISOString();
     } else {
       entry.successfulContributions.push({
         ...contrib,
-        status: 'submitted',
+        status: "submitted",
         provenance: prov,
         submittedAt: new Date().toISOString(),
       });
@@ -140,15 +153,20 @@ export class RepoMemoryLedger {
   /**
    * Mark a contribution as verified through authoritative platform check.
    */
-  verifyContribution(repoFullName: string, prNumberOrUrl: number | string): boolean {
+  verifyContribution(
+    repoFullName: string,
+    prNumberOrUrl: number | string,
+  ): boolean {
     const entry = this.getMemory(repoFullName);
-    const target = entry.successfulContributions.find(
-      (c) => (typeof prNumberOrUrl === 'number' ? c.prNumber === prNumberOrUrl : c.prUrl === prNumberOrUrl),
+    const target = entry.successfulContributions.find((c) =>
+      typeof prNumberOrUrl === "number"
+        ? c.prNumber === prNumberOrUrl
+        : c.prUrl === prNumberOrUrl,
     );
 
     if (target) {
       target.provenance = {
-        source: 'github_verified',
+        source: "github_verified",
         verified: true,
         verifiedAt: new Date().toISOString(),
       };
@@ -164,27 +182,32 @@ export class RepoMemoryLedger {
    */
   recordMerge(repoFullName: string, prNumberOrUrl: number | string): void {
     const entry = this.getMemory(repoFullName);
-    const target = entry.successfulContributions.find(
-      (c) => (typeof prNumberOrUrl === 'number' ? c.prNumber === prNumberOrUrl : c.prUrl === prNumberOrUrl),
+    const target = entry.successfulContributions.find((c) =>
+      typeof prNumberOrUrl === "number"
+        ? c.prNumber === prNumberOrUrl
+        : c.prUrl === prNumberOrUrl,
     );
 
     const now = new Date().toISOString();
     if (target) {
-      target.status = 'merged';
+      target.status = "merged";
       target.mergedAt = now;
       target.provenance = {
-        source: 'github_verified',
+        source: "github_verified",
         verified: true,
         verifiedAt: now,
       };
     } else {
       entry.successfulContributions.push({
-        prUrl: typeof prNumberOrUrl === 'string' ? prNumberOrUrl : `https://github.com/${repoFullName}/pull/${prNumberOrUrl}`,
-        prNumber: typeof prNumberOrUrl === 'number' ? prNumberOrUrl : undefined,
+        prUrl:
+          typeof prNumberOrUrl === "string"
+            ? prNumberOrUrl
+            : `https://github.com/${repoFullName}/pull/${prNumberOrUrl}`,
+        prNumber: typeof prNumberOrUrl === "number" ? prNumberOrUrl : undefined,
         title: `PR #${prNumberOrUrl}`,
-        status: 'merged',
+        status: "merged",
         provenance: {
-          source: 'github_verified',
+          source: "github_verified",
           verified: true,
           verifiedAt: now,
         },
@@ -200,19 +223,31 @@ export class RepoMemoryLedger {
   /**
    * Record that a submitted PR was closed without merge.
    */
-  recordClose(repoFullName: string, prNumberOrUrl: number | string, reason?: string): void {
+  recordClose(
+    repoFullName: string,
+    prNumberOrUrl: number | string,
+    reason?: string,
+  ): void {
     const entry = this.getMemory(repoFullName);
-    const target = entry.successfulContributions.find(
-      (c) => (typeof prNumberOrUrl === 'number' ? c.prNumber === prNumberOrUrl : c.prUrl === prNumberOrUrl),
+    const target = entry.successfulContributions.find((c) =>
+      typeof prNumberOrUrl === "number"
+        ? c.prNumber === prNumberOrUrl
+        : c.prUrl === prNumberOrUrl,
     );
 
     if (target) {
-      target.status = 'closed';
+      target.status = "closed";
       target.closedAt = new Date().toISOString();
     }
 
     if (reason) {
-      this.recordFailure(repoFullName, `PR Closed: ${reason}`, typeof prNumberOrUrl === 'string' ? prNumberOrUrl : `PR #${prNumberOrUrl}`);
+      this.recordFailure(
+        repoFullName,
+        `PR Closed: ${reason}`,
+        typeof prNumberOrUrl === "string"
+          ? prNumberOrUrl
+          : `PR #${prNumberOrUrl}`,
+      );
     } else {
       this.cache.set(repoFullName, entry);
       this.save();
@@ -222,10 +257,16 @@ export class RepoMemoryLedger {
   /**
    * Record review state (e.g. changes requested or in_review).
    */
-  recordReview(repoFullName: string, prNumberOrUrl: number | string, state: 'changes_requested' | 'in_review'): void {
+  recordReview(
+    repoFullName: string,
+    prNumberOrUrl: number | string,
+    state: "changes_requested" | "in_review",
+  ): void {
     const entry = this.getMemory(repoFullName);
-    const target = entry.successfulContributions.find(
-      (c) => (typeof prNumberOrUrl === 'number' ? c.prNumber === prNumberOrUrl : c.prUrl === prNumberOrUrl),
+    const target = entry.successfulContributions.find((c) =>
+      typeof prNumberOrUrl === "number"
+        ? c.prNumber === prNumberOrUrl
+        : c.prUrl === prNumberOrUrl,
     );
 
     if (target) {
@@ -238,7 +279,10 @@ export class RepoMemoryLedger {
   /**
    * Backward-compatible alias for recordSubmission.
    */
-  recordSuccess(repoFullName: string, contrib: ContributionSubmissionInput): void {
+  recordSuccess(
+    repoFullName: string,
+    contrib: ContributionSubmissionInput,
+  ): void {
     this.recordSubmission(repoFullName, contrib);
   }
 

@@ -14,7 +14,7 @@ graph TD
 
     subgraph "OpenContrib 接入层"
         CLI[OpenContrib CLI - 16 大工业级命令域]
-        MCP[MCP 服务端 - 34 个 JSON-RPC 协议工具]
+        MCP[MCP 服务端 - 35 个 JSON-RPC 协议工具]
     end
 
     subgraph "确定性领域引擎核心"
@@ -62,6 +62,7 @@ graph TD
 ## 🎯 2. Top-K 智能指针收敛与 150-Token 渐进式解引用
 
 为了彻底解决长上下文污染与大模型盲目猜代码的问题：
+
 - OpenContrib 在缺陷点计算标准化的 **可疑度指数 (Suspiciousness Index)**。
 - 输出仅占 150 Token 的高精度 **Smart Pointer** `(file, startLine, endLine, confidence, probeType)`。
 - Agent 仅在需要时一键解引用 150 Token 的精准切片，节省 95% 的上下文开销。
@@ -71,6 +72,7 @@ graph TD
 ## 🧪 3. 双阶段物证校验与并发抢占风暴
 
 补丁绝不依赖大模型“自称的信心”，必须通过双重经验性物理验证：
+
 1. **阶段一：干净 Worktree 沙盒复现**：在隔离的工作树中执行定向单元测试建立基线，绝不污染工作区。
 2. **阶段二：并发抢占风暴与混沌抖动**：高并发并行执行与线程随机调度抖动，验证多线程竞态安全。
 
@@ -79,6 +81,7 @@ graph TD
 ## 🛡️ 4. 防跟风抢占治理与 RFC-100 刚性门禁
 
 坚决捍卫开源社区维护者的信任：
+
 - **100 行 Diff 上限**：自动拦截大范围重构与无关格式化。
 - **反 AI 行话过滤**：自动剥除机械式空话、Emoji 堆砌和无依据的主观推断。
 - **排他性认领协议**：发 PR 前严格校验 Issue 是否已被其他开发者锁定。
@@ -89,6 +92,7 @@ graph TD
 ## ⚡ 5. 活跃会话引擎与自驱状态机 (Active Session Engine)
 
 确保跨多轮对话与命令执行时上下文零丢失：
+
 - **全局活跃会话总线 (`~/.opencontrib/active_session.json`)**：实时同步记录当前 `runId`、关联仓库、沙盒路径与生命周期阶段。
 - **上下文自动继承**：后续所有 CLI 命令免传参数自动寻址工作区与活跃会话，追加写入只增事件流（`events.jsonl`）与物证快照（`evidence.json`）。
 - **保姆级自驱指令推荐**：终端每步输出确切的 `▶ NEXT RECOMMENDED COMMAND`，驱动智能体精准流转。

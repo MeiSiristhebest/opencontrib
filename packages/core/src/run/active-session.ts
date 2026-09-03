@@ -1,9 +1,7 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import { homedir as osHomedir } from 'os';
-import type { ContributionRunPhase } from './types.js';
-import { getOpenContribHome } from '../kernel/home.js';
-
+import * as fs from "fs";
+import * as path from "path";
+import type { ContributionRunPhase } from "./types.js";
+import { getOpenContribHome } from "../kernel/home.js";
 
 export interface ActiveSessionData {
   runId: string;
@@ -19,7 +17,9 @@ export interface ActiveSessionData {
 export class ActiveSessionManager {
   private sessionFilePath: string;
 
-  public static getActiveSession(customPath?: string): ActiveSessionData | null {
+  public static getActiveSession(
+    customPath?: string,
+  ): ActiveSessionData | null {
     return new ActiveSessionManager(customPath).getActiveSession();
   }
 
@@ -28,16 +28,17 @@ export class ActiveSessionManager {
   }
 
   constructor(customPath?: string) {
-    this.sessionFilePath = customPath || path.join(getOpenContribHome(), '.opencontrib', 'active_session.json');
+    this.sessionFilePath =
+      customPath ||
+      path.join(getOpenContribHome(), ".opencontrib", "active_session.json");
   }
 
   public getActiveSession(): ActiveSessionData | null {
-
     try {
       if (!fs.existsSync(this.sessionFilePath)) {
         return null;
       }
-      const content = fs.readFileSync(this.sessionFilePath, 'utf8');
+      const content = fs.readFileSync(this.sessionFilePath, "utf8");
       return JSON.parse(content) as ActiveSessionData;
     } catch {
       return null;
@@ -49,15 +50,23 @@ export class ActiveSessionManager {
     return session ? session.runId : null;
   }
 
-  public setActiveSession(data: Partial<ActiveSessionData> & { runId: string; repoFullName: string }): ActiveSessionData {
-    const current = this.getActiveSession() || ({} as Partial<ActiveSessionData>);
+  public setActiveSession(
+    data: Partial<ActiveSessionData> & { runId: string; repoFullName: string },
+  ): ActiveSessionData {
+    const current =
+      this.getActiveSession() || ({} as Partial<ActiveSessionData>);
     const updated: ActiveSessionData = {
       runId: data.runId,
       repoFullName: data.repoFullName,
-      currentPhase: data.currentPhase || current.currentPhase || 'INITIALIZED',
-      workspacePath: data.workspacePath !== undefined ? data.workspacePath : current.workspacePath,
-      issueNumber: data.issueNumber !== undefined ? data.issueNumber : current.issueNumber,
-      issueTitle: data.issueTitle !== undefined ? data.issueTitle : current.issueTitle,
+      currentPhase: data.currentPhase || current.currentPhase || "INITIALIZED",
+      workspacePath:
+        data.workspacePath !== undefined
+          ? data.workspacePath
+          : current.workspacePath,
+      issueNumber:
+        data.issueNumber !== undefined ? data.issueNumber : current.issueNumber,
+      issueTitle:
+        data.issueTitle !== undefined ? data.issueTitle : current.issueTitle,
       updatedAt: new Date().toISOString(),
       metadata: { ...(current.metadata || {}), ...(data.metadata || {}) },
     };
@@ -67,7 +76,11 @@ export class ActiveSessionManager {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    fs.writeFileSync(this.sessionFilePath, JSON.stringify(updated, null, 2), 'utf8');
+    fs.writeFileSync(
+      this.sessionFilePath,
+      JSON.stringify(updated, null, 2),
+      "utf8",
+    );
     return updated;
   }
 

@@ -13,6 +13,8 @@ import { mapToDefectCategory, mapSeverity } from './defect-category.js';
 import { isBinaryOnPath } from '../kernel/tool-registry.js';
 import { discoverDocker } from '../discovery/docker-discovery.js';
 import { execWithSpawn } from '../kernel/process-runner.js';
+import { RandomIdGenerator } from '../ports/id-generator.port.js';
+import type { IdGenerator } from '../ports/id-generator.port.js';
 
 // ── Output parsers ────────────────────────────────────────────────────────────
 
@@ -23,7 +25,7 @@ export type OutputParser = (
 ) => NormalizedFinding[];
 
 export const OUTPUT_PARSERS: Record<string, OutputParser> = {
-  semgrep: (probe, data, targetPath) => {
+  semgrep: (_probe, data, targetPath) => {
     if (!Array.isArray(data.results)) return [];
     const findings: NormalizedFinding[] = [];
     for (const res of data.results) {
@@ -46,7 +48,7 @@ export const OUTPUT_PARSERS: Record<string, OutputParser> = {
     return findings;
   },
 
-  'osv-scanner': (probe, data, targetPath) => {
+  'osv-scanner': (_probe, data, targetPath) => {
     if (!Array.isArray(data.results)) return [];
     const findings: NormalizedFinding[] = [];
     for (const res of data.results) {
@@ -72,7 +74,7 @@ export const OUTPUT_PARSERS: Record<string, OutputParser> = {
     return findings;
   },
 
-  knip: (probe, data, _targetPath) => {
+  knip: (_probe, data, _targetPath) => {
     if (!(data.files || data.unused)) return [];
     const unusedFiles: string[] = data.files || [];
     return unusedFiles.map((uf: string) => ({
@@ -89,7 +91,7 @@ export const OUTPUT_PARSERS: Record<string, OutputParser> = {
     }));
   },
 
-  ruff: (probe, data, targetPath) => {
+  ruff: (_probe, data, targetPath) => {
     if (!Array.isArray(data)) return [];
     return (data as any[]).map((item) => ({
       id: `ruff-${item.code}-${item.filename}-${item.location?.row || 1}`,
@@ -109,10 +111,14 @@ export const OUTPUT_PARSERS: Record<string, OutputParser> = {
 };
 
 /** Generic `findings` array (any probe that emits `{ findings: [...] }`). */
-function parseGenericFindings(probe: ProbeManifest, data: any): NormalizedFinding[] {
+function parseGenericFindings(
+  probe: ProbeManifest,
+  data: any,
+  idGen: IdGenerator,
+): NormalizedFinding[] {
   if (!Array.isArray(data.findings)) return [];
   return data.findings.map((f: any) => ({
-    id: f.id || `${probe.name}-${Math.random().toString(36).slice(2, 8)}`,
+    id: f.id || idGen.generate(`${probe.name}-`),
     probeName: probe.name,
     category: f.category || probe.category,
     title: f.title || f.message || 'Probe finding',
@@ -151,6 +157,7 @@ export function parseProbeOutput(
   probe: ProbeManifest,
   stdout: string,
   targetPath: string,
+  idGen: IdGenerator = new RandomIdGenerator(),
 ): NormalizedFinding[] {
   if (!stdout || stdout.trim() === '') return [];
   try {
@@ -160,7 +167,7 @@ export function parseProbeOutput(
       const parsed = parser(probe, data, targetPath);
       if (parsed.length > 0) return parsed;
     }
-    const generic = parseGenericFindings(probe, data);
+    const generic = parseGenericFindings(probe, data, idGen);
     if (generic.length > 0) return generic;
     return [];
   } catch {
@@ -195,7 +202,7 @@ export const FALLBACK_COMMANDS: Record<string, FallbackCommandBuilders> = {
     },
   },
   knip: {
-    ephemeral: (t) => {
+    ephemeral: (_t) => {
       if (isBinaryOnPath('bun')) return `bun x knip --reporter json`;
       if (isBinaryOnPath('npx')) return `npx knip --reporter json`;
       return undefined;

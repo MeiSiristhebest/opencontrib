@@ -44,12 +44,18 @@ async function mapConcurrent<T, R>(
  * Scout Engine (Two-Tier Discovery + Unified Calibrated Scoring + Diversity Reranking)
  * Orchestrates GitHub discovery, cheap pre-ranking, deep community enrichment,
  * single source of truth scoring, and 2-stage diversity reranking.
+ *
+ * The GitHub client may be injected via `options.client` (DIP): the pipeline
+ * passes its already-wired `deps.client` so `scout` never constructs its own
+ * network adapter and is fully testable with an `InMemoryIssueSource`.
+ * Callers that omit `options.client` get a default-wired production client.
  */
 export async function scoutOpportunities(
   profile: UserProfile,
   options: ScoutOptions = {},
+  client?: GitHubClient,
 ): Promise<Opportunity[]> {
-  const client = new GitHubClient({ token: options.githubToken });
+  const resolvedClient = client ?? new GitHubClient({ token: options.githubToken });
   const capabilities = detectSystemCapabilities();
   const limit = options.limit ?? 10;
   const minStars = options.minStars ?? 50;
@@ -86,7 +92,7 @@ export async function scoutOpportunities(
       .join(' ');
   }
 
-  const searchResult = await client.searchIssues(searchQuery, { refresh: options.refresh, maxPages: 2 });
+  const searchResult = await resolvedClient.searchIssues(searchQuery, { refresh: options.refresh, maxPages: 2 });
   const rawItems = searchResult.items || [];
   if (rawItems.length === 0) {
     return [];
@@ -131,7 +137,7 @@ export async function scoutOpportunities(
       // Fail-Safe Batch repo details
       let repoDetails = repoDetailsCache.get(repoFullName);
       if (!repoDetails) {
-        const repoRes = await client.getRepoDetails(owner, repo);
+        const repoRes = await resolvedClient.getRepoDetails(owner, repo);
         if (repoRes.status !== 'OK' || !repoRes.data) {
           return null; // Fail-Safe: discard issue if repo metadata cannot be securely verified
         }
@@ -141,8 +147,8 @@ export async function scoutOpportunities(
       if (repoDetails.isArchived) return null;
 
       // Paged comments and timeline with rich ApiStatus
-      const commentsResult = await client.getIssueComments(owner, repo, item.number);
-      const timelineResult = await client.getIssueLinkedPrsCount(owner, repo, item.number);
+      const commentsResult = await resolvedClient.getIssueComments(owner, repo, item.number);
+      const timelineResult = await resolvedClient.getIssueLinkedPrsCount(owner, repo, item.number);
 
       const comments = commentsResult.data.map((c: any) => ({
         id: c.id,

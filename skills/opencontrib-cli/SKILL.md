@@ -53,7 +53,7 @@ Load these modular references into context **only when entering that specific ph
 
 1. **CLI-First Execution Priority (Dual-Ingress Architecture)**:
    - **CLI-First Priority**: Always prioritize executing `opencontrib <subcommand>` via terminal commands (`run_command`). The CLI provides automated active session inheritance, immediate log streaming, and deterministic `▶ NEXT RECOMMENDED COMMAND` prompts.
-   - **MCP First-Class Support**: The OpenContrib MCP Server (`@opencontrib/mcp`) provides 34 composable JSON-RPC tools and resources when operating in MCP-only client environments.
+   - **MCP First-Class Support**: The OpenContrib MCP Server (`@opencontrib/mcp`) provides 35 composable JSON-RPC tools and resources when operating in MCP-only client environments.
 
 2. **File-First Markdown Protocol (No Inline String Markdown)**:
    - **NEVER** pass Markdown, multi-line text, or quotes as inline string arguments in CLI/PowerShell (e.g. `-f body="..."` or `--body "..."`).
@@ -91,13 +91,10 @@ Load these modular references into context **only when entering that specific ph
 
 ---
 
-
 ## 🎯 The Three Human Checkpoints
 
 Pause and obtain user confirmation at these three gates:
+
 - **Checkpoint 1 (Post-Scout / Finding Selection):** Present the **Single Defect Summary Card** (`printDefectCard`) with file path, line numbers, core defect in plain language, and minimal fix scope before preparing workspaces.
 - **Checkpoint 2 (Empirical Reproduction):** Present the concrete failing test output proving the bug exists (`opencontrib evidence`) before modifying source code.
 - **Checkpoint 3 (Governance & Pre-Flight Review):** Show the patch diff, governance audit score (0-100), and draft PR body before pushing to remotes.
-
-
-

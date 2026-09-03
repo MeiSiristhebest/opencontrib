@@ -13,7 +13,7 @@
 **抽象只做了一半。** 项目里同时存在两套互不一致的世界观：
 
 | 世界观 A（做对了的部分） | 世界观 B（占主体的部分） |
-|---|---|
+| --- | --- |
 | `SandboxProvider` 接口 + 2 个适配器 | `probe/runner.ts` 用字符串 `if/else` 分派探针 |
 | `VcsDeltaPort`、`GitHostPort`、`LLMProvider` | `GitHubClient` 内部直接 `new Octokit()` |
 | `scoring-engine.ts` 的纯函数打分 | `scout.ts` 里 HTTP + 缓存 + 编排 + 打分混在一个函数 |
@@ -25,7 +25,7 @@
 ### 原则达成度评分
 
 | 原则 | 评分 | 状态 |
-|---|:---:|---|
+| --- | :---: | --- |
 | 硬编码与 mock | 3/10 | ❌ 严重违背（生产包内置 mock 打分器） |
 | 单一职责 SRP | 4/10 | ❌ 存在 530 行上帝方法 |
 | 开闭原则 OCP | 3/10 | ❌ 字符串分派链遍布 |
@@ -70,6 +70,7 @@ export const MockOrDirectLLMProvider = MockLLMProvider;  // "for legacy tests"
 这不只是"测试代码放错位置"。这是**一个专门检测 AI 造假、号称 "Exit Code 2 Hard Gate" 的治理引擎，自己在生产 bundle 里内置了一个编造 94 分的装置**。而且 `LLMService` 构造函数的注释建议生产调用方 `new MockLLMProvider()`（`llm-service.ts:190`）。任何一次误配置都会让整个质量闸门静默失效。
 
 **重构方向**：
+
 1. `MockLLMProvider` 移出 `core/src`，放到 `packages/core/src/llm/__fixtures__/` 或独立 `testkit` 子路径导出，并在 `package.json` 的 `exports` 中显式隔离。
 2. 生产路径加硬断言：`LLMService` 构造函数在 `NODE_ENV !== 'test'` 时拒绝任何 `provider.constructor.name.startsWith('Mock')` 的实现。
 3. 打分来源加**溯源标记**：`ConfidenceBreakdown` 增加 `provenance: 'measured' | 'llm_reported' | 'default'`，治理闸门拒绝 `provenance !== 'measured'` 且无证据支撑的高分。
@@ -97,7 +98,7 @@ targetRepo: 'mock/microservice-go',
 ### 1.4 大规模硬编码配置
 
 | 位置 | 内容 | 问题 |
-|---|---|---|
+| --- | --- | --- |
 | `probe/registry.ts:10-429` | 420 行探针清单：命令模板、超时、语言、二进制名 | 新增探针要改源码并重新发版 |
 | `probe/runner.ts:18-55` | `uvx semgrep scan --config auto ...`、`docker run ... returntocorp/semgrep` | Docker 镜像/CLI 参数硬编码 |
 | `governance/governance-auditor.ts:9-32` | 26 条反 AI 短语 + 6 个正则 | 规则无法由用户/社区扩展 |
@@ -146,7 +147,7 @@ interface PipelineStep<TCtx> {
 ### 2.2 其他 SRP 违规点
 
 | 文件 | 违规 |
-|---|---|
+| --- | --- |
 | `probe/runner.ts:127-318` | `runProbes` 同时做分派、命令渲染、三级降级、解析、过滤、汇总 |
 | `probe/runner.ts:376-505` | `parseProbeOutput` 内含 semgrep/osv/knip/ruff/通用/正则行 6 套解析 |
 | `governance/governance-auditor.ts` | AI 文本 lint + Markdown 校验 + 7 维加权 + RFC 行数闸 + PR 模板渲染，5 件事一个文件 |
@@ -155,6 +156,7 @@ interface PipelineStep<TCtx> {
 | `discovery/github-client.ts` | Octokit 封装 + 磁盘缓存 + 重试退避 + 凭据发现（env→config.json→`gh auth token`）+ 领域方法 |
 
 **重构方向（以 GitHubClient 为例）**：拆成 4 层
+
 ```
 CredentialsProvider (port)      ← EnvCredentialsProvider / GhCliCredentialsProvider / ConfigFileCredentialsProvider
 ResponseCache      (port)       ← FileSystemResponseCache / InMemoryResponseCache / NullCache
@@ -479,7 +481,7 @@ core/src/llm/llm-service.ts:3            ⚠️  LLMProvider 接口，但没放�
 ### 8.2 真正需要端口却缺失的地方
 
 | 现状 | 应有端口 |
-|---|---|
+| --- | --- |
 | `GitHubClient` 直接耦合 Octokit | `IssueSource` / `PullRequestSink` |
 | `GitHubClient` 自己管磁盘缓存 | `ResponseCache` |
 | `GitHubClient` 自己读 env + config.json + `gh auth token` | `CredentialsProvider` |
@@ -518,6 +520,7 @@ evidence-collector.ts:29 getProcessHandleCount()         // 直接调 process.pi
 ```
 
 **重构方向**：
+
 - `computeActivityFreshnessModifier(activityTs, now: Instant)` —— 时间作为参数传入。
 - `generateRunId(repo, issue, clock, idGen)`。
 - `binaryCache` 改为 `BinaryProbe` 接口的实例字段，而非模块级常量。
@@ -621,7 +624,7 @@ nextCommand: 'opencontrib governance audit --patch <file> --pr-title <title> --a
 ### 13.1 Manager / Handler / Data / Item / Info 后缀
 
 | 后缀 | 实例 |
-|---|---|
+| --- | --- |
 | **Manager** ×5 | `PluginManager`、`ContributionRunManager`、`WorktreeManager`、`ActiveSessionManager`、`ArtifactBundleManager` |
 | **Handler** ×5 | `KernelEventHandler`、`TaskActionHandler`、`wrapHandler`、`dataHandler`、`endHandler` |
 | **Data** ×2 | `PrData`、`ActiveSessionData` |
@@ -639,7 +642,7 @@ nextCommand: 'opencontrib governance audit --patch <file> --pr-title <title> --a
 ### 13.3 重构方向（重命名映射）
 
 | 现名 | 建议 | 理由 |
-|---|---|---|
+| --- | --- | --- |
 | `ContributionRunManager` | `ContributionRunRepository` + `RunPhaseTracker` | 拆掉"管理"这个模糊动词 |
 | `PluginManager` | `PluginStateStore` | 它实际只做启停状态的持久化 |
 | `ActiveSessionManager` | `ActiveSessionStore` | 同上 |
@@ -659,7 +662,7 @@ nextCommand: 'opencontrib governance audit --patch <file> --pr-title <title> --a
 ### 14.1 用对且不滥的（保持）
 
 | 模式 | 位置 | 评价 |
-|---|---|---|
+| --- | --- | --- |
 | **策略** | `SandboxProvider` + 2 实现 | ✅ 教科书级，Fail-Closed 语义清晰 |
 | **观察者** | `MicrokernelEventBus` + `KernelEventMap` | ✅ 类型化事件映射很漂亮 |
 | **适配器** | `TestOutputParserRegistry`（9 种测试框架解析器） | ✅ 正确的注册表 + 适配器链 |
@@ -683,12 +686,14 @@ kernel/{capability-router, evidence-graph, scan-scheduler, pointer-store,
 再看 `plugins/` 下 12 个插件（`plugin-semgrep.ts`、`plugin-ruff.ts`、`plugin-knip.ts` ...）—— 它们**只是 `BUILTIN_PROBES`（`probe/registry.ts:10-429`）的另一份包装**。
 
 结果是**两套并存的插件体系**：
+
 - `ProbeRegistry` + `ProbeManifest`（数据驱动，JSON 清单，可放 `~/.opencontrib/plugins/`）
 - `PluginHost` + `OpenContribPlugin`（代码驱动，`activate(ctx)` 注册探针与工具）
 
 两者都管"探针"，都有注册/注销/列表，都要判断启用状态，却互不知晓。`PluginManager.isEnabled()` 用 `TOOL_REGISTRY` 判断，`ProbeRegistry` 用自己的 `memoryProbes`——**同一件事两个真相源**。
 
 **重构方向**：二选一，不要两套。
+
 - 若走数据驱动（推荐）：删掉 `PluginHost` / `OpenContribPlugin` / `PluginManager` 的插件语义，只保留 `ProbeRegistry` + `ProbeCatalog`，`plugins/` 目录下 12 个文件改写成 `ProbeManifest` 常量。
 - 若走代码驱动：删掉 `BUILTIN_PROBES`，让 12 个插件各自 `activate()`，统一由 `PluginHost` 管生命周期与权限。
 
@@ -724,7 +729,7 @@ export function getAutoSandboxProvider(preferDocker = true): SandboxProvider {
 ### 15.3 不可测的部分
 
 | 对象 | 为什么不可测 |
-|---|---|
+| --- | --- |
 | `scoutOpportunities` | 内部 `new GitHubClient()`，无法脱离网络 |
 | `collectEvidence` | 直接调全局 `defaultSandboxRuntime`，测证据逻辑必须真跑子进程 |
 | `AgentOrchestrator` | 构造函数 new 9 个具体类，一个都换不掉 |
@@ -751,12 +756,15 @@ const evidence = await collectEvidence(
 ```
 
 配套动作：
+
 1. **架构测试（ArchUnit 风格）**——用 CI 守住分层，防止再次腐化：
+
    ```
    domain/**        不得 import fs / child_process / process.env / @octokit
    application/**   不得 import fs / child_process（只能依赖 ports）
    domain/**        不得 import application/** 或 infrastructure/**
    ```
+
 2. 提供 `packages/core/src/testkit/` 导出 `InMemoryIssueSource` / `ScriptedSandboxProvider` / `FixedClock` / `InMemoryRunRepository`，让写测试的成本低于写集成脚本。
 3. 把 1166 行的 `comprehensive_integration.test.ts` 拆成按用例划分的单元测试 + 少量端到端冒烟。
 
@@ -825,7 +833,7 @@ const evidence = await collectEvidence(
 ### 18.1 已完成（已通过测试验证，无回归）
 
 | # | 改动 | 文件 | 验证 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | `MockLLMProvider` 迁出生产路径至 `core/src/testkit/mock-llm.ts`；`LLMService` 构造函数加 `instanceof MockLLMProvider` 硬断言；删除 `MockOrDirectLLMProvider` 别名 | `llm-service.ts` / 新增 `testkit/mock-llm.ts` / `orchestrator_pipeline.test.ts` | 集成测试断言 llm 导出仍包含 `MockLLMProvider` ✅ |
 | 2 | `DockerSandboxProvider.getDeniedPaths()` 返回空数组的 LSP 违背：抽取共享 `sensitiveDeniedPaths()`，两个 provider 共用同一份拒绝清单 | `sandbox-runtime.ts` / 新增 `sandbox/denied-paths.ts` | `sandbox_security_evidence.test.ts` 16/16 ✅ |
 | 3 | 删除两处 `sha: 'placeholder'` 伪造数据，SHA 改为按需可选 | `cli/.../discovery.ts`、`mcp-server/.../discovery-tools.ts` | 类型 `assembleContext(input: any)` 不受影响 ✅ |
@@ -840,7 +848,7 @@ const evidence = await collectEvidence(
 ### 18.2 第二轮执行（2026-09-03 续）：DIP / OCP / 纯函数注入 / 架构护栏
 
 | # | 原则 | 改动 | 文件 | 验证 |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 8 | **DIP** | 3 份 `execWithSpawn` 合并为 `core/src/kernel/process-runner.ts`；参数化 `shell`/`env`/`maxBuffer`/`timeout`；抽出共享 `SystemBinaryProbe`/`defaultBinaryProbe`（原 2 份二进制探测缓存合并） | `process-runner.ts`（新）、`probe/runner.ts`、`kernel/scan-scheduler.ts`、`kernel/plugin-host.ts` | scan-scheduler / plugin-host / kernel_microkernel / sandbox 测试 ✅ |
 | 9 | **OCP** | `run-manager.ts` 的 10 分支 switch → `PHASE_TRANSITIONS` 相位机邻接表 | `run/run-manager.ts` | run_and_primitives ✅ |
 | 10 | **纯函数注入 / 可测试性** | 新增 `ports/clock.port.ts`、`ports/id-generator.port.ts`；`ContributionRunManager` 注入 `Clock`/`IdGenerator`/`ActiveSession`（消除 `Date.now()`/`Math.random()` 隐式输入），默认保持原行为 | `ports/*.port.ts`、`run/run-manager.ts` | run_and_primitives ✅ |
@@ -857,7 +865,7 @@ const evidence = await collectEvidence(
 第二轮落地后 `bun test` 全绿，但 `tsc --noEmit` 仍有 19 个类型错误（bun 运行时不校验类型，故未在测试层暴露）。本轮在不改变任何运行时行为的前提下清零类型错误：
 
 | # | 改动 | 文件 | 验证 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 15 | `CreateRunInput` 从 `run-manager.ts` 下沉为领域类型，迁入 `run/types.ts`；`run-manager.ts` 改为 re-export，保持对外契约不变 | `run/types.ts`、`run/run-manager.ts` | run_and_primitives ✅ |
 | 16 | **行为保持**：`PHASE_TRANSITIONS` 为补齐 `Record<ContributionRunPhase,string>` 所需键位，新增 `PROBE_COMPLETED`/`POC_GENERATED` 两项，但原 10 个相位的映射值**原样保留**（含 `OPPORTUNITY_SCOUTED:'assemble_context'`），未改动既有 `resumeRun` 行为 | `run/run-manager.ts` | run_and_primitives（含「resume 建议下一步」断言）✅ |
 | 17 | `testkit/index.ts` 修正：`IdGenerator` 类型改从 `id-generator.port.ts` 导入；`InMemoryRunRepository.getRun` 补 `availableArtifactFiles`；`saveArtifact` 返回补齐 `runId`/`filePath` | `testkit/index.ts` | architecture.test 4/4 ✅ |
@@ -879,7 +887,7 @@ const evidence = await collectEvidence(
 ### 18.4 第四轮执行（2026-09-03 续）：领域层 / 被动视图 / 集成测试确定性
 
 | # | 原则 | 改动 | 文件 | 验证 |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 21 | **SRP / 被动视图** | `cli/src/utils/exit.ts` 新增强类型 `CliExitError`；`governance.ts` 内所有 `process.exit` 改为抛 `CliExitError`（命令层零 `process.exit`）；`index.ts` 用 `program.parseAsync().catch(...)` 在唯一边界把 `CliExitError` 翻成 `process.exit(code)` | `cli/src/utils/exit.ts`（新）、`cli/src/commands/governance.ts`、`cli/src/index.ts` | 直接运行 `governance audit --patch … --pr-title …` 打印指引后 `EXIT_CODE=2` ✅ |
 | 22 | **纯函数 / 关注点分离** | 抽纯逻辑到 `core/src/domain/`：`matcher.ts`(TechnologyMatcher)、`scoring.ts`、`qualification.ts`、`risk.ts`、`governance.ts`；原文件降级为 `export *` 垫片（40+ 调用点不变）；`ApiStatus` 用 type-only 导入避免运行期耦合 | `core/src/domain/*`（新）、`discovery/scoring-engine.ts`、`discovery/qualification.ts`、`discovery/technology-matcher.ts`、`risk/risk-engine.ts`、`governance/governance-auditor.ts` | `architecture.test.ts` 的 `domain/`  purity 护栏加严通过；domain 相关测试 75/0 ✅ |
 | 23 | **OCP** | `runProbes` 内建探针分派改为 `BUILTIN_RUNNERS` 注册表（按 `probe.name` / `execution.transformer` 查表，含 `runGitHotspotBuiltin`/`runPropertyFuzzBuiltin`/`runPioliumBuiltin`）；`mapToDefectCategory` 关键字链改为 `DEFECT_CATEGORY_RULES` 有序表（首匹配优先） | `probe/runner.ts`、`probe/defect-category.ts`（新）、`tests/defect_category.test.ts`（新） | defect_category 3/3、probe 套件 11/11 ✅ |
@@ -887,6 +895,7 @@ const evidence = await collectEvidence(
 | 25 | **Stage 5 护栏补强** | `tests/pipeline_e2e.test.ts`：用 `mock.module` 桩掉 `scoutOpportunities`、注入 `PipelineDeps` 假实现，离线跑通全部 14 个 `PipelineStep`，正向验证 SRP 拆解行为等价（3/3 pass） | `tests/pipeline_e2e.test.ts`（新） | 3/3 ✅ |
 
 > **收口结论（2026-09-03 第四轮）**：
+>
 > - `bun x tsc --noEmit -p tsconfig.json` **0 错误**。
 > - `bun test packages/core/tests`：**344 通过 / 0 失败**（46 文件）。
 > - `bun test packages/cli/tests`：**18 通过 / 0 失败**（2 文件）。
@@ -898,7 +907,7 @@ const evidence = await collectEvidence(
 本轮依用户要求，将路线图里所有标为「高风险、需分阶段」的项全部落地，全部行为保持等价、测试正向覆盖。
 
 | # | 原则 | 改动 | 文件 | 验证 |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 26 | **DIP / 端口** | 新增 `ports/credentials-provider.port.ts`：`CredentialsProvider` 端口（解析 `GH_TOKEN`/`GITHUB_TOKEN`/`gh` auth，1Password/CI 注入实现可替换） | `ports/credentials-provider.port.ts`（新） | architecture.test 护栏 + `github_client_split.test.ts` ✅ |
 | 27 | **DIP / 端口** | 新增 `ports/response-cache.port.ts`：`ResponseCache` 端口（文件级 TTL 缓存，避免重复打 GitHub API） | `ports/response-cache.port.ts`（新） | 同上 ✅ |
 | 28 | **SRP / 分层** | `GitHubClient` 拆为四层：`github/credentials-provider.ts`（令牌解析，注入 `CredentialsProvider`）、`github/response-cache.ts`（文件缓存）、`github/retry-strategy.ts`（`requestWithRetry` 退避重试，独立可测）、`github/octokit-issue-source.ts`（所有 Octokit 域操作，委托 retry+cache）。`discovery/github-client.ts` 瘦身为组合门面，公共 API（`searchIssues`/`getIssueComments`/`getRepoTextFile`/`listWorkflowFiles`/`getRepoDetails`/`getIssueLinkedPrsCount`/`hasActiveLinkedPr`/`submitPullRequest`/`requestWithRetry`）签名不变 | `github/*.ts`（新）、`discovery/github-client.ts`（瘦身为 shim 式门面） | `github_client_split.test.ts` 7/7（含 retry 退避、cache 命中、凭据解析）✅ |
@@ -906,17 +915,23 @@ const evidence = await collectEvidence(
 | 30 | **组合根** | 新增 `composition-root.ts`：`buildProductionGitHubClient()` 串联 CredentialsProvider→ResponseCache→RetryStrategy→OctokitIssueSource；`agent-orchestrator.ts` 构造函数委托该组合根创建 `GitHubClient`，全仓生产装配集中到一处 | `composition-root.ts`（新）、`orchestration/agent-orchestrator.ts` | tsc 0 错误；core 全量 376/0 ✅ |
 | 31 | **OCP / 用例层** | 新增 `application/index.ts` 的 `ContributionPipeline` 门面（薄封装 `AgentOrchestrator.runPipeline`，注入 `PipelineDeps`），作为 CLI 与 MCP 的**唯一**用例入口；新增 `reporting/report-renderer.ts` 的纯 `renderReport`/`renderJson`/`renderContributionSummary`，CLI `output.ts` 的 `printJSON` 现委托 `ReportRenderer`；`application/` 与 `reporting/` 加入架构护栏（零 `fs`/`child_process`/`process.env`） | `application/index.ts`（新）、`reporting/report-renderer.ts`（新）、`cli/utils/output.ts`、`tests/architecture.test.ts` | `application_facade.test.ts` 2/2、`report_renderer.test.ts` 7/7、architecture.test 含新护栏 ✅ |
 | 32 | **OCP / 装饰器** | 探针降级链由 `runner.ts` 内嵌 try/catch 三阶回退，重构为 `strategies.ts` 的 `withFallback` + `execProbeCommand` 组合（主命令 → `uvx`/`npx`/`bunx` 临时回退 → Docker sandbox；首产出即停，保留首个底层错误）。行为与原实现逐字节等价 | `probe/strategies.ts`、`probe/runner.ts` | `probe_fallback_decorator.test.ts` 7/7（含「首错误保留 / 中间不可用不覆盖主错误」）✅ |
-| 33 | **测试硬化** | `domain/matcher.ts`：`matches('   ','  ')` 空白输入误判为匹配（原实现的潜伏 bug，原样迁移时带入）→ 收紧 `!text.trim() || !term.trim()` 守卫，真实输入行为不变 | `domain/matcher.ts` | `domain_matcher.test.ts` 9/9 ✅ |
+| 33 | **测试硬化** | `domain/matcher.ts`：`matches('   ','  ')` 空白输入误判为匹配（原实现的潜伏 bug，原样迁移时带入）→ 收紧 `!text.trim() | | !term.trim()` 守卫，真实输入行为不变 | `domain/matcher.ts` | `domain_matcher.test.ts` 9/9 ✅ |
 | 34 | **测试硬化** | `deep_advanced_frameworks` 的 `TaskflowEngine` 集成测试改为仅在 `seclab-taskflow-agent`/`docker` 实际可用时运行（原 `isProbeRuntimeAvailable` 过宽导致在缺该二进制时误跑失败），其余仍按网络自动探测 | `tests/helpers/integration-guard.ts`、`deep_advanced_frameworks.test.ts` | 全量 376/0 ✅ |
 | 35 | **阶段五门禁** | `packages/core/scripts/check-domain-coverage.ts`：解析 `bun test --coverage` 文本报告，对 `domain/` 5 个模块强制 ≥85% 行覆盖；`package.json` 加 `coverage:domain` 脚本 | `scripts/check-domain-coverage.ts`（新）、`package.json` | 门禁通过（5 模块全部 ≥85%）✅ |
 
 > **收口结论（2026-09-03 第五轮）**：
+>
 > - `bun x tsc --noEmit -p tsconfig.json` **0 错误**。
 > - `bun test packages/core/tests`：**376 通过 / 0 失败**（52 文件）。
 > - `bun test packages/cli/tests`：**18 通过 / 0 失败**；`bun test packages/mcp-server/tests`：**16 通过 / 0 失败**。
 > - `bun run coverage:domain`（门禁）：**5 个 `domain/` 模块全部 ≥85% 行覆盖**，通过。
 > - 全部路线图条目（§16 阶段一至五）现已落地并通过验证；架构护栏（eslint `no-restricted-imports` + `architecture.test`）持续生效，`domain/`/`ports/`/`testkit/`/`application/`/`reporting/` 均保持纯净。
 
-### 18.6 已知小尾项（无害，可后续清理）
+### 18.6 已知小尾项（已全部收敛清理完毕）
 
-- 13 个文件去重后，`homedir`/`os` 的 import 在个别文件中变为未使用（tsconfig 未启用 `noUnusedLocals`，不影响编译与测试）。建议下一步顺手清除。
+- 13 个文件去重后遗留的无用 `homedir`/`os` import（包括 `profile-sync.ts`、`repo-memory.ts`、`active-session.ts`、`artifact-bundle.ts`、`run-manager.ts`）已在第六轮全部清除。
+- `Opportunity` 中 `rawScore` / `adjustedScore` 的语义边界已在 `schemas.ts` 与 `scoring.ts` 中明确注释。
+- CLI 命令层已完全消灭顶层 `new ContributionRunManager()`，全部切换为惰性工厂；CLI 与 MCP 全面接入 `ContributionPipeline`。
+- `governance` 命令的硬编码文案与判定规则已完全下沉为领域层 `guidance` 视图模型。
+- `domain/` 层所有全局时间/随机数依赖全部消灭并受架构测试刚性守卫。
+- 项目所有中英文文档（`README.md`、`README_zh.md`、`ARCHITECTURE.md`、`ARCHITECTURE_zh.md`、`SKILL.md`）中的 MCP 工具数量已从 34 统一更新为 35，保持 100% 真实契约一致性。

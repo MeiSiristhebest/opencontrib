@@ -1,8 +1,6 @@
-import { existsSync, readdirSync } from 'fs';
-import { homedir as osHomedir } from 'os';
-import { join } from 'path';
-import { ArtifactBundleManager } from './artifact-bundle.js';
-
+import { existsSync, readdirSync } from "fs";
+import { join } from "path";
+import { ArtifactBundleManager } from "./artifact-bundle.js";
 
 import type {
   ArtifactType,
@@ -11,25 +9,35 @@ import type {
   ContributionRunSummary,
   CreateRunInput,
   SavedArtifactResult,
-} from './types.js';
-import { SystemClock, type Clock } from '../ports/clock.port.js';
-import { RandomIdGenerator, type IdGenerator } from '../ports/id-generator.port.js';
-import { ActiveSessionManager, defaultActiveSessionManager } from './active-session.js';
+} from "./types.js";
+import { SystemClock, type Clock } from "../ports/clock.port.js";
+import {
+  RandomIdGenerator,
+  type IdGenerator,
+} from "../ports/id-generator.port.js";
+import {
+  ActiveSessionManager,
+  defaultActiveSessionManager,
+} from "./active-session.js";
+// `defaultActiveSessionManager` is still re-exported below for backward-
+// compatibility with callers that construct a manager without injecting an
+// active session; it is only used as a *constructor default*, never bypassed
+// at runtime (transition/updatePhase go through `this.activeSession`).
 
 /** Phase → next suggested CLI/MCP action. Replaces the 10-branch switch (OCP). */
 const PHASE_TRANSITIONS: Record<ContributionRunPhase, string> = {
-  INITIALIZED: 'scout_opportunity',
-  OPPORTUNITY_SCOUTED: 'assemble_context',
-  PROBE_COMPLETED: 'assemble_context',
-  CONTEXT_ASSEMBLED: 'prepare_workspace',
-  WORKSPACE_PREPARED: 'draft_patch',
-  POC_GENERATED: 'draft_patch',
-  PATCH_DRAFTED: 'collect_evidence',
-  EVIDENCE_COLLECTED: 'audit_governance',
-  GOVERNANCE_AUDITED: 'render_pr_and_submit',
-  PR_SUBMITTED: 'sync_flywheel',
-  COMPLETED: 'none (run completed)',
-  FAILED: 'inspect_failure_and_replan',
+  INITIALIZED: "scout_opportunity",
+  OPPORTUNITY_SCOUTED: "assemble_context",
+  PROBE_COMPLETED: "assemble_context",
+  CONTEXT_ASSEMBLED: "prepare_workspace",
+  WORKSPACE_PREPARED: "draft_patch",
+  POC_GENERATED: "draft_patch",
+  PATCH_DRAFTED: "collect_evidence",
+  EVIDENCE_COLLECTED: "audit_governance",
+  GOVERNANCE_AUDITED: "render_pr_and_submit",
+  PR_SUBMITTED: "sync_flywheel",
+  COMPLETED: "none (run completed)",
+  FAILED: "inspect_failure_and_replan",
 };
 
 export type { CreateRunInput };
@@ -52,7 +60,7 @@ export interface ResumeRunResult {
   suggestedNextAction: string;
 }
 
-import { getOpenContribHome } from '../kernel/home.js';
+import { getOpenContribHome } from "../kernel/home.js";
 
 export class ContributionRunManager {
   private bundleManager: ArtifactBundleManager;
@@ -69,7 +77,8 @@ export class ContributionRunManager {
       activeSession?: ActiveSessionManager;
     } = {},
   ) {
-    this.baseDir = deps.baseDir || join(getOpenContribHome(), '.opencontrib', 'runs');
+    this.baseDir =
+      deps.baseDir || join(getOpenContribHome(), ".opencontrib", "runs");
     this.bundleManager = new ArtifactBundleManager(this.baseDir);
     this.clock = deps.clock ?? new SystemClock();
     this.idGenerator = deps.idGenerator ?? new RandomIdGenerator();
@@ -82,9 +91,9 @@ export class ContributionRunManager {
   }
 
   generateRunId(repoFullName: string, issueNumber?: number): string {
-    const timestamp = this.clock.nowIso().replace(/[-:T]/g, '').slice(0, 14);
-    const cleanRepo = repoFullName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-    const issueSuffix = issueNumber ? `_issue_${issueNumber}` : '';
+    const timestamp = this.clock.nowIso().replace(/[-:T]/g, "").slice(0, 14);
+    const cleanRepo = repoFullName.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+    const issueSuffix = issueNumber ? `_issue_${issueNumber}` : "";
     const randomSuffix = this.idGenerator.generate();
     return `run_${timestamp}_${cleanRepo}${issueSuffix}_${randomSuffix}`;
   }
@@ -94,12 +103,12 @@ export class ContributionRunManager {
     const now = this.clock.nowIso();
 
     const manifest: ContributionRunManifest = {
-      schemaVersion: '1.0.0',
+      schemaVersion: "1.0.0",
       runId,
       repoFullName: input.repoFullName,
       issueNumber: input.issueNumber,
       issueTitle: input.issueTitle,
-      currentPhase: 'INITIALIZED',
+      currentPhase: "INITIALIZED",
       createdAt: now,
       updatedAt: now,
       tags: input.tags ?? [],
@@ -108,23 +117,30 @@ export class ContributionRunManager {
 
     this.bundleManager.saveManifest(manifest);
     this.bundleManager.appendEvent(runId, {
-      phase: 'INITIALIZED',
-      eventType: 'RUN_CREATED',
-      payload: { repoFullName: input.repoFullName, issueNumber: input.issueNumber, issueTitle: input.issueTitle },
+      phase: "INITIALIZED",
+      eventType: "RUN_CREATED",
+      payload: {
+        repoFullName: input.repoFullName,
+        issueNumber: input.issueNumber,
+        issueTitle: input.issueTitle,
+      },
     });
 
-    defaultActiveSessionManager.setActiveSession({
+    this.activeSession.setActiveSession({
       runId,
       repoFullName: input.repoFullName,
       issueNumber: input.issueNumber,
       issueTitle: input.issueTitle,
-      currentPhase: 'INITIALIZED',
+      currentPhase: "INITIALIZED",
     });
 
     return manifest;
   }
 
-  updateRunPhase(runId: string, newPhase: ContributionRunPhase): ContributionRunManifest {
+  updateRunPhase(
+    runId: string,
+    newPhase: ContributionRunPhase,
+  ): ContributionRunManifest {
     const manifest = this.bundleManager.readManifest(runId);
     if (!manifest) {
       throw new Error(`Contribution run ${runId} does not exist`);
@@ -137,11 +153,11 @@ export class ContributionRunManager {
 
     this.bundleManager.appendEvent(runId, {
       phase: newPhase,
-      eventType: 'PHASE_TRANSITION',
+      eventType: "PHASE_TRANSITION",
       payload: { fromPhase: previousPhase, toPhase: newPhase },
     });
 
-    defaultActiveSessionManager.updatePhase(newPhase);
+    this.activeSession.updatePhase(newPhase);
 
     return manifest;
   }
@@ -161,7 +177,7 @@ export class ContributionRunManager {
 
     this.bundleManager.appendEvent(runId, {
       phase: autoAdvancePhase || manifest.currentPhase,
-      eventType: 'ARTIFACT_SAVED',
+      eventType: "ARTIFACT_SAVED",
       payload: { artifactType: type, byteSize: saved.byteSize },
     });
 
@@ -196,7 +212,10 @@ export class ContributionRunManager {
       }
     }
 
-    return manifests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return manifests.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
   }
 
   resumeRun(runId: string): ResumeRunResult {
@@ -207,14 +226,14 @@ export class ContributionRunManager {
 
     const artifacts = summary.artifacts;
     const availableArtifacts: ArtifactType[] = [];
-    if (artifacts.opportunity) availableArtifacts.push('opportunity');
-    if (artifacts.context) availableArtifacts.push('context');
-    if (artifacts.workspace) availableArtifacts.push('workspace');
-    if (artifacts.patch) availableArtifacts.push('patch');
-    if (artifacts.evidence) availableArtifacts.push('evidence');
-    if (artifacts.governance) availableArtifacts.push('governance');
-    if (artifacts.prDraft) availableArtifacts.push('pr_draft');
-    if (artifacts.result) availableArtifacts.push('result');
+    if (artifacts.opportunity) availableArtifacts.push("opportunity");
+    if (artifacts.context) availableArtifacts.push("context");
+    if (artifacts.workspace) availableArtifacts.push("workspace");
+    if (artifacts.patch) availableArtifacts.push("patch");
+    if (artifacts.evidence) availableArtifacts.push("evidence");
+    if (artifacts.governance) availableArtifacts.push("governance");
+    if (artifacts.prDraft) availableArtifacts.push("pr_draft");
+    if (artifacts.result) availableArtifacts.push("result");
 
     const latestSummary = {
       hasOpportunity: !!artifacts.opportunity,
@@ -227,7 +246,8 @@ export class ContributionRunManager {
       hasResult: !!artifacts.result,
     };
 
-    const suggestedNextAction = PHASE_TRANSITIONS[summary.manifest.currentPhase];
+    const suggestedNextAction =
+      PHASE_TRANSITIONS[summary.manifest.currentPhase];
 
     return {
       runId,

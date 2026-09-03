@@ -14,7 +14,7 @@ graph TD
 
     subgraph "OpenContrib Ingress Layer"
         CLI[OpenContrib CLI - 16 Command Domains]
-        MCP[MCP Server - 34 JSON-RPC Tools]
+        MCP[MCP Server - 35 JSON-RPC Tools]
     end
 
     subgraph "Deterministic Domain Engine"
@@ -62,6 +62,7 @@ Traditional AI coding assistants rely on naive regex or blind file reading. Open
 ## 🎯 2. Top-K Smart Pointer Triage & 1-Click Dereferencing
 
 To eliminate context bloating and hallucinated multi-file guessing:
+
 - OpenContrib computes a normalized **Suspiciousness Index** across identified defect sites.
 - It returns a high-precision **Smart Pointer** `(file, startLine, endLine, confidence, probeType)` with an upper bound of 150 tokens.
 - Agents can dereference only the exact 150-token slice needed, preserving 95% of the LLM context window.
@@ -84,6 +85,7 @@ A patch is never submitted based on LLM "confidence". It must pass two determini
 ## 🛡️ 4. Anti-Bandwagoning Governance (RFC-100 Gate & Hard Barrier)
 
 To defend maintainer trust:
+
 - **100-Line Patch Ceiling**: Automatically rejects massive refactors or unrequested reformatting.
 - **Anti-AI Jargon Sanitizer**: Strips robotic explanations, emojis, and unverified speculative claims from PR drafts.
 - **Exclusive Claim Protocol**: Verifies whether an issue is already claimed or actively worked on before drafting.
@@ -94,6 +96,7 @@ To defend maintainer trust:
 ## ⚡ 5. Active Session Engine & Deterministic State Machine
 
 To guarantee unbroken traceability across multi-turn agent lifecycles:
+
 - **Active Session Bus (`~/.opencontrib/active_session.json`)**: Tracks active `runId`, repository, workspace directory, and current phase.
 - **Automatic Context Inheritance**: Subsequent CLI commands resolve `runId` and workspace automatically, persisting an append-only JSONL event log (`events.jsonl`) and real-time evidence (`evidence.json`).
 - **Self-Guiding Next Actions**: Each CLI response outputs deterministic next-step recommendations and human review checkpoints.
@@ -103,8 +106,10 @@ To guarantee unbroken traceability across multi-turn agent lifecycles:
 ## 🔒 6. Telemetry & Privacy
 
 OpenContrib includes a minimal, anonymous ping mechanism to understand runtime adoption.
+
 - **Strictly Non-Sensitive**: Transmits only OS platform, runtime (`node`/`bun`), and CLI version.
 - **Opt-Out**: Users can completely disable telemetry anytime:
+
   ```bash
   export OPENCONTRIB_TELEMETRY=0
   # or

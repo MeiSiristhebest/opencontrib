@@ -8,37 +8,42 @@
  * process-environment modules are permitted here — the architecture guard enforces this.
  */
 
-import type { ConfidenceBreakdown, GovernanceAuditResult } from '../contracts/schemas.js';
-import { validateMarkdownIntegrity, type MarkdownValidationReport } from '../governance/markdown-validator.js';
-
+import type {
+  ConfidenceBreakdown,
+  GovernanceAuditResult,
+} from "../contracts/schemas.js";
+import {
+  validateMarkdownIntegrity,
+  type MarkdownValidationReport,
+} from "../governance/markdown-validator.js";
 
 /**
  * Advanced Semantic & Behavioral Anti-AI Patterns
  * Targets robotic tropes, AI disclaimers, boilerplate fluff, and mechanical comments.
  */
 export const ANTI_AI_PHRASE_PATTERNS = [
-  'as an ai language model',
-  'as an ai assistant',
-  'i do not have access to',
-  'i apologize for the confusion',
-  'i have carefully analyzed',
-  'i have crafted a solution',
-  'here is a breakdown of the changes',
-  'in this pull request, i have',
-  'in this pull request i have',
-  'this pr aims to fix',
-  'hope this helps!',
-  'let me know if you need anything else',
-  'feel free to ask if you have any questions',
-  'ai-generated',
-  'generated with claude',
-  'generated with chatgpt',
-  'generated with cursor',
-  'generated with copilot',
-  '// helper function',
-  '// auto-generated function',
-  'google / bytedance standard',
-  'microsoft vscode standard',
+  "as an ai language model",
+  "as an ai assistant",
+  "i do not have access to",
+  "i apologize for the confusion",
+  "i have carefully analyzed",
+  "i have crafted a solution",
+  "here is a breakdown of the changes",
+  "in this pull request, i have",
+  "in this pull request i have",
+  "this pr aims to fix",
+  "hope this helps!",
+  "let me know if you need anything else",
+  "feel free to ask if you have any questions",
+  "ai-generated",
+  "generated with claude",
+  "generated with chatgpt",
+  "generated with cursor",
+  "generated with copilot",
+  "// helper function",
+  "// auto-generated function",
+  "google / bytedance standard",
+  "microsoft vscode standard",
 ];
 
 export const FORBIDDEN_AI_PHRASES = [...ANTI_AI_PHRASE_PATTERNS];
@@ -74,12 +79,12 @@ export function lintAntiAiText(text: string): {
 
   // Remove robotic header prefixes
   let cleanText = text
-    .replace(/^#\s*\(Google\s+Standard\)\s*/i, '')
-    .replace(/^#\s*\(Microsoft\s+VSCode\s+Standard\)\s*/i, '')
-    .replace(/^#\s*\(PyTorch\s+Standard\)\s*/i, '')
-    .replace(/^#\s*\(CloudWeGo\s+Standard\)\s*/i, '')
-    .replace(/^#\s*\(CNCF\s+Standard\)\s*/i, '')
-    .replace(/^#\s*\(Linux\s+Kernel\s+Standard\)\s*/i, '');
+    .replace(/^#\s*\(Google\s+Standard\)\s*/i, "")
+    .replace(/^#\s*\(Microsoft\s+VSCode\s+Standard\)\s*/i, "")
+    .replace(/^#\s*\(PyTorch\s+Standard\)\s*/i, "")
+    .replace(/^#\s*\(CloudWeGo\s+Standard\)\s*/i, "")
+    .replace(/^#\s*\(CNCF\s+Standard\)\s*/i, "")
+    .replace(/^#\s*\(Linux\s+Kernel\s+Standard\)\s*/i, "");
 
   const isAiFlagged = flaggedPhrases.length > 0;
   return {
@@ -95,25 +100,33 @@ export function calculateConfidenceScore(breakdown: ConfidenceBreakdown): {
   weakestDimension: { dimension: string; score: number };
   isPassed: boolean;
 } {
-  const { rootCause, implementation, regression, defensiveCoverage, testCoverage, styleMatch, securityAudit } = breakdown;
+  const {
+    rootCause,
+    implementation,
+    regression,
+    defensiveCoverage,
+    testCoverage,
+    styleMatch,
+    securityAudit,
+  } = breakdown;
 
   const overallScore =
     0.25 * rootCause +
     0.25 * implementation +
-    0.20 * regression +
-    0.10 * defensiveCoverage +
-    0.10 * testCoverage +
+    0.2 * regression +
+    0.1 * defensiveCoverage +
+    0.1 * testCoverage +
     0.05 * styleMatch +
     0.05 * securityAudit;
 
   const dimensions = [
-    { dimension: 'Root Cause Confidence', score: rootCause },
-    { dimension: 'Implementation Confidence', score: implementation },
-    { dimension: 'Regression Confidence', score: regression },
-    { dimension: 'Defensive Coverage Confidence', score: defensiveCoverage },
-    { dimension: 'Test Coverage Confidence', score: testCoverage },
-    { dimension: 'Style & Pattern Confidence', score: styleMatch },
-    { dimension: 'Security Confidence', score: securityAudit },
+    { dimension: "Root Cause Confidence", score: rootCause },
+    { dimension: "Implementation Confidence", score: implementation },
+    { dimension: "Regression Confidence", score: regression },
+    { dimension: "Defensive Coverage Confidence", score: defensiveCoverage },
+    { dimension: "Test Coverage Confidence", score: testCoverage },
+    { dimension: "Style & Pattern Confidence", score: styleMatch },
+    { dimension: "Security Confidence", score: securityAudit },
   ];
 
   let weakest = dimensions[0];
@@ -171,15 +184,23 @@ export function deriveEvidenceBackedQualityRubric(input: {
   // Root cause confidence: 95 only if empirical failure reproduction was confirmed, 90 if standard tests passed, 65 if untested
   const rootCause = hasReproductionAssertion ? 95 : testsPassed ? 90 : 65;
   // Implementation confidence: based on surgical diff size
-  const implementation = diffLines <= 100 ? 94 : Math.max(60, 94 - Math.round((diffLines - 100) * 0.25));
+  const implementation =
+    diffLines <= 100
+      ? 94
+      : Math.max(60, 94 - Math.round((diffLines - 100) * 0.25));
   // Regression confidence: based on actual test passes
   const regression = testsPassed ? 93 : 50;
   // Defensive and test coverage: based on real passed unit tests count and test coverage percentage (>=85% required)
-  const defensiveCoverage = passedTestsCount > 0 ? 91 : subagentReviewAvailable ? 86 : 75;
-  let testCoverage = passedTestsCount > 0 ? 92 : subagentReviewAvailable ? 85 : 70;
-  if (typeof testCoveragePercent === 'number') {
+  const defensiveCoverage =
+    passedTestsCount > 0 ? 91 : subagentReviewAvailable ? 86 : 75;
+  let testCoverage =
+    passedTestsCount > 0 ? 92 : subagentReviewAvailable ? 85 : 70;
+  if (typeof testCoveragePercent === "number") {
     if (testCoveragePercent >= 85) {
-      testCoverage = Math.min(100, Math.round(85 + (testCoveragePercent - 85) * 1.0));
+      testCoverage = Math.min(
+        100,
+        Math.round(85 + (testCoveragePercent - 85) * 1.0),
+      );
     } else {
       // Under 85% test coverage strictly caps score below 80 to enforce Gated Block
       testCoverage = Math.max(50, Math.round(testCoveragePercent * 0.85));
@@ -188,17 +209,17 @@ export function deriveEvidenceBackedQualityRubric(input: {
 
   // Style and Security scores: grounded in Subagent Review if available, or calibrated conservative defaults if not
   const styleMatch =
-    typeof styleScore === 'number'
+    typeof styleScore === "number"
       ? styleScore
       : subagentReviewAvailable
-      ? 90
-      : 80;
+        ? 90
+        : 80;
   const securityAudit =
-    typeof securityScore === 'number'
+    typeof securityScore === "number"
       ? securityScore
       : subagentReviewAvailable
-      ? 90
-      : 80;
+        ? 90
+        : 80;
 
   const breakdown: ConfidenceBreakdown = {
     rootCause,
@@ -222,7 +243,8 @@ export function lintMarkdownIntegrity(text: string): {
   return {
     isClean: report.isValid,
     corruptedIssues: report.errors.map(
-      (e) => `[${e.ruleId}${e.line ? ` Line ${e.line}` : ''}] ${e.message} (Fix: ${e.suggestedFix})`
+      (e) =>
+        `[${e.ruleId}${e.line ? ` Line ${e.line}` : ""}] ${e.message} (Fix: ${e.suggestedFix})`,
     ),
   };
 }
@@ -244,12 +266,17 @@ export interface AuditGovernanceInput {
   impactAnalysisConducted?: boolean;
 }
 
-export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditResult & {
+export function auditGovernance(
+  input: AuditGovernanceInput,
+): GovernanceAuditResult & {
   overallConfidence: { isPassed: boolean; overallScore: number };
 } {
-  const patch = input.diffText || input.patchContent || '';
-  const prBody = input.prBodyText || input.prBody || '';
-  const lines = typeof input.lineCount === 'number' ? input.lineCount : patch.split('\n').length;
+  const patch = input.diffText || input.patchContent || "";
+  const prBody = input.prBodyText || input.prBody || "";
+  const lines =
+    typeof input.lineCount === "number"
+      ? input.lineCount
+      : patch.split("\n").length;
   const humanApproved = input.humanApproved ?? !input.isAutonomousPrSubmission;
   const maxDiffAllowed = input.maxDiffLines ?? 100;
 
@@ -258,12 +285,14 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
     const calibrated = deriveEvidenceBackedQualityRubric({
       hasReproductionAssertion: Boolean(input.evidence?.reproductionVerified),
       testsPassed: Boolean(input.evidence?.allTestsPassing),
-      passedTestsCount: input.evidence?.passedTestsCount || (input.evidence?.allTestsPassing ? 5 : 0),
+      passedTestsCount:
+        input.evidence?.passedTestsCount ||
+        (input.evidence?.allTestsPassing ? 5 : 0),
       testCoveragePercent: input.evidence?.testCoveragePercent,
       diffLines: lines,
       styleScore: input.subagentQualityScore,
       securityScore: input.subagentQualityScore,
-      subagentReviewAvailable: typeof input.subagentQualityScore === 'number',
+      subagentReviewAvailable: typeof input.subagentQualityScore === "number",
     });
     breakdown = calibrated.breakdown;
     // Reward in-domain deep defense if variant hunt was conducted
@@ -275,7 +304,10 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
   // 1. Anti-AI & Anti-Robotic Linting
   const aiDiffCheck = lintAntiAiText(patch);
   const aiPrCheck = lintAntiAiText(prBody);
-  const flaggedAiPhrases = [...aiDiffCheck.flaggedPhrases, ...aiPrCheck.flaggedPhrases];
+  const flaggedAiPhrases = [
+    ...aiDiffCheck.flaggedPhrases,
+    ...aiPrCheck.flaggedPhrases,
+  ];
   const antiAiCheckPassed = flaggedAiPhrases.length === 0;
 
   // 2. Markdown Integrity & Encoding Check
@@ -301,15 +333,24 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
 
   const remediationSuggestions: string[] = [];
   if (!markdownIntegrityPassed) {
-    remediationSuggestions.push(`Fix Markdown encoding/corruption issues: ${corruptedMarkdownIssues.join('; ')}`);
+    remediationSuggestions.push(
+      `Fix Markdown encoding/corruption issues: ${corruptedMarkdownIssues.join("; ")}`,
+    );
   }
   if (!antiAiCheckPassed) {
-    remediationSuggestions.push(`Remove flagged robotic/AI phrases: ${flaggedAiPhrases.join(', ')}`);
+    remediationSuggestions.push(
+      `Remove flagged robotic/AI phrases: ${flaggedAiPhrases.join(", ")}`,
+    );
   }
   if (!rfcGatePassed) {
-    remediationSuggestions.push(`Diff exceeds 100 lines (${lines} lines). Split into RFC Discussion issue first.`);
+    remediationSuggestions.push(
+      `Diff exceeds 100 lines (${lines} lines). Split into RFC Discussion issue first.`,
+    );
   }
-  if (typeof input.evidence?.testCoveragePercent === 'number' && input.evidence.testCoveragePercent < 85) {
+  if (
+    typeof input.evidence?.testCoveragePercent === "number" &&
+    input.evidence.testCoveragePercent < 85
+  ) {
     remediationSuggestions.push(
       `PR accompanying test coverage is below mandatory 85% threshold (Current: ${input.evidence.testCoveragePercent}%). Must add additional unit tests to cover all modified branches.`,
     );
@@ -326,10 +367,14 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
   }
 
   if (!input.variantHuntConducted) {
-    remediationSuggestions.push('In-Domain Defense Recommendation: Run Variant Hunting sweep across sister modules to ensure zero parallel structural defects.');
+    remediationSuggestions.push(
+      "In-Domain Defense Recommendation: Run Variant Hunting sweep across sister modules to ensure zero parallel structural defects.",
+    );
   }
   if (requiresHumanApproval) {
-    remediationSuggestions.push('Pre-flight Human Gate: Draft requires explicit user preview and approval before submission.');
+    remediationSuggestions.push(
+      "Pre-flight Human Gate: Draft requires explicit user preview and approval before submission.",
+    );
   }
 
   return {
@@ -347,6 +392,28 @@ export function auditGovernance(input: AuditGovernanceInput): GovernanceAuditRes
     overallConfidence: {
       isPassed: isGatedPassed,
       overallScore: confidence.overallScore,
+    },
+    guidance: {
+      isPassed: isGatedPassed,
+      forbiddenActions: isGatedPassed
+        ? []
+        : [
+            `Overall Quality Score (${confidence.overallScore.toFixed(1)}/100) is below required 90.0% threshold.`,
+            `Weakest dimension: ${confidence.weakestDimension.dimension} (${confidence.weakestDimension.score}/100).`,
+            "STRICTLY FORBIDDEN: Do NOT commit or create a PR with failing governance audit score.",
+          ],
+      invariants: isGatedPassed
+        ? [
+            "Present the patch diff and audit report to the user at Checkpoint 3 before pushing.",
+          ]
+        : [
+            "Improve test coverage or add negative assertion cases to increase confidence.",
+            "Run variant hunting across sister modules to verify no parallel defects.",
+            "To explicitly request human waiver, rerun with --allow-unverified.",
+          ],
+      nextCommand: isGatedPassed
+        ? 'opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"'
+        : "opencontrib governance audit --patch <file> --pr-title <title> --allow-unverified",
     },
   };
 }
@@ -367,7 +434,7 @@ export interface MasterPrTemplateInput {
   dcoAuthorName?: string;
   dcoAuthorEmail?: string;
   confidenceScore?: number;
-  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
+  riskLevel?: "LOW" | "MEDIUM" | "HIGH";
   isDocumentationOnly?: boolean;
   aiDisclosureRequired?: boolean;
   conditionalAiRequired?: boolean;
@@ -376,32 +443,53 @@ export interface MasterPrTemplateInput {
 
 export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
   const issueNumber = data.issueNumber;
-  const problemSummary = data.problemSummary || data.summary || data.issueTitle || 'Fixes reported issue';
-  const rootCause = data.rootCause || 'Identified root cause and applied targeted fix.';
-  const keyChanges = data.keyChanges || ['Targeted surgical code fix', 'Added unit regression test'];
-  const reproductionCommand = data.reproductionCommand || 'npm test';
-  const verificationCommand = data.verificationCommand || data.validationCommand || 'npm test';
+  const problemSummary =
+    data.problemSummary ||
+    data.summary ||
+    data.issueTitle ||
+    "Fixes reported issue";
+  const rootCause =
+    data.rootCause || "Identified root cause and applied targeted fix.";
+  const keyChanges = data.keyChanges || [
+    "Targeted surgical code fix",
+    "Added unit regression test",
+  ];
+  const reproductionCommand = data.reproductionCommand || "npm test";
+  const verificationCommand =
+    data.verificationCommand || data.validationCommand || "npm test";
   const testCount = data.testCount ?? 5;
   const stressLoopCount = data.stressLoopCount ?? 1;
   const dcoAuthorName = data.dcoAuthorName;
   const dcoAuthorEmail = data.dcoAuthorEmail;
 
   // If target repository provides a native template, merge into it
-  if (data.nativeTemplateContent && data.nativeTemplateContent.trim().length > 10) {
+  if (
+    data.nativeTemplateContent &&
+    data.nativeTemplateContent.trim().length > 10
+  ) {
     let result = data.nativeTemplateContent;
-    result = result.replace(/<!--[\s\S]*?-->/g, ''); // strip comments
+    result = result.replace(/<!--[\s\S]*?-->/g, ""); // strip comments
     if (/fixes #|closes #|resolves #/i.test(result)) {
-      result = result.replace(/(fixes|closes|resolves)\s+#\d*/i, `$1 #${issueNumber}`);
+      result = result.replace(
+        /(fixes|closes|resolves)\s+#\d*/i,
+        `$1 #${issueNumber}`,
+      );
     } else {
       result = `Fixes #${issueNumber}\n\n` + result;
     }
-    if (/## description|## summary|## motivation|### description/i.test(result)) {
+    if (
+      /## description|## summary|## motivation|### description/i.test(result)
+    ) {
       result = result.replace(
         /(##\s*(?:description|summary|motivation)[\s\S]*?)(?=##|$)/i,
-        `$1\n${problemSummary}\n\n**Root Cause**: ${rootCause}\n\n**Key Changes**:\n${keyChanges.map((c) => `- ${c}`).join('\n')}\n\n`,
+        `$1\n${problemSummary}\n\n**Root Cause**: ${rootCause}\n\n**Key Changes**:\n${keyChanges.map((c) => `- ${c}`).join("\n")}\n\n`,
       );
     }
-    if (/## test plan|## verification|## how has this been tested|### test plan/i.test(result)) {
+    if (
+      /## test plan|## verification|## how has this been tested|### test plan/i.test(
+        result,
+      )
+    ) {
       result = result.replace(
         /(##\s*(?:test plan|verification|how has this been tested)[\s\S]*?)(?=##|$)/i,
         `$1\n- Reproduction: \`${reproductionCommand}\`\n- Verification: \`${verificationCommand}\`\n- Test Suite: ${testCount} tests passed\n\n`,
@@ -410,11 +498,15 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     return result.trim();
   }
 
-  const changeList = keyChanges.map((c) => `- ${c}`).join('\n');
-  const dcoTrailer = dcoAuthorName && dcoAuthorEmail ? `\n\nSigned-off-by: ${dcoAuthorName} <${dcoAuthorEmail}>` : '';
-  const verificationDetail = stressLoopCount > 1
-    ? `passed cleanly across ${stressLoopCount} consecutive stress loop runs (${testCount} test assertions passed).`
-    : `passed cleanly (${testCount} test assertions passed, 0 regressions).`;
+  const changeList = keyChanges.map((c) => `- ${c}`).join("\n");
+  const dcoTrailer =
+    dcoAuthorName && dcoAuthorEmail
+      ? `\n\nSigned-off-by: ${dcoAuthorName} <${dcoAuthorEmail}>`
+      : "";
+  const verificationDetail =
+    stressLoopCount > 1
+      ? `passed cleanly across ${stressLoopCount} consecutive stress loop runs (${testCount} test assertions passed).`
+      : `passed cleanly (${testCount} test assertions passed, 0 regressions).`;
 
   return `### Problem Description
 Fixes #${issueNumber}

@@ -34,10 +34,14 @@ export class DiscoveryScoutStep implements PipelineStep {
   readonly name = 'DiscoveryScout';
   async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
     deps.stateMachine.transition('DISCOVERY', 'Scouting candidate issues with live GitHub search');
-    const opportunities = await scoutOpportunities(ctx.profile, {
-      repo: ctx.targetRepo,
-      limit: 5,
-    });
+    // DIP: pass the injected GitHub client (deps.client) so the scout never
+    // constructs its own network adapter and is testable with an
+    // InMemoryIssueSource. Callers outside the pipeline may still omit it.
+    const opportunities = await scoutOpportunities(
+      ctx.profile,
+      { repo: ctx.targetRepo, limit: 5 },
+      deps.client,
+    );
     if (opportunities.length === 0) {
       deps.stateMachine.transition('BLOCKED', 'No qualified issues found');
       return halt({
@@ -162,9 +166,12 @@ export class PatchGenerationStep implements PipelineStep {
           prompt: `${ctx.prompt}\n\nPlease generate a minimal surgical patch conforming strictly to PatchDraftSchema JSON with concrete code files in the 'files' array.`,
           schema: PatchDraftSchema,
         });
+        // SAFETY: PatchDraftSchema (Zod) validated llmResult.data at runtime;
+        // the schema's output type is structurally identical to PatchDraft.
         patchDraft = llmResult.data as unknown as PatchDraft;
       } catch {
-        // LLM Error
+        // LLM generation failed — refuse to fabricate a patch (fail-closed).
+        // The empty-patch gate below halts the pipeline.
       }
     }
 
@@ -191,7 +198,6 @@ export class PatchGenerationStep implements PipelineStep {
 export class ImplementValidateLoopStep implements PipelineStep {
   readonly name = 'ImplementValidateLoop';
   async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
-    const selectedOpp = ctx.selectedOpp!;
     const workspacePath = ctx.workspace!.workspacePath;
     const prompt = ctx.prompt!;
     const testCmd = ctx.testCmd;
@@ -205,7 +211,6 @@ export class ImplementValidateLoopStep implements PipelineStep {
     let validationStatus: ValidationStatus = 'NO_TEST_AVAILABLE';
     let appliedFiles: Array<{ path: string; operation: string }> = [];
     const accumulatedAppliedFiles: Array<{ path: string; operation: string }> = [];
-    let filesToSubmit: Array<{ path: string; content: string }> = [];
     let evidenceReport: any;
     let lastFailureOutput = '';
     const toolFeedback: import('../agent-orchestrator.js').ToolFeedbackEntry[] = [];
@@ -215,7 +220,6 @@ export class ImplementValidateLoopStep implements PipelineStep {
     while (implementationAttempts < maxAttempts && !validationPassed) {
       implementationAttempts++;
       appliedFiles = [];
-      filesToSubmit = [];
 
       const turnPrompt =
         implementationAttempts > 1
@@ -242,9 +246,14 @@ export class ImplementValidateLoopStep implements PipelineStep {
               (repairResult.data as any).files &&
               (repairResult.data as any).files.length > 0
             ) {
+              // SAFETY: PatchDraftSchema (Zod) validated repairResult.data at
+              // runtime; the schema's output type is structurally identical to
+              // PatchDraft. Guard above already checked `.files.length > 0`.
               activePatchRef.patch = repairResult.data as unknown as PatchDraft;
             }
-          } catch {}
+          } catch {
+            // Repair LLM call failed — keep the previous patch draft and retry.
+          }
         } else {
           break;
         }
@@ -262,7 +271,6 @@ export class ImplementValidateLoopStep implements PipelineStep {
 
       appliedFiles = safeApplyResult.appliedFiles;
       accumulatedAppliedFiles.push(...appliedFiles);
-      filesToSubmit = activePatchRef.patch.files.map((f) => ({ path: f.path, content: f.content }));
 
       if (safeApplyResult.errors.length > 0) {
         validationStatus = 'VALIDATION_FAILED';

@@ -17,11 +17,22 @@ import { GitHubClient } from './discovery/github-client.js';
 import { ContributionPipeline } from './application/index.js';
 import { SystemClock } from './ports/clock.port.js';
 import { LLMService } from './llm/llm-service.js';
+import { ContributionRunManager } from './run/run-manager.js';
 import type { GitHubClientOptions } from './github/types.js';
 
 /** Production GitHub client with env-based credentials, file cache, and retry. */
 export function buildProductionGitHubClient(options: GitHubClientOptions = {}): GitHubClient {
   return new GitHubClient(options);
+}
+
+/**
+ * Production ContributionRunManager. CLI commands call this inside their
+ * action callbacks (never at module load time) so the manager is constructed
+ * lazily and its injected Clock/IdGenerator/ActiveSession defaults resolve
+ * correctly. Tests inject fakes via the constructor directly.
+ */
+export function buildContributionRunManager(): ContributionRunManager {
+  return new ContributionRunManager();
 }
 
 /**

@@ -1,8 +1,15 @@
-import { randomUUID } from 'crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'fs';
-
-import { homedir as osHomedir } from 'os';
-import { basename, dirname, join, resolve, sep } from 'path';
+import { randomUUID } from "crypto";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
+import { basename, dirname, join, resolve, sep } from "path";
 
 import type {
   ArtifactType,
@@ -11,27 +18,30 @@ import type {
   ContributionRunSummary,
   RunEvent,
   SavedArtifactResult,
-} from './types.js';
-import { getOpenContribHome } from '../kernel/home.js';
+} from "./types.js";
+import { getOpenContribHome } from "../kernel/home.js";
 
 export function writeAtomic(filePath: string, content: string): void {
   const dir = dirname(filePath);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  const tempPath = join(dir, `.${basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`);
-  writeFileSync(tempPath, content, 'utf-8');
+  const tempPath = join(
+    dir,
+    `.${basename(filePath)}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`,
+  );
+  writeFileSync(tempPath, content, "utf-8");
   renameSync(tempPath, filePath);
 }
 
 export function sanitizeRunId(runId: string): string {
-  if (!runId || typeof runId !== 'string') return '';
-  return runId.replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!runId || typeof runId !== "string") return "";
+  return runId.replace(/[^a-zA-Z0-9_-]/g, "");
 }
 
 export function validateRunId(runId: string, baseDir: string): string {
-  if (!runId || typeof runId !== 'string') {
-    throw new Error('Invalid runId: must be a non-empty string.');
+  if (!runId || typeof runId !== "string") {
+    throw new Error("Invalid runId: must be a non-empty string.");
   }
   if (!/^[a-zA-Z0-9_-]+$/.test(runId)) {
     throw new Error(
@@ -40,18 +50,23 @@ export function validateRunId(runId: string, baseDir: string): string {
   }
   const resolvedBase = resolve(baseDir);
   const resolvedTarget = resolve(join(baseDir, runId));
-  if (!resolvedTarget.startsWith(resolvedBase + sep) && resolvedTarget !== resolvedBase) {
-    throw new Error(`Security error: Run ID "${runId}" traverses outside base directory boundary.`);
+  if (
+    !resolvedTarget.startsWith(resolvedBase + sep) &&
+    resolvedTarget !== resolvedBase
+  ) {
+    throw new Error(
+      `Security error: Run ID "${runId}" traverses outside base directory boundary.`,
+    );
   }
   return runId;
 }
-
 
 export class ArtifactBundleManager {
   private baseDir: string;
 
   constructor(customBaseDir?: string) {
-    this.baseDir = customBaseDir || join(getOpenContribHome(), '.opencontrib', 'runs');
+    this.baseDir =
+      customBaseDir || join(getOpenContribHome(), ".opencontrib", "runs");
     if (!existsSync(this.baseDir)) {
       mkdirSync(this.baseDir, { recursive: true });
     }
@@ -76,33 +91,38 @@ export class ArtifactBundleManager {
 
   getArtifactFilename(type: ArtifactType): string {
     switch (type) {
-      case 'opportunity':
-        return 'opportunity.json';
-      case 'context':
-        return 'context.json';
-      case 'workspace':
-        return 'workspace.json';
-      case 'patch':
-        return 'patch.diff';
-      case 'evidence':
-        return 'evidence.json';
-      case 'governance':
-        return 'governance.json';
-      case 'pr_draft':
-        return 'pr_draft.md';
-      case 'result':
-        return 'result.json';
+      case "opportunity":
+        return "opportunity.json";
+      case "context":
+        return "context.json";
+      case "workspace":
+        return "workspace.json";
+      case "patch":
+        return "patch.diff";
+      case "evidence":
+        return "evidence.json";
+      case "governance":
+        return "governance.json";
+      case "pr_draft":
+        return "pr_draft.md";
+      case "result":
+        return "result.json";
       default:
         return `${type}.json`;
     }
   }
 
-  saveArtifact(runId: string, type: ArtifactType, content: string | Record<string, unknown>): SavedArtifactResult {
+  saveArtifact(
+    runId: string,
+    type: ArtifactType,
+    content: string | Record<string, unknown>,
+  ): SavedArtifactResult {
     const runDir = this.ensureRunDir(runId);
     const filename = this.getArtifactFilename(type);
     const filePath = join(runDir, filename);
 
-    const stringContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+    const stringContent =
+      typeof content === "string" ? content : JSON.stringify(content, null, 2);
     writeAtomic(filePath, stringContent);
 
     return {
@@ -110,7 +130,7 @@ export class ArtifactBundleManager {
       artifactType: type,
       filePath,
       savedAt: new Date().toISOString(),
-      byteSize: Buffer.byteLength(stringContent, 'utf-8'),
+      byteSize: Buffer.byteLength(stringContent, "utf-8"),
     };
   }
 
@@ -123,42 +143,52 @@ export class ArtifactBundleManager {
       return null;
     }
 
-    const content = readFileSync(filePath, 'utf-8');
-    if (type === 'patch' || type === 'pr_draft') {
+    const content = readFileSync(filePath, "utf-8");
+    if (type === "patch" || type === "pr_draft") {
+      // SAFETY: Raw patch and pr_draft artifacts are stored as plain UTF-8
+      // text strings; caller requested string-compatible T.
       return content as unknown as T;
     }
 
     try {
       return JSON.parse(content) as T;
     } catch (err: any) {
-      console.warn(`[ArtifactBundle] Failed to parse artifact ${type} for run ${runId}: ${err.message}`);
+      console.warn(
+        `[ArtifactBundle] Failed to parse artifact ${type} for run ${runId}: ${err.message}`,
+      );
+      // SAFETY: Fallback returns raw string content when JSON parse fails.
       return content as unknown as T;
     }
   }
 
   saveManifest(manifest: ContributionRunManifest): void {
     const runDir = this.ensureRunDir(manifest.runId);
-    const manifestPath = join(runDir, 'manifest.json');
+    const manifestPath = join(runDir, "manifest.json");
     writeAtomic(manifestPath, JSON.stringify(manifest, null, 2));
   }
 
   readManifest(runId: string): ContributionRunManifest | null {
     const runDir = this.getRunDir(runId);
-    const manifestPath = join(runDir, 'manifest.json');
+    const manifestPath = join(runDir, "manifest.json");
     if (!existsSync(manifestPath)) {
       return null;
     }
     try {
-      return JSON.parse(readFileSync(manifestPath, 'utf-8')) as ContributionRunManifest;
+      return JSON.parse(
+        readFileSync(manifestPath, "utf-8"),
+      ) as ContributionRunManifest;
     } catch {
       return null;
     }
   }
 
-  appendEvent(runId: string, event: Omit<RunEvent, 'runId' | 'timestamp' | 'eventId'>): RunEvent {
+  appendEvent(
+    runId: string,
+    event: Omit<RunEvent, "runId" | "timestamp" | "eventId">,
+  ): RunEvent {
     const runDir = this.ensureRunDir(runId);
-    const eventsPath = join(runDir, 'events.jsonl');
-    const timelogPath = join(runDir, 'timelog.md');
+    const eventsPath = join(runDir, "events.jsonl");
+    const timelogPath = join(runDir, "timelog.md");
     const now = new Date().toISOString();
 
     const fullEvent: RunEvent = {
@@ -167,39 +197,53 @@ export class ArtifactBundleManager {
       timestamp: now,
       ...event,
     };
-    const eventLine = JSON.stringify(fullEvent) + '\n';
-    const tmpEventsPath = eventsPath + '.tmp';
+    const eventLine = JSON.stringify(fullEvent) + "\n";
+    const tmpEventsPath = eventsPath + ".tmp";
     try {
-      writeFileSync(tmpEventsPath, eventLine, 'utf-8');
+      writeFileSync(tmpEventsPath, eventLine, "utf-8");
       if (existsSync(eventsPath)) {
-        appendFileSync(eventsPath, readFileSync(tmpEventsPath, 'utf-8'));
+        appendFileSync(eventsPath, readFileSync(tmpEventsPath, "utf-8"));
       } else {
         renameSync(tmpEventsPath, eventsPath);
       }
     } catch {
-      try { unlinkSync(tmpEventsPath); } catch {}
+      try {
+        unlinkSync(tmpEventsPath);
+      } catch {}
       throw new Error(`Failed to append event to ${eventsPath}`);
     }
 
     // Automatically maintain human-readable timelog.md
     if (!existsSync(timelogPath)) {
-      writeFileSync(timelogPath, `# Contribution Run Timelog: ${runId}\n\n| Timestamp | Phase | Event Type | Details |\n| :--- | :--- | :--- | :--- |\n`, 'utf-8');
+      writeFileSync(
+        timelogPath,
+        `# Contribution Run Timelog: ${runId}\n\n| Timestamp | Phase | Event Type | Details |\n| :--- | :--- | :--- | :--- |\n`,
+        "utf-8",
+      );
     }
-    const details = event.payload ? JSON.stringify(event.payload).replace(/\|/g, '\\|') : '-';
-    appendFileSync(timelogPath, `| \`${now}\` | **${event.phase}** | \`${event.eventType}\` | ${details} |\n`, 'utf-8');
+    const details = event.payload
+      ? JSON.stringify(event.payload).replace(/\|/g, "\\|")
+      : "-";
+    appendFileSync(
+      timelogPath,
+      `| \`${now}\` | **${event.phase}** | \`${event.eventType}\` | ${details} |\n`,
+      "utf-8",
+    );
 
     return fullEvent;
   }
 
-
   readEvents(runId: string): RunEvent[] {
     const runDir = this.getRunDir(runId);
-    const eventsPath = join(runDir, 'events.jsonl');
+    const eventsPath = join(runDir, "events.jsonl");
     if (!existsSync(eventsPath)) {
       return [];
     }
     try {
-      const lines = readFileSync(eventsPath, 'utf-8').trim().split('\n').filter(Boolean);
+      const lines = readFileSync(eventsPath, "utf-8")
+        .trim()
+        .split("\n")
+        .filter(Boolean);
       const events: RunEvent[] = [];
       const errors: string[] = [];
       for (const [idx, l] of lines.entries()) {
@@ -210,7 +254,9 @@ export class ArtifactBundleManager {
         }
       }
       if (errors.length > 0) {
-        console.warn(`[ArtifactBundle] Warning: ${errors.length} corrupted event line(s) skipped: ${errors.join('; ')}`);
+        console.warn(
+          `[ArtifactBundle] Warning: ${errors.length} corrupted event line(s) skipped: ${errors.join("; ")}`,
+        );
       }
       return events;
     } catch {
@@ -235,14 +281,14 @@ export class ArtifactBundleManager {
     return {
       manifest,
       artifacts: {
-        opportunity: this.readArtifact(runId, 'opportunity') ?? undefined,
-        context: this.readArtifact(runId, 'context') ?? undefined,
-        workspace: this.readArtifact(runId, 'workspace') ?? undefined,
-        patch: this.readArtifact(runId, 'patch') ?? undefined,
-        evidence: this.readArtifact(runId, 'evidence') ?? undefined,
-        governance: this.readArtifact(runId, 'governance') ?? undefined,
-        prDraft: this.readArtifact(runId, 'pr_draft') ?? undefined,
-        result: this.readArtifact(runId, 'result') ?? undefined,
+        opportunity: this.readArtifact(runId, "opportunity") ?? undefined,
+        context: this.readArtifact(runId, "context") ?? undefined,
+        workspace: this.readArtifact(runId, "workspace") ?? undefined,
+        patch: this.readArtifact(runId, "patch") ?? undefined,
+        evidence: this.readArtifact(runId, "evidence") ?? undefined,
+        governance: this.readArtifact(runId, "governance") ?? undefined,
+        prDraft: this.readArtifact(runId, "pr_draft") ?? undefined,
+        result: this.readArtifact(runId, "result") ?? undefined,
       },
       events: this.readEvents(runId),
       availableArtifactFiles: this.listArtifactFiles(runId),

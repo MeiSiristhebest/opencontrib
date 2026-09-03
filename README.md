@@ -25,8 +25,6 @@
   <em>A modular contribution infrastructure providing AI agents with discrete engineering primitives: 6-dimension deep defect probes, Smart Pointer progressive dereferencing, clean-room Git worktrees, concurrency stampede evidence verification, and RFC-100 anti-AI governance.</em>
 </p>
 
-
-
 ---
 
 ## 📑 Table of Contents
@@ -132,6 +130,7 @@ When a contribution run starts via `opencontrib run create`, OpenContrib creates
 ### 5. Self-Guiding State Machine Terminal Output
 
 Every CLI command terminates with an explicit guidance block displaying:
+
 - `📍 PHASE`: The current lifecycle milestone.
 - `▶ NEXT RECOMMENDED COMMAND`: The deterministic next shell command to execute.
 - `🛑 FORBIDDEN IN THIS PHASE`: Guardrails against premature actions.
@@ -140,6 +139,7 @@ Every CLI command terminates with an explicit guidance block displaying:
 ### 6. Concurrency Stampede & Chaos Jitter Evidence
 
 Replaces superficial test loops with real multi-worker contention:
+
 - **`concurrencyWorkers`**: Concurrent threads executing under shared state competition.
 - **`raceCollisionsDetected`**: Catches mutex collisions, duplicate key bypasses, and data races.
 - **`latencyJitterMs`**: Quantifies execution time variance across concurrent workers.
@@ -251,29 +251,29 @@ Industrial-grade command set spanning 16 core capability domains:
 | | `probe fuzz [target]` | Generate property-based boundary fuzzing test harness |
 | **Pointer** | `pointer resolve <uri>` | 3-level progressive dereferencing (`--view stub&#124;slice&#124;evidence`) |
 | | `pointer list [namespace]` | List registered pointers in current session store |
-| **Capability**| `capability list` | List registered microkernel capability adapters & domains |
+| **Capability** | `capability list` | List registered microkernel capability adapters & domains |
 | | `capability plan [target]` | Run capability scoring engine to derive optimal execution plan |
 | **Evidence** | `evidence` | Concurrency stampede chaos verification and dual-stage reproduction |
 | **Workspace** | `workspace prepare` | Create clean-room Git worktree sandbox |
 | | `workspace purge` | Safely destroy ephemeral sandbox directories & bare repo cache |
 | | `workspace list` | List all active and cached workspace sandboxes |
-| **Governance**| `governance audit` | 7-Dimensional quality rubric, RFC-100 diff, and anti-AI check |
+| **Governance** | `governance audit` | 7-Dimensional quality rubric, RFC-100 diff, and anti-AI check |
 | | `governance impact` | 360° cross-platform filepath/CRLF/sister-module hazard detector |
 | | `governance ci-diagnose` | GitHub Actions CI raw log root cause diagnostics |
-| | `governance pr-template`| Merge contribution metadata into repository native PR template |
+| | `governance pr-template` | Merge contribution metadata into repository native PR template |
 | | `governance claim` | Generate authoritative Issue-First Claim statement or 0-day proposal |
 | | `governance lint-md` | Run static markdown encoding integrity and lint checks |
 | **Discovery** | `scout <repo>` | Multi-signal issue opportunity scouting (top-level command) |
 | | `discovery rank` | Multi-dimensional opportunity probability ranking |
 | | `discovery qualify` | Anti-bandwagoning claim qualification filter |
-| | `discovery feasibility`| Environment and toolchain feasibility assessment |
+| | `discovery feasibility` | Environment and toolchain feasibility assessment |
 | | `discovery context` | Assemble deterministic cross-file context bundles |
 | | `discovery manifests` | Diagnose repository package manifests and workflows |
 | **Plugin** | `plugin list` / `status` | List registered SAST and AST scanner plugins and active status |
 | | `plugin enable` / `disable` | Dynamically enable or disable specific probes/tools |
 | | `plugin install <id>` | Install toolchain and host binary dependencies |
 | | `plugin reset` / `info` | Reset plugin states to default or inspect specific probe metadata |
-| **Run** | `run create` / `get` / `list`| Create, retrieve, and list auditable runs under `~/.opencontrib/runs/` |
+| **Run** | `run create` / `get` / `list` | Create, retrieve, and list auditable runs under `~/.opencontrib/runs/` |
 | | `run resume <id>` | Resume interrupted contribution pipeline session |
 | | `run save <id>` | Persist stage artifact to auditable run session |
 | **Flywheel** | `flywheel sync` | Sync repository profile and contribution memory ledger |
@@ -291,14 +291,18 @@ Industrial-grade command set spanning 16 core capability domains:
 OpenContrib works out-of-the-box as an autonomous toolchain and MCP engine across all leading AI coding assistants:
 
 ### 1. Claude Code
+
 OpenContrib provides native `CLAUDE.md` instructions and MCP integration for Claude Code:
+
 ```bash
 # Add OpenContrib MCP server to Claude Code
 claude mcp add opencontrib npx -y @opencontrib/cli mcp
 ```
 
 ### 2. Cursor (Composer & Agent)
+
 OpenContrib includes pre-configured `.cursor/rules/opencontrib.mdc` and `.cursorrules`:
+
 ```json
 // Add to ~/.cursor/mcp.json or .cursor/mcp.json:
 {
@@ -312,9 +316,11 @@ OpenContrib includes pre-configured `.cursor/rules/opencontrib.mdc` and `.cursor
 ```
 
 ### 3. OpenAI Codex / Custom Assistants
+
 OpenContrib includes standard `AGENTS.md` and `CODEX.md` directives to orchestrate the 9-phase contribution pipeline deterministically.
 
 ### 4. 1-Click Multi-Agent Setup
+
 ```bash
 # Auto-configure MCP servers across all detected IDEs & agents
 npx -y @opencontrib/cli setup
@@ -333,14 +339,14 @@ Or add to client configuration:
 }
 ```
 
-**MCP Capabilities**: 34 Composable Tools across 9 domains (`contrib_scout`, `contrib_prepare_workspace`, `contrib_collect_evidence`, `contrib_audit_governance`, etc.), 3 Resources (`opencontrib://doctor`, `opencontrib://memory`, `opencontrib://runs`), and 1 Prompt (`opencontrib_workflow_guide`).
+**MCP Capabilities**: 35 Composable Tools across 9 domains (`contrib_scout`, `contrib_prepare_workspace`, `contrib_collect_evidence`, `contrib_audit_governance`, `contrib_run_pipeline`, etc.), 3 Resources (`opencontrib://doctor`, `opencontrib://memory`, `opencontrib://runs`), and 1 Prompt (`opencontrib_workflow_guide`).
 
 ---
 
 ## 🛡️ The 6 Absolute Engineering Invariants
 
 1. **CLI-First Execution Priority (Dual-Ingress Ready)**:
-   Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 34 composable tools of `@opencontrib/mcp` remain first-class supported for MCP-native agents.
+   Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 35 composable tools of `@opencontrib/mcp` remain first-class supported for MCP-native agents.
 2. **Anti-Drift Circuit Breaker (Max 3 `view_file` calls)**:
    Avoid blind sequential file reads (> 3 views). Pinpoint symbols strictly via Smart Pointer slices (`ptr://...`) or `grep_search`.
 3. **Mandatory Issue-First on 0-Days (No Blind PRs)**:
@@ -389,6 +395,7 @@ If you find this project useful or inspiring, please consider giving it a ⭐ **
 </p>
 
 ### 🤝 Contributors
+
 <a href="https://github.com/MeiSiristhebest/opencontrib/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=MeiSiristhebest/opencontrib" alt="Contributors" />
 </a>

@@ -4,12 +4,16 @@ import { Command } from 'commander';
 import {
   capturePreFixAssertion,
   collectEvidence,
-  ContributionRunManager,
+  buildContributionRunManager,
   verifyDualStageReproduction,
+  type ContributionRunManager,
 } from '@opencontrib/core';
 import { printJSON, printPhaseGuidance } from '../utils/output.js';
 
-const runManager = new ContributionRunManager();
+// Lazy factory: constructed on first use, not at module load time.
+let _runManager: ContributionRunManager | null = null;
+const getRunManager = (): ContributionRunManager =>
+  (_runManager ??= buildContributionRunManager());
 
 export const evidenceCommand = new Command('evidence')
   .description('Execute dual-stage empirical verification (pre-fix baseline + post-fix stress loop)')
@@ -36,14 +40,14 @@ export const evidenceCommand = new Command('evidence')
     pretty?: boolean;
   }) => {
     try {
-      const runId = runManager.resolveRunId(opts.runId);
+      const runId = getRunManager().resolveRunId(opts.runId);
       let workspaceRoot = opts.workspaceRoot;
       let baselineSha = opts.baselineSha;
       let targetCwd = opts.cwd;
 
       if (runId) {
         try {
-          const run = runManager.getRun(runId);
+          const run = getRunManager().getRun(runId);
           if (run?.artifacts?.workspace?.workspacePath) {
             if (!workspaceRoot) workspaceRoot = String(run.artifacts.workspace.workspacePath);
             if (!targetCwd) targetCwd = String(run.artifacts.workspace.workspacePath);
@@ -91,7 +95,7 @@ export const evidenceCommand = new Command('evidence')
       let persistence: { saved: boolean; error?: string } | undefined;
       if (runId) {
         try {
-          runManager.saveArtifact(runId, 'evidence', fullReport, 'EVIDENCE_COLLECTED');
+          getRunManager().saveArtifact(runId, 'evidence', fullReport, 'EVIDENCE_COLLECTED');
           persistence = { saved: true };
         } catch (err: any) {
           persistence = { saved: false, error: err.message };

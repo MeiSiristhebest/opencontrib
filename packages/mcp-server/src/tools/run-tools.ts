@@ -1,19 +1,36 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import { ContributionRunManager } from '@opencontrib/core';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import {
+  type ContributionRunManager,
+  buildContributionPipeline,
+  renderReport,
+} from "@opencontrib/core";
 
-export function registerRunTools(server: McpServer, runManager: ContributionRunManager): void {
+export function registerRunTools(
+  server: McpServer,
+  runManager: ContributionRunManager,
+): void {
   // -------------------------------------------------------------
   // Tool: contrib_create_run (贡献会话初始化与会话目录锚定)
   // -------------------------------------------------------------
   server.tool(
-    'contrib_create_run',
-    'Initialize an auditable contribution run session under ~/.opencontrib/runs/<runId>/ for structured state and artifact tracking',
+    "contrib_create_run",
+    "Initialize an auditable contribution run session under ~/.opencontrib/runs/<runId>/ for structured state and artifact tracking",
     {
-      repoFullName: z.string().describe('Target repository full name, e.g. "owner/repo"'),
-      issueNumber: z.number().optional().describe('Optional issue number associated with this contribution run'),
-      issueTitle: z.string().optional().describe('Optional issue title'),
-      tags: z.array(z.string()).optional().describe('Optional tags for indexing and telemetry'),
+      repoFullName: z
+        .string()
+        .describe('Target repository full name, e.g. "owner/repo"'),
+      issueNumber: z
+        .number()
+        .optional()
+        .describe(
+          "Optional issue number associated with this contribution run",
+        ),
+      issueTitle: z.string().optional().describe("Optional issue title"),
+      tags: z
+        .array(z.string())
+        .optional()
+        .describe("Optional tags for indexing and telemetry"),
     },
     async (args) => {
       try {
@@ -27,10 +44,10 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
         return {
           content: [
             {
-              type: 'text',
+              type: "text",
               text: JSON.stringify(
                 {
-                  status: 'success',
+                  status: "success",
                   manifest,
                 },
                 null,
@@ -42,7 +59,7 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
       } catch (err: any) {
         return {
           isError: true,
-          content: [{ type: 'text', text: `Security error: ${err.message}` }],
+          content: [{ type: "text", text: `Security error: ${err.message}` }],
         };
       }
     },
@@ -52,40 +69,42 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
   // Tool: contrib_save_artifact (阶段性物证快照落盘)
   // -------------------------------------------------------------
   server.tool(
-    'contrib_save_artifact',
-    'Save discrete stage artifact (opportunity, context, workspace, patch, evidence, governance, pr_draft, result) to run bundle',
+    "contrib_save_artifact",
+    "Save discrete stage artifact (opportunity, context, workspace, patch, evidence, governance, pr_draft, result) to run bundle",
     {
-      runId: z.string().describe('Unique contribution run ID'),
+      runId: z.string().describe("Unique contribution run ID"),
       artifactType: z.enum([
-        'opportunity',
-        'probe',
-        'context',
-        'workspace',
-        'poc',
-        'patch',
-        'evidence',
-        'governance',
-        'pr_draft',
-        'result',
+        "opportunity",
+        "probe",
+        "context",
+        "workspace",
+        "poc",
+        "patch",
+        "evidence",
+        "governance",
+        "pr_draft",
+        "result",
       ]),
-      content: z.union([z.string(), z.record(z.unknown())]).describe('Artifact payload or raw markdown/diff string'),
+      content: z
+        .union([z.string(), z.record(z.unknown())])
+        .describe("Artifact payload or raw markdown/diff string"),
       autoAdvancePhase: z
         .enum([
-          'INITIALIZED',
-          'OPPORTUNITY_SCOUTED',
-          'PROBE_COMPLETED',
-          'CONTEXT_ASSEMBLED',
-          'WORKSPACE_PREPARED',
-          'POC_GENERATED',
-          'PATCH_DRAFTED',
-          'EVIDENCE_COLLECTED',
-          'GOVERNANCE_AUDITED',
-          'PR_SUBMITTED',
-          'COMPLETED',
-          'FAILED',
+          "INITIALIZED",
+          "OPPORTUNITY_SCOUTED",
+          "PROBE_COMPLETED",
+          "CONTEXT_ASSEMBLED",
+          "WORKSPACE_PREPARED",
+          "POC_GENERATED",
+          "PATCH_DRAFTED",
+          "EVIDENCE_COLLECTED",
+          "GOVERNANCE_AUDITED",
+          "PR_SUBMITTED",
+          "COMPLETED",
+          "FAILED",
         ])
         .optional()
-        .describe('Optional phase to advance run manifest to'),
+        .describe("Optional phase to advance run manifest to"),
     },
     async (args) => {
       try {
@@ -99,10 +118,10 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
         return {
           content: [
             {
-              type: 'text',
+              type: "text",
               text: JSON.stringify(
                 {
-                  status: 'success',
+                  status: "success",
                   saved,
                 },
                 null,
@@ -114,7 +133,7 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
       } catch (err: any) {
         return {
           isError: true,
-          content: [{ type: 'text', text: `Security error: ${err.message}` }],
+          content: [{ type: "text", text: `Security error: ${err.message}` }],
         };
       }
     },
@@ -124,10 +143,10 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
   // Tool: contrib_get_run (查询指定 Run 的完整状态与物证清单)
   // -------------------------------------------------------------
   server.tool(
-    'contrib_get_run',
-    'Retrieve full manifest and all saved artifacts of a contribution run',
+    "contrib_get_run",
+    "Retrieve full manifest and all saved artifacts of a contribution run",
     {
-      runId: z.string().describe('Unique contribution run ID'),
+      runId: z.string().describe("Unique contribution run ID"),
     },
     async (args) => {
       try {
@@ -135,17 +154,22 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
         if (!run) {
           return {
             isError: true,
-            content: [{ type: 'text', text: `Contribution run "${args.runId}" not found.` }],
+            content: [
+              {
+                type: "text",
+                text: `Contribution run "${args.runId}" not found.`,
+              },
+            ],
           };
         }
 
         return {
           content: [
             {
-              type: 'text',
+              type: "text",
               text: JSON.stringify(
                 {
-                  status: 'success',
+                  status: "success",
                   run,
                 },
                 null,
@@ -157,7 +181,7 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
       } catch (err: any) {
         return {
           isError: true,
-          content: [{ type: 'text', text: `Security error: ${err.message}` }],
+          content: [{ type: "text", text: `Security error: ${err.message}` }],
         };
       }
     },
@@ -167,10 +191,10 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
   // Tool: contrib_resume_run (断点恢复贡献会话)
   // -------------------------------------------------------------
   server.tool(
-    'contrib_resume_run',
-    'Resume an interrupted contribution run by loading its latest phase, existing artifacts, and suggested next action',
+    "contrib_resume_run",
+    "Resume an interrupted contribution run by loading its latest phase, existing artifacts, and suggested next action",
     {
-      runId: z.string().describe('Unique contribution run ID to resume'),
+      runId: z.string().describe("Unique contribution run ID to resume"),
     },
     async (args) => {
       try {
@@ -179,10 +203,10 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
         return {
           content: [
             {
-              type: 'text',
+              type: "text",
               text: JSON.stringify(
                 {
-                  status: 'success',
+                  status: "success",
                   resume,
                 },
                 null,
@@ -194,7 +218,78 @@ export function registerRunTools(server: McpServer, runManager: ContributionRunM
       } catch (err: any) {
         return {
           isError: true,
-          content: [{ type: 'text', text: `Resume error: ${err.message}` }],
+          content: [{ type: "text", text: `Resume error: ${err.message}` }],
+        };
+      }
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool: contrib_run_pipeline (执行完整端到端自动化贡献流水线)
+  // -------------------------------------------------------------
+  server.tool(
+    "contrib_run_pipeline",
+    "Execute the autonomous contribution pipeline (use-case facade) for a target repository, running discovery, clean-room reproduction, patch generation, validation, and governance gates",
+    {
+      repoFullName: z
+        .string()
+        .describe('Target repository full name, e.g. "owner/repo"'),
+      humanApproved: z
+        .boolean()
+        .default(false)
+        .describe(
+          "Whether human approval has been pre-granted for PR creation in interactive mode",
+        ),
+      stressLoopRuns: z
+        .number()
+        .default(1)
+        .describe(
+          "Number of concurrency stampede loops to verify thread safety",
+        ),
+      techStack: z
+        .array(z.string())
+        .optional()
+        .describe("Developer tech stack filters"),
+      focusAreas: z
+        .array(z.string())
+        .optional()
+        .describe("Developer focus area filters"),
+    },
+    async (args) => {
+      try {
+        const pipeline = buildContributionPipeline();
+        const outcome = await pipeline.run({
+          profile: {
+            techStack: args.techStack ?? [
+              "typescript",
+              "javascript",
+              "python",
+              "go",
+              "rust",
+            ],
+            focusAreas: args.focusAreas ?? ["bugfix", "testing", "security"],
+            proficiency: "intermediate",
+            minMatchScore: 60,
+          },
+          targetRepo: args.repoFullName,
+          humanApproved: args.humanApproved,
+          stressLoopRuns: args.stressLoopRuns,
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: renderReport(outcome, "json"),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            { type: "text", text: `Pipeline execution error: ${err.message}` },
+          ],
         };
       }
     },

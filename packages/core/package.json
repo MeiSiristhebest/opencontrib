@@ -32,9 +32,9 @@
   },
   "description": "Agent-Native Open Source Contribution Engine — Core domain algorithms, governance verification & risk engine",
   "scripts": {
-    "test": "bun test",
-    "test:integration": "OPENCONTRIB_NETWORK_TESTS=1 bun test --timeout 60000",
-    "coverage": "bun test --coverage --coverage-reporter=text packages/core/tests",
+    "test": "NODE_ENV=test bun test",
+    "test:integration": "OPENCONTRIB_NETWORK_TESTS=1 NODE_ENV=test bun test --timeout 60000",
+    "coverage": "NODE_ENV=test bun test --coverage --coverage-reporter=text packages/core/tests",
     "coverage:gate": "bun scripts/check-domain-coverage.ts"
   },
   "author": "OpenContrib Contributors",

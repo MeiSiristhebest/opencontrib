@@ -28,6 +28,13 @@ export interface ScoreCandidateInput {
     repoStars?: number;
   };
   feasibility: FeasibilityAssessment;
+  /**
+   * Required clock for the freshness modifier. Production callers obtain this
+   * from the `Clock` port (infrastructure); tests pass a fixed timestamp for
+   * deterministic assertions. Required so the domain layer never reaches for
+   * the wall clock directly.
+   */
+  now: number;
 }
 
 export interface ScoreBreakdown {
@@ -73,12 +80,15 @@ export function getSearchAliasQuery(term: string): string {
  * Calculates the exact latest activity timestamp (ms) across all dates.
  * Strictly implements Math.max(createdAt, updatedAt, latestCommentAt, ...commentDates).
  */
-export function calculateLatestActivityTimestamp(issue: {
-  createdAt: string;
-  updatedAt?: string;
-  latestCommentAt?: string;
-  commentDates?: string[];
-}): number {
+export function calculateLatestActivityTimestamp(
+  issue: {
+    createdAt: string;
+    updatedAt?: string;
+    latestCommentAt?: string;
+    commentDates?: string[];
+  },
+  now: number,
+): number {
   const timestamps: number[] = [];
 
   const createdTime = Date.parse(issue.createdAt);
@@ -101,15 +111,26 @@ export function calculateLatestActivityTimestamp(issue: {
     }
   }
 
-  return timestamps.length > 0 ? Math.max(...timestamps) : (isNaN(createdTime) ? Date.now() : createdTime);
+  // Fallback when no parseable timestamp is present: fall back to createdAt if
+  // it parsed, otherwise the injected clock value. `now` is required so the
+  // domain layer never reaches for the wall clock directly.
+  if (timestamps.length > 0) return Math.max(...timestamps);
+  return isNaN(createdTime) ? now : createdTime;
 }
 
 /**
  * Calibrated Freshness Modifier based on latest meaningful activity in days.
  * Bounded between -20 and +6 points.
+ *
+ * The `now` parameter makes the time source injectable: production callers omit
+ * it (defaulting to the wall clock), while tests pass a fixed timestamp for
+ * deterministic assertions. This keeps the domain layer free of hidden,
+ * non-injectable global state.
  */
-export function computeActivityFreshnessModifier(activityTimestampMs: number): number {
-  const now = Date.now();
+export function computeActivityFreshnessModifier(
+  activityTimestampMs: number,
+  now: number,
+): number {
   const ageDays = (now - activityTimestampMs) / (1000 * 60 * 60 * 24);
 
   if (ageDays < 30) return 6;    // Fresh (< 1 month)
@@ -268,8 +289,8 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
   }
 
   // 4. Activity Freshness: strictly Math.max across createdAt, updatedAt, and comments
-  const latestActivityMs = calculateLatestActivityTimestamp(issue);
-  const freshnessModifier = computeActivityFreshnessModifier(latestActivityMs);
+  const latestActivityMs = calculateLatestActivityTimestamp(issue, input.now);
+  const freshnessModifier = computeActivityFreshnessModifier(latestActivityMs, input.now);
 
   // 5. Actionability Modifier (-6 to +6)
   const actionabilityModifier = computeActionabilityModifier(issue.body);

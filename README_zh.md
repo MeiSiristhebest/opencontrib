@@ -130,6 +130,7 @@ opencontrib pointer resolve ptr://findings/ast-ts-unhandled-promise-catch-foo-10
 ### 5. 自驱状态机终端保姆级引导 (Self-Guiding Next Actions)
 
 每条 CLI 命令执行完成后，强制在终端末尾输出统一引导看板：
+
 - `📍 PHASE`：当前生命周期阶段；
 - `▶ NEXT RECOMMENDED COMMAND`：下一个确切推荐执行的 Shell 命令；
 - `🛑 FORBIDDEN IN THIS PHASE`：当前阶段严禁违规行为与防御约束；
@@ -138,6 +139,7 @@ opencontrib pointer resolve ptr://findings/ast-ts-unhandled-promise-catch-foo-10
 ### 6. 并发抢占风暴与混沌抖动物证
 
 废除无意义的单线程简单重跑，引入真正的多并发抢占风暴：
+
 - **`concurrencyWorkers`**：多线程/协程并发抢占共享资源；
 - **`raceCollisionsDetected`**：捕获竞态碰撞、主键冲突绕过与死锁；
 - **`latencyJitterMs`**：记录并发执行延迟方差与抖动；
@@ -245,33 +247,33 @@ gh pr create --repo owner/repo --title "fix: resolve unhandled nil pointer in pa
 | :--- | :--- | :--- |
 | **Probe（探针）** | `probe run [target]` | Top-K 聚合多探针扫描（支持 `--limit`, `--min-confidence`） |
 | | `probe plan [target]` | 提取仓库指纹并协商探针执行规划 |
-| | `probe hotspot [target]`| 运行 Code as a Crime Scene 代码犯罪现场热点分析 |
+| | `probe hotspot [target]` | 运行 Code as a Crime Scene 代码犯罪现场热点分析 |
 | | `probe fuzz [target]` | 自动生成针对特定缺陷类别的属性模糊测试脚手架 |
-| **Pointer（智能指针）**| `pointer resolve <uri>` | 3 级渐进式切片解引用（`--view stub&#124;slice&#124;evidence`） |
+| **Pointer（智能指针）** | `pointer resolve <uri>` | 3 级渐进式切片解引用（`--view stub&#124;slice&#124;evidence`） |
 | | `pointer list [namespace]` | 列出当前会话存储的智能指针清单 |
-| **Capability（微内核）**| `capability list` | 列出微内核已注册的能力领域与 Provider |
+| **Capability（微内核）** | `capability list` | 列出微内核已注册的能力领域与 Provider |
 | | `capability plan [target]` | 运行能力评分引擎生成最佳执行路由计划 |
 | **Evidence（物证）** | `evidence` | 并发抢占风暴混沌验证、延迟抖动与双阶段红绿断言物证收集 |
-| **Workspace（沙盒）**| `workspace prepare` | 创建 Clean-Room Git Worktree 物理隔离沙盒 |
+| **Workspace（沙盒）** | `workspace prepare` | 创建 Clean-Room Git Worktree 物理隔离沙盒 |
 | | `workspace purge` | 安全销毁临时沙盒工作区与缓存 |
 | | `workspace list` | 列出当前活跃的沙盒工作区 |
-| **Governance（治理）**| `governance audit` | RFC-100 行限制审计、反 AI 噪音检测、7 维置信度评估 |
+| **Governance（治理）** | `governance audit` | RFC-100 行限制审计、反 AI 噪音检测、7 维置信度评估 |
 | | `governance impact` | 360° 跨平台路径/换行符/姊妹模块风险检测 |
-| | `governance ci-diagnose`| GitHub Actions CI 原始日志根因诊断与失败用例提取 |
-| | `governance pr-template`| 合并贡献数据至目标仓库原生 PR 模板 |
+| | `governance ci-diagnose` | GitHub Actions CI 原始日志根因诊断与失败用例提取 |
+| | `governance pr-template` | 合并贡献数据至目标仓库原生 PR 模板 |
 | | `governance claim` | 生成权威 Issue-First 认领声明与缺陷提案 |
 | | `governance lint-md` | Markdown 编码完整性与静态格式校验 |
 | **Discovery（发现）** | `scout <repo>` | 多源检索机会 Issue 与意图分析（顶级独立命令） |
 | | `discovery rank` | 多维机会概率信号加权排序 |
 | | `discovery qualify` | 防跟风抢占排他性认领资格判定 |
-| | `discovery feasibility`| 环境与工具链可行性评估 |
+| | `discovery feasibility` | 环境与工具链可行性评估 |
 | | `discovery context` | 跨文件上下文打包与最优阅读链提取 |
 | | `discovery manifests` | 诊断仓库依赖清单与 CI 配置缺陷 |
 | **Plugin（插件）** | `plugin list` / `status` | 列出已注册的 SAST 与 AST 扫描插件及其启停状态 |
 | | `plugin enable` / `disable` | 动态启用或禁用特定探针/工具 |
 | | `plugin install <id>` | 一键安装探针所需的宿主工具链与二进制依赖 |
 | | `plugin reset` / `info` | 重置插件状态或查看指定探针元数据 |
-| **Run（会话）** | `run create` / `get` / `list`| 在 `~/.opencontrib/runs/` 下创建、查看与列出会话 |
+| **Run（会话）** | `run create` / `get` / `list` | 在 `~/.opencontrib/runs/` 下创建、查看与列出会话 |
 | | `run resume <id>` | 恢复被中断的贡献流水线会话与推荐下一步 |
 | | `run save <id>` | 持久化阶段工件至审计会话 |
 | **Flywheel（飞轮）** | `flywheel sync` | 同步仓库贡献记忆账本与开发者技能飞轮 |
@@ -289,14 +291,18 @@ gh pr create --repo owner/repo --title "fix: resolve unhandled nil pointer in pa
 OpenContrib 开箱即用支持主流 AI 编程助手与自主智能体环境：
 
 ### 1. Claude Code
+
 OpenContrib 原生内置 `CLAUDE.md` 执行规范与 MCP 协议：
+
 ```bash
 # 在 Claude Code 中一键添加 OpenContrib MCP 服务
 claude mcp add opencontrib npx -y @opencontrib/cli mcp
 ```
 
 ### 2. Cursor (Composer & Agent)
+
 OpenContrib 预置了 `.cursor/rules/opencontrib.mdc` 与 `.cursorrules` 规则：
+
 ```json
 // 在 ~/.cursor/mcp.json 或项目 .cursor/mcp.json 中添加：
 {
@@ -310,9 +316,11 @@ OpenContrib 预置了 `.cursor/rules/opencontrib.mdc` 与 `.cursorrules` 规则�
 ```
 
 ### 3. OpenAI Codex / 智能体助手
+
 内置标准 `AGENTS.md` 与 `CODEX.md`，为 Codex 与 GPT 助手提供高确定性的 9 阶段开源贡献指令。
 
 ### 4. 一键全自动配置多 Agent 环境
+
 ```bash
 # 自动检测本地已安装的 IDE 与 Agent 环境并写入 MCP 配置
 npx -y @opencontrib/cli setup
@@ -331,14 +339,14 @@ npx -y @opencontrib/cli setup
 }
 ```
 
-**MCP 能力清单**：34 个可组合领域工具（`contrib_scout`、`contrib_prepare_workspace`、`contrib_collect_evidence`、`contrib_audit_governance` 等）、3 个资源（`opencontrib://doctor`、`opencontrib://memory`、`opencontrib://runs`）以及 1 个工作流指导 Prompt（`opencontrib_workflow_guide`）。
+**MCP 能力清单**：35 个可组合领域工具（`contrib_scout`、`contrib_prepare_workspace`、`contrib_collect_evidence`、`contrib_audit_governance`、`contrib_run_pipeline` 等）、3 个资源（`opencontrib://doctor`、`opencontrib://memory`、`opencontrib://runs`）以及 1 个工作流指导 Prompt（`opencontrib_workflow_guide`）。
 
 ---
 
 ## 🛡️ 6 大绝对工程防线（零容忍红线）
 
 1. **CLI 优先与双通道就绪原则（CLI-First & Dual-Ingress）**：
-   在智能体协作流程中，优先推荐调用终端 CLI 命令（`opencontrib <command>`），以享受活跃会话继承与自驱状态机流转。同时 OpenContrib MCP 34 大工具集全面作为一等公民受支持，兼容 MCP 客户端。
+   在智能体协作流程中，优先推荐调用终端 CLI 命令（`opencontrib <command>`），以享受活跃会话继承与自驱状态机流转。同时 OpenContrib MCP 35 大工具集全面作为一等公民受支持，兼容 MCP 客户端。
 2. **防脱轨熔断机制（严禁超过 3 次盲目 view_file）**：
    杜绝连续盲读文件。定位代码必须通过 Smart Pointer 切片（`ptr://...`）或 `grep_search` 精准查找。
 3. **0-Day 漏洞 Issue-First 铁律（严禁裸提 PR）**：
@@ -387,6 +395,7 @@ bun x tsc --noEmit
 </p>
 
 ### 🤝 社区贡献者
+
 <a href="https://github.com/MeiSiristhebest/opencontrib/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=MeiSiristhebest/opencontrib" alt="Contributors" />
 </a>

@@ -17,13 +17,25 @@ import { join } from 'node:path';
 const SRC = join(import.meta.dir, '..', 'src');
 
 // Patterns that must never appear in the dependency-inverted layers.
-const FORBIDDEN = [
+// Infrastructure I/O (fs / child_process / process.env) is forbidden everywhere
+// in the dependency-inverted layers.
+const FORBIDDEN_INFRA = [
   /from\s+['"]node:fs['"]/,
   /from\s+['"]node:child_process['"]/,
   /from\s+['"]fs['"]/,
   /from\s+['"]child_process['"]/,
   /process\.env/,
   /process\.cwd\(\)/,
+];
+
+// Non-injectable global non-determinism (Date.now / Math.random) is forbidden
+// in the *pure* layers (domain / application / reporting) — they must receive
+// time and id sources through ports (Clock / IdGenerator). It IS allowed in
+// `ports/` and `testkit/`, which host the legitimate default implementations
+// (SystemClock, RandomIdGenerator) that encapsulate those globals.
+const FORBIDDEN_NON_DETERMINISM = [
+  /\bDate\.now\(\)/,
+  /\bMath\.random\(\)/,
 ];
 
 function walk(dir: string): string[] {
@@ -37,11 +49,11 @@ function walk(dir: string): string[] {
   return out;
 }
 
-function assertClean(dir: string, label: string): void {
+function assertClean(dir: string, label: string, patterns: RegExp[] = FORBIDDEN_INFRA): void {
   if (!existsSync(dir)) return; // layer not extracted yet — skip gracefully
   for (const file of walk(dir)) {
     const src = readFileSync(file, 'utf8');
-    for (const re of FORBIDDEN) {
+    for (const re of patterns) {
       if (re.test(src)) {
         throw new Error(`Architecture violation in ${label}: ${file} contains forbidden pattern ${re}`);
       }
@@ -51,23 +63,34 @@ function assertClean(dir: string, label: string): void {
 
 describe('Architecture guardrails', () => {
   test('ports/ layer is infrastructure-free (no fs / child_process / process.env)', () => {
-    assertClean(join(SRC, 'ports'), 'ports');
+    // ports/ hosts default impls (SystemClock, RandomIdGenerator) that may
+    // wrap Date.now/Math.random — only infra I/O is forbidden here.
+    assertClean(join(SRC, 'ports'), 'ports', FORBIDDEN_INFRA);
   });
 
   test('testkit/ layer is infrastructure-free', () => {
-    assertClean(join(SRC, 'testkit'), 'testkit');
+    assertClean(join(SRC, 'testkit'), 'testkit', FORBIDDEN_INFRA);
   });
 
-  test('domain/ layer stays pure once extracted', () => {
-    assertClean(join(SRC, 'domain'), 'domain');
+  test('domain/ layer stays pure (no infra I/O, no Date.now/Math.random)', () => {
+    assertClean(join(SRC, 'domain'), 'domain', [
+      ...FORBIDDEN_INFRA,
+      ...FORBIDDEN_NON_DETERMINISM,
+    ]);
   });
 
-  test('application/ use-case layer stays infrastructure-free', () => {
-    assertClean(join(SRC, 'application'), 'application');
+  test('application/ use-case layer stays pure (no infra I/O, no Date.now/Math.random)', () => {
+    assertClean(join(SRC, 'application'), 'application', [
+      ...FORBIDDEN_INFRA,
+      ...FORBIDDEN_NON_DETERMINISM,
+    ]);
   });
 
-  test('reporting/ layer stays side-effect-free', () => {
-    assertClean(join(SRC, 'reporting'), 'reporting');
+  test('reporting/ layer stays side-effect-free (no infra I/O, no Date.now/Math.random)', () => {
+    assertClean(join(SRC, 'reporting'), 'reporting', [
+      ...FORBIDDEN_INFRA,
+      ...FORBIDDEN_NON_DETERMINISM,
+    ]);
   });
 
   test('ports/ and testkit/ actually exist and are non-empty', () => {
