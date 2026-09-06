@@ -2,45 +2,56 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
+    paths:
+      - 'packages/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'bun.lock'
+      - 'tsconfig.json'
+      - '.github/workflows/ci.yml'
   pull_request:
-    branches: [main]
+    branches: [main, master]
+    paths:
+      - 'packages/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'bun.lock'
+      - 'tsconfig.json'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
-    name: Test & Typecheck (${{ matrix.os }})
+    name: Bun Test & Typecheck (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Setup Bun runtime
-        # v2.2.0
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      - name: Setup Bun Runtime
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Setup Node.js (for tool compatibility)
-        # v4.2.0
-        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a
-        with:
-          node-version: 22
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
 
-      - name: Install dependencies
-        run: bun install
-
-      - name: Typecheck
+      - name: TypeScript Typecheck
         run: bunx tsc --noEmit
 
-      - name: Run test suite
+      - name: Run Test Suite
         run: bun test --timeout 60000
         env:
           NODE_ENV: test

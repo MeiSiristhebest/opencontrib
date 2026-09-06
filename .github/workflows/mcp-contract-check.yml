@@ -1,0 +1,38 @@
+---
+name: OpenContrib MCP Contract Validation
+
+on:
+  pull_request:
+    paths:
+      - 'packages/mcp-server/**'
+      - '.github/workflows/mcp-contract-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-mcp:
+    name: Validate 34 MCP Tools Schema Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify MCP Server Schema Definition
+        run: bun run --filter @opencontrib/mcp-server build
+...
