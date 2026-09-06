@@ -4,21 +4,21 @@ on:
   push:
     branches: [main, master]
     paths:
-      - 'packages/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'bun.lock'
-      - 'tsconfig.json'
-      - '.github/workflows/ci.yml'
+      - "packages/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - "tsconfig.json"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [main, master]
     paths:
-      - 'packages/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'bun.lock'
-      - 'tsconfig.json'
-      - '.github/workflows/ci.yml'
+      - "packages/**"
+      - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - "tsconfig.json"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:

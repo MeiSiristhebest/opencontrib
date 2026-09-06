@@ -1,0 +1,47 @@
+---
+name: Code Hygiene & Linter
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'packages/**'
+      - 'scripts/**'
+      - 'eslint.config.mjs'
+      - 'knip.json'
+      - 'package.json'
+      - 'bun.lock'
+      - '.github/workflows/code-hygiene.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hygiene-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Fast ESLint & Dead Code Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run ESLint
+        run: bunx eslint packages/
+
+      - name: TypeScript Typecheck
+        run: bunx tsc --noEmit
+...

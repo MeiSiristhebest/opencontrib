@@ -4,8 +4,8 @@ name: OpenContrib MCP Contract Validation
 on:
   pull_request:
     paths:
-      - 'packages/mcp-server/**'
-      - '.github/workflows/mcp-contract-check.yml'
+      - "packages/mcp-server/**"
+      - ".github/workflows/mcp-contract-check.yml"
   workflow_dispatch:
 
 permissions:
