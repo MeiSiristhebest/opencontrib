@@ -252,6 +252,25 @@ export const GovernanceAuditResultSchema = z.object({
     dimension: z.string(),
     score: z.number(),
   }),
+  technicalGate: z
+    .object({
+      status: z.enum(["PASS", "FAIL"]),
+      passed: z.boolean(),
+    })
+    .optional(),
+  approvalGate: z
+    .object({
+      status: z.enum(["PENDING", "APPROVED", "WAIVED"]),
+      approved: z.boolean(),
+    })
+    .optional(),
+  submissionDecision: z
+    .object({
+      allowed: z.boolean(),
+      status: z.enum(["ALLOWED", "BLOCKED", "WAIVED"]),
+      reason: z.string().optional(),
+    })
+    .optional(),
   isGatedPassed: z.boolean(),
   requiresHumanApproval: z.boolean(),
   rfcGatePassed: z.boolean(),

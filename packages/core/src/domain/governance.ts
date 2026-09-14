@@ -247,6 +247,37 @@ export function lintMarkdownIntegrity(text: string): {
   };
 }
 
+export interface GovernanceDecisionOutput {
+  overallScore: number;
+  weakestDimension: { dimension: string; score: number };
+  technicalGate: {
+    status: "PASS" | "FAIL";
+    passed: boolean;
+  };
+  approvalGate: {
+    status: "PENDING" | "APPROVED" | "WAIVED";
+    approved: boolean;
+  };
+  submissionDecision: {
+    allowed: boolean;
+    status: "ALLOWED" | "BLOCKED" | "WAIVED";
+    reason?: string;
+  };
+  rfcGatePassed: boolean;
+  diffLineCount: number;
+  antiAiCheckPassed: boolean;
+  flaggedAiPhrases: string[];
+  markdownIntegrityPassed?: boolean;
+  corruptedMarkdownIssues?: string[];
+  remediationSuggestions: string[];
+  guidance: {
+    isPassed: boolean;
+    forbiddenActions: string[];
+    invariants: string[];
+    nextCommand: string;
+  };
+}
+
 export interface AuditGovernanceInput {
   diffText?: string;
   patchContent?: string;
@@ -338,6 +369,30 @@ export function auditGovernance(
 
   const isGatedPassed = isTechnicalGatePassed && humanApproved;
 
+  const technicalGate = {
+    status: isTechnicalGatePassed ? ("PASS" as const) : ("FAIL" as const),
+    passed: isTechnicalGatePassed,
+  };
+
+  const approvalGate = {
+    status: humanApproved ? ("APPROVED" as const) : ("PENDING" as const),
+    approved: Boolean(humanApproved),
+  };
+
+  const submissionDecision = {
+    allowed: isGatedPassed,
+    status: isGatedPassed
+      ? ("ALLOWED" as const)
+      : !isTechnicalGatePassed
+        ? ("BLOCKED" as const)
+        : ("WAIVED" as const),
+    reason: isGatedPassed
+      ? undefined
+      : !isTechnicalGatePassed
+        ? "Technical quality gate criteria not met"
+        : "Pending explicit human approval",
+  };
+
   const remediationSuggestions: string[] = [];
   if (!markdownIntegrityPassed) {
     remediationSuggestions.push(
@@ -387,6 +442,9 @@ export function auditGovernance(
   return {
     overallScore: confidence.overallScore,
     weakestDimension: confidence.weakestDimension,
+    technicalGate,
+    approvalGate,
+    submissionDecision,
     isGatedPassed,
     requiresHumanApproval,
     rfcGatePassed,

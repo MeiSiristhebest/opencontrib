@@ -89,6 +89,34 @@ export function validatePhaseGate(
     }
   }
 
+  if (targetPhase === "COMPLETED") {
+    const res = runSummary.artifacts.result as
+      | Partial<{
+          submissionVerified: boolean;
+          prNumber: number;
+          prUrl: string;
+        }>
+      | undefined;
+    if (
+      res &&
+      res.submissionVerified === false &&
+      (!res.prNumber || !res.prUrl)
+    ) {
+      return {
+        ok: false,
+        error: new PhaseGateViolationError(
+          runSummary.manifest.runId,
+          currentPhase,
+          targetPhase,
+          [
+            "Result artifact fails semantic validity: PR submission is unverified or missing prNumber/prUrl.",
+          ],
+          "Submit PR through verified SubmissionService before completing run.",
+        ),
+      };
+    }
+  }
+
   if (
     targetPhase !== "FAILED" &&
     req.fromPhases.length > 0 &&
