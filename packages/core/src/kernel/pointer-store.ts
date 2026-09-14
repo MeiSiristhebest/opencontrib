@@ -1,13 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import type {
   SmartPointer,
   PointerStoreApi,
   PointerView,
   PointerCreateOptions,
-  PointerSlice,
-  PointerEvidence,
 } from "./contract.js";
 import { getOpenContribDataDir } from "./home.js";
 import { ActiveSessionManager } from "../run/active-session.js";
@@ -98,19 +95,6 @@ export class SmartPointerStore implements PointerStoreApi {
             const pointer = JSON.parse(content) as SmartPointer;
             if (pointer && pointer.uri) {
               this.memoryMap.set(pointer.uri, pointer);
-              // Track existing IDs in idCounters to prevent cross-process collision/overwrite
-              const ns = pointer.namespace || "findings";
-              const id = pointer.id;
-              const baseMatch = id.match(/^(.*?)(?:_(\d+))?$/);
-              if (baseMatch) {
-                const baseId = baseMatch[1];
-                const counterKey = `${ns}:${baseId}`;
-                const count = baseMatch[2] ? parseInt(baseMatch[2], 10) + 1 : 1;
-                const currentMax = this.idCounters.get(counterKey) || 0;
-                if (count > currentMax) {
-                  this.idCounters.set(counterKey, count);
-                }
-              }
             }
           } catch {}
         }
@@ -123,11 +107,11 @@ export class SmartPointerStore implements PointerStoreApi {
     const namespace = rawNamespace.replace(/[^a-zA-Z0-9_-]/g, "_");
     const rawId = params.id.replace(/[^a-zA-Z0-9_-]/g, "_");
 
-    // Prevent same-id overwrite: append counter when id collides within namespace
+    // Prevent same-id overwrite: append counter only when duplicate id occurs in same session or file
     const counterKey = `${namespace}:${rawId}`;
-    const existingCount = this.idCounters.get(counterKey) || 0;
-    const counter = existingCount > 0 ? `_${existingCount}` : "";
-    this.idCounters.set(counterKey, existingCount + 1);
+    const existingCount = this.idCounters.get(counterKey);
+    const counter = existingCount !== undefined && existingCount > 0 ? `_${existingCount}` : "";
+    this.idCounters.set(counterKey, (existingCount || 0) + 1);
 
     const cleanId = `${rawId}${counter}`;
     const uri = `ptr://${namespace}/${cleanId}`;

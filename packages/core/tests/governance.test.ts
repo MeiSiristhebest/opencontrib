@@ -188,7 +188,7 @@ Fixes #1106
       evidence: {
         reproductionVerified: true,
         allTestsPassing: true,
-        passedTestsCount: 5,
+        passedUnitTestsCount: 5,
         testCoveragePercent: 70, // Below 85% threshold
       },
       lineCount: 15,
@@ -207,7 +207,7 @@ Fixes #1106
       evidence: {
         reproductionVerified: true,
         allTestsPassing: true,
-        passedTestsCount: 5,
+        passedUnitTestsCount: 5,
         testCoveragePercent: 95, // Above 85% threshold
       },
       lineCount: 15,

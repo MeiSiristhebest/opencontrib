@@ -633,6 +633,9 @@ export class HumanGateStep implements PipelineStep {
         telemetry: ctx.telemetry,
         reportSummary: `Candidate patch applied in sandbox (${ctx.implementationAttempts} attempt(s)) for #${selectedOpp.issueNumber}. Risk Level: ${riskAssessment.riskLevel} (${riskAssessment.riskScore}/100). Validation: ${validationStatus}. Awaiting human review before opening PR.`,
       });
+    } else if (ctx.humanApproved) {
+      // Transition through HUMAN_GATE to satisfy reviewRequired constraint
+      deps.stateMachine.transition("HUMAN_GATE", "Approved by human reviewer");
     }
     return continuePipeline();
   }
@@ -754,9 +757,9 @@ export class PrSubmissionStep implements PipelineStep {
       problemSummary: activePatch?.summary || selectedOpp.title,
       rootCause: activePatch?.rationale || "Targeted surgical bugfix",
       keyChanges: activePatch?.implementationSteps || ["Applied surgical fix"],
-      reproductionCommand: activePatch?.regressionTestPlan?.[0] || "npm test",
-      verificationCommand: "npm test",
-      testCount: 5,
+      reproductionCommand: activePatch?.regressionTestPlan?.[0],
+      verificationCommand: ctx.evidenceReport ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand : undefined,
+      testCount: ctx.evidenceReport?.passedUnitTestsCount,
       dcoAuthorName: "OpenContrib",
       dcoAuthorEmail: "bot@opencontrib.dev",
     });

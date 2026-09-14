@@ -49,20 +49,29 @@ const workspacePrepare = new Command("prepare")
           runId,
         });
 
+        let effectiveRunId = runId;
+        if (!effectiveRunId) {
+          // Create real tracked run session so activeSession and RunManager are 100% synchronized
+          const manifest = getRunManager().createRun({
+            repoFullName: opts.repo,
+            issueNumber: parseInt(opts.issue, 10) || undefined,
+            issueTitle: `Workspace for issue ${opts.issue}`,
+          });
+          effectiveRunId = manifest.runId;
+        }
+
         defaultActiveSessionManager.setActiveSession({
-          runId:
-            runId ||
-            `run_${Date.now()}_${opts.repo.replace(/[^a-zA-Z0-9]/g, "_")}`,
+          runId: effectiveRunId,
           repoFullName: opts.repo,
           workspacePath: context.workspacePath,
           currentPhase: "WORKSPACE_PREPARED",
         });
 
         let persistence: { saved: boolean; error?: string } | undefined;
-        if (runId) {
+        if (effectiveRunId) {
           try {
             getRunManager().saveArtifact(
-              runId,
+              effectiveRunId,
               "workspace",
               {
                 workspacePath: context.workspacePath,

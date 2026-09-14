@@ -9,6 +9,7 @@ import {
   rankOpportunitySignals,
 } from "@opencontrib/core";
 import { printJSON, parseJSON, readStdin } from "../utils/output.js";
+import { CliExitError } from "../utils/exit.js";
 
 // ─── Sub-commands (defined before discoveryCommand to avoid TDZ) ───────────────
 
@@ -19,7 +20,7 @@ const rankCommand = new Command("rank")
     "JSON object with issue, repository, developerProfile (or pipe via stdin)",
   )
   .option("--pretty", "Pretty-print", false)
-  .action(async (opts: { pretty?: boolean }, cmd: Command) => {
+  .action(async (opts: { pretty?: boolean }) => {
     try {
       const input = (opts as any).input ?? (await readStdin());
       const parsed = parseJSON(input, "stdin") as any;
@@ -51,7 +52,7 @@ const qualifyCommand = new Command("qualify")
   )
   .option("--input <json>", "JSON object with issue data (or pipe via stdin)")
   .option("--pretty", "Pretty-print", false)
-  .action(async (opts: { pretty?: boolean }, cmd: Command) => {
+  .action(async (opts: { pretty?: boolean }) => {
     try {
       const input = (opts as any).input ?? (await readStdin());
       const parsed = parseJSON(input, "stdin") as any;
@@ -130,7 +131,6 @@ const contextCommand = new Command("context")
   .action(
     async (
       opts: { input?: string; runId?: string; pretty?: boolean },
-      cmd: Command,
     ) => {
       try {
         const input = (opts as any).input ?? (await readStdin());
@@ -206,7 +206,7 @@ const manifestsCommand = new Command("manifests")
     "JSON with workflows, readmeContent, packageJsonContent, etc. (or pipe via stdin)",
   )
   .option("--pretty", "Pretty-print", false)
-  .action(async (opts: { pretty?: boolean }, cmd: Command) => {
+  .action(async (opts: { pretty?: boolean }) => {
     try {
       const input = (opts as any).input ?? (await readStdin());
       const parsed = parseJSON(input, "stdin") as any;

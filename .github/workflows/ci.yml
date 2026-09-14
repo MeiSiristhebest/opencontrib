@@ -6,6 +6,11 @@ on:
     paths:
       - "packages/**"
       - "scripts/**"
+      - "skills/**"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - ".cursorrules"
+      - ".cursor/**"
       - "package.json"
       - "bun.lock"
       - "tsconfig.json"
@@ -15,6 +20,11 @@ on:
     paths:
       - "packages/**"
       - "scripts/**"
+      - "skills/**"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - ".cursorrules"
+      - ".cursor/**"
       - "package.json"
       - "bun.lock"
       - "tsconfig.json"
@@ -43,7 +53,7 @@ jobs:
       - name: Setup Bun Runtime
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.2.4"
 
       - name: Install Dependencies
         run: bun install --frozen-lockfile

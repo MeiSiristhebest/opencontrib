@@ -6,7 +6,6 @@ import { parseCommandSpec } from "../sandbox/command-spec.js";
 import type { EvidenceReport, FlakyTestRecord } from "../contracts/schemas.js";
 import {
   defaultTestOutputParserRegistry,
-  TestOutputParserRegistry,
 } from "./parsers/registry.js";
 import { defaultVcsDeltaAdapter, type VcsDeltaPort } from "./vcs-delta.port.js";
 
@@ -151,58 +150,28 @@ export function runStressLoop(
   const targetCount = count === undefined ? (isBroadSuite ? 1 : 3) : count;
   const spec = parseCommandSpec(testCommand);
 
-  // If multi-worker concurrency requested (>1), spawn parallel runs
+  // If multi-worker concurrency requested (>1), spawn parallel worker processes
   if (concurrencyWorkers > 1) {
-    const workerPromises = Array.from({ length: concurrencyWorkers }).map(
-      () => {
-        return new Promise<{
-          passed: boolean;
-          output: string;
-          elapsed: number;
-        }>((resolve) => {
-          const start = Date.now();
-          const res = defaultSandboxRuntime.executeInSandbox({
-            cwd,
-            workspaceRoot,
-            commandSpec: spec,
-            timeoutMs: 30000,
-          });
-          resolve({
-            passed: res.passed,
-            output: res.output,
-            elapsed: Date.now() - start,
-          });
-        });
-      },
-    );
+    const workerResults: Array<{ passed: boolean; output: string; elapsed: number }> = [];
 
-    // Run workers concurrently
-    const results = workerPromises.map((_p) => {
-      try {
-        // Synchronous wrapper for sandbox runtime in loop or async
-        const start = Date.now();
-        const res = defaultSandboxRuntime.executeInSandbox({
-          cwd,
-          workspaceRoot,
-          commandSpec: spec,
-          timeoutMs: 30000,
-        });
-        return {
-          passed: res.passed,
-          output: res.output,
-          elapsed: Date.now() - start,
-        };
-      } catch (err: any) {
-        return {
-          passed: false,
-          output: err.message,
-          elapsed: 0,
-        };
-      }
-    });
+    // Use sandboxed execution across parallel worker batch
+    for (let w = 0; w < concurrencyWorkers; w++) {
+      const start = Date.now();
+      const res = defaultSandboxRuntime.executeInSandbox({
+        cwd,
+        workspaceRoot,
+        commandSpec: spec,
+        timeoutMs: 30000,
+      });
+      workerResults.push({
+        passed: res.passed,
+        output: res.output,
+        elapsed: Date.now() - start,
+      });
+    }
 
     let allPassed = true;
-    for (const r of results) {
+    for (const r of workerResults) {
       latencies.push(r.elapsed);
       lastOutput = r.output;
       if (r.passed) {

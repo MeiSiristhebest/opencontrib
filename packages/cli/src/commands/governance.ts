@@ -170,19 +170,32 @@ const auditCommand = new Command("audit")
           opts.pretty,
         );
 
-        if (!isPassed && !opts.allowUnverified) {
-          printPhaseGuidance({
-            currentPhase: "GOVERNANCE_AUDITED",
-            runId,
-            status: "GATED_BLOCKED",
-            humanCheckpoint: "Checkpoint 3 (Governance Quality Gate Failure)",
-            forbiddenActions: audit.guidance.forbiddenActions,
-            invariants: audit.guidance.invariants,
-            nextCommand: audit.guidance.nextCommand,
-          });
-          // Signal the boundary to exit(2). The command action itself must not
-          // call process.exit — the CLI entry point owns process lifecycle.
-          throw new CliExitError(2);
+        if (!isPassed) {
+          if (!opts.allowUnverified) {
+            printPhaseGuidance({
+              currentPhase: "GOVERNANCE_AUDITED",
+              runId,
+              status: "GATED_BLOCKED",
+              humanCheckpoint: "Checkpoint 3 (Governance Quality Gate Failure)",
+              forbiddenActions: audit.guidance.forbiddenActions,
+              invariants: audit.guidance.invariants,
+              nextCommand: audit.guidance.nextCommand,
+            });
+            throw new CliExitError(2);
+          } else {
+            printPhaseGuidance({
+              currentPhase: "GOVERNANCE_AUDITED",
+              runId,
+              status: "WARNING",
+              humanCheckpoint: "Checkpoint 3 (Quality Gate WAIVED by explicit --allow-unverified)",
+              nextCommand: `opencontrib governance pr-template --issue <id> --issue-title "${opts.prTitle}" --summary "<summary>"`,
+              invariants: [
+                "WARNING: Governance quality gate threshold was failed but waived via --allow-unverified.",
+                ...audit.guidance.invariants,
+              ],
+            });
+            return;
+          }
         }
 
         printPhaseGuidance({
@@ -298,12 +311,10 @@ const prTemplateCommand = new Command("pr-template")
   .option(
     "--validation-cmd <cmd>",
     "Command used to verify the fix",
-    "bun test",
   )
   .option(
     "--validation-output <text>",
     "Test passing log excerpt",
-    "All unit tests pass cleanly.",
   )
   .option(
     "--native-template <text>",
@@ -351,9 +362,8 @@ const prTemplateCommand = new Command("pr-template")
           issueNumber: parseInt(opts.issue, 10) || 1,
           issueTitle: opts.issueTitle,
           summary: opts.summary,
-          validationCommand: opts.validationCmd || "bun test",
-          validationOutputSnippet:
-            opts.validationOutput || "All unit tests pass cleanly.",
+          validationCommand: opts.validationCmd,
+          validationOutputSnippet: opts.validationOutput,
           confidenceScore: opts.confidence,
           riskLevel: opts.risk,
           isDocumentationOnly: opts.isDocsOnly ?? false,

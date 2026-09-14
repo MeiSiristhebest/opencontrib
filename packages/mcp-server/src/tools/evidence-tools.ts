@@ -33,16 +33,36 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
       runId: z.string().optional().describe('Optional runId to automatically resolve workspaceRoot and save evidence.json artifact'),
     },
     async (args) => {
-      // Validate cwd against workspaceRoot boundary
+      let resolvedWorkspaceRoot = args.workspaceRoot;
+      let resolvedBaselineCommitSha = args.baselineCommitSha;
+
+      // Auto-resolve workspaceRoot and baselineCommitSha from runId if not explicitly provided
+      if (args.runId) {
+        try {
+          const run = runManager.getRun(args.runId);
+          if (run) {
+            if (run.artifacts?.workspace?.workspacePath && !resolvedWorkspaceRoot) {
+              resolvedWorkspaceRoot = String(run.artifacts.workspace.workspacePath);
+            }
+            if (run.artifacts?.workspace?.baseCommitSha && !resolvedBaselineCommitSha) {
+              resolvedBaselineCommitSha = String(run.artifacts.workspace.baseCommitSha);
+            }
+          }
+        } catch (err: any) {
+          console.warn(`[evidence-tools] Error auto-resolving run "${args.runId}": ${err.message}`);
+        }
+      }
+
+      // Security boundary validation (now using resolvedWorkspaceRoot)
       const resolvedCwd = path.resolve(args.cwd);
-      if (args.workspaceRoot) {
-        const resolvedRoot = path.resolve(args.workspaceRoot);
-        if (!resolvedCwd.startsWith(resolvedRoot + path.sep) && resolvedCwd !== resolvedRoot) {
+      if (resolvedWorkspaceRoot) {
+        const root = path.resolve(resolvedWorkspaceRoot);
+        if (!resolvedCwd.startsWith(root + path.sep) && resolvedCwd !== root) {
           return {
             isError: true,
             content: [{
               type: 'text',
-              text: JSON.stringify({ status: 'error', message: `cwd "${resolvedCwd}" is outside workspaceRoot "${resolvedRoot}"` }, null, 2),
+              text: JSON.stringify({ status: 'error', message: `Security violation: cwd "${resolvedCwd}" escapes workspace root "${root}"` }, null, 2),
             }],
           };
         }
@@ -65,23 +85,6 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
         args.stressLoopCount = 100;
       }
 
-      let resolvedWorkspaceRoot = args.workspaceRoot;
-      let resolvedBaselineCommitSha = args.baselineCommitSha;
-
-      // Auto-resolve workspaceRoot and baselineCommitSha from runId if not explicitly provided
-      if (args.runId) {
-        try {
-          const run = runManager.getRun(args.runId);
-          if (!run) {
-            console.warn(`[evidence-tools] Run "${args.runId}" not found; skipping workspaceRoot/baseline auto-resolution`);
-          } else if (run.artifacts?.workspace?.workspacePath && !resolvedWorkspaceRoot) {
-            resolvedWorkspaceRoot = String(run.artifacts.workspace.workspacePath);
-          } else if (run.artifacts?.workspace?.baseCommitSha && !resolvedBaselineCommitSha) {
-            resolvedBaselineCommitSha = String(run.artifacts.workspace.baseCommitSha);
-          }
-        } catch {}
-      }
-
       let dualStageResult: any = undefined;
 
       // 1. Dual-stage verification if preFixAssertionProbe is provided
@@ -90,6 +93,7 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
           args.cwd,
           args.preFixTestCommand || args.testCommand,
           resolvedWorkspaceRoot,
+          args.preFixAssertionProbe,
         );
         dualStageResult = await verifyDualStageReproduction({
           cwd: args.cwd,
@@ -112,6 +116,8 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
 
       const fullEvidenceReport = {
         ...evidence,
+        reproductionVerified: dualStageResult ? Boolean(dualStageResult.isReproductionVerified) : false,
+        allTestsPassing: evidence.stressLoopPassed && (evidence.failedUnitTestsCount ?? 0) === 0,
         dualStage: dualStageResult,
       };
 
@@ -208,7 +214,9 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
         if (args.runId) {
           try {
             runManager.saveArtifact(args.runId, 'poc', report as any, 'POC_GENERATED');
-          } catch {}
+          } catch (err: any) {
+            console.warn(`[evidence-tools] Failed to auto-save poc artifact: ${err.message}`);
+          }
         }
 
         return {

@@ -193,6 +193,26 @@ export class ContributionRunManager {
       throw new Error(`Contribution run ${runId} does not exist`);
     }
 
+    // Prospective validation: if autoAdvancePhase is requested, pre-validate before writing artifact
+    if (autoAdvancePhase && autoAdvancePhase !== manifest.currentPhase) {
+      const prospectiveSummary = this.getRun(runId);
+      if (prospectiveSummary) {
+        // Construct prospective artifacts record
+        const prospectiveArtifacts = {
+          ...prospectiveSummary.artifacts,
+          [type === "pr_draft" ? "prDraft" : type]: content,
+        };
+        const prospective = {
+          ...prospectiveSummary,
+          artifacts: prospectiveArtifacts,
+        };
+        const gateResult = validatePhaseGate(prospective, autoAdvancePhase);
+        if (!gateResult.ok && gateResult.error) {
+          throw gateResult.error;
+        }
+      }
+    }
+
     const saved = this.bundleManager.saveArtifact(runId, type, content);
 
     this.bundleManager.appendEvent(runId, {
@@ -202,7 +222,7 @@ export class ContributionRunManager {
     });
 
     if (autoAdvancePhase && autoAdvancePhase !== manifest.currentPhase) {
-      this.transition(runId, autoAdvancePhase);
+      this.updateRunPhase(runId, autoAdvancePhase);
     } else {
       manifest.updatedAt = this.clock.nowIso();
       this.bundleManager.saveManifest(manifest);

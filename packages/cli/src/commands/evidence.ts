@@ -123,8 +123,8 @@ export const evidenceCommand = new Command("evidence")
         const fullReport = {
           ...evidence,
           reproductionVerified: dualStage
-            ? dualStage.isReproductionVerified
-            : evidence.passedUnitTestsCount > 0,
+            ? Boolean(dualStage.isReproductionVerified)
+            : false,
           allTestsPassing:
             evidence.stressLoopPassed &&
             (evidence.failedUnitTestsCount ?? 0) === 0,

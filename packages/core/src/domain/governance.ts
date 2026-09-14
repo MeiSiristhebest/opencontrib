@@ -11,10 +11,10 @@
 import type {
   ConfidenceBreakdown,
   GovernanceAuditResult,
+  EvidenceReport,
 } from "../contracts/schemas.js";
 import {
   validateMarkdownIntegrity,
-  type MarkdownValidationReport,
 } from "../governance/markdown-validator.js";
 
 /**
@@ -259,7 +259,7 @@ export interface AuditGovernanceInput {
   lineCount?: number;
   maxDiffLines?: number;
   humanApproved?: boolean;
-  evidence?: any;
+  evidence?: Partial<EvidenceReport>;
   subagentQualityScore?: number;
   isAutonomousPrSubmission?: boolean;
   variantHuntConducted?: boolean;
@@ -283,12 +283,17 @@ export function auditGovernance(
 
   let breakdown = input.confidenceBreakdown;
   if (!breakdown) {
+    const passedTestsCount =
+      input.evidence?.passedUnitTestsCount ??
+      (input.evidence && "passedTestsCount" in input.evidence
+        ? (input.evidence as { passedTestsCount: number }).passedTestsCount
+        : undefined) ??
+      (input.evidence?.allTestsPassing ? 1 : 0);
+
     const calibrated = deriveEvidenceBackedQualityRubric({
       hasReproductionAssertion: Boolean(input.evidence?.reproductionVerified),
-      testsPassed: Boolean(input.evidence?.allTestsPassing),
-      passedTestsCount:
-        input.evidence?.passedTestsCount ||
-        (input.evidence?.allTestsPassing ? 5 : 0),
+      testsPassed: Boolean(input.evidence?.allTestsPassing ?? (passedTestsCount > 0)),
+      passedTestsCount,
       testCoveragePercent: input.evidence?.testCoveragePercent,
       diffLines: lines,
       styleScore: input.subagentQualityScore,

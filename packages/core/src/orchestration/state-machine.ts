@@ -102,7 +102,7 @@ export class ContributionStateMachine {
         "PATCH_DESIGN",
         "BLOCKED",
       ],
-      HUMAN_GATE: ["PR_SUBMISSION", "PATCH_DESIGN", "BLOCKED"],
+      HUMAN_GATE: ["PR_SUBMISSION", "COMPLETED", "PATCH_DESIGN", "BLOCKED"],
       PR_SUBMISSION: ["COMPLETED", "BLOCKED"],
       COMPLETED: [],
       BLOCKED: ["IDLE", "PATCH_DESIGN"],
