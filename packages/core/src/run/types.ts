@@ -1,16 +1,16 @@
 export type ContributionRunPhase =
-  | 'INITIALIZED'
-  | 'OPPORTUNITY_SCOUTED'
-  | 'PROBE_COMPLETED'
-  | 'CONTEXT_ASSEMBLED'
-  | 'WORKSPACE_PREPARED'
-  | 'POC_GENERATED'
-  | 'PATCH_DRAFTED'
-  | 'EVIDENCE_COLLECTED'
-  | 'GOVERNANCE_AUDITED'
-  | 'PR_SUBMITTED'
-  | 'COMPLETED'
-  | 'FAILED';
+  | "INITIALIZED"
+  | "OPPORTUNITY_SCOUTED"
+  | "PROBE_COMPLETED"
+  | "CONTEXT_ASSEMBLED"
+  | "WORKSPACE_PREPARED"
+  | "POC_GENERATED"
+  | "PATCH_DRAFTED"
+  | "EVIDENCE_COLLECTED"
+  | "GOVERNANCE_AUDITED"
+  | "PR_SUBMITTED"
+  | "COMPLETED"
+  | "FAILED";
 
 export interface ContributionRunManifest {
   schemaVersion: string;
@@ -34,16 +34,16 @@ export interface CreateRunInput {
 }
 
 export type ArtifactType =
-  | 'opportunity'
-  | 'probe'
-  | 'context'
-  | 'workspace'
-  | 'poc'
-  | 'patch'
-  | 'evidence'
-  | 'governance'
-  | 'pr_draft'
-  | 'result';
+  | "opportunity"
+  | "probe"
+  | "context"
+  | "workspace"
+  | "poc"
+  | "patch"
+  | "evidence"
+  | "governance"
+  | "pr_draft"
+  | "result";
 
 export interface SavedArtifactResult {
   runId: string;
@@ -66,8 +66,10 @@ export interface ContributionRunSummary {
   manifest: ContributionRunManifest;
   artifacts: {
     opportunity?: Record<string, unknown>;
+    probe?: Record<string, unknown>;
     context?: Record<string, unknown>;
     workspace?: Record<string, unknown>;
+    poc?: Record<string, unknown>;
     patch?: string;
     evidence?: Record<string, unknown>;
     governance?: Record<string, unknown>;

@@ -49,8 +49,10 @@ export interface ResumeRunResult {
   availableArtifacts: ArtifactType[];
   latestArtifactSummary: {
     hasOpportunity: boolean;
+    hasProbe: boolean;
     hasContext: boolean;
     hasWorkspace: boolean;
+    hasPoc: boolean;
     hasPatch: boolean;
     hasEvidence: boolean;
     hasGovernance: boolean;
@@ -60,6 +62,7 @@ export interface ResumeRunResult {
   suggestedNextAction: string;
 }
 
+import { validatePhaseGate } from "./state-machine.js";
 import { getOpenContribHome } from "../kernel/home.js";
 
 export class ContributionRunManager {
@@ -126,7 +129,7 @@ export class ContributionRunManager {
       },
     });
 
-    this.activeSession.setActiveSession({
+    this.activeSession.activateSession({
       runId,
       repoFullName: input.repoFullName,
       issueNumber: input.issueNumber,
@@ -135,6 +138,23 @@ export class ContributionRunManager {
     });
 
     return manifest;
+  }
+
+  transition(
+    runId: string,
+    targetPhase: ContributionRunPhase,
+  ): ContributionRunManifest {
+    const summary = this.getRun(runId);
+    if (!summary) {
+      throw new Error(`Contribution run ${runId} does not exist`);
+    }
+
+    const gateResult = validatePhaseGate(summary, targetPhase);
+    if (!gateResult.ok && gateResult.error) {
+      throw gateResult.error;
+    }
+
+    return this.updateRunPhase(runId, targetPhase);
   }
 
   updateRunPhase(
@@ -157,7 +177,7 @@ export class ContributionRunManager {
       payload: { fromPhase: previousPhase, toPhase: newPhase },
     });
 
-    this.activeSession.updatePhase(newPhase);
+    this.activeSession.updatePhase(newPhase, runId);
 
     return manifest;
   }
@@ -182,7 +202,7 @@ export class ContributionRunManager {
     });
 
     if (autoAdvancePhase && autoAdvancePhase !== manifest.currentPhase) {
-      this.updateRunPhase(runId, autoAdvancePhase);
+      this.transition(runId, autoAdvancePhase);
     } else {
       manifest.updatedAt = this.clock.nowIso();
       this.bundleManager.saveManifest(manifest);
@@ -227,8 +247,10 @@ export class ContributionRunManager {
     const artifacts = summary.artifacts;
     const availableArtifacts: ArtifactType[] = [];
     if (artifacts.opportunity) availableArtifacts.push("opportunity");
+    if (artifacts.probe) availableArtifacts.push("probe");
     if (artifacts.context) availableArtifacts.push("context");
     if (artifacts.workspace) availableArtifacts.push("workspace");
+    if (artifacts.poc) availableArtifacts.push("poc");
     if (artifacts.patch) availableArtifacts.push("patch");
     if (artifacts.evidence) availableArtifacts.push("evidence");
     if (artifacts.governance) availableArtifacts.push("governance");
@@ -237,8 +259,10 @@ export class ContributionRunManager {
 
     const latestSummary = {
       hasOpportunity: !!artifacts.opportunity,
+      hasProbe: !!artifacts.probe,
       hasContext: !!artifacts.context,
       hasWorkspace: !!artifacts.workspace,
+      hasPoc: !!artifacts.poc,
       hasPatch: !!artifacts.patch,
       hasEvidence: !!artifacts.evidence,
       hasGovernance: !!artifacts.governance,

@@ -13,40 +13,50 @@ You have access to the **OpenContrib Engine** via CLI and MCP tools. Follow thes
 ### 1. Code Navigation via Smart Pointers
 Avoid reading entire large files into context. Use OpenContrib smart pointers:
 ```bash
-opencontrib pointer resolve "ptr://<relative_path>#L<start>-L<end>"
+opencontrib pointer list
+opencontrib pointer resolve "ptr://findings/<finding_id>" --view slice
 ```
 
 ### 2. Deep AST / SAST Defect Probing
 Scan target repos or directories for deep concurrency bugs, memory leaks, and protocol violations:
 ```bash
-opencontrib probe run --dir . --pack concurrency,goroutine_leak,type_narrowing
+opencontrib probe plan [target]
+opencontrib probe run [target] --limit 5
 ```
 
 ### 3. Isolated Workspace Management
 Always perform changes inside a clean git worktree sandbox:
 ```bash
-opencontrib workspace create --branch fix/<issue_name>
+opencontrib workspace prepare --repo <owner/repo> --issue <issue_id>
 # To clean up:
-opencontrib workspace cleanup
+opencontrib workspace purge
 ```
 
-### 4. Empirical Evidence Collection (Fail-First)
-Before applying a fix, establish a failing baseline test:
+### 4. Empirical Evidence Collection (Fail-First + Dual-Stage)
+Before applying a fix, establish a failing baseline test and verify post-fix success:
 ```bash
-opencontrib evidence record --command "<test_runner_command>"
+opencontrib evidence --test-cmd "<test_command>" --assertion "<expected_failure_regex>"
 ```
 
 ### 5. RFC-100 Governance Pre-Flight Check
 Before generating PRs, run automated anti-AI governance linting:
 ```bash
-opencontrib governance audit --diff
+opencontrib governance audit --patch <patch_file> --pr-title "<pr_title>"
+```
+
+### 6. PR Description Drafting
+Generate high-acceptance PR descriptions honoring maintainer conventions:
+```bash
+opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"
 ```
 
 ## 🔌 MCP Tools Available
 When MCP is enabled in Cursor (`.cursor/mcp.json`):
 - `contrib_scout`: Scout issues with feasibility ranking
+- `contrib_probe_run`: Run deep AST/SAST probes and populate Smart Pointers
 - `contrib_assemble_context`: Gather minimal context bundle
 - `contrib_prepare_workspace`: Create clean worktree
 - `contrib_collect_evidence`: Record test assertion runs
 - `contrib_audit_governance`: Enforce maintainer guidelines
 - `contrib_render_pr_template`: Generate high-acceptance PR bodies
+- `contrib_sync_flywheel`: Synchronize contribution memory ledger

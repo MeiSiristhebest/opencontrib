@@ -1,6 +1,6 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import type {
   SmartPointer,
   PointerStoreApi,
@@ -8,17 +8,75 @@ import type {
   PointerCreateOptions,
   PointerSlice,
   PointerEvidence,
-} from './contract.js';
-import { getOpenContribHome } from './home.js';
+} from "./contract.js";
+import { getOpenContribDataDir } from "./home.js";
+import { ActiveSessionManager } from "../run/active-session.js";
 
+export interface PointerStoreLocationOptions {
+  runId?: string;
+  workspacePath?: string;
+  cwd?: string;
+  storageDir?: string;
+}
+
+/**
+ * Resolves the authoritative pointer storage directory.
+ * Priority:
+ * 1. Explicit storageDir if provided
+ * 2. workspacePath/.opencontrib/pointers (if workspacePath provided or active in session)
+ * 3. cwd/.opencontrib/pointers (if cwd/.opencontrib exists)
+ * 4. global store: <opencontrib_data_dir>/pointers
+ */
+export function resolvePointerStoreLocation(
+  opts: PointerStoreLocationOptions = {},
+): string {
+  if (opts.storageDir) {
+    return opts.storageDir;
+  }
+
+  // Check explicit or active session workspace
+  let ws = opts.workspacePath;
+  if (!ws) {
+    try {
+      const active = ActiveSessionManager.getActiveSession();
+      if (active?.workspacePath && fs.existsSync(active.workspacePath)) {
+        ws = active.workspacePath;
+      }
+    } catch {}
+  }
+
+  if (ws && fs.existsSync(ws)) {
+    return path.join(ws, ".opencontrib", "pointers");
+  }
+
+  // Check local project cwd
+  const targetCwd = opts.cwd || process.cwd();
+  const localProjectOpenContrib = path.join(targetCwd, ".opencontrib");
+  if (fs.existsSync(localProjectOpenContrib)) {
+    return path.join(localProjectOpenContrib, "pointers");
+  }
+
+  return path.join(getOpenContribDataDir(), "pointers");
+}
+
+export type PointerResolveResult =
+  | SmartPointer["stub"]
+  | (SmartPointer["stub"] & { slice: NonNullable<SmartPointer["slice"]> })
+  | (SmartPointer["stub"] & { evidence: NonNullable<SmartPointer["evidence"]> })
+  | SmartPointer
+  | { error: string; message: string };
 
 export class SmartPointerStore implements PointerStoreApi {
   private memoryMap = new Map<string, SmartPointer>();
   private storageDir: string;
   private idCounters = new Map<string, number>();
 
-  constructor(storageDir?: string) {
-    this.storageDir = storageDir || path.join(getOpenContribHome(), '.opencontrib', 'pointers');
+  constructor(storageDirOrOpts?: string | PointerStoreLocationOptions) {
+    if (typeof storageDirOrOpts === "string") {
+      this.storageDir = storageDirOrOpts;
+    } else {
+      this.storageDir = resolvePointerStoreLocation(storageDirOrOpts || {});
+    }
     if (!fs.existsSync(this.storageDir)) {
       try {
         fs.mkdirSync(this.storageDir, { recursive: true });
@@ -33,13 +91,26 @@ export class SmartPointerStore implements PointerStoreApi {
     try {
       const files = fs.readdirSync(this.storageDir);
       for (const file of files) {
-        if (file.endsWith('.json')) {
+        if (file.endsWith(".json")) {
           const filePath = path.join(this.storageDir, file);
           try {
-            const content = fs.readFileSync(filePath, 'utf8');
+            const content = fs.readFileSync(filePath, "utf8");
             const pointer = JSON.parse(content) as SmartPointer;
             if (pointer && pointer.uri) {
               this.memoryMap.set(pointer.uri, pointer);
+              // Track existing IDs in idCounters to prevent cross-process collision/overwrite
+              const ns = pointer.namespace || "findings";
+              const id = pointer.id;
+              const baseMatch = id.match(/^(.*?)(?:_(\d+))?$/);
+              if (baseMatch) {
+                const baseId = baseMatch[1];
+                const counterKey = `${ns}:${baseId}`;
+                const count = baseMatch[2] ? parseInt(baseMatch[2], 10) + 1 : 1;
+                const currentMax = this.idCounters.get(counterKey) || 0;
+                if (count > currentMax) {
+                  this.idCounters.set(counterKey, count);
+                }
+              }
             }
           } catch {}
         }
@@ -48,14 +119,14 @@ export class SmartPointerStore implements PointerStoreApi {
   }
 
   public create(params: PointerCreateOptions): SmartPointer {
-    const rawNamespace = params.namespace || 'findings';
-    const namespace = rawNamespace.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const rawId = params.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const rawNamespace = params.namespace || "findings";
+    const namespace = rawNamespace.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const rawId = params.id.replace(/[^a-zA-Z0-9_-]/g, "_");
 
     // Prevent same-id overwrite: append counter when id collides within namespace
     const counterKey = `${namespace}:${rawId}`;
     const existingCount = this.idCounters.get(counterKey) || 0;
-    const counter = existingCount > 0 ? `_${existingCount}` : '';
+    const counter = existingCount > 0 ? `_${existingCount}` : "";
     this.idCounters.set(counterKey, existingCount + 1);
 
     const cleanId = `${rawId}${counter}`;
@@ -69,10 +140,10 @@ export class SmartPointerStore implements PointerStoreApi {
       stub: {
         id: cleanId,
         uri,
-        title: params.title || '',
-        category: params.category || '',
-        severity: params.severity || '',
-        file: params.file || '',
+        title: params.title || "",
+        category: params.category || "",
+        severity: params.severity || "",
+        file: params.file || "",
         line: params.line,
         confidence: params.confidence ?? 90,
         affectedSymbol: params.affectedSymbol,
@@ -102,36 +173,39 @@ export class SmartPointerStore implements PointerStoreApi {
    * Level 2 (slice): ~150 tokens
    * Level 3 (evidence): full trace and PoC
    */
-  public resolve(rawUri: string, defaultView: PointerView = 'slice'): unknown {
+  public resolve(
+    rawUri: string,
+    defaultView: PointerView = "slice",
+  ): PointerResolveResult {
     const { uri, view } = this.parseUriWithView(rawUri, defaultView);
     const pointer = this.get(uri);
 
     if (!pointer) {
       return {
-        error: 'POINTER_NOT_FOUND',
+        error: "POINTER_NOT_FOUND",
         message: `No resource found at pointer URI: ${uri}`,
       };
     }
 
     switch (view) {
-      case 'stub':
+      case "stub":
         return pointer.stub;
-      case 'slice':
+      case "slice":
         return {
           ...pointer.stub,
           slice: pointer.slice || {
             codeSnippet: `// Source: ${pointer.stub.file}:${pointer.stub.line}`,
-            remediationSuggestion: 'Inspect line and surrounding scope.',
+            remediationSuggestion: "Inspect line and surrounding scope.",
           },
         };
-      case 'evidence':
+      case "evidence":
         return {
           ...pointer.stub,
           evidence: pointer.evidence || {
-            pocCode: '// No explicit PoC code recorded for this finding.',
+            pocCode: "// No explicit PoC code recorded for this finding.",
           },
         };
-      case 'all':
+      case "all":
       default:
         return pointer;
     }
@@ -149,18 +223,24 @@ export class SmartPointerStore implements PointerStoreApi {
   }
 
   private normalizeUri(uri: string): string {
-    return uri.split('?')[0].trim();
+    return uri.split("?")[0].trim();
   }
 
-  private parseUriWithView(rawUri: string, defaultView: PointerView): { uri: string; view: PointerView } {
-    const parts = rawUri.split('?');
+  private parseUriWithView(
+    rawUri: string,
+    defaultView: PointerView,
+  ): { uri: string; view: PointerView } {
+    const parts = rawUri.split("?");
     const uri = parts[0].trim();
     let view = defaultView;
 
     if (parts.length > 1) {
       const params = new URLSearchParams(parts[1]);
-      const requestedView = params.get('view') as PointerView;
-      if (requestedView && ['stub', 'slice', 'evidence', 'all'].includes(requestedView)) {
+      const requestedView = params.get("view") as PointerView;
+      if (
+        requestedView &&
+        ["stub", "slice", "evidence", "all"].includes(requestedView)
+      ) {
         view = requestedView;
       }
     }
@@ -170,8 +250,11 @@ export class SmartPointerStore implements PointerStoreApi {
   private persistToDisk(pointer: SmartPointer): void {
     if (!this.storageDir) return;
     try {
-      const filePath = path.join(this.storageDir, `${pointer.namespace}_${pointer.id}.json`);
-      fs.writeFileSync(filePath, JSON.stringify(pointer, null, 2), 'utf8');
+      const filePath = path.join(
+        this.storageDir,
+        `${pointer.namespace}_${pointer.id}.json`,
+      );
+      fs.writeFileSync(filePath, JSON.stringify(pointer, null, 2), "utf8");
     } catch {
       // Ignore disk write errors in ephemeral runs
     }

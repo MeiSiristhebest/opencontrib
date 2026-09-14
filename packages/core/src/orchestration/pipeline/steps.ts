@@ -10,30 +10,49 @@
  * phase from the original method; no behavioral change is intended.
  */
 
-import type { Opportunity } from '../../contracts/schemas.js';
+import type { Opportunity } from "../../contracts/schemas.js";
 import {
   PatchDraftSchema,
   SubagentReviewEvaluationSchema,
   type PatchDraft,
-} from '../../contracts/llm-schemas.js';
-import { scoutOpportunities } from '../../discovery/scout.js';
-import { MultiSignalHeuristicRanker } from '../../discovery/ranking.js';
-import { detectSystemCapabilities } from '../../discovery/feasibility.js';
-import { verifyEmpiricalReproduction, collectEvidence } from '../../evidence/evidence-collector.js';
-import { generateSubagentReviewPrompt } from '../../governance/subagent-reviewer.js';
-import { deriveEvidenceBackedQualityRubric } from '../../governance/governance-auditor.js';
-import { buildPrDescription } from '../../governance/template-merger.js';
-import { assessContributionRisk, type RiskAssessment, type ValidationStatus } from '../../risk/risk-engine.js';
-import { buildTurnPrompt } from '../agent-orchestrator.js';
-import type { PipelineContext, PipelineDeps, PipelineStep, StepOutcome, OrchestratorSubagentReview } from './types.js';
-import { halt, continuePipeline } from './types.js';
+} from "../../contracts/llm-schemas.js";
+import { scoutOpportunities } from "../../discovery/scout.js";
+import { MultiSignalHeuristicRanker } from "../../discovery/ranking.js";
+import { detectSystemCapabilities } from "../../discovery/feasibility.js";
+import {
+  verifyEmpiricalReproduction,
+  collectEvidence,
+} from "../../evidence/evidence-collector.js";
+import { generateSubagentReviewPrompt } from "../../governance/subagent-reviewer.js";
+import { deriveEvidenceBackedQualityRubric } from "../../governance/governance-auditor.js";
+import { buildPrDescription } from "../../governance/template-merger.js";
+import {
+  assessContributionRisk,
+  type RiskAssessment,
+  type ValidationStatus,
+} from "../../risk/risk-engine.js";
+import { buildTurnPrompt } from "../agent-orchestrator.js";
+import type {
+  PipelineContext,
+  PipelineDeps,
+  PipelineStep,
+  StepOutcome,
+  OrchestratorSubagentReview,
+} from "./types.js";
+import { halt, continuePipeline } from "./types.js";
 
 // ── Phase 0: Discovery & Scout ──────────────────────────────────────────────
 
 export class DiscoveryScoutStep implements PipelineStep {
-  readonly name = 'DiscoveryScout';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
-    deps.stateMachine.transition('DISCOVERY', 'Scouting candidate issues with live GitHub search');
+  readonly name = "DiscoveryScout";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
+    deps.stateMachine.transition(
+      "DISCOVERY",
+      "Scouting candidate issues with live GitHub search",
+    );
     // DIP: pass the injected GitHub client (deps.client) so the scout never
     // constructs its own network adapter and is testable with an
     // InMemoryIssueSource. Callers outside the pipeline may still omit it.
@@ -43,11 +62,12 @@ export class DiscoveryScoutStep implements PipelineStep {
       deps.client,
     );
     if (opportunities.length === 0) {
-      deps.stateMachine.transition('BLOCKED', 'No qualified issues found');
+      deps.stateMachine.transition("BLOCKED", "No qualified issues found");
       return halt({
-        status: 'BLOCKED',
-        stage: 'DISCOVERY',
-        reportSummary: 'No qualified, unclaimed open issues matched current profile and feasibility gates.',
+        status: "BLOCKED",
+        stage: "DISCOVERY",
+        reportSummary:
+          "No qualified, unclaimed open issues matched current profile and feasibility gates.",
       });
     }
     ctx.opportunities = opportunities;
@@ -58,8 +78,11 @@ export class DiscoveryScoutStep implements PipelineStep {
 // ── Phase 0.5: Dynamic Runtime Probe & Multi-Signal Heuristic Ranking ───────
 
 export class RankingStep implements PipelineStep {
-  readonly name = 'Ranking';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "Ranking";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const capabilities = detectSystemCapabilities();
     const ranker = new MultiSignalHeuristicRanker(
       {
@@ -69,7 +92,12 @@ export class RankingStep implements PipelineStep {
         minMatchScore: ctx.profile.minMatchScore || 70,
       },
       {
-        os: capabilities.os === 'win32' ? 'windows' : capabilities.os === 'darwin' ? 'macos' : 'linux',
+        os:
+          capabilities.os === "win32"
+            ? "windows"
+            : capabilities.os === "darwin"
+              ? "macos"
+              : "linux",
         hasDocker: capabilities.hasDocker,
         hasWsl: capabilities.hasWsl,
       },
@@ -77,17 +105,26 @@ export class RankingStep implements PipelineStep {
 
     const rankedOpportunities = ranker.rankOpportunities(ctx.opportunities!);
     if (rankedOpportunities.length === 0) {
-      deps.stateMachine.transition('BLOCKED', 'All candidate issues disqualified by ranking gates');
+      deps.stateMachine.transition(
+        "BLOCKED",
+        "All candidate issues disqualified by ranking gates",
+      );
       return halt({
-        status: 'BLOCKED',
-        stage: 'QUALIFICATION',
-        reportSummary: 'All candidate issues were disqualified by OS feasibility or community qualification gates.',
+        status: "BLOCKED",
+        stage: "QUALIFICATION",
+        reportSummary:
+          "All candidate issues were disqualified by OS feasibility or community qualification gates.",
       });
     }
 
-    const selectedOpp = (rankedOpportunities[0] as any).opportunity || (rankedOpportunities[0] as Opportunity);
-    const [owner, repo] = selectedOpp.repoFullName.split('/');
-    deps.stateMachine.setRepoContext(selectedOpp.repoFullName, selectedOpp.issueNumber);
+    const selectedOpp =
+      (rankedOpportunities[0] as any).opportunity ||
+      (rankedOpportunities[0] as Opportunity);
+    const [owner, repo] = selectedOpp.repoFullName.split("/");
+    deps.stateMachine.setRepoContext(
+      selectedOpp.repoFullName,
+      selectedOpp.issueNumber,
+    );
     ctx.ranked = rankedOpportunities;
     ctx.selectedOpp = selectedOpp;
     ctx.owner = owner;
@@ -99,16 +136,25 @@ export class RankingStep implements PipelineStep {
 // ── Phase 1: Clean-room Workspace Allocation ────────────────────────────────
 
 export class WorkspaceAllocationStep implements PipelineStep {
-  readonly name = 'WorkspaceAllocation';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "WorkspaceAllocation";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
-    deps.stateMachine.transition('ONBOARDING', `Preparing clean-room worktree for ${selectedOpp.repoFullName}`);
+    deps.stateMachine.transition(
+      "ONBOARDING",
+      `Preparing clean-room worktree for ${selectedOpp.repoFullName}`,
+    );
     const workspace = deps.worktreeManager.createIsolatedWorkspace({
       repoFullName: selectedOpp.repoFullName,
       issueOrTaskId: selectedOpp.issueNumber,
     });
     deps.stateMachine.setWorkspace(workspace.workspacePath);
-    ctx.workspace = { workspacePath: workspace.workspacePath, branchName: workspace.branchName };
+    ctx.workspace = {
+      workspacePath: workspace.workspacePath,
+      branchName: workspace.branchName,
+    };
     return continuePipeline();
   }
 }
@@ -116,10 +162,16 @@ export class WorkspaceAllocationStep implements PipelineStep {
 // ── Phase 2 + 2.5: Context Assembly & Pre-Fix Baseline ──────────────────────
 
 export class ContextAssemblyStep implements PipelineStep {
-  readonly name = 'ContextAssembly';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "ContextAssembly";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
-    deps.stateMachine.transition('PATCH_DESIGN', 'Assembling multi-dimensional context');
+    deps.stateMachine.transition(
+      "PATCH_DESIGN",
+      "Assembling multi-dimensional context",
+    );
     const assembledContext = await deps.contextAssembler.assemble({
       repoFullName: selectedOpp.repoFullName,
       issueNumber: selectedOpp.issueNumber,
@@ -134,7 +186,7 @@ export class ContextAssemblyStep implements PipelineStep {
       assembledContext.repoContext.testCommandHint;
 
     let preFixReproductionCaptured = false;
-    let preFixOutput = '';
+    let preFixOutput = "";
     if (testCmd) {
       const preCheck = verifyEmpiricalReproduction({
         cwd: ctx.workspace!.workspacePath,
@@ -156,8 +208,11 @@ export class ContextAssemblyStep implements PipelineStep {
 // ── Phase (initial): Schema-First LLM Patch Generation ──────────────────────
 
 export class PatchGenerationStep implements PipelineStep {
-  readonly name = 'PatchGeneration';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "PatchGeneration";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     let patchDraft: PatchDraft | null = null;
 
     if (deps.llmService) {
@@ -177,13 +232,17 @@ export class PatchGenerationStep implements PipelineStep {
 
     // P0: Do NOT generate fake placeholder patches if LLM fails or is unconfigured!
     if (!patchDraft || !patchDraft.files || patchDraft.files.length === 0) {
-      deps.stateMachine.transition('BLOCKED', 'LLM Patch generation failed or generated empty patch');
+      deps.stateMachine.transition(
+        "BLOCKED",
+        "LLM Patch generation failed or generated empty patch",
+      );
       return halt({
-        status: 'BLOCKED',
-        stage: 'PATCH_DESIGN',
+        status: "BLOCKED",
+        stage: "PATCH_DESIGN",
         selectedOpportunity: ctx.selectedOpp,
         workspacePath: ctx.workspace?.workspacePath,
-        reportSummary: 'Pipeline halted: No valid surgical patch produced. Refusing to inject fake placeholder files.',
+        reportSummary:
+          "Pipeline halted: No valid surgical patch produced. Refusing to inject fake placeholder files.",
       });
     }
 
@@ -196,24 +255,32 @@ export class PatchGenerationStep implements PipelineStep {
 // ── Phases 3-4: Observe -> Physical Edit -> Run Test -> Diagnose -> Replan ──
 
 export class ImplementValidateLoopStep implements PipelineStep {
-  readonly name = 'ImplementValidateLoop';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "ImplementValidateLoop";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const workspacePath = ctx.workspace!.workspacePath;
     const prompt = ctx.prompt!;
     const testCmd = ctx.testCmd;
     const activePatchRef = { patch: ctx.activePatch! };
 
-    deps.stateMachine.transition('SANDBOX_VALIDATION', 'Executing empirical baseline assertion checks in sandbox');
+    deps.stateMachine.transition(
+      "SANDBOX_VALIDATION",
+      "Executing empirical baseline assertion checks in sandbox",
+    );
 
     let implementationAttempts = 0;
     const maxAttempts = 2;
     let validationPassed = false;
-    let validationStatus: ValidationStatus = 'NO_TEST_AVAILABLE';
+    let validationStatus: ValidationStatus = "NO_TEST_AVAILABLE";
     let appliedFiles: Array<{ path: string; operation: string }> = [];
-    const accumulatedAppliedFiles: Array<{ path: string; operation: string }> = [];
+    const accumulatedAppliedFiles: Array<{ path: string; operation: string }> =
+      [];
     let evidenceReport: any;
-    let lastFailureOutput = '';
-    const toolFeedback: import('../agent-orchestrator.js').ToolFeedbackEntry[] = [];
+    let lastFailureOutput = "";
+    const toolFeedback: import("../agent-orchestrator.js").ToolFeedbackEntry[] =
+      [];
 
     const loopRuns = ctx.stressLoopRuns || 1;
 
@@ -273,12 +340,12 @@ export class ImplementValidateLoopStep implements PipelineStep {
       accumulatedAppliedFiles.push(...appliedFiles);
 
       if (safeApplyResult.errors.length > 0) {
-        validationStatus = 'VALIDATION_FAILED';
+        validationStatus = "VALIDATION_FAILED";
         validationPassed = false;
-        lastFailureOutput = `Workspace safety boundary error: ${safeApplyResult.errors.join('; ')}`;
+        lastFailureOutput = `Workspace safety boundary error: ${safeApplyResult.errors.join("; ")}`;
         toolFeedback.push({
           turn: implementationAttempts,
-          toolName: 'applySurgicalFilesSafely',
+          toolName: "applySurgicalFilesSafely",
           output: lastFailureOutput,
           success: false,
         });
@@ -294,7 +361,7 @@ export class ImplementValidateLoopStep implements PipelineStep {
           const output = `Stress loops passed: ${evidenceReport.stressLoopPassed}, Passed tests: ${evidenceReport.passedUnitTestsCount}, Failed tests: ${evidenceReport.failedUnitTestsCount || 0}`;
           toolFeedback.push({
             turn: implementationAttempts,
-            toolName: 'collectEvidence',
+            toolName: "collectEvidence",
             command: testCmd,
             exitCode: evidenceReport.exitCode,
             output: output,
@@ -302,33 +369,35 @@ export class ImplementValidateLoopStep implements PipelineStep {
           });
 
           if (evidenceReport.stressLoopPassed) {
-            validationStatus = 'VALIDATED';
+            validationStatus = "VALIDATED";
             validationPassed = true;
           } else {
-            validationStatus = 'VALIDATION_FAILED';
+            validationStatus = "VALIDATION_FAILED";
             validationPassed = false;
             lastFailureOutput = `Stress loop failed on ${testCmd}. ${output}`;
           }
         } catch (err: any) {
-          validationStatus = 'VALIDATION_UNAVAILABLE';
+          validationStatus = "VALIDATION_UNAVAILABLE";
           validationPassed = false;
           lastFailureOutput = `Validation execution error: ${err.message}`;
           toolFeedback.push({
             turn: implementationAttempts,
-            toolName: 'collectEvidence',
+            toolName: "collectEvidence",
             command: testCmd,
             output: lastFailureOutput,
             success: false,
           });
         }
       } else {
-        validationStatus = 'NO_TEST_AVAILABLE';
+        validationStatus = "NO_TEST_AVAILABLE";
         validationPassed = false;
         break;
       }
     }
 
-    const isReproductionVerified = ctx.preFixReproductionCaptured === true && validationStatus === 'VALIDATED';
+    const isReproductionVerified =
+      ctx.preFixReproductionCaptured === true &&
+      validationStatus === "VALIDATED";
     deps.stateMachine.setReproductionCaptured(isReproductionVerified);
 
     ctx.activePatch = activePatchRef.patch;
@@ -344,25 +413,33 @@ export class ImplementValidateLoopStep implements PipelineStep {
 // ── Phase 5: Adversarial Subagent Review ────────────────────────────────────
 
 export class SubagentReviewStep implements PipelineStep {
-  readonly name = 'SubagentReview';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "SubagentReview";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
     const activePatch = ctx.activePatch!;
     const validationStatus = ctx.validationStatus!;
     const evidenceReport = ctx.evidenceReport;
 
-    deps.stateMachine.transition('SUBAGENT_REVIEW', 'Running Maintainer/Security/QA evaluation');
+    deps.stateMachine.transition(
+      "SUBAGENT_REVIEW",
+      "Running Maintainer/Security/QA evaluation",
+    );
     const reviewPrompt = `${generateSubagentReviewPrompt({
       repoFullName: selectedOpp.repoFullName,
       issueTitle: selectedOpp.title,
       issueBody: selectedOpp.body,
-      diffText: activePatch.files.map((f) => `--- ${f.path}\n+++ ${f.path}\n${f.content}`).join('\n\n'),
+      diffText: activePatch.files
+        .map((f) => `--- ${f.path}\n+++ ${f.path}\n${f.content}`)
+        .join("\n\n"),
       testEvidence: evidenceReport
         ? `Validation status: ${validationStatus}, Stress loops passed: ${evidenceReport.stressLoopPassed}, Passed tests: ${evidenceReport.passedUnitTestsCount}`
         : `Validation status: ${validationStatus} (No automated test detected)`,
     })}\n\nPlease return structured JSON conforming strictly to SubagentReviewEvaluationSchema.`;
 
-    let subagentReview: OrchestratorSubagentReview = { status: 'UNAVAILABLE' };
+    let subagentReview: OrchestratorSubagentReview = { status: "UNAVAILABLE" };
 
     if (deps.llmService) {
       try {
@@ -370,10 +447,14 @@ export class SubagentReviewStep implements PipelineStep {
           prompt: reviewPrompt,
           schema: SubagentReviewEvaluationSchema,
         });
-        if (reviewResult.data && (reviewResult.data as any).confidenceBreakdown) {
+        if (
+          reviewResult.data &&
+          (reviewResult.data as any).confidenceBreakdown
+        ) {
           subagentReview = {
-            status: 'SUCCESS',
-            maintainerPerspective: (reviewResult.data as any).maintainerPerspective,
+            status: "SUCCESS",
+            maintainerPerspective: (reviewResult.data as any)
+              .maintainerPerspective,
             securityPerspective: (reviewResult.data as any).securityPerspective,
             qaPerspective: (reviewResult.data as any).qaPerspective,
             confidenceBreakdown: (reviewResult.data as any).confidenceBreakdown,
@@ -381,7 +462,7 @@ export class SubagentReviewStep implements PipelineStep {
         }
       } catch (err: any) {
         subagentReview = {
-          status: 'FAILED',
+          status: "FAILED",
           failureReason: err.message,
         };
       }
@@ -395,28 +476,40 @@ export class SubagentReviewStep implements PipelineStep {
 // ── Phase 5 (quality rubric): Evidence-Backed Quality Rubric ────────────────
 
 export class QualityRubricStep implements PipelineStep {
-  readonly name = 'QualityRubric';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "QualityRubric";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const activePatch = ctx.activePatch!;
     const validationStatus = ctx.validationStatus!;
     const evidenceReport = ctx.evidenceReport;
     const subagentReview = ctx.subagentReview!;
 
     const confidenceBreakdown =
-      subagentReview.status === 'SUCCESS' ? subagentReview.confidenceBreakdown : undefined;
-    const isReviewAvailable = subagentReview.status === 'SUCCESS' && !!confidenceBreakdown;
+      subagentReview.status === "SUCCESS"
+        ? subagentReview.confidenceBreakdown
+        : undefined;
+    const isReviewAvailable =
+      subagentReview.status === "SUCCESS" && !!confidenceBreakdown;
     const { rubricResult: qualityRubric } = deriveEvidenceBackedQualityRubric({
-      hasReproductionAssertion: (ctx.preFixReproductionCaptured ?? false) && validationStatus === 'VALIDATED',
-      testsPassed: validationStatus === 'VALIDATED',
+      hasReproductionAssertion:
+        (ctx.preFixReproductionCaptured ?? false) &&
+        validationStatus === "VALIDATED",
+      testsPassed: validationStatus === "VALIDATED",
       passedTestsCount:
-        evidenceReport?.passedUnitTestsCount || (validationStatus === 'VALIDATED' ? 1 : 0),
+        evidenceReport?.passedUnitTestsCount ||
+        (validationStatus === "VALIDATED" ? 1 : 0),
       diffLines: activePatch.estimatedDiffLines,
       styleScore: confidenceBreakdown?.styleMatch,
       securityScore: confidenceBreakdown?.securityAudit,
       subagentReviewAvailable: isReviewAvailable,
     });
 
-    deps.stateMachine.setConfidenceScore(qualityRubric.overallScore);
+    deps.stateMachine.setConfidenceScore(
+      qualityRubric.overallScore,
+      qualityRubric.weakestDimension?.score,
+    );
     ctx.qualityRubric = qualityRubric as any;
     return continuePipeline();
   }
@@ -425,8 +518,11 @@ export class QualityRubricStep implements PipelineStep {
 // ── Phase 5.5: Unified Contribution Risk Engine Assessment ──────────────────
 
 export class RiskAssessmentGateStep implements PipelineStep {
-  readonly name = 'RiskAssessmentGate';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "RiskAssessmentGate";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
     const activePatch = ctx.activePatch!;
     const validationStatus = ctx.validationStatus!;
@@ -441,19 +537,20 @@ export class RiskAssessmentGateStep implements PipelineStep {
     });
 
     if (
-      riskAssessment.riskLevel === 'CRITICAL' ||
-      riskAssessment.recommendedPolicy === 'blocked' ||
+      riskAssessment.riskLevel === "CRITICAL" ||
+      riskAssessment.recommendedPolicy === "blocked" ||
       (!qualityRubric.isPassed &&
         !ctx.humanApproved &&
-        (validationStatus === 'VALIDATION_FAILED' || validationStatus === 'VALIDATION_UNAVAILABLE'))
+        (validationStatus === "VALIDATION_FAILED" ||
+          validationStatus === "VALIDATION_UNAVAILABLE"))
     ) {
       deps.stateMachine.transition(
-        'BLOCKED',
-        `Contribution risk critical or validation failed: ${riskAssessment.reasons.join(', ')}`,
+        "BLOCKED",
+        `Contribution risk critical or validation failed: ${riskAssessment.reasons.join(", ")}`,
       );
       return halt({
-        status: 'BLOCKED',
-        stage: 'SUBAGENT_REVIEW',
+        status: "BLOCKED",
+        stage: "SUBAGENT_REVIEW",
         selectedOpportunity: selectedOpp,
         workspacePath: ctx.workspace?.workspacePath,
         patchDraft: activePatch,
@@ -462,7 +559,7 @@ export class RiskAssessmentGateStep implements PipelineStep {
         confidenceScore: qualityRubric.overallScore,
         subagentReview: ctx.subagentReview,
         riskAssessment,
-        reportSummary: `Patch rejected by Quality Rubric & Risk Engine (Overall: ${qualityRubric.overallScore}%, Risk: ${riskAssessment.riskLevel}). Reasons: ${riskAssessment.reasons.join('; ')}`,
+        reportSummary: `Patch rejected by Quality Rubric & Risk Engine (Overall: ${qualityRubric.overallScore}%, Risk: ${riskAssessment.riskLevel}). Reasons: ${riskAssessment.reasons.join("; ")}`,
       });
     }
 
@@ -474,8 +571,11 @@ export class RiskAssessmentGateStep implements PipelineStep {
 // ── Telemetry snapshot (post risk gate) ─────────────────────────────────────
 
 export class TelemetryStep implements PipelineStep {
-  readonly name = 'Telemetry';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "Telemetry";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
     const qualityRubric = ctx.qualityRubric!;
     const riskAssessment = ctx.riskAssessment!;
@@ -490,7 +590,7 @@ export class TelemetryStep implements PipelineStep {
       qualityScore: qualityRubric.overallScore,
       riskScore: riskAssessment.riskScore,
       riskLevel: riskAssessment.riskLevel,
-      status: 'SUCCESS',
+      status: "SUCCESS",
     };
     return continuePipeline();
   }
@@ -499,8 +599,11 @@ export class TelemetryStep implements PipelineStep {
 // ── Phase 6: Human Gate & Execution Policy Check ────────────────────────────
 
 export class HumanGateStep implements PipelineStep {
-  readonly name = 'HumanGate';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "HumanGate";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
     const activePatch = ctx.activePatch!;
     const validationStatus = ctx.validationStatus!;
@@ -509,15 +612,15 @@ export class HumanGateStep implements PipelineStep {
     const riskAssessment = ctx.riskAssessment!;
 
     const requiresHumanGate =
-      (policy.mode === 'interactive' && !ctx.humanApproved) ||
-      (riskAssessment.riskLevel !== 'LOW' && !ctx.humanApproved) ||
-      (validationStatus === 'NO_TEST_AVAILABLE' && !ctx.humanApproved);
+      (policy.mode === "interactive" && !ctx.humanApproved) ||
+      (riskAssessment.riskLevel !== "LOW" && !ctx.humanApproved) ||
+      (validationStatus === "NO_TEST_AVAILABLE" && !ctx.humanApproved);
 
     if (requiresHumanGate) {
-      deps.stateMachine.transition('HUMAN_GATE', 'Awaiting human confirmation');
+      deps.stateMachine.transition("HUMAN_GATE", "Awaiting human confirmation");
       return halt({
-        status: 'HUMAN_APPROVAL_REQUIRED',
-        stage: 'HUMAN_GATE',
+        status: "HUMAN_APPROVAL_REQUIRED",
+        stage: "HUMAN_GATE",
         selectedOpportunity: selectedOpp,
         workspacePath: ctx.workspace?.workspacePath,
         patchDraft: activePatch,
@@ -538,8 +641,11 @@ export class HumanGateStep implements PipelineStep {
 // ── Dry Run / Local Artifacts Only Mode ─────────────────────────────────────
 
 export class DryRunStep implements PipelineStep {
-  readonly name = 'DryRun';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "DryRun";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
     const activePatch = ctx.activePatch!;
     const validationStatus = ctx.validationStatus!;
@@ -548,14 +654,21 @@ export class DryRunStep implements PipelineStep {
     const riskAssessment = ctx.riskAssessment!;
     const durationMs = deps.clock.now().getTime() - ctx.startTime;
 
-    if (policy.mode === 'dry_run' || policy.mode === 'local_artifacts_only' || !policy.allowRealPr) {
+    if (
+      policy.mode === "dry_run" ||
+      policy.mode === "local_artifacts_only" ||
+      !policy.allowRealPr
+    ) {
       if (policy.autoPurgeSandboxOnFinish) {
         deps.worktreeManager.cleanupWorkspace(ctx.workspace!.workspacePath);
       }
-      deps.stateMachine.transition('COMPLETED', 'Dry run contribution completed successfully');
+      deps.stateMachine.transition(
+        "COMPLETED",
+        "Dry run contribution completed successfully",
+      );
       return halt({
-        status: 'DRY_RUN_COMPLETED',
-        stage: 'COMPLETED',
+        status: "DRY_RUN_COMPLETED",
+        stage: "COMPLETED",
         selectedOpportunity: selectedOpp,
         workspacePath: ctx.workspace?.workspacePath,
         patchDraft: activePatch,
@@ -576,8 +689,11 @@ export class DryRunStep implements PipelineStep {
 // ── Phase 7a: Authoritative State Machine Submission Policy Enforcement ─────
 
 export class SubmissionPolicyStep implements PipelineStep {
-  readonly name = 'SubmissionPolicy';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "SubmissionPolicy";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
     const activePatch = ctx.activePatch!;
     const validationStatus = ctx.validationStatus!;
@@ -587,10 +703,13 @@ export class SubmissionPolicyStep implements PipelineStep {
     const submissionGate = deps.stateMachine.canProceedToSubmission();
     if (!submissionGate.allowed) {
       const currentState = deps.stateMachine.getState();
-      deps.stateMachine.transition('BLOCKED', 'Submission blocked by authoritative state machine policy');
+      deps.stateMachine.transition(
+        "BLOCKED",
+        "Submission blocked by authoritative state machine policy",
+      );
       return halt({
-        status: 'BLOCKED',
-        stage: 'SUBMISSION_POLICY_BLOCKED',
+        status: "BLOCKED",
+        stage: "SUBMISSION_POLICY_BLOCKED",
         selectedOpportunity: selectedOpp,
         workspacePath: ctx.workspace?.workspacePath,
         patchDraft: activePatch,
@@ -600,12 +719,15 @@ export class SubmissionPolicyStep implements PipelineStep {
         confidenceScore: qualityRubric.overallScore,
         subagentReview: ctx.subagentReview,
         riskAssessment,
-        telemetry: { ...ctx.telemetry!, status: 'BLOCKED' },
+        telemetry: { ...ctx.telemetry!, status: "BLOCKED" },
         reportSummary: `PR submission physically blocked by authoritative state machine policy: confidenceScore (${currentState.confidenceScore}) < 90, reproduction unverified, or execution policy violation.`,
       });
     }
 
-    deps.stateMachine.transition('PR_SUBMISSION', 'Creating Pull Request on GitHub');
+    deps.stateMachine.transition(
+      "PR_SUBMISSION",
+      "Creating Pull Request on GitHub",
+    );
     return continuePipeline();
   }
 }
@@ -613,8 +735,11 @@ export class SubmissionPolicyStep implements PipelineStep {
 // ── Phase 7b: Real Pull Request Submission & Verified Flywheel Sync ─────────
 
 export class PrSubmissionStep implements PipelineStep {
-  readonly name = 'PrSubmission';
-  async execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome> {
+  readonly name = "PrSubmission";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
     const activePatch = ctx.activePatch!;
     const validationStatus = ctx.validationStatus!;
@@ -627,13 +752,13 @@ export class PrSubmissionStep implements PipelineStep {
     const prDraftText = buildPrDescription({
       issueNumber: selectedOpp.issueNumber,
       problemSummary: activePatch?.summary || selectedOpp.title,
-      rootCause: activePatch?.rationale || 'Targeted surgical bugfix',
-      keyChanges: activePatch?.implementationSteps || ['Applied surgical fix'],
-      reproductionCommand: activePatch?.regressionTestPlan?.[0] || 'npm test',
-      verificationCommand: 'npm test',
+      rootCause: activePatch?.rationale || "Targeted surgical bugfix",
+      keyChanges: activePatch?.implementationSteps || ["Applied surgical fix"],
+      reproductionCommand: activePatch?.regressionTestPlan?.[0] || "npm test",
+      verificationCommand: "npm test",
       testCount: 5,
-      dcoAuthorName: 'OpenContrib',
-      dcoAuthorEmail: 'bot@opencontrib.dev',
+      dcoAuthorName: "OpenContrib",
+      dcoAuthorEmail: "bot@opencontrib.dev",
     });
 
     let prUrl: string;
@@ -646,7 +771,10 @@ export class PrSubmissionStep implements PipelineStep {
         title: `fix: ${selectedOpp.title}`,
         body: prDraftText,
         branchName: ctx.workspace!.branchName,
-        files: ctx.activePatch!.files.map((f) => ({ path: f.path, content: f.content })),
+        files: ctx.activePatch!.files.map((f) => ({
+          path: f.path,
+          content: f.content,
+        })),
         commitMessage: `fix: ${selectedOpp.title}`,
         isDraft: true,
       });
@@ -655,10 +783,13 @@ export class PrSubmissionStep implements PipelineStep {
       prNumber = submission.prNumber;
       if (ctx.telemetry) ctx.telemetry.prUrl = prUrl;
     } catch (err: any) {
-      deps.stateMachine.transition('BLOCKED', `Failed to submit Pull Request: ${err.message}`);
+      deps.stateMachine.transition(
+        "BLOCKED",
+        `Failed to submit Pull Request: ${err.message}`,
+      );
       return halt({
-        status: 'BLOCKED',
-        stage: 'PR_SUBMISSION',
+        status: "BLOCKED",
+        stage: "PR_SUBMISSION",
         selectedOpportunity: selectedOpp,
         workspacePath: ctx.workspace?.workspacePath,
         patchDraft: ctx.patchDraft || undefined,
@@ -668,7 +799,7 @@ export class PrSubmissionStep implements PipelineStep {
         confidenceScore: qualityRubric.overallScore,
         subagentReview: ctx.subagentReview,
         riskAssessment,
-        telemetry: { ...ctx.telemetry!, status: 'FAILED' },
+        telemetry: { ...ctx.telemetry!, status: "FAILED" },
         reportSummary: `Failed to create real GitHub Pull Request: ${err.message}. Operation aborted; Flywheel not modified.`,
       });
     }
@@ -688,12 +819,12 @@ export class PrSubmissionStep implements PipelineStep {
       issueTitle: selectedOpp.title,
       prNumber,
       prUrl,
-      status: 'submitted',
+      status: "submitted",
       submittedAt: deps.clock.nowIso(),
       diffStat: `~${activePatch?.estimatedDiffLines || 10} lines`,
       evidenceSummary: `Verified across ${ctx.implementationAttempts} attempt(s) with ${qualityRubric.overallScore}% quality score (${validationStatus})`,
       provenance: {
-        source: 'system_recorded',
+        source: "system_recorded",
         verified: true,
         verifiedAt: deps.clock.nowIso(),
       },
@@ -704,11 +835,14 @@ export class PrSubmissionStep implements PipelineStep {
       deps.worktreeManager.cleanupWorkspace(ctx.workspace!.workspacePath);
     }
 
-    deps.stateMachine.transition('COMPLETED', 'PR submitted and flywheel synced');
+    deps.stateMachine.transition(
+      "COMPLETED",
+      "PR submitted and flywheel synced",
+    );
 
     return halt({
-      status: 'COMPLETED',
-      stage: 'COMPLETED',
+      status: "COMPLETED",
+      stage: "COMPLETED",
       selectedOpportunity: selectedOpp,
       workspacePath: ctx.workspace?.workspacePath,
       patchDraft: ctx.patchDraft || undefined,

@@ -9,3 +9,4 @@ export * from './capability.js';
 export * from './capability-router.js';
 export * from './evidence-graph.js';
 export * from './config.js';
+export * from './home.js';

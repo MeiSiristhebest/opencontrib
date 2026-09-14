@@ -39,34 +39,39 @@ Use Track A when the user asks to "audit", "find deep-water bugs", "scan reposit
 ## Step-by-Step Command Execution
 
 ### Phase 1: Initialize Run Session
+
 ```bash
 opencontrib doctor --pretty
 opencontrib run create --repo <owner>/<repo> --issue <issue_number> --title "<title>" --pretty
 ```
+
 > [!NOTE]
 > `run create` initializes the **Active Session** at `~/.opencontrib/active_session.json`. All subsequent commands automatically inherit this `runId` and tracking context without requiring `--run-id` manually.
 
 ---
 
 ### Phase 2: Run Multi-Probe SAST & Fingerprint Analysis
+
 Execute `opencontrib probe run` to trigger matching language analyzers:
 
 ```bash
 opencontrib probe run ./<repo_dir> --limit 5 --pretty
 ```
+
 - **Output**: Triaged Top-K Smart Pointers (`ptr://...`), categorized by defect archetype (e.g. `lifecycle_leak`, `protocol_drift`, `concurrency_race`).
 - **Next Step**: Follow the `▶ NEXT RECOMMENDED COMMAND` output by the CLI.
 
 > [!CAUTION]
 > **Track A Isolation Rule**: During proactive 0-day auditing, you are strictly **code-driven**. Defects MUST be discovered through probe scan results and source code analysis only. **NEVER** execute:
+>
 > - `opencontrib scout` (Track B only — reactive issue scouting)
 > - `gh issue list` / `gh issue view` (Track B only — browsing existing issues)
 > - `opencontrib discovery qualify` / `opencontrib discovery rank` (Track B only)
 >
 > Running these commands during Track A wastes API calls and fundamentally changes the contribution from "proactive deep-water bug discovery" to "cherry-picking easy existing issues" — which is NOT what the user requested.
 
-
 ### Phase 3: Dereference Smart Pointer & Context Assembly
+
 Inspect the top Smart Pointer finding using progressive dereferencing:
 
 ```bash
@@ -83,6 +88,7 @@ opencontrib pointer resolve ptr://<namespace>/<defect_id>/<file>:<line> --view e
 ---
 
 ### Phase 4: Prepare Clean-Room Worktree Sandbox
+
 Create an isolated git worktree for the contribution run (automatically bound to the active session):
 
 ```bash
@@ -90,11 +96,13 @@ opencontrib workspace prepare \
   --repo <owner>/<repo> \
   --issue <issue_number>
 ```
+
 - **Capture**: The returned `workspacePath` is automatically registered to the active session.
 
 ---
 
 ### Phase 5: Construct Minimal Failing Test Case (RED Phase)
+
 Write a targeted regression test inside the workspace. Execute **ONLY the targeted package or test file** to observe the pre-fix failure:
 
 ```bash
@@ -114,6 +122,7 @@ pytest tests/test_specific.py -k test_defect
 ---
 
 ### Phase 6: Implement Surgical Fix & Empirical Evidence (GREEN Phase)
+
 Apply the minimal, idiomatic code modification (strictly $\le 100$ lines). Then run targeted evidence verification:
 
 ```bash
@@ -127,11 +136,13 @@ opencontrib evidence \
   --concurrency 5 \
   --stress-loop 5
 ```
+
 - **Auto-Sync**: `--cwd` and `--run-id` are automatically resolved from the active session.
 
 ---
 
 ### Phase 7: Governance Quality & Markdown Integrity Audit
+
 Verify RFC-100 line limit, anti-AI linting, and 7D quality rubric:
 
 ```bash
@@ -150,6 +161,7 @@ opencontrib governance audit \
 ---
 
 ### Phase 8: Mandatory Issue-First Registration & PR Submission
+
 Before opening a PR, publicly register the bug in GitHub Issues with an idiomatic Claim statement:
 
 ```bash
@@ -183,6 +195,7 @@ gh pr create \
 ---
 
 ### Phase 9: Sync Profile & Memory Flywheel
+
 Record the in-flight or completed contribution in local ledger memory:
 
 ```bash
@@ -196,6 +209,7 @@ cat <<JSON | opencontrib flywheel sync --repo <owner>/<repo>
 }
 JSON
 ```
+
 - Advances the active session to `COMPLETED`.
 
 ---
@@ -220,6 +234,4 @@ opencontrib workspace prepare --repo facebook/react --issue 42
 
 # If evidence was lost, re-run from the patch phase
 opencontrib evidence --test-cmd "bun test"
-```
-"bun test" --run-id "$RUN_ID"
 ```

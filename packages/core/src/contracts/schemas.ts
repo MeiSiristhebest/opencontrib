@@ -161,7 +161,22 @@ export const EvidenceReportSchema = z.object({
   initialDescriptorCount: z.number().optional(),
   finalDescriptorCount: z.number().optional(),
   passedUnitTestsCount: z.number(),
+  failedUnitTestsCount: z.number().default(0).optional(),
   addedUnitTestsCount: z.number().optional(),
+  testCoveragePercent: z.number().min(0).max(100).optional(),
+  reproductionVerified: z.boolean().optional(),
+  allTestsPassing: z.boolean().optional(),
+  dualStage: z
+    .object({
+      preFixFailingAssertionCaptured: z.boolean().optional(),
+      preFixOutput: z.string().optional(),
+      postFixPassed: z.boolean().optional(),
+      postFixOutput: z.string().optional(),
+      isReproductionVerified: z.boolean().optional(),
+      stressLoopPassed: z.boolean().optional(),
+      completedRuns: z.number().optional(),
+    })
+    .optional(),
   benchmarkMetrics: z.record(z.string(), z.string()).optional(),
   rawExecutionLogs: z.string().optional(),
 });

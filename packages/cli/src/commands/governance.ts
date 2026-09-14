@@ -46,6 +46,12 @@ const auditCommand = new Command("audit")
     "Path to markdown file containing proposed PR body",
   )
   .option("--evidence <json>", "Evidence JSON from collect_evidence")
+  .option("--evidence-file <path>", "Path to evidence.json file")
+  .option(
+    "--human-approved",
+    "Explicit human approval for contribution submission",
+    false,
+  )
   .option(
     "--subagent-score <n>",
     "External subagent quality score (0-100)",
@@ -70,6 +76,8 @@ const auditCommand = new Command("audit")
       prBody?: string;
       prBodyFile?: string;
       evidence?: string;
+      evidenceFile?: string;
+      humanApproved?: boolean;
       subagentScore?: number;
       isAutonomous?: boolean;
       runId?: string;
@@ -101,9 +109,34 @@ const auditCommand = new Command("audit")
           }
         }
 
-        const evidence = opts.evidence
-          ? (parseJSON(opts.evidence, "--evidence") as any) || undefined
-          : undefined;
+        const runId = getRunManager().resolveRunId(opts.runId);
+
+        let evidence: any = undefined;
+        if (opts.evidenceFile && fs.existsSync(opts.evidenceFile)) {
+          try {
+            evidence = JSON.parse(fs.readFileSync(opts.evidenceFile, "utf-8"));
+          } catch (err: any) {
+            console.error(
+              `Failed to read evidence file "${opts.evidenceFile}": ${err.message}`,
+            );
+            throw new CliExitError(1);
+          }
+        } else if (opts.evidence) {
+          evidence =
+            (parseJSON(opts.evidence, "--evidence") as any) || undefined;
+        } else if (runId) {
+          try {
+            const run = getRunManager().getRun(runId);
+            if (run?.artifacts?.evidence) {
+              evidence = run.artifacts.evidence;
+            }
+          } catch (err: any) {
+            console.warn(
+              `[Governance] Warning: Could not auto-load evidence from run "${runId}": ${err.message}`,
+            );
+          }
+        }
+
         const audit = auditGovernance({
           patchContent,
           prTitle: opts.prTitle,
@@ -111,10 +144,10 @@ const auditCommand = new Command("audit")
           evidence,
           subagentQualityScore: opts.subagentScore,
           isAutonomousPrSubmission: opts.isAutonomous ?? false,
+          humanApproved: opts.humanApproved,
         });
 
         const isPassed = audit.overallConfidence.isPassed;
-        const runId = getRunManager().resolveRunId(opts.runId);
 
         if (runId) {
           try {
@@ -330,7 +363,12 @@ const prTemplateCommand = new Command("pr-template")
         const runId = getRunManager().resolveRunId(opts.runId);
         if (runId) {
           try {
-            getRunManager().saveArtifact(runId, "pr_draft", { prBody } as any);
+            getRunManager().saveArtifact(
+              runId,
+              "pr_draft",
+              { prBody } as any,
+              "GOVERNANCE_AUDITED",
+            );
           } catch {
             // PR draft persistence is best-effort; template content still output to stdout
           }
@@ -339,14 +377,14 @@ const prTemplateCommand = new Command("pr-template")
         printJSON({ status: "success", prBody }, opts.pretty);
 
         printPhaseGuidance({
-          currentPhase: "PR_SUBMITTED",
+          currentPhase: "GOVERNANCE_AUDITED",
           runId,
           status: "SUCCESS",
-          humanCheckpoint: "Checkpoint 3 (Final PR Ready for Submission)",
+          humanCheckpoint: "Checkpoint 3 (PR Drafted & Ready for Human Review)",
           nextCommand: `gh pr create --title "${opts.issueTitle}" --body-file pr-body.md`,
           invariants: [
             'Ensure the PR description includes "Fixes #<issue_number>".',
-            'After PR submission, run "opencontrib flywheel sync" to record the contribution.',
+            'After PR is actually submitted via gh pr create, run "opencontrib flywheel sync" to record the contribution.',
           ],
         });
       } catch (err: any) {

@@ -1,17 +1,17 @@
 export type ExecutionMode =
-  | 'draft_only'
-  | 'local_artifacts_only'
-  | 'dry_run'
-  | 'interactive'
-  | 'autonomous_headless';
+  | "draft_only"
+  | "local_artifacts_only"
+  | "dry_run"
+  | "interactive"
+  | "autonomous_headless";
 
 export type ExecutionOutcome =
-  | 'draft_generated'
-  | 'local_artifacts_written'
-  | 'patch_validated'
-  | 'pr_opened'
-  | 'blocked_by_governance'
-  | 'waiting_for_human_approval';
+  | "draft_generated"
+  | "local_artifacts_written"
+  | "patch_validated"
+  | "pr_opened"
+  | "blocked_by_governance"
+  | "waiting_for_human_approval";
 
 export interface ExecutionPolicy {
   mode: ExecutionMode;
@@ -23,7 +23,7 @@ export interface ExecutionPolicy {
 }
 
 export const DEFAULT_EXECUTION_POLICY: ExecutionPolicy = {
-  mode: 'interactive',
+  mode: "interactive",
   allowRealPr: true,
   reviewRequired: true,
   maxDiffLines: 100,
@@ -32,17 +32,17 @@ export const DEFAULT_EXECUTION_POLICY: ExecutionPolicy = {
 };
 
 export type PipelineStage =
-  | 'IDLE'
-  | 'DISCOVERY'
-  | 'QUALIFICATION'
-  | 'ONBOARDING'
-  | 'PATCH_DESIGN'
-  | 'SANDBOX_VALIDATION'
-  | 'SUBAGENT_REVIEW'
-  | 'HUMAN_GATE'
-  | 'PR_SUBMISSION'
-  | 'COMPLETED'
-  | 'BLOCKED';
+  | "IDLE"
+  | "DISCOVERY"
+  | "QUALIFICATION"
+  | "ONBOARDING"
+  | "PATCH_DESIGN"
+  | "SANDBOX_VALIDATION"
+  | "SUBAGENT_REVIEW"
+  | "HUMAN_GATE"
+  | "PR_SUBMISSION"
+  | "COMPLETED"
+  | "BLOCKED";
 
 export interface PipelineState {
   stage: PipelineStage;
@@ -53,6 +53,7 @@ export interface PipelineState {
   workspacePath?: string;
   reproductionCaptured: boolean;
   confidenceScore?: number;
+  weakestDimensionScore?: number;
   outcome?: ExecutionOutcome;
   history: Array<{ stage: PipelineStage; timestamp: string; note?: string }>;
 }
@@ -62,10 +63,10 @@ export class ContributionStateMachine {
 
   constructor(policy: Partial<ExecutionPolicy> = {}) {
     this.state = {
-      stage: 'IDLE',
+      stage: "IDLE",
       policy: { ...DEFAULT_EXECUTION_POLICY, ...policy },
       reproductionCaptured: false,
-      history: [{ stage: 'IDLE', timestamp: new Date().toISOString() }],
+      history: [{ stage: "IDLE", timestamp: new Date().toISOString() }],
     };
   }
 
@@ -81,23 +82,36 @@ export class ContributionStateMachine {
     //   With human gate:    ... -> SUBAGENT_REVIEW -> HUMAN_GATE -> PR_SUBMISSION -> COMPLETED
     // QUALIFICATION is a logical concept inlined in the orchestrator (ranking) and is not a separate transition.
     const validTransitions: Record<PipelineStage, PipelineStage[]> = {
-      IDLE: ['DISCOVERY', 'BLOCKED'],
-      DISCOVERY: ['ONBOARDING', 'QUALIFICATION', 'PATCH_DESIGN', 'HUMAN_GATE', 'BLOCKED'],
-      QUALIFICATION: ['ONBOARDING', 'PATCH_DESIGN', 'HUMAN_GATE', 'BLOCKED'],
-      ONBOARDING: ['PATCH_DESIGN', 'BLOCKED'],
-      PATCH_DESIGN: ['SANDBOX_VALIDATION', 'BLOCKED'],
-      SANDBOX_VALIDATION: ['SUBAGENT_REVIEW', 'PATCH_DESIGN', 'BLOCKED'],
-      SUBAGENT_REVIEW: ['SANDBOX_VALIDATION', 'HUMAN_GATE', 'PR_SUBMISSION', 'COMPLETED', 'PATCH_DESIGN', 'BLOCKED'],
-      HUMAN_GATE: ['PR_SUBMISSION', 'PATCH_DESIGN', 'BLOCKED'],
-      PR_SUBMISSION: ['COMPLETED', 'BLOCKED'],
+      IDLE: ["DISCOVERY", "BLOCKED"],
+      DISCOVERY: [
+        "ONBOARDING",
+        "QUALIFICATION",
+        "PATCH_DESIGN",
+        "HUMAN_GATE",
+        "BLOCKED",
+      ],
+      QUALIFICATION: ["ONBOARDING", "PATCH_DESIGN", "HUMAN_GATE", "BLOCKED"],
+      ONBOARDING: ["PATCH_DESIGN", "BLOCKED"],
+      PATCH_DESIGN: ["SANDBOX_VALIDATION", "BLOCKED"],
+      SANDBOX_VALIDATION: ["SUBAGENT_REVIEW", "PATCH_DESIGN", "BLOCKED"],
+      SUBAGENT_REVIEW: [
+        "SANDBOX_VALIDATION",
+        "HUMAN_GATE",
+        "PR_SUBMISSION",
+        "COMPLETED",
+        "PATCH_DESIGN",
+        "BLOCKED",
+      ],
+      HUMAN_GATE: ["PR_SUBMISSION", "PATCH_DESIGN", "BLOCKED"],
+      PR_SUBMISSION: ["COMPLETED", "BLOCKED"],
       COMPLETED: [],
-      BLOCKED: ['IDLE', 'PATCH_DESIGN'],
+      BLOCKED: ["IDLE", "PATCH_DESIGN"],
     };
 
     const allowedTargets = validTransitions[currentStage] || [];
     if (!allowedTargets.includes(nextStage)) {
       throw new Error(
-        `Invalid pipeline transition: ${currentStage} -> ${nextStage}. Allowed: ${allowedTargets.join(', ') || 'none'}`,
+        `Invalid pipeline transition: ${currentStage} -> ${nextStage}. Allowed: ${allowedTargets.join(", ") || "none"}`,
       );
     }
 
@@ -122,8 +136,9 @@ export class ContributionStateMachine {
     this.state.reproductionCaptured = captured;
   }
 
-  setConfidenceScore(score: number): void {
+  setConfidenceScore(score: number, weakestScore?: number): void {
     this.state.confidenceScore = score;
+    this.state.weakestDimensionScore = weakestScore;
   }
 
   setOutcome(outcome: ExecutionOutcome): void {
@@ -134,7 +149,11 @@ export class ContributionStateMachine {
     const { policy, confidenceScore, reproductionCaptured, stage } = this.state;
 
     // 1. Lifecycle position constraint
-    const validStages: PipelineStage[] = ['SUBAGENT_REVIEW', 'HUMAN_GATE', 'PR_SUBMISSION'];
+    const validStages: PipelineStage[] = [
+      "SUBAGENT_REVIEW",
+      "HUMAN_GATE",
+      "PR_SUBMISSION",
+    ];
     if (!validStages.includes(stage)) {
       return {
         allowed: false,
@@ -144,28 +163,49 @@ export class ContributionStateMachine {
 
     // 2. Policy constraint
     if (!policy.allowRealPr) {
-      return { allowed: false, reason: `Policy forbids real PR submissions (mode: ${policy.mode})` };
+      return {
+        allowed: false,
+        reason: `Policy forbids real PR submissions (mode: ${policy.mode})`,
+      };
     }
 
     // 2b. Review required constraint — cannot bypass human gate
-    if (policy.reviewRequired && stage === 'SUBAGENT_REVIEW') {
-      return { allowed: false, reason: 'Human gate review required before PR submission' };
+    if (policy.reviewRequired && stage === "SUBAGENT_REVIEW") {
+      return {
+        allowed: false,
+        reason: "Human gate review required before PR submission",
+      };
     }
 
     // 3. Dual-stage evidence constraint
     if (!reproductionCaptured) {
-      return { allowed: false, reason: 'Failing reproduction assertion has not been captured in sandbox' };
+      return {
+        allowed: false,
+        reason:
+          "Failing reproduction assertion has not been captured in sandbox",
+      };
     }
 
-    // 4. Quality confidence constraint
-    if (confidenceScore !== undefined && confidenceScore < policy.minConfidenceScore) {
+    // 4. Quality confidence constraint (both overall >= 90 and weakest >= 80)
+    if (
+      confidenceScore !== undefined &&
+      confidenceScore < policy.minConfidenceScore
+    ) {
       return {
         allowed: false,
         reason: `Confidence score (${confidenceScore}%) is below policy requirement (${policy.minConfidenceScore}%)`,
+      };
+    }
+    if (
+      this.state.weakestDimensionScore !== undefined &&
+      this.state.weakestDimensionScore < 80
+    ) {
+      return {
+        allowed: false,
+        reason: `Weakest dimension score (${this.state.weakestDimensionScore}%) is below required 80% threshold`,
       };
     }
 
     return { allowed: true };
   }
 }
-

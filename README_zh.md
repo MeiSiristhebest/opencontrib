@@ -296,7 +296,7 @@ OpenContrib 原生内置 `CLAUDE.md` 执行规范与 MCP 协议：
 
 ```bash
 # 在 Claude Code 中一键添加 OpenContrib MCP 服务
-claude mcp add opencontrib npx -y @opencontrib/cli mcp
+claude mcp add opencontrib npx -y @opencontrib/mcp
 ```
 
 ### 2. Cursor (Composer & Agent)
@@ -309,7 +309,7 @@ OpenContrib 预置了 `.cursor/rules/opencontrib.mdc` 与 `.cursorrules` 规则�
   "mcpServers": {
     "opencontrib": {
       "command": "npx",
-      "args": ["-y", "@opencontrib/cli", "mcp"]
+      "args": ["-y", "@opencontrib/mcp"]
     }
   }
 }
@@ -317,7 +317,7 @@ OpenContrib 预置了 `.cursor/rules/opencontrib.mdc` 与 `.cursorrules` 规则�
 
 ### 3. OpenAI Codex / 智能体助手
 
-内置标准 `AGENTS.md` 与 `CODEX.md`，为 Codex 与 GPT 助手提供高确定性的 9 阶段开源贡献指令。
+内置标准 `AGENTS.md`，为 Codex 与 GPT 助手提供高确定性的 9 阶段开源贡献指令。
 
 ### 4. 一键全自动配置多 Agent 环境
 

@@ -296,7 +296,7 @@ OpenContrib provides native `CLAUDE.md` instructions and MCP integration for Cla
 
 ```bash
 # Add OpenContrib MCP server to Claude Code
-claude mcp add opencontrib npx -y @opencontrib/cli mcp
+claude mcp add opencontrib npx -y @opencontrib/mcp
 ```
 
 ### 2. Cursor (Composer & Agent)
@@ -309,7 +309,7 @@ OpenContrib includes pre-configured `.cursor/rules/opencontrib.mdc` and `.cursor
   "mcpServers": {
     "opencontrib": {
       "command": "npx",
-      "args": ["-y", "@opencontrib/cli", "mcp"]
+      "args": ["-y", "@opencontrib/mcp"]
     }
   }
 }
@@ -317,7 +317,7 @@ OpenContrib includes pre-configured `.cursor/rules/opencontrib.mdc` and `.cursor
 
 ### 3. OpenAI Codex / Custom Assistants
 
-OpenContrib includes standard `AGENTS.md` and `CODEX.md` directives to orchestrate the 9-phase contribution pipeline deterministically.
+OpenContrib includes standard `AGENTS.md` directives to orchestrate the 9-phase contribution pipeline deterministically.
 
 ### 4. 1-Click Multi-Agent Setup
 

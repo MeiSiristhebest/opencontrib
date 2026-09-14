@@ -117,8 +117,10 @@ const runSave = new Command("save")
   .requiredOption("--type <type>", "Artifact type", (v) => {
     const valid = [
       "opportunity",
+      "probe",
       "context",
       "workspace",
+      "poc",
       "patch",
       "evidence",
       "governance",
@@ -132,8 +134,28 @@ const runSave = new Command("save")
     }
     return v;
   })
-  .option("--content <json>", "Artifact payload as JSON string")
-  .option("--phase <phase>", "Phase to auto-advance to")
+  .option("--phase <phase>", "Phase to auto-advance to", (v) => {
+    const validPhases = [
+      "INITIALIZED",
+      "OPPORTUNITY_SCOUTED",
+      "PROBE_COMPLETED",
+      "CONTEXT_ASSEMBLED",
+      "WORKSPACE_PREPARED",
+      "POC_GENERATED",
+      "PATCH_DRAFTED",
+      "EVIDENCE_COLLECTED",
+      "GOVERNANCE_AUDITED",
+      "PR_SUBMITTED",
+      "COMPLETED",
+      "FAILED",
+    ];
+    if (!validPhases.includes(v)) {
+      throw new Error(
+        `Invalid phase "${v}". Must be one of: ${validPhases.join(", ")}`,
+      );
+    }
+    return v;
+  })
   .option("--pretty", "Pretty-print", false)
   .action(
     async (

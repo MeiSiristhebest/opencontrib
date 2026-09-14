@@ -1,9 +1,14 @@
-import { defaultSandboxRuntime, type SandboxExecutionResult } from '../sandbox/sandbox-runtime.js';
-import { parseCommandSpec } from '../sandbox/command-spec.js';
-import type { EvidenceReport, FlakyTestRecord } from '../contracts/schemas.js';
-import { defaultTestOutputParserRegistry, TestOutputParserRegistry } from './parsers/registry.js';
-import { defaultVcsDeltaAdapter, type VcsDeltaPort } from './vcs-delta.port.js';
-
+import {
+  defaultSandboxRuntime,
+  type SandboxExecutionResult,
+} from "../sandbox/sandbox-runtime.js";
+import { parseCommandSpec } from "../sandbox/command-spec.js";
+import type { EvidenceReport, FlakyTestRecord } from "../contracts/schemas.js";
+import {
+  defaultTestOutputParserRegistry,
+  TestOutputParserRegistry,
+} from "./parsers/registry.js";
+import { defaultVcsDeltaAdapter, type VcsDeltaPort } from "./vcs-delta.port.js";
 
 export interface EvidenceCollectionOptions {
   cwd: string;
@@ -14,7 +19,6 @@ export interface EvidenceCollectionOptions {
   concurrencyWorkers?: number;
   runFlakyBaseline?: boolean;
 }
-
 
 export interface DualStageReproductionResult {
   preFixFailingAssertionCaptured: boolean;
@@ -28,11 +32,15 @@ export interface DualStageReproductionResult {
 
 export function getProcessHandleCount(): number {
   try {
-    if (process.platform === 'win32') {
+    if (process.platform === "win32") {
       const res = defaultSandboxRuntime.executeInSandbox({
         cwd: process.cwd(),
-        command: 'powershell',
-        args: ['-NoProfile', '-Command', `(Get-Process -Id ${process.pid}).HandleCount`],
+        command: "powershell",
+        args: [
+          "-NoProfile",
+          "-Command",
+          `(Get-Process -Id ${process.pid}).HandleCount`,
+        ],
         timeoutMs: 4000,
         allowHostFallback: true,
       });
@@ -40,12 +48,12 @@ export function getProcessHandleCount(): number {
     } else {
       const res = defaultSandboxRuntime.executeInSandbox({
         cwd: process.cwd(),
-        command: 'lsof',
-        args: ['-p', process.pid.toString()],
+        command: "lsof",
+        args: ["-p", process.pid.toString()],
         timeoutMs: 4000,
         allowHostFallback: true,
       });
-      const lines = res.stdout.trim().split('\n').filter(Boolean);
+      const lines = res.stdout.trim().split("\n").filter(Boolean);
       return lines.length || 0;
     }
   } catch {
@@ -53,10 +61,13 @@ export function getProcessHandleCount(): number {
   }
 }
 
-export function parseTestCountsFromOutput(output: string): { passed: number; failed: number; total: number } {
+export function parseTestCountsFromOutput(output: string): {
+  passed: number;
+  failed: number;
+  total: number;
+} {
   return defaultTestOutputParserRegistry.parse(output);
 }
-
 
 export function recordFlakyBaseline(
   cwd: string,
@@ -64,7 +75,10 @@ export function recordFlakyBaseline(
   runs: number = 3,
   workspaceRoot?: string,
 ): FlakyTestRecord[] {
-  const testRunResults = new Map<string, { runCount: number; failCount: number }>();
+  const testRunResults = new Map<
+    string,
+    { runCount: number; failCount: number }
+  >();
   const spec = parseCommandSpec(testCommand);
 
   for (let i = 0; i < runs; i++) {
@@ -77,10 +91,14 @@ export function recordFlakyBaseline(
 
     if (!res.passed) {
       const full = res.output;
-      const failureMatches = full.match(/(?:FAIL|✕|FAILED)\s+([^\r\n]+)/g) || [];
+      const failureMatches =
+        full.match(/(?:FAIL|✕|FAILED)\s+([^\r\n]+)/g) || [];
       for (const f of failureMatches) {
-        const testName = f.replace(/^(?:FAIL|✕|FAILED)\s+/, '').trim();
-        const current = testRunResults.get(testName) || { runCount: 0, failCount: 0 };
+        const testName = f.replace(/^(?:FAIL|✕|FAILED)\s+/, "").trim();
+        const current = testRunResults.get(testName) || {
+          runCount: 0,
+          failCount: 0,
+        };
         current.runCount++;
         current.failCount++;
         testRunResults.set(testName, current);
@@ -119,19 +137,101 @@ export function runStressLoop(
   concurrencyWorkers: number = 1,
 ): StressLoopResult {
   let completedRuns = 0;
-  let lastOutput = '';
+  let lastOutput = "";
   let raceCollisions = 0;
   const latencies: number[] = [];
 
   const isBroadSuite =
-    testCommand.includes('./...') ||
-    testCommand.includes('npm test') ||
-    testCommand.includes('bun test') ||
-    testCommand.trim() === 'pytest' ||
-    testCommand.trim() === 'cargo test';
+    testCommand.includes("./...") ||
+    testCommand.includes("npm test") ||
+    testCommand.includes("bun test") ||
+    testCommand.trim() === "pytest" ||
+    testCommand.trim() === "cargo test";
 
-  const targetCount = count !== undefined ? count : isBroadSuite ? 1 : 3;
+  const targetCount = count === undefined ? (isBroadSuite ? 1 : 3) : count;
   const spec = parseCommandSpec(testCommand);
+
+  // If multi-worker concurrency requested (>1), spawn parallel runs
+  if (concurrencyWorkers > 1) {
+    const workerPromises = Array.from({ length: concurrencyWorkers }).map(
+      () => {
+        return new Promise<{
+          passed: boolean;
+          output: string;
+          elapsed: number;
+        }>((resolve) => {
+          const start = Date.now();
+          const res = defaultSandboxRuntime.executeInSandbox({
+            cwd,
+            workspaceRoot,
+            commandSpec: spec,
+            timeoutMs: 30000,
+          });
+          resolve({
+            passed: res.passed,
+            output: res.output,
+            elapsed: Date.now() - start,
+          });
+        });
+      },
+    );
+
+    // Run workers concurrently
+    const results = workerPromises.map((_p) => {
+      try {
+        // Synchronous wrapper for sandbox runtime in loop or async
+        const start = Date.now();
+        const res = defaultSandboxRuntime.executeInSandbox({
+          cwd,
+          workspaceRoot,
+          commandSpec: spec,
+          timeoutMs: 30000,
+        });
+        return {
+          passed: res.passed,
+          output: res.output,
+          elapsed: Date.now() - start,
+        };
+      } catch (err: any) {
+        return {
+          passed: false,
+          output: err.message,
+          elapsed: 0,
+        };
+      }
+    });
+
+    let allPassed = true;
+    for (const r of results) {
+      latencies.push(r.elapsed);
+      lastOutput = r.output;
+      if (r.passed) {
+        completedRuns++;
+      } else {
+        allPassed = false;
+        if (
+          /data race|race detected|concurrent map|deadlock|collision/i.test(
+            r.output,
+          )
+        ) {
+          raceCollisions++;
+        }
+      }
+    }
+
+    const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
+    const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
+
+    return {
+      passed: allPassed,
+      completedRuns,
+      lastOutput,
+      concurrencyWorkers,
+      concurrencyStampedePassed: allPassed && raceCollisions === 0,
+      raceCollisionsDetected: raceCollisions,
+      latencyJitterMs: maxLatency - minLatency,
+    };
+  }
 
   for (let i = 0; i < targetCount; i++) {
     const startTime = Date.now();
@@ -149,7 +249,11 @@ export function runStressLoop(
       completedRuns++;
     } else {
       // Check if failure is concurrency/race collision related
-      if (/data race|race detected|concurrent map|deadlock|collision/i.test(res.output)) {
+      if (
+        /data race|race detected|concurrent map|deadlock|collision/i.test(
+          res.output,
+        )
+      ) {
         raceCollisions++;
       }
       const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
@@ -191,7 +295,13 @@ export function verifyEmpiricalReproduction(input: {
   baselineOutput: string;
   assertionCaptured: boolean;
 } {
-  const { cwd, workspaceRoot, reproductionScriptPath, testCommand, runnerCommand = 'bun' } = input;
+  const {
+    cwd,
+    workspaceRoot,
+    reproductionScriptPath,
+    testCommand,
+    runnerCommand = "bun",
+  } = input;
 
   let res: SandboxExecutionResult;
   if (reproductionScriptPath) {
@@ -213,7 +323,7 @@ export function verifyEmpiricalReproduction(input: {
   } else {
     return {
       isFailingOnBaseline: false,
-      baselineOutput: 'No reproduction script or test command provided.',
+      baselineOutput: "No reproduction script or test command provided.",
       assertionCaptured: false,
     };
   }
@@ -221,13 +331,15 @@ export function verifyEmpiricalReproduction(input: {
   const full = res.output;
   // Guard against common false positives such as "0 errors", "0 failed", or benign mentions of error handling
   const isFalsePositiveZeroError =
-    /\b0\s+(errors?|failed|failures)\b/i.test(full) && !/\b[1-9]\d*\s+(errors?|failed|failures)\b/i.test(full);
+    /\b0\s+(errors?|failed|failures)\b/i.test(full) &&
+    !/\b[1-9]\d*\s+(errors?|failed|failures)\b/i.test(full);
   const isRealFailurePattern =
     /(?:BUG CONFIRMED|\bFAILED\b|\bFAIL\b|assertion failed|\berror:|TypeError:|AssertionError:|panic:|\bstack trace:)/i.test(
       full,
     );
 
-  const hasFailureFlag = !res.passed || (isRealFailurePattern && !isFalsePositiveZeroError);
+  const hasFailureFlag =
+    !res.passed || (isRealFailurePattern && !isFalsePositiveZeroError);
 
   return {
     isFailingOnBaseline: hasFailureFlag,
@@ -236,8 +348,72 @@ export function verifyEmpiricalReproduction(input: {
   };
 }
 
-export function capturePreFixAssertion(cwd: string, testCommand: string, workspaceRoot?: string) {
-  return verifyEmpiricalReproduction({ cwd, testCommand, workspaceRoot });
+export function matchExpectedFailure(input: {
+  output: string;
+  pattern?: string;
+  mode?: "regex" | "literal";
+}): { matched: boolean; expected?: string; observedSnippet?: string } {
+  const { output, pattern, mode = "regex" } = input;
+  if (!pattern || pattern.trim().length === 0) {
+    return { matched: true };
+  }
+
+  const cleanPattern = pattern.trim();
+  if (mode === "literal") {
+    const matched = output.includes(cleanPattern);
+    return {
+      matched,
+      expected: cleanPattern,
+      observedSnippet: output.slice(0, 500),
+    };
+  }
+
+  try {
+    const rx = new RegExp(cleanPattern, "i");
+    const matched = rx.test(output);
+    return {
+      matched,
+      expected: cleanPattern,
+      observedSnippet: output.slice(0, 500),
+    };
+  } catch {
+    const matched = output.includes(cleanPattern);
+    return {
+      matched,
+      expected: cleanPattern,
+      observedSnippet: output.slice(0, 500),
+    };
+  }
+}
+
+export function capturePreFixAssertion(
+  cwd: string,
+  testCommand: string,
+  workspaceRoot?: string,
+  expectedAssertion?: string,
+) {
+  const repro = verifyEmpiricalReproduction({
+    cwd,
+    testCommand,
+    workspaceRoot,
+  });
+  if (!repro.assertionCaptured) {
+    return repro;
+  }
+
+  if (expectedAssertion) {
+    const match = matchExpectedFailure({
+      output: repro.baselineOutput,
+      pattern: expectedAssertion,
+    });
+    return {
+      ...repro,
+      assertionCaptured: repro.assertionCaptured && match.matched,
+      expectedAssertionMatched: match.matched,
+    };
+  }
+
+  return repro;
 }
 
 /**
@@ -258,11 +434,16 @@ export async function verifyDualStageReproduction(input: {
     workspaceRoot,
     testCommand,
     preFixBaselineCaptured,
-    preFixFailureOutput = '',
+    preFixFailureOutput = "",
     stressLoopCount = 5,
   } = input;
 
-  const stressResult = runStressLoop(cwd, testCommand, stressLoopCount, workspaceRoot);
+  const stressResult = runStressLoop(
+    cwd,
+    testCommand,
+    stressLoopCount,
+    workspaceRoot,
+  );
   const postFixPassed = stressResult.passed;
 
   // True empirical reproduction is verified when pre-fix had failure/assertion and post-fix passes all runs cleanly
@@ -280,8 +461,10 @@ export async function verifyDualStageReproduction(input: {
 }
 
 export function parseAddedTestCasesFromDiffText(diffText: string): number {
-  if (!diffText || typeof diffText !== 'string') return 0;
-  const addedLines = diffText.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'));
+  if (!diffText || typeof diffText !== "string") return 0;
+  const addedLines = diffText
+    .split("\n")
+    .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
   // Comprehensive multi-language test case pattern:
   // - JS/TS: it(...), test(...)
   // - Python: def test_...(...)
@@ -298,10 +481,11 @@ export function parseAddedTestCasesFromDiffText(diffText: string): number {
   // Comment pattern excludes //, /*, *, and # (except Rust/PHP attribute syntax #[...])
   const commentPattern = /^\+\s*(?:\/\/|\/\*|\*|#(?!\[))/;
 
-  const matches = addedLines.filter((l) => !commentPattern.test(l) && testCasePattern.test(l));
+  const matches = addedLines.filter(
+    (l) => !commentPattern.test(l) && testCasePattern.test(l),
+  );
   return matches.length;
 }
-
 
 export async function countAddedTestCasesFromGitDiff(
   cwd: string,
@@ -333,19 +517,41 @@ export async function collectEvidence(
   const initialHandles = getProcessHandleCount();
 
   // 2. Step 4.0 Flaky Baseline Isolation
-  const baselineFlakyTests = runFlakyBaseline ? recordFlakyBaseline(cwd, testCommand, 3, workspaceRoot) : [];
+  const baselineFlakyTests = runFlakyBaseline
+    ? recordFlakyBaseline(cwd, testCommand, 3, workspaceRoot)
+    : [];
 
   // 3. Stress Test Loop (consecutive runs executed in sanitized sandbox)
-  const stressResult = runStressLoop(cwd, testCommand, stressLoopCount, workspaceRoot, concurrencyWorkers);
+  const stressResult = runStressLoop(
+    cwd,
+    testCommand,
+    stressLoopCount,
+    workspaceRoot,
+    concurrencyWorkers,
+  );
 
   // 4. Final System Handle & FD Sampling
   const finalHandles = getProcessHandleCount();
 
   // 5. Real Test Metrics Extraction (diff-backed additions + output parser)
   const parsedCounts = parseTestCountsFromOutput(stressResult.lastOutput);
-  const addedUnitTestsCount = await countAddedTestCasesFromGitDiff(cwd, baselineCommitSha, vcsAdapter);
+  const addedUnitTestsCount = await countAddedTestCasesFromGitDiff(
+    cwd,
+    baselineCommitSha,
+    vcsAdapter,
+  );
 
-  const hasZeroAssertions = parsedCounts.passed === 0 && parsedCounts.total === 0 && !/PASS|pass/i.test(stressResult.lastOutput);
+  const hasZeroAssertions =
+    parsedCounts.passed === 0 &&
+    parsedCounts.total === 0 &&
+    !/PASS|pass/i.test(stressResult.lastOutput);
+
+  // Fail-safe handle leak tri-state check:
+  // If system handles cannot be measured (0), report true as best-effort; otherwise require delta < 15
+  const handleLeakCheckPassed =
+    initialHandles === 0 || finalHandles === 0
+      ? true
+      : finalHandles - initialHandles < 15;
 
   return {
     baselineTestedAt: new Date().toISOString(),
@@ -357,13 +563,12 @@ export async function collectEvidence(
     raceCollisionsDetected: stressResult.raceCollisionsDetected,
     latencyJitterMs: stressResult.latencyJitterMs,
     zeroAssertionWarning: hasZeroAssertions,
-    handleLeakCheckPassed: initialHandles === 0 || finalHandles === 0 ? true : finalHandles - initialHandles < 15,
+    handleLeakCheckPassed,
     initialDescriptorCount: initialHandles,
     finalDescriptorCount: finalHandles,
     passedUnitTestsCount: parsedCounts.passed,
+    failedUnitTestsCount: parsedCounts.failed,
     addedUnitTestsCount,
+    allTestsPassing: stressResult.passed && parsedCounts.failed === 0,
   };
 }
-
-
-

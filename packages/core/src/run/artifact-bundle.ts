@@ -282,8 +282,10 @@ export class ArtifactBundleManager {
       manifest,
       artifacts: {
         opportunity: this.readArtifact(runId, "opportunity") ?? undefined,
+        probe: this.readArtifact(runId, "probe") ?? undefined,
         context: this.readArtifact(runId, "context") ?? undefined,
         workspace: this.readArtifact(runId, "workspace") ?? undefined,
+        poc: this.readArtifact(runId, "poc") ?? undefined,
         patch: this.readArtifact(runId, "patch") ?? undefined,
         evidence: this.readArtifact(runId, "evidence") ?? undefined,
         governance: this.readArtifact(runId, "governance") ?? undefined,
