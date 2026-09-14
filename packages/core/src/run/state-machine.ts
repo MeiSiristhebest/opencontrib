@@ -67,10 +67,12 @@ export function validatePhaseGate(
 
   // Semantic artifact predicates
   if (targetPhase === "EVIDENCE_COLLECTED") {
-    const ev = runSummary.artifacts.evidence as Partial<{
-      reproductionVerified: boolean;
-      allTestsPassing: boolean;
-    }> | undefined;
+    const ev = runSummary.artifacts.evidence as
+      | Partial<{
+          reproductionVerified: boolean;
+          allTestsPassing: boolean;
+        }>
+      | undefined;
     if (ev && ev.reproductionVerified === false && !ev.allTestsPassing) {
       return {
         ok: false,
@@ -78,8 +80,10 @@ export function validatePhaseGate(
           runSummary.manifest.runId,
           currentPhase,
           targetPhase,
-          ["Evidence artifact fails semantic validity: reproductionVerified and allTestsPassing are false."],
-          "Run dual-stage verification with opencontrib evidence capture-red and verify-green."
+          [
+            "Evidence artifact fails semantic validity: reproductionVerified and allTestsPassing are false.",
+          ],
+          "Run dual-stage verification with opencontrib evidence capture-red and verify-green.",
         ),
       };
     }

@@ -1,10 +1,14 @@
-import { spawn, spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'child_process';
-import { mkdtempSync, existsSync } from 'fs';
-import { homedir, tmpdir } from 'os';
-import { join, resolve, sep } from 'path';
-import { parseCommandSpec, type CommandSpec } from './command-spec.js';
-import { safeRmSync } from '../workspace/worktree-manager.js';
-import { sensitiveDeniedPaths } from './denied-paths.js';
+import {
+  spawn,
+  spawnSync,
+  type SpawnSyncOptionsWithStringEncoding,
+} from "child_process";
+import { mkdtempSync, existsSync } from "fs";
+import { homedir, tmpdir } from "os";
+import { join, resolve, sep } from "path";
+import { parseCommandSpec, type CommandSpec } from "./command-spec.js";
+import { safeRmSync } from "../workspace/worktree-manager.js";
+import { sensitiveDeniedPaths } from "./denied-paths.js";
 
 export interface SandboxExecutionOptions {
   cwd: string;
@@ -30,7 +34,11 @@ export interface SandboxExecutionResult {
 export interface SandboxAvailability {
   available: boolean;
   reason?: string;
-  isolationMode: 'NATIVE_ISOLATION' | 'SANITIZED_ENVIRONMENT' | 'CONTAINER_ISOLATION' | 'UNAVAILABLE';
+  isolationMode:
+    | "NATIVE_ISOLATION"
+    | "SANITIZED_ENVIRONMENT"
+    | "CONTAINER_ISOLATION"
+    | "UNAVAILABLE";
   warnings: string[];
 }
 
@@ -47,7 +55,7 @@ export interface SandboxProvider {
 }
 
 export class SanitizedLocalSandboxProvider implements SandboxProvider {
-  public readonly name = 'sanitized_local';
+  public readonly name = "sanitized_local";
   private readonly home: string;
   private readonly defaultTimeoutMs = 60_000;
 
@@ -60,17 +68,17 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
    */
   getDeniedPaths(): string[] {
     return [
-      join(this.home, '.ssh'),
-      join(this.home, '.aws'),
-      join(this.home, '.azure'),
-      join(this.home, '.config', 'gh'),
-      join(this.home, '.config', 'opencontrib'),
-      join(this.home, '.opencontrib'),
-      join(this.home, '.git-credentials'),
-      join(this.home, '.netrc'),
-      join(this.home, '.npmrc'),
-      join(this.home, '.pypirc'),
-      join(this.home, '.gnupg'),
+      join(this.home, ".ssh"),
+      join(this.home, ".aws"),
+      join(this.home, ".azure"),
+      join(this.home, ".config", "gh"),
+      join(this.home, ".config", "opencontrib"),
+      join(this.home, ".opencontrib"),
+      join(this.home, ".git-credentials"),
+      join(this.home, ".netrc"),
+      join(this.home, ".npmrc"),
+      join(this.home, ".pypirc"),
+      join(this.home, ".gnupg"),
     ];
   }
 
@@ -82,7 +90,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
 
     return {
       available: true,
-      isolationMode: 'SANITIZED_ENVIRONMENT',
+      isolationMode: "SANITIZED_ENVIRONMENT",
       warnings,
     };
   }
@@ -94,61 +102,61 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
   buildSanitizedEnvironment(sandboxTempDir: string): NodeJS.ProcessEnv {
     const allowedVars = [
       // OS/runtime essentials
-      'PATH',
-      'Path',
-      'PATHEXT',
-      'SystemRoot',
-      'WINDIR',
-      'COMSPEC',
-      'ComSpec',
-      'SYSTEMDRIVE',
-      'SystemDrive',
-      'PROGRAMFILES',
-      'ProgramFiles',
-      'PROGRAMFILES(X86)',
-      'ProgramFiles(x86)',
-      'COMMONPROGRAMFILES',
-      'PSModulePath',
-      'LANG',
-      'LC_ALL',
-      'TERM',
+      "PATH",
+      "Path",
+      "PATHEXT",
+      "SystemRoot",
+      "WINDIR",
+      "COMSPEC",
+      "ComSpec",
+      "SYSTEMDRIVE",
+      "SystemDrive",
+      "PROGRAMFILES",
+      "ProgramFiles",
+      "PROGRAMFILES(X86)",
+      "ProgramFiles(x86)",
+      "COMMONPROGRAMFILES",
+      "PSModulePath",
+      "LANG",
+      "LC_ALL",
+      "TERM",
       // Node.js
-      'NODE_PATH',
-      'NODE_OPTIONS',
-      'BUN_INSTALL',
+      "NODE_PATH",
+      "NODE_OPTIONS",
+      "BUN_INSTALL",
       // Go toolchain
-      'GOROOT',
-      'GOPATH',
-      'GOBIN',
-      'GOMODCACHE',
+      "GOROOT",
+      "GOPATH",
+      "GOBIN",
+      "GOMODCACHE",
       // Rust toolchain
-      'CARGO_HOME',
-      'RUSTUP_HOME',
-      'RUSTC_WRAPPER',
-      'RUSTFLAGS',
+      "CARGO_HOME",
+      "RUSTUP_HOME",
+      "RUSTC_WRAPPER",
+      "RUSTFLAGS",
       // Java / Android toolchain
-      'JAVA_HOME',
-      'M2_HOME',
-      'GRADLE_HOME',
-      'ANDROID_HOME',
-      'ANDROID_SDK_ROOT',
+      "JAVA_HOME",
+      "M2_HOME",
+      "GRADLE_HOME",
+      "ANDROID_HOME",
+      "ANDROID_SDK_ROOT",
       // Python
-      'PYTHONPATH',
-      'VIRTUAL_ENV',
-      'VIRTUAL_ENV_WRAPPER',
-      'PIP_CONFIG_FILE',
-      'CONDA_PREFIX',
-      'CONDA_DEFAULT_ENV',
+      "PYTHONPATH",
+      "VIRTUAL_ENV",
+      "VIRTUAL_ENV_WRAPPER",
+      "PIP_CONFIG_FILE",
+      "CONDA_PREFIX",
+      "CONDA_DEFAULT_ENV",
       // .NET
-      'DOTNET_ROOT',
-      'MSBUILD_EXE_PATH',
+      "DOTNET_ROOT",
+      "MSBUILD_EXE_PATH",
       // Nix
-      'NIX_PATH',
-      'NIX_USER_PROFILE_DIR',
+      "NIX_PATH",
+      "NIX_USER_PROFILE_DIR",
       // Common toolchain cache / config dirs (non-credential)
-      'NPM_CONFIG_CACHE',
-      'BUNDLE_PATH',
-      'GEM_HOME',
+      "NPM_CONFIG_CACHE",
+      "BUNDLE_PATH",
+      "GEM_HOME",
     ];
 
     const sanitizedEnv: NodeJS.ProcessEnv = {};
@@ -158,18 +166,18 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       }
     }
 
-    sanitizedEnv['HOME'] = sandboxTempDir;
-    sanitizedEnv['USERPROFILE'] = sandboxTempDir;
-    sanitizedEnv['TMPDIR'] = sandboxTempDir;
-    sanitizedEnv['TMP'] = sandboxTempDir;
-    sanitizedEnv['TEMP'] = sandboxTempDir;
+    sanitizedEnv["HOME"] = sandboxTempDir;
+    sanitizedEnv["USERPROFILE"] = sandboxTempDir;
+    sanitizedEnv["TMPDIR"] = sandboxTempDir;
+    sanitizedEnv["TMP"] = sandboxTempDir;
+    sanitizedEnv["TEMP"] = sandboxTempDir;
 
-    sanitizedEnv['CI'] = 'true';
-    sanitizedEnv['FORCE_COLOR'] = '0';
-    sanitizedEnv['DEBIAN_FRONTEND'] = 'noninteractive';
-    sanitizedEnv['GIT_TERMINAL_PROMPT'] = '0';
-    sanitizedEnv['DOTNET_CLI_TELEMETRY_OPTOUT'] = '1';
-    sanitizedEnv['NEXT_TELEMETRY_DISABLED'] = '1';
+    sanitizedEnv["CI"] = "true";
+    sanitizedEnv["FORCE_COLOR"] = "0";
+    sanitizedEnv["DEBIAN_FRONTEND"] = "noninteractive";
+    sanitizedEnv["GIT_TERMINAL_PROMPT"] = "0";
+    sanitizedEnv["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+    sanitizedEnv["NEXT_TELEMETRY_DISABLED"] = "1";
 
     return sanitizedEnv;
   }
@@ -180,7 +188,10 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
   isPathWithinBoundary(targetPath: string, rootBoundary: string): boolean {
     const resolvedTarget = resolve(targetPath);
     const resolvedRoot = resolve(rootBoundary);
-    return resolvedTarget.startsWith(resolvedRoot + sep) || resolvedTarget === resolvedRoot;
+    return (
+      resolvedTarget.startsWith(resolvedRoot + sep) ||
+      resolvedTarget === resolvedRoot
+    );
   }
 
   /**
@@ -195,7 +206,9 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
    * True async execution using child_process.spawn.
    * Enables genuine parallel process concurrency and contention.
    */
-  async executeAsync(options: SandboxExecutionOptions): Promise<SandboxExecutionResult> {
+  async executeAsync(
+    options: SandboxExecutionOptions,
+  ): Promise<SandboxExecutionResult> {
     const {
       cwd,
       workspaceRoot,
@@ -212,19 +225,19 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       const resolvedRoot = resolve(workspaceRoot);
       if (!this.isPathWithinBoundary(resolvedCwd, resolvedRoot)) {
         return {
-          command: command || '',
+          command: command || "",
           exitCode: 126,
           passed: false,
-          stdout: '',
+          stdout: "",
           stderr: `Path traversal denied: Execution cwd "${resolvedCwd}" escapes workspace root "${resolvedRoot}".`,
           output: `Path traversal denied: Execution cwd "${resolvedCwd}" escapes workspace root "${resolvedRoot}".`,
           isSandboxed: false,
-          isolationWarnings: ['Cwd escaped workspace root'],
+          isolationWarnings: ["Cwd escaped workspace root"],
         };
       }
     }
 
-    let finalCommand = command || '';
+    let finalCommand = command || "";
     let finalArgs = [...args];
     if (commandSpec) {
       finalCommand = commandSpec.executable;
@@ -235,10 +248,10 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       finalArgs = parsed.args;
     }
 
-    const commandDisplay = `${finalCommand} ${finalArgs.join(' ')}`.trim();
-    let sandboxTempDir = '';
+    const commandDisplay = `${finalCommand} ${finalArgs.join(" ")}`.trim();
+    let sandboxTempDir = "";
     try {
-      sandboxTempDir = mkdtempSync(join(tmpdir(), 'opencontrib-sandbox-'));
+      sandboxTempDir = mkdtempSync(join(tmpdir(), "opencontrib-sandbox-"));
     } catch {
       sandboxTempDir = tmpdir();
     }
@@ -246,37 +259,41 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
     const sanitizedEnv = this.buildSanitizedEnvironment(sandboxTempDir);
 
     return new Promise<SandboxExecutionResult>((resolvePromise) => {
-      let stdout = '';
-      let stderr = '';
+      let stdout = "";
+      let stderr = "";
       let timedOut = false;
 
       const child = spawn(finalCommand, finalArgs, {
         cwd: resolvedCwd,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ["ignore", "pipe", "pipe"],
         env: sanitizedEnv,
-        shell: process.platform === 'win32',
+        shell: process.platform === "win32",
       });
 
       const timer = setTimeout(() => {
         timedOut = true;
         try {
-          child.kill('SIGKILL');
+          child.kill("SIGKILL");
         } catch {
           // kill timeout fallback
         }
       }, timeoutMs);
 
-      child.stdout?.on('data', (chunk) => {
+      child.stdout?.on("data", (chunk) => {
         stdout += chunk.toString();
       });
 
-      child.stderr?.on('data', (chunk) => {
+      child.stderr?.on("data", (chunk) => {
         stderr += chunk.toString();
       });
 
-      child.on('close', (code) => {
+      child.on("close", (code) => {
         clearTimeout(timer);
-        if (sandboxTempDir && existsSync(sandboxTempDir) && sandboxTempDir.includes('opencontrib-sandbox-')) {
+        if (
+          sandboxTempDir &&
+          existsSync(sandboxTempDir) &&
+          sandboxTempDir.includes("opencontrib-sandbox-")
+        ) {
           try {
             safeRmSync(sandboxTempDir, { recursive: true, force: true });
           } catch {
@@ -297,7 +314,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
         });
       });
 
-      child.on('error', (err) => {
+      child.on("error", (err) => {
         clearTimeout(timer);
         resolvePromise({
           command: commandDisplay,
@@ -324,7 +341,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       allowHostFallback = false,
     } = options;
 
-    let finalCommand = command || '';
+    let finalCommand = command || "";
     let finalArgs = args;
 
     if (commandSpec) {
@@ -336,7 +353,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       finalArgs = parsed.args;
     }
 
-    const commandDisplay = `${finalCommand} ${finalArgs.join(' ')}`.trim();
+    const commandDisplay = `${finalCommand} ${finalArgs.join(" ")}`.trim();
 
     // 1. Mandatory CWD & Workspace Boundary Enforcement
     const resolvedCwd = resolve(cwd);
@@ -347,11 +364,11 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
           command: commandDisplay,
           exitCode: 126,
           passed: false,
-          stdout: '',
+          stdout: "",
           stderr: `Sandbox execution blocked: CWD "${resolvedCwd}" violates workspace boundary "${resolvedRoot}" (Path Traversal Protection / Fail-Closed).`,
           output: `Sandbox execution blocked: CWD "${resolvedCwd}" violates workspace boundary "${resolvedRoot}" (Path Traversal Protection / Fail-Closed).`,
           isSandboxed: false,
-          isolationWarnings: ['CWD traverses outside workspace boundary'],
+          isolationWarnings: ["CWD traverses outside workspace boundary"],
         };
       }
     }
@@ -363,29 +380,29 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
         command: commandDisplay,
         exitCode: 127,
         passed: false,
-        stdout: '',
-        stderr: `Sandbox execution blocked: ${availability.reason || 'Sandbox unavailable'} (Fail-Closed).`,
-        output: `Sandbox execution blocked: ${availability.reason || 'Sandbox unavailable'} (Fail-Closed).`,
+        stdout: "",
+        stderr: `Sandbox execution blocked: ${availability.reason || "Sandbox unavailable"} (Fail-Closed).`,
+        output: `Sandbox execution blocked: ${availability.reason || "Sandbox unavailable"} (Fail-Closed).`,
         isSandboxed: false,
         isolationWarnings: availability.warnings,
       };
     }
 
     // 3. Isolated Scratch Directory Creation (Fail-Closed on failure)
-    let sandboxTempDir = '';
+    let sandboxTempDir = "";
     try {
-      sandboxTempDir = mkdtempSync(join(tmpdir(), 'opencontrib-sandbox-'));
+      sandboxTempDir = mkdtempSync(join(tmpdir(), "opencontrib-sandbox-"));
     } catch (err: any) {
       if (!allowHostFallback) {
         return {
           command: commandDisplay,
           exitCode: 126,
           passed: false,
-          stdout: '',
+          stdout: "",
           stderr: `Sandbox initialization failed: Unable to create isolated scratch directory (${err.message}). Execution blocked (Fail-Closed).`,
           output: `Sandbox initialization failed: Unable to create isolated scratch directory (${err.message}). Execution blocked (Fail-Closed).`,
           isSandboxed: false,
-          isolationWarnings: ['Failed to create isolated scratch directory'],
+          isolationWarnings: ["Failed to create isolated scratch directory"],
         };
       }
       sandboxTempDir = tmpdir();
@@ -396,21 +413,26 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
     try {
       const spawnOptions: SpawnSyncOptionsWithStringEncoding = {
         cwd: resolvedCwd,
-        encoding: 'utf-8',
+        encoding: "utf-8",
         timeout: timeoutMs,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ["ignore", "pipe", "pipe"],
         env: sanitizedEnv,
         shell: false,
       };
 
       const result = spawnSync(finalCommand, finalArgs, spawnOptions);
 
-      const stdout = String(result.stdout || '');
-      const stderr = String(result.stderr || '');
-      const errorText = result.error ? `\n${result.error.message}` : '';
+      const stdout = String(result.stdout || "");
+      const stderr = String(result.stderr || "");
+      const errorText = result.error ? `\n${result.error.message}` : "";
       const combinedOutput = `${stdout}\n${stderr}${errorText}`.trim();
 
-      const exitCode = typeof result.status === 'number' ? result.status : result.error ? 1 : 0;
+      const exitCode =
+        typeof result.status === "number"
+          ? result.status
+          : result.error
+            ? 1
+            : 0;
       const passed = exitCode === 0;
 
       return {
@@ -424,7 +446,11 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
         isolationWarnings: availability.warnings,
       };
     } finally {
-      if (sandboxTempDir && existsSync(sandboxTempDir) && sandboxTempDir.includes('opencontrib-sandbox-')) {
+      if (
+        sandboxTempDir &&
+        existsSync(sandboxTempDir) &&
+        sandboxTempDir.includes("opencontrib-sandbox-")
+      ) {
         try {
           safeRmSync(sandboxTempDir, { recursive: true, force: true });
         } catch {
@@ -436,9 +462,9 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
 }
 
 export class DockerSandboxProvider implements SandboxProvider {
-  public readonly name = 'docker_container';
+  public readonly name = "docker_container";
   private readonly defaultTimeoutMs = 120_000;
-  private readonly defaultImage = 'node:22-alpine';
+  private readonly defaultImage = "node:22-alpine";
 
   getDeniedPaths(): string[] {
     return sensitiveDeniedPaths();
@@ -446,11 +472,14 @@ export class DockerSandboxProvider implements SandboxProvider {
 
   getAvailability(): SandboxAvailability {
     try {
-      const res = spawnSync('docker', ['info'], { timeout: 3000, stdio: 'ignore' });
+      const res = spawnSync("docker", ["info"], {
+        timeout: 3000,
+        stdio: "ignore",
+      });
       if (res.status === 0 && !res.error) {
         return {
           available: true,
-          isolationMode: 'CONTAINER_ISOLATION',
+          isolationMode: "CONTAINER_ISOLATION",
           warnings: [],
         };
       }
@@ -459,23 +488,32 @@ export class DockerSandboxProvider implements SandboxProvider {
     }
     return {
       available: false,
-      isolationMode: 'UNAVAILABLE',
-      reason: 'Docker daemon is not reachable or not running.',
-      warnings: ['Docker is not available on host'],
+      isolationMode: "UNAVAILABLE",
+      reason: "Docker daemon is not reachable or not running.",
+      warnings: ["Docker is not available on host"],
     };
   }
 
   isPathWithinBoundary(targetPath: string, rootBoundary: string): boolean {
     const resolvedTarget = resolve(targetPath);
     const resolvedRoot = resolve(rootBoundary);
-    return resolvedTarget.startsWith(resolvedRoot + sep) || resolvedTarget === resolvedRoot;
+    return (
+      resolvedTarget.startsWith(resolvedRoot + sep) ||
+      resolvedTarget === resolvedRoot
+    );
   }
 
   execute(options: SandboxExecutionOptions): SandboxExecutionResult {
-    const { cwd, command, args = [], commandSpec, timeoutMs = this.defaultTimeoutMs } = options;
+    const {
+      cwd,
+      command,
+      args = [],
+      commandSpec,
+      timeoutMs = this.defaultTimeoutMs,
+    } = options;
     const resolvedCwd = resolve(cwd);
 
-    let finalCommand = command || '';
+    let finalCommand = command || "";
     let finalArgs = [...args];
     if (commandSpec) {
       finalCommand = commandSpec.executable;
@@ -486,32 +524,32 @@ export class DockerSandboxProvider implements SandboxProvider {
       finalArgs = parsed.args;
     }
 
-    const commandDisplay = `${finalCommand} ${finalArgs.join(' ')}`.trim();
+    const commandDisplay = `${finalCommand} ${finalArgs.join(" ")}`.trim();
     const dockerArgs = [
-      'run',
-      '--rm',
-      '-i',
-      '-v',
+      "run",
+      "--rm",
+      "-i",
+      "-v",
       `${resolvedCwd}:/workspace`,
-      '-w',
-      '/workspace',
+      "-w",
+      "/workspace",
       this.defaultImage,
       finalCommand,
       ...finalArgs,
     ];
 
     try {
-      const result = spawnSync('docker', dockerArgs, {
-        encoding: 'utf-8',
+      const result = spawnSync("docker", dockerArgs, {
+        encoding: "utf-8",
         timeout: timeoutMs,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ["ignore", "pipe", "pipe"],
       });
 
-      const stdout = String(result.stdout || '');
-      const stderr = String(result.stderr || '');
-      const errorText = result.error ? `\n${result.error.message}` : '';
+      const stdout = String(result.stdout || "");
+      const stderr = String(result.stderr || "");
+      const errorText = result.error ? `\n${result.error.message}` : "";
       const combinedOutput = `${stdout}\n${stderr}${errorText}`.trim();
-      const exitCode = typeof result.status === 'number' ? result.status : 1;
+      const exitCode = typeof result.status === "number" ? result.status : 1;
 
       return {
         command: commandDisplay,
@@ -528,7 +566,7 @@ export class DockerSandboxProvider implements SandboxProvider {
         command: commandDisplay,
         exitCode: 1,
         passed: false,
-        stdout: '',
+        stdout: "",
         stderr: err.message,
         output: err.message,
         isSandboxed: false,
