@@ -18,10 +18,7 @@ import { scoutCommand } from "../src/commands/scout.js";
 import { evidenceCommand } from "../src/commands/evidence.js";
 import { verifyCommand } from "../src/commands/verify.js";
 import { evalCommand } from "../src/commands/eval.js";
-import {
-  printPhaseGuidance,
-  printTable,
-} from "../src/utils/output.js";
+import { printPhaseGuidance, printTable } from "../src/utils/output.js";
 
 describe("CLI Commands & Subcommands Test Suite", () => {
   it("registers all 16 command domains correctly with descriptions and subcommands", () => {

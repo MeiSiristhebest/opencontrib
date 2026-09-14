@@ -7,7 +7,10 @@ import {
   captureRedEvidence,
   verifyGreenEvidence,
 } from "../src/evidence/evidence-collector.js";
-import { validatePhaseGate, type ContributionRunSummary } from "../src/index.js";
+import {
+  validatePhaseGate,
+  type ContributionRunSummary,
+} from "../src/index.js";
 import type { RedEvidence } from "../src/contracts/schemas.js";
 
 function makeSummary(
@@ -83,7 +86,7 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
     }
   });
 
-  test("verifyGreenEvidence: reproductionVerified is false when RED assertion did not match", () => {
+  test("verifyGreenEvidence: reproductionVerified is false when RED assertion did not match", async () => {
     const dir = mkdtempSync(join(tmpdir(), "oc-green-unmatched-"));
     try {
       const red: RedEvidence = {
@@ -93,8 +96,9 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
         sourceTreeSha256: "deadbeef", // a hash that differs from the real tree
         capturedAt: new Date().toISOString(),
         assertionMatched: false,
+        assertionMatchedFingerprint: "fingerprint",
       };
-      const res = verifyGreenEvidence({
+      const res = await verifyGreenEvidence({
         cwd: dir,
         testCommand: HARMLESS_CMD,
         redEvidence: red,
@@ -126,13 +130,37 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
     });
     const res = validatePhaseGate(summary, "EVIDENCE_COLLECTED");
     expect(res.ok).toBe(false);
-    expect(res.error?.message).toContain("reproductionVerified must be true");
+    expect(res.error?.message).toContain("EvidenceBundleV2");
   });
 
-  test("gate: EVIDENCE_COLLECTED is allowed when reproductionVerified is true", () => {
+  test("gate: EVIDENCE_COLLECTED is allowed for a valid RED→GREEN bundle", () => {
     const summary = makeSummary("PATCH_DRAFTED", {
       workspace: { workspacePath: "/tmp/ws" },
-      evidence: { allTestsPassing: true, reproductionVerified: true },
+      evidence: {
+        reproductionVerified: true,
+        allTestsPassing: true,
+        redEvidence: {
+          command: "bun test",
+          observedOutputSnippet: "AssertionError: expected",
+          exitCode: 1,
+          sourceTreeSha256: "aaaaaaaa",
+          capturedAt: "2026-07-01T00:00:00.000Z",
+          assertionMatched: true,
+          assertionMatchedFingerprint: "fp-1",
+        },
+        greenEvidence: {
+          command: "bun test",
+          exitCode: 0,
+          outputSnippet: "0 failed",
+          passed: true,
+          sourceTreeSha256: "bbbbbbbb",
+          capturedAt: "2026-07-01T00:01:00.000Z",
+          treeChangedComparedToRed: true,
+          treeHashMatchesRed: false,
+          stressLoopPassed: true,
+          assertionMatchedFingerprint: "fp-1",
+        },
+      },
     });
     const res = validatePhaseGate(summary, "EVIDENCE_COLLECTED");
     expect(res.ok).toBe(true);

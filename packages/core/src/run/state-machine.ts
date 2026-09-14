@@ -4,6 +4,13 @@ import {
   ContributionRunSummary,
 } from "./types.js";
 import { DERIVED_PHASE_REQUIREMENTS } from "../workflow/protocol-contract.js";
+import {
+  EvidenceBundleV2Schema,
+  GovernanceAuditResultSchema,
+  SubmissionArtifactSchema,
+  type EvidenceBundleV2,
+  type SubmissionArtifact,
+} from "../contracts/schemas.js";
 
 export class PhaseGateViolationError extends Error {
   constructor(
@@ -67,17 +74,10 @@ export function validatePhaseGate(
 
   // Semantic artifact predicates
   if (targetPhase === "EVIDENCE_COLLECTED") {
-    const ev = runSummary.artifacts.evidence as
-      | Partial<{
-          reproductionVerified: boolean;
-          allTestsPassing: boolean;
-        }>
-      | undefined;
-    // A RED→GREEN-verified evidence artifact is MANDATORY to enter
-    // EVIDENCE_COLLECTED. Missing artifact OR unverified (reproductionVerified
-    // !== true) both fail closed. allTestsPassing alone (GREEN without a
-    // captured RED baseline) is NOT sufficient.
-    if (!ev || ev.reproductionVerified !== true) {
+    const ev = runSummary.artifacts.evidence;
+    const evidence = ev ? EvidenceBundleV2Schema.safeParse(ev) : undefined;
+    if (!evidence?.success) {
+      const issue = evidence?.error.issues[0]?.message;
       return {
         ok: false,
         error: new PhaseGateViolationError(
@@ -86,27 +86,68 @@ export function validatePhaseGate(
           targetPhase,
           [
             !ev
-              ? "Missing evidence artifact: cannot enter EVIDENCE_COLLECTED without a RED→GREEN evidence report."
-              : "Evidence artifact fails semantic validity: reproductionVerified must be true (RED baseline required).",
+              ? "Missing evidence artifact: cannot enter EVIDENCE_COLLECTED without a RED→GREEN evidence bundle."
+              : `Evidence artifact fails EvidenceBundleV2 semantic validity: ${issue ?? "missing RED/GREEN evidence or verified status."}`,
           ],
           "Capture the RED baseline: opencontrib evidence capture-red --test-cmd '<cmd>' --assertion '<pattern>', then opencontrib evidence verify-green --test-cmd '<cmd>'.",
         ),
       };
     }
+
+    const bundle = evidence.data;
+    const invalid = validateEvidenceBundleIdentity(bundle);
+    if (invalid) {
+      return {
+        ok: false,
+        error: new PhaseGateViolationError(
+          runSummary.manifest.runId,
+          currentPhase,
+          targetPhase,
+          [invalid],
+          "Re-run the canonical Evidence V2 flow: capture-red, apply the fix, verify-green.",
+        ),
+      };
+    }
   }
 
-  if (targetPhase === "COMPLETED") {
-    const res = runSummary.artifacts.result as
-      | Partial<{
-          submissionVerified: boolean;
-          prNumber: number;
-          prUrl: string;
-        }>
-      | undefined;
+  if (targetPhase === "GOVERNANCE_AUDITED") {
+    const gov = runSummary.artifacts.governance;
+    const audit = gov ? GovernanceAuditResultSchema.safeParse(gov) : undefined;
+    if (!audit?.success) {
+      return {
+        ok: false,
+        error: new PhaseGateViolationError(
+          runSummary.manifest.runId,
+          currentPhase,
+          targetPhase,
+          [
+            !gov
+              ? "Missing governance artifact: cannot enter GOVERNANCE_AUDITED without audit result."
+              : `Governance artifact fails semantic validity: ${audit?.error.issues[0]?.message ?? "invalid audit result."}`,
+          ],
+          "Run opencontrib governance audit --patch <file> --pr-title '<title>'.",
+        ),
+      };
+    }
+
+    const gate = audit.data;
+    if (gate.technicalGate?.status !== "PASS") {
+      return {
+        ok: false,
+        error: new PhaseGateViolationError(
+          runSummary.manifest.runId,
+          currentPhase,
+          targetPhase,
+          [
+            "Governance artifact fails semantic validity: technicalGate.status must be PASS.",
+          ],
+          "Fix the patch/governance audit failures before advancing to GOVERNANCE_AUDITED.",
+        ),
+      };
+    }
     if (
-      res &&
-      res.submissionVerified === false &&
-      (!res.prNumber || !res.prUrl)
+      gate.approvalGate?.status !== "APPROVED" &&
+      gate.approvalGate?.status !== "WAIVED"
     ) {
       return {
         ok: false,
@@ -115,9 +156,52 @@ export function validatePhaseGate(
           currentPhase,
           targetPhase,
           [
-            "Result artifact fails semantic validity: PR submission is unverified or missing prNumber/prUrl.",
+            "Governance artifact fails semantic validity: approvalGate must be APPROVED or WAIVED.",
           ],
-          "Submit PR through verified SubmissionService before completing run.",
+          "Complete explicit human approval or a recorded policy waiver before advancing to GOVERNANCE_AUDITED.",
+        ),
+      };
+    }
+  }
+
+  if (targetPhase === "COMPLETED") {
+    const res = runSummary.artifacts.result as
+      | (Partial<{ prNumber: number; prUrl: string }> & {
+          submission?: SubmissionArtifact;
+        })
+      | undefined;
+    const submission = res?.submission
+      ? SubmissionArtifactSchema.safeParse(res.submission)
+      : undefined;
+    const validPrUrl =
+      typeof res?.prUrl === "string" &&
+      /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9][0-9]*$/i.test(
+        res.prUrl,
+      );
+    if (
+      !submission?.success ||
+      !submission.data.verified ||
+      !submission.data.prNumber ||
+      !submission.data.prUrl ||
+      !submission.data.headSha ||
+      !validPrUrl ||
+      res?.prNumber !== submission.data.prNumber ||
+      res?.prUrl !== submission.data.prUrl
+    ) {
+      return {
+        ok: false,
+        error: new PhaseGateViolationError(
+          runSummary.manifest.runId,
+          currentPhase,
+          targetPhase,
+          [
+            !submission?.success
+              ? "Result artifact fails semantic validity: missing verified SubmissionArtifact."
+              : !submission.data.verified
+                ? "Result artifact fails semantic validity: SubmissionArtifact.verified must be true."
+                : "Result artifact fails semantic validity: prNumber/prUrl must match the verified SubmissionArtifact.",
+          ],
+          "Submit PR through the verified SubmissionService before completing run.",
         ),
       };
     }
@@ -143,4 +227,40 @@ export function validatePhaseGate(
   }
 
   return { ok: true };
+}
+
+function validateEvidenceBundleIdentity(
+  bundle: EvidenceBundleV2,
+): string | undefined {
+  const { redEvidence, greenEvidence, reproductionVerified, allTestsPassing } =
+    bundle;
+  const checks: Array<[boolean, string]> = [
+    [
+      redEvidence.assertionMatched === true,
+      "RED baseline assertion must have matched.",
+    ],
+    [
+      redEvidence.exitCode !== 0,
+      "RED baseline must record a non-zero exit code.",
+    ],
+    [
+      redEvidence.assertionMatchedFingerprint ===
+        greenEvidence.assertionMatchedFingerprint,
+      "GREEN evidence must bind to the same assertion fingerprint as RED.",
+    ],
+    [greenEvidence.passed === true, "GREEN tests must pass."],
+    [
+      greenEvidence.treeChangedComparedToRed === true,
+      "Source tree must change between RED and GREEN.",
+    ],
+    [
+      greenEvidence.treeHashMatchesRed === false,
+      "GREEN tree must differ from RED tree hash.",
+    ],
+    [greenEvidence.stressLoopPassed === true, "GREEN stress loop must pass."],
+    [reproductionVerified === true, "reproductionVerified must be true."],
+    [allTestsPassing === true, "allTestsPassing must be true."],
+  ];
+  const failed = checks.find(([ok]) => !ok);
+  return failed ? failed[1] : undefined;
 }

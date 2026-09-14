@@ -149,6 +149,7 @@ export const RedEvidenceSchema = z.object({
   baselineCommitSha: z.string().optional(),
   capturedAt: z.string(),
   assertionMatched: z.boolean(),
+  assertionMatchedFingerprint: z.string().optional(),
 });
 export type RedEvidence = z.infer<typeof RedEvidenceSchema>;
 
@@ -160,6 +161,10 @@ export const GreenEvidenceSchema = z.object({
   sourceTreeSha256: z.string(),
   capturedAt: z.string(),
   treeChangedComparedToRed: z.boolean(),
+  treeHashMatchesRed: z.boolean().optional(),
+  stressLoopPassed: z.boolean().optional(),
+  allTestsPassing: z.boolean().optional(),
+  assertionMatchedFingerprint: z.string().optional(),
 });
 export type GreenEvidence = z.infer<typeof GreenEvidenceSchema>;
 
@@ -231,6 +236,14 @@ export const EvidenceReportSchema = z.object({
   rawExecutionLogs: z.string().optional(),
 });
 export type EvidenceReport = z.infer<typeof EvidenceReportSchema>;
+
+export const EvidenceBundleV2Schema = z.object({
+  redEvidence: RedEvidenceSchema,
+  greenEvidence: GreenEvidenceSchema,
+  reproductionVerified: z.literal(true),
+  allTestsPassing: z.literal(true),
+});
+export type EvidenceBundleV2 = z.infer<typeof EvidenceBundleV2Schema>;
 
 // ==========================================
 // 5. Governance & Confidence Contracts

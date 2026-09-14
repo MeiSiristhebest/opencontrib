@@ -60,10 +60,9 @@ function resolveEvidenceContext(opts: EvidenceContextOptions): {
   return { runId, workspaceRoot, baselineSha, targetCwd };
 }
 
-export const evidenceCommand = new Command("evidence")
-  .description(
-    "Empirical evidence: RED→GREEN dual-stage verification (one-shot via 'run', or capture-red + verify-green)",
-  );
+export const evidenceCommand = new Command("evidence").description(
+  "Empirical evidence: RED→GREEN dual-stage verification (one-shot via 'run', or capture-red + verify-green)",
+);
 
 export const evidenceRunCommand = evidenceCommand
   .command("run")
