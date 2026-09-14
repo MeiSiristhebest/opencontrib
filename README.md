@@ -138,12 +138,12 @@ Every CLI command terminates with an explicit guidance block displaying:
 
 ### 6. Concurrency Stampede & Chaos Jitter Evidence
 
-Replaces superficial test loops with real multi-worker contention:
+Replaces superficial single-run test loops with multi-worker parallel execution:
 
-- **`concurrencyWorkers`**: Concurrent threads executing under shared state competition.
+- **`concurrencyWorkers`**: Concurrent worker processes executing under shared workspace execution.
 - **`raceCollisionsDetected`**: Catches mutex collisions, duplicate key bypasses, and data races.
 - **`latencyJitterMs`**: Quantifies execution time variance across concurrent workers.
-- **`zeroAssertionWarning`**: Rejects no-op tests containing 0 real assertions.
+- **`zeroAssertionWarning`**: Flags no-op tests containing 0 real assertions.
 
 ### 7. In-Domain Sister-Module Variant Hunting
 

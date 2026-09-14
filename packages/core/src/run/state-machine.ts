@@ -65,6 +65,26 @@ export function validatePhaseGate(
     };
   }
 
+  // Semantic artifact predicates
+  if (targetPhase === "EVIDENCE_COLLECTED") {
+    const ev = runSummary.artifacts.evidence as Partial<{
+      reproductionVerified: boolean;
+      allTestsPassing: boolean;
+    }> | undefined;
+    if (ev && ev.reproductionVerified === false && !ev.allTestsPassing) {
+      return {
+        ok: false,
+        error: new PhaseGateViolationError(
+          runSummary.manifest.runId,
+          currentPhase,
+          targetPhase,
+          ["Evidence artifact fails semantic validity: reproductionVerified and allTestsPassing are false."],
+          "Run dual-stage verification with opencontrib evidence capture-red and verify-green."
+        ),
+      };
+    }
+  }
+
   if (
     targetPhase !== "FAILED" &&
     req.fromPhases.length > 0 &&

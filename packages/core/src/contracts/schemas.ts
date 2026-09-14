@@ -137,8 +137,56 @@ export const RepoProbeResultSchema = z.object({
 export type RepoProbeResult = z.infer<typeof RepoProbeResultSchema>;
 
 // ==========================================
-// 4. Empirical Evidence Contracts
+// 4. Empirical Evidence Contracts (Evidence V2)
 // ==========================================
+export const RedEvidenceSchema = z.object({
+  command: z.string(),
+  expectedAssertion: z.string().optional(),
+  observedOutputSnippet: z.string(),
+  exitCode: z.number(),
+  sourceTreeSha256: z.string(),
+  testFileSha256: z.string().optional(),
+  baselineCommitSha: z.string().optional(),
+  capturedAt: z.string(),
+  assertionMatched: z.boolean(),
+});
+export type RedEvidence = z.infer<typeof RedEvidenceSchema>;
+
+export const GreenEvidenceSchema = z.object({
+  command: z.string(),
+  exitCode: z.number(),
+  outputSnippet: z.string(),
+  passed: z.boolean(),
+  sourceTreeSha256: z.string(),
+  capturedAt: z.string(),
+  treeChangedComparedToRed: z.boolean(),
+});
+export type GreenEvidence = z.infer<typeof GreenEvidenceSchema>;
+
+export const ApprovalArtifactSchema = z.object({
+  runId: z.string(),
+  patchSha256: z.string(),
+  evidenceSha256: z.string().optional(),
+  prBodySha256: z.string().optional(),
+  approvedBy: z.string().default("human_reviewer"),
+  approvedAt: z.string(),
+  approvalMode: z.enum(["explicit_human", "policy_waived"]),
+});
+export type ApprovalArtifact = z.infer<typeof ApprovalArtifactSchema>;
+
+export const SubmissionArtifactSchema = z.object({
+  runId: z.string(),
+  provider: z.literal("github"),
+  owner: z.string(),
+  repo: z.string(),
+  prNumber: z.number(),
+  prUrl: z.string(),
+  headSha: z.string(),
+  submittedAt: z.string(),
+  verified: z.boolean(),
+});
+export type SubmissionArtifact = z.infer<typeof SubmissionArtifactSchema>;
+
 export const FlakyTestRecordSchema = z.object({
   testName: z.string(),
   runCount: z.number(),
@@ -166,6 +214,8 @@ export const EvidenceReportSchema = z.object({
   testCoveragePercent: z.number().min(0).max(100).optional(),
   reproductionVerified: z.boolean().optional(),
   allTestsPassing: z.boolean().optional(),
+  redEvidence: RedEvidenceSchema.optional(),
+  greenEvidence: GreenEvidenceSchema.optional(),
   dualStage: z
     .object({
       preFixFailingAssertionCaptured: z.boolean().optional(),

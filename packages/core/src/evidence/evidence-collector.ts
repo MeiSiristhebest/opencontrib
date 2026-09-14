@@ -126,6 +126,131 @@ export interface StressLoopResult {
   latencyJitterMs: number;
 }
 
+export async function runStressLoopAsync(
+  cwd: string,
+  testCommand: string,
+  count?: number,
+  workspaceRoot?: string,
+  concurrencyWorkers: number = 1,
+): Promise<StressLoopResult> {
+  let completedRuns = 0;
+  let lastOutput = "";
+  let raceCollisions = 0;
+  const latencies: number[] = [];
+
+  const isBroadSuite =
+    testCommand.includes("./...") ||
+    testCommand.includes("npm test") ||
+    testCommand.includes("bun test") ||
+    testCommand.trim() === "pytest" ||
+    testCommand.trim() === "cargo test";
+
+  const targetCount = count === undefined ? (isBroadSuite ? 1 : 3) : count;
+  const spec = parseCommandSpec(testCommand);
+
+  // If multi-worker concurrency requested (>1), spawn simultaneous worker processes via Promise.all
+  if (concurrencyWorkers > 1) {
+    const workerPromises = Array.from({ length: concurrencyWorkers }).map(
+      async () => {
+        const start = Date.now();
+        const res = await defaultSandboxRuntime.executeAsync({
+          cwd,
+          workspaceRoot,
+          commandSpec: spec,
+          timeoutMs: 30000,
+        });
+        return {
+          passed: res.passed,
+          output: res.output,
+          elapsed: Date.now() - start,
+        };
+      },
+    );
+
+    const workerResults = await Promise.all(workerPromises);
+
+    let allPassed = true;
+    for (const r of workerResults) {
+      latencies.push(r.elapsed);
+      lastOutput = r.output;
+      if (r.passed) {
+        completedRuns++;
+      } else {
+        allPassed = false;
+        if (
+          /data race|race detected|concurrent map|deadlock|collision/i.test(
+            r.output,
+          )
+        ) {
+          raceCollisions++;
+        }
+      }
+    }
+
+    const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
+    const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
+
+    return {
+      passed: allPassed,
+      completedRuns,
+      lastOutput,
+      concurrencyWorkers,
+      concurrencyStampedePassed: allPassed && raceCollisions === 0,
+      raceCollisionsDetected: raceCollisions,
+      latencyJitterMs: maxLatency - minLatency,
+    };
+  }
+
+  for (let i = 0; i < targetCount; i++) {
+    const startTime = Date.now();
+    const res = await defaultSandboxRuntime.executeAsync({
+      cwd,
+      workspaceRoot,
+      commandSpec: spec,
+      timeoutMs: 30000,
+    });
+    const elapsed = Date.now() - startTime;
+    latencies.push(elapsed);
+
+    lastOutput = res.output;
+    if (res.passed) {
+      completedRuns++;
+    } else {
+      if (
+        /data race|race detected|concurrent map|deadlock|collision/i.test(
+          res.output,
+        )
+      ) {
+        raceCollisions++;
+      }
+      const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
+      const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
+      return {
+        passed: false,
+        completedRuns,
+        lastOutput,
+        concurrencyWorkers,
+        concurrencyStampedePassed: false,
+        raceCollisionsDetected: raceCollisions,
+        latencyJitterMs: maxLatency - minLatency,
+      };
+    }
+  }
+
+  const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
+  const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
+
+  return {
+    passed: true,
+    completedRuns,
+    lastOutput,
+    concurrencyWorkers,
+    concurrencyStampedePassed: raceCollisions === 0,
+    raceCollisionsDetected: raceCollisions,
+    latencyJitterMs: maxLatency - minLatency,
+  };
+}
+
 export function runStressLoop(
   cwd: string,
   testCommand: string,
@@ -493,7 +618,7 @@ export async function collectEvidence(
     : [];
 
   // 3. Stress Test Loop (consecutive runs executed in sanitized sandbox)
-  const stressResult = runStressLoop(
+  const stressResult = await runStressLoopAsync(
     cwd,
     testCommand,
     stressLoopCount,

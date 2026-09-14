@@ -169,8 +169,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "Patch Drafted",
     description:
       "Targeted code fix implemented in worktree, awaiting verification.",
-    allowedFromPhases: ["INITIALIZED", "WORKSPACE_PREPARED", "POC_GENERATED"],
-    requiredArtifacts: [],
+    allowedFromPhases: ["WORKSPACE_PREPARED", "POC_GENERATED"],
+    requiredArtifacts: ["workspace"],
     cli: {
       command: "run",
       subcommand: "save",
@@ -180,6 +180,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       tool: "contrib_save_artifact",
     },
     forbiddenActions: [
+      "DO NOT edit production files directly from INITIALIZED without workspace preparation.",
       "DO NOT exceed 100 modified lines without prior RFC issue discussion.",
     ],
     invariants: [

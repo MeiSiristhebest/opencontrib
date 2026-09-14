@@ -136,14 +136,14 @@ opencontrib pointer resolve ptr://findings/ast-ts-unhandled-promise-catch-foo-10
 - `🛑 FORBIDDEN IN THIS PHASE`：当前阶段严禁违规行为与防御约束；
 - `🎯 HUMAN CHECKPOINT`：涉及向 GitHub 提交公开内容前的人工审批提示。
 
-### 6. 并发抢占风暴与混沌抖动物证
+### 6. 并发抢占与执行抖动物证
 
-废除无意义的单线程简单重跑，引入真正的多并发抢占风暴：
+废除无意义的单次简单重跑，引入多进程并行压力测试：
 
-- **`concurrencyWorkers`**：多线程/协程并发抢占共享资源；
-- **`raceCollisionsDetected`**：捕获竞态碰撞、主键冲突绕过与死锁；
+- **`concurrencyWorkers`**：多进程并行执行测试；
+- **`raceCollisionsDetected`**：捕获竞态碰撞、并发读写冲突与死锁；
 - **`latencyJitterMs`**：记录并发执行延迟方差与抖动；
-- **`zeroAssertionWarning`**：自动识别并拦截 0 断言的空跑测试。
+- **`zeroAssertionWarning`**：自动识别并标记 0 断言的空跑测试。
 
 ### 7. 领域内姊妹模块变种猎杀
 

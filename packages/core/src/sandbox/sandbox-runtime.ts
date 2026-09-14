@@ -1,4 +1,4 @@
-import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'child_process';
+import { spawn, spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'child_process';
 import { mkdtempSync, existsSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join, resolve, sep } from 'path';
@@ -191,6 +191,128 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
     return this.executeInSandbox(options);
   }
 
+  /**
+   * True async execution using child_process.spawn.
+   * Enables genuine parallel process concurrency and contention.
+   */
+  async executeAsync(options: SandboxExecutionOptions): Promise<SandboxExecutionResult> {
+    const {
+      cwd,
+      workspaceRoot,
+      command,
+      args = [],
+      commandSpec,
+      timeoutMs = this.defaultTimeoutMs,
+    } = options;
+
+    const resolvedCwd = resolve(cwd);
+    const availability = this.getAvailability();
+
+    if (workspaceRoot) {
+      const resolvedRoot = resolve(workspaceRoot);
+      if (!this.isPathWithinBoundary(resolvedCwd, resolvedRoot)) {
+        return {
+          command: command || '',
+          exitCode: 126,
+          passed: false,
+          stdout: '',
+          stderr: `Path traversal denied: Execution cwd "${resolvedCwd}" escapes workspace root "${resolvedRoot}".`,
+          output: `Path traversal denied: Execution cwd "${resolvedCwd}" escapes workspace root "${resolvedRoot}".`,
+          isSandboxed: false,
+          isolationWarnings: ['Cwd escaped workspace root'],
+        };
+      }
+    }
+
+    let finalCommand = command || '';
+    let finalArgs = [...args];
+    if (commandSpec) {
+      finalCommand = commandSpec.executable;
+      finalArgs = [...commandSpec.args];
+    } else if (finalCommand && finalArgs.length === 0) {
+      const parsed = parseCommandSpec(finalCommand);
+      finalCommand = parsed.executable;
+      finalArgs = parsed.args;
+    }
+
+    const commandDisplay = `${finalCommand} ${finalArgs.join(' ')}`.trim();
+    let sandboxTempDir = '';
+    try {
+      sandboxTempDir = mkdtempSync(join(tmpdir(), 'opencontrib-sandbox-'));
+    } catch {
+      sandboxTempDir = tmpdir();
+    }
+
+    const sanitizedEnv = this.buildSanitizedEnvironment(sandboxTempDir);
+
+    return new Promise<SandboxExecutionResult>((resolvePromise) => {
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+
+      const child = spawn(finalCommand, finalArgs, {
+        cwd: resolvedCwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: sanitizedEnv,
+        shell: process.platform === 'win32',
+      });
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // kill timeout fallback
+        }
+      }, timeoutMs);
+
+      child.stdout?.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+
+      child.stderr?.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (sandboxTempDir && existsSync(sandboxTempDir) && sandboxTempDir.includes('opencontrib-sandbox-')) {
+          try {
+            safeRmSync(sandboxTempDir, { recursive: true, force: true });
+          } catch {
+            // temp cleanup fallback
+          }
+        }
+        const exitCode = timedOut ? 124 : (code ?? 0);
+        const combined = `${stdout}\n${stderr}`.trim();
+        resolvePromise({
+          command: commandDisplay,
+          exitCode,
+          passed: exitCode === 0,
+          stdout,
+          stderr,
+          output: combined,
+          isSandboxed: true,
+          isolationWarnings: availability.warnings,
+        });
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        resolvePromise({
+          command: commandDisplay,
+          exitCode: 1,
+          passed: false,
+          stdout,
+          stderr: err.message,
+          output: `${stdout}\n${err.message}`.trim(),
+          isSandboxed: false,
+          isolationWarnings: [err.message],
+        });
+      });
+    });
+  }
+
   executeInSandbox(options: SandboxExecutionOptions): SandboxExecutionResult {
     const {
       cwd,
@@ -332,7 +454,9 @@ export class DockerSandboxProvider implements SandboxProvider {
           warnings: [],
         };
       }
-    } catch {}
+    } catch {
+      // Docker info fallback
+    }
     return {
       available: false,
       isolationMode: 'UNAVAILABLE',

@@ -138,7 +138,9 @@ export const evidenceCommand = new Command("evidence")
               runId,
               "evidence",
               fullReport,
-              "EVIDENCE_COLLECTED",
+              fullReport.reproductionVerified || fullReport.allTestsPassing
+                ? "EVIDENCE_COLLECTED"
+                : undefined,
             );
             persistence = { saved: true };
           } catch (err: any) {
@@ -155,15 +157,20 @@ export const evidenceCommand = new Command("evidence")
           opts.pretty,
         );
 
+        const isVerified = Boolean(fullReport.reproductionVerified);
         printPhaseGuidance({
-          currentPhase: "EVIDENCE_COLLECTED",
+          currentPhase: isVerified ? "EVIDENCE_COLLECTED" : "PATCH_DRAFTED",
           runId,
-          status: "SUCCESS",
-          humanCheckpoint: "Checkpoint 2 (Empirical Reproduction Verified)",
+          status: isVerified ? "SUCCESS" : "WARNING",
+          humanCheckpoint: isVerified
+            ? "Checkpoint 2 (Empirical Reproduction Verified)"
+            : "Checkpoint 2 (Unverified Baseline - Passing Tests Only)",
           nextCommand:
             'opencontrib governance audit --patch <file> --pr-title "<title>"',
           invariants: [
-            "Ensure unit test passed cleanly with 0 regressions before proceeding.",
+            isVerified
+              ? "Empirical fail-first baseline confirmed and verified."
+              : "Warning: Dual-stage reproduction was not verified with --assertion.",
             "Next, execute Phase 7 Governance Audit to verify RFC-100 line limit and anti-AI rubric.",
           ],
         });

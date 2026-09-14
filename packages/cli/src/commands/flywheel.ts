@@ -91,7 +91,9 @@ const flywheelSync = new Command("sync")
               try {
                 getRunManager().updateRunPhase(runId, "PR_SUBMITTED");
               } catch (phaseErr: any) {
-                console.warn(`[Flywheel] Could not auto-advance to PR_SUBMITTED: ${phaseErr.message}`);
+                console.warn(
+                  `[Flywheel] Could not auto-advance to PR_SUBMITTED: ${phaseErr.message}`,
+                );
               }
             }
             getRunManager().saveArtifact(
@@ -116,8 +118,11 @@ const flywheelSync = new Command("sync")
         }
 
         const effectivePhase = persistenceError
-          ? (getRunManager().getRun(runId)?.manifest.currentPhase || "GOVERNANCE_AUDITED")
-          : (isActualSubmission ? "COMPLETED" : "GOVERNANCE_AUDITED");
+          ? getRunManager().getRun(runId)?.manifest.currentPhase ||
+            "GOVERNANCE_AUDITED"
+          : isActualSubmission
+            ? "COMPLETED"
+            : "GOVERNANCE_AUDITED";
 
         printJSON({ status: "success", flywheelResult: result }, opts.pretty);
 

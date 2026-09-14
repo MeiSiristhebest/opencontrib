@@ -51,20 +51,6 @@
         "typescript": "^5.7.3",
       },
     },
-    "packages/studio": {
-      "name": "@opencontrib/studio",
-      "version": "1.0.0",
-      "bin": {
-        "opencontrib-studio": "./src/server/index.ts",
-      },
-      "dependencies": {
-        "@opencontrib/core": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/node": "^22.13.4",
-        "typescript": "^5.7.3",
-      },
-    },
   },
   "packages": {
     "@hono/node-server": ["@hono/node-server@2.1.1", "https://registry.npmmirror.com/@hono/node-server/-/node-server-2.1.1.tgz", { "peerDependencies": { "hono": "^4" } }, "sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg=="],
@@ -95,9 +81,11 @@
 
     "@octokit/types": ["@octokit/types@14.1.0", "https://registry.npmmirror.com/@octokit/types/-/types-14.1.0.tgz", { "dependencies": { "@octokit/openapi-types": "^25.1.0" } }, "sha512-1y6DgTy8Jomcpu33N+p5w58l6xyt55Ar2I91RPiIA0xCJBXyUAhXCcmZaDWSANiha7R9a6qJJ2CRomGPZ6f46g=="],
 
+    "@opencontrib/cli": ["@opencontrib/cli@workspace:packages/cli"],
+
     "@opencontrib/core": ["@opencontrib/core@workspace:packages/core"],
 
-    "@opencontrib/studio": ["@opencontrib/studio@workspace:packages/studio"],
+    "@opencontrib/mcp": ["@opencontrib/mcp@workspace:packages/mcp-server"],
 
     "@types/bun": ["@types/bun@1.4.0", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.0.tgz", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 
@@ -230,10 +218,6 @@
     "on-finished": ["on-finished@2.4.1", "https://registry.npmmirror.com/on-finished/-/on-finished-2.4.1.tgz", { "dependencies": { "ee-first": "1.1.1" } }, "sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg=="],
 
     "once": ["once@1.4.0", "https://registry.npmmirror.com/once/-/once-1.4.0.tgz", { "dependencies": { "wrappy": "1" } }, "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=="],
-
-    "@opencontrib/cli": ["@opencontrib/cli@workspace:packages/cli"],
-
-    "@opencontrib/mcp": ["@opencontrib/mcp@workspace:packages/mcp-server"],
 
     "parseurl": ["parseurl@1.3.3", "https://registry.npmmirror.com/parseurl/-/parseurl-1.3.3.tgz", {}, "sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ=="],
 
