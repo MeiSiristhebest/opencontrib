@@ -73,7 +73,11 @@ export function validatePhaseGate(
           allTestsPassing: boolean;
         }>
       | undefined;
-    if (ev && ev.reproductionVerified === false && !ev.allTestsPassing) {
+    // A RED→GREEN-verified evidence artifact is MANDATORY to enter
+    // EVIDENCE_COLLECTED. Missing artifact OR unverified (reproductionVerified
+    // !== true) both fail closed. allTestsPassing alone (GREEN without a
+    // captured RED baseline) is NOT sufficient.
+    if (!ev || ev.reproductionVerified !== true) {
       return {
         ok: false,
         error: new PhaseGateViolationError(
@@ -81,9 +85,11 @@ export function validatePhaseGate(
           currentPhase,
           targetPhase,
           [
-            "Evidence artifact fails semantic validity: reproductionVerified and allTestsPassing are false.",
+            !ev
+              ? "Missing evidence artifact: cannot enter EVIDENCE_COLLECTED without a RED→GREEN evidence report."
+              : "Evidence artifact fails semantic validity: reproductionVerified must be true (RED baseline required).",
           ],
-          "Run dual-stage verification with opencontrib evidence capture-red and verify-green.",
+          "Capture the RED baseline: opencontrib evidence capture-red --test-cmd '<cmd>' --assertion '<pattern>', then opencontrib evidence verify-green --test-cmd '<cmd>'.",
         ),
       };
     }

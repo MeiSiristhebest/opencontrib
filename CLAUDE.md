@@ -37,10 +37,13 @@ When conducting open-source scouting, vulnerability probing, bug fixing, or pull
    opencontrib workspace prepare --repo <owner/repo> --issue <issue_id>
    ```
 
-5. **Empirical Evidence Collection (Fail-First & Dual-Stage):**
+5. **Empirical Evidence Collection (Fail-First & Dual-Stage, RED→GREEN):**
 
    ```bash
-   opencontrib evidence --test-cmd "<test_cmd>" --assertion "<expected_regex>"
+   # Before the fix: capture the failing baseline and bind the source tree
+   opencontrib evidence capture-red --test-cmd "<test_cmd>" --assertion "<expected_regex>"
+   # Apply the fix, then verify GREEN against the captured RED baseline
+   opencontrib evidence verify-green --test-cmd "<test_cmd>"
    ```
 
 6. **RFC-100 Governance Pre-Flight Audit:**

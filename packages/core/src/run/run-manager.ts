@@ -140,6 +140,15 @@ export class ContributionRunManager {
     return manifest;
   }
 
+  /**
+   * Public, gate-validated phase transition. This is the ONLY sanctioned path
+   * for advancing a contribution run to a new phase from external callers
+   * (CLI flywheel, autonomous pipeline, MCP tools, submission service).
+   * It runs validatePhaseGate() before persisting, so it rejects invalid
+   * jumps (e.g. PR_SUBMITTED without a governance artifact, or COMPLETED
+   * without a verified submission). Callers that must move a run forward
+   * use this method — never the raw updateRunPhase() primitive.
+   */
   transition(
     runId: string,
     targetPhase: ContributionRunPhase,
@@ -157,6 +166,11 @@ export class ContributionRunManager {
     return this.updateRunPhase(runId, targetPhase);
   }
 
+  /**
+   * Internal phase persistence. Not for direct public use —
+   * all production code must go through transition() which validates the gate.
+   * Kept public only for RunManager internal and test infrastructure use.
+   */
   updateRunPhase(
     runId: string,
     newPhase: ContributionRunPhase,

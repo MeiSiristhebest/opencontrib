@@ -96,5 +96,5 @@ Load these modular references into context **only when entering that specific ph
 Pause and obtain user confirmation at these three gates:
 
 - **Checkpoint 1 (Post-Scout / Finding Selection):** Present the **Single Defect Summary Card** (`printDefectCard`) with file path, line numbers, core defect in plain language, and minimal fix scope before preparing workspaces.
-- **Checkpoint 2 (Empirical Reproduction):** Present the concrete failing test output proving the bug exists (`opencontrib evidence`) before modifying source code.
+- **Checkpoint 2 (Empirical Reproduction):** Capture the RED baseline with `opencontrib evidence capture-red --test-cmd "<cmd>" --assertion "<pattern>"` and present the concrete failing test output proving the bug exists **before** modifying source code. After the fix, verify with `opencontrib evidence verify-green --test-cmd "<cmd>"` (a passing test alone is insufficient — a captured RED baseline is required).
 - **Checkpoint 3 (Governance & Pre-Flight Review):** Show the patch diff, governance audit score (0-100), and draft PR body before pushing to remotes.

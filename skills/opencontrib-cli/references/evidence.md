@@ -1,20 +1,51 @@
 # Evidence Command & Adaptive Verification
 
-Dual-stage empirical verification: pre-fix failure baseline assertion, regression test execution, and optional concurrency stampede chaos testing for race conditions.
+Dual-stage empirical verification: a mandatory RED baseline (failing test + failure assertion) captured **before** the fix, then a GREEN run **after** the fix that must prove the source tree actually changed. A passing test alone (GREEN without a verified RED) does NOT advance the run to `EVIDENCE_COLLECTED`.
+
+The `evidence` command exposes three subcommands:
+
+| Subcommand | Purpose |
+| :--- | :--- |
+| `evidence run` | One-shot dual-stage verification (baseline + post-fix stress loop) in a single invocation |
+| `evidence capture-red` | Capture an immutable RED baseline (failing test + source-tree hash) **before** applying the fix |
+| `evidence verify-green` | Run the GREEN check, bind it to the captured RED, and advance to `EVIDENCE_COLLECTED` only when verified |
 
 ---
 
-## `evidence`
+## Recommended flow: `capture-red` → fix → `verify-green`
+
+```bash
+# 1. Before the fix: capture the failing baseline and bind the source tree hash
+opencontrib evidence capture-red \
+  --cwd /path/to/workspace \
+  --test-cmd "bun test src/specific.test.ts" \
+  --assertion "<expected failure regex>" \
+  --run-id "$RUN_ID"
+
+# 2. Apply the fix
+
+# 3. After the fix: verify GREEN against the captured RED (advances to EVIDENCE_COLLECTED when verified)
+opencontrib evidence verify-green \
+  --cwd /path/to/workspace \
+  --test-cmd "bun test src/specific.test.ts" \
+  --run-id "$RUN_ID"
+```
+
+`verify-green` only reports a verified reproduction when the RED assertion matched, the source tree changed, and the GREEN run passes.
+
+---
+
+## One-shot: `evidence run`
 
 ```bash
 # Standard empirical verification (targeted 1x clean run)
-opencontrib evidence \
+opencontrib evidence run \
   --cwd /path/to/workspace \
   --test-cmd "bun test src/specific.test.ts" \
   --run-id "$RUN_ID"
 
 # For concurrency / race condition / flaky bug fixes (optional stress loop & parallel workers)
-opencontrib evidence \
+opencontrib evidence run \
   --cwd /path/to/workspace \
   --test-cmd "go test -v ./pkg/redis/..." \
   --concurrency 5 \
@@ -34,6 +65,8 @@ opencontrib evidence \
 | `--baseline-sha` | string | — | — | Baseline commit SHA before changes |
 | `--run-id` | string | — | Active Session | Auto-resolved from active session if omitted |
 | `--pretty` | flag | — | false | Pretty-print output |
+
+For `capture-red`, add `--assertion` to match the expected failure. For `verify-green`, the RED baseline is read from the same `--run-id`.
 
 ---
 

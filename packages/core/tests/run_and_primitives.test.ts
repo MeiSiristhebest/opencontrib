@@ -87,11 +87,17 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       "PATCH_DRAFTED",
     );
 
-    // 4. Save evidence
+    // 4. Save evidence (a verified RED→GREEN cycle is required to advance)
+    const evidenceReport = {
+      passed: true,
+      stressLoopSuccessRate: 1.0,
+      reproductionVerified: true,
+      allTestsPassing: true,
+    };
     manager.saveArtifact(
       manifest.runId,
       "evidence",
-      { passed: true, stressLoopSuccessRate: 1.0 },
+      evidenceReport,
       "EVIDENCE_COLLECTED",
     );
 
@@ -102,10 +108,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       signals: { skillMatch: 0.95 },
     });
     expect(summary?.artifacts.patch).toContain("+new");
-    expect(summary?.artifacts.evidence).toEqual({
-      passed: true,
-      stressLoopSuccessRate: 1.0,
-    });
+    expect(summary?.artifacts.evidence).toEqual(evidenceReport);
     expect(summary?.availableArtifactFiles).toContain("opportunity.json");
     expect(summary?.availableArtifactFiles).toContain("patch.diff");
     expect(summary?.availableArtifactFiles).toContain("evidence.json");
@@ -334,7 +337,10 @@ describe("ActiveSessionManager & Pointer Store Persistence", () => {
       "../src/index.js"
     );
     const sessionManager = new ActiveSessionManager(sessionFile);
-    const runManager = new ContributionRunManager({ baseDir: customBase });
+    const runManager = new ContributionRunManager({
+      baseDir: customBase,
+      activeSession: sessionManager,
+    });
 
     // Explicit run ID should resolve directly
     expect(runManager.resolveRunId("run_explicit_999")).toBe(

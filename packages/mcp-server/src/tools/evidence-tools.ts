@@ -193,12 +193,17 @@ export function registerEvidenceTools(
 
       let persistence: { saved: boolean; error?: string } = { saved: false };
       if (args.runId) {
+        // Only auto-advance to EVIDENCE_COLLECTED when a verified RED→GREEN
+        // cycle was produced; otherwise save the artifact without advancing.
+        const isVerified =
+          fullEvidenceReport.reproductionVerified === true &&
+          fullEvidenceReport.allTestsPassing;
         try {
           runManager.saveArtifact(
             args.runId,
             "evidence",
             fullEvidenceReport,
-            "EVIDENCE_COLLECTED",
+            isVerified ? "EVIDENCE_COLLECTED" : undefined,
           );
           persistence = { saved: true };
         } catch (err: any) {

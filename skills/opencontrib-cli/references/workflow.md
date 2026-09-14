@@ -126,12 +126,13 @@ pytest tests/test_specific.py -k test_defect
 Apply the minimal, idiomatic code modification (strictly $\le 100$ lines). Then run targeted evidence verification:
 
 ```bash
-# Standard targeted verification (1x clean run):
-opencontrib evidence \
-  --test-cmd "<targeted_test_command>"
+# Preferred RED→GREEN flow (required to advance to EVIDENCE_COLLECTED):
+opencontrib evidence capture-red --test-cmd "<targeted_test_command>" --assertion "<failure_regex>"
+# ... apply the fix ...
+opencontrib evidence verify-green --test-cmd "<targeted_test_command>"
 
-# Optional: For concurrency / race condition / flaky defects:
-opencontrib evidence \
+# One-shot alternative (concurrency / race / flaky defects):
+opencontrib evidence run \
   --test-cmd "<targeted_test_command>" \
   --concurrency 5 \
   --stress-loop 5
@@ -232,6 +233,6 @@ opencontrib run get
 # If workspace was purged, recreate it
 opencontrib workspace prepare --repo facebook/react --issue 42
 
-# If evidence was lost, re-run from the patch phase
-opencontrib evidence --test-cmd "bun test"
+# If evidence was lost, re-run the RED→GREEN cycle from the patch phase
+opencontrib evidence capture-red --test-cmd "bun test" --assertion "<failure_regex>" && opencontrib evidence verify-green --test-cmd "bun test"
 ```

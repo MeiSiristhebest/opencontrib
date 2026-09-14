@@ -77,8 +77,13 @@ const flywheelSync = new Command("sync")
           evidenceSummary: parsed.evidenceSummary || "",
         } as any);
 
+        // Trust boundary: COMPLETED must be gated on *verified* submission
+        // provenance, not merely the presence of agent-supplied prNumber/prUrl.
+        // A submission is only "verified" when its provenance marks itself
+        // verified (e.g. a Submission V1 service that confirmed the PR via API).
+        const provenanceVerified = parsed.provenance?.verified === true;
         const isActualSubmission =
-          Boolean(parsed.prNumber && parsed.prUrl) ||
+          (Boolean(parsed.prNumber && parsed.prUrl) && provenanceVerified) ||
           status === "merged" ||
           status === "completed";
 
@@ -104,7 +109,11 @@ const flywheelSync = new Command("sync")
                 status,
                 prNumber: parsed.prNumber,
                 prUrl: parsed.prUrl,
-                submissionVerified: Boolean(parsed.prNumber && parsed.prUrl),
+                submissionVerified: provenanceVerified,
+                submissionProvenance: parsed.provenance || {
+                  source: "agent_claim",
+                  verified: false,
+                },
               } as any,
               "COMPLETED",
             );

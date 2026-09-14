@@ -144,6 +144,20 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(manifest.runId).toStartWith("run_");
     expect(manifest.currentPhase).toBe("INITIALIZED");
 
+    // PATCH_DRAFTED requires a prepared workspace, so save the workspace
+    // artifact and advance to WORKSPACE_PREPARED before drafting the patch.
+    const wsResult = await tools["contrib_save_artifact"].handler({
+      runId: manifest.runId,
+      artifactType: "workspace",
+      content: JSON.stringify({
+        workspacePath: "/tmp/sandbox",
+        branchName: "opencontrib/fix-42",
+        baseCommitSha: "abc123",
+      }),
+      autoAdvancePhase: "WORKSPACE_PREPARED",
+    });
+    expect(wsResult.isError).toBeUndefined();
+
     // Save artifact and advance phase
     const saveResult = await tools["contrib_save_artifact"].handler({
       runId: manifest.runId,
@@ -171,6 +185,31 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     const resume = JSON.parse(resumeResult.content[0].text).resume;
     expect(resume.currentPhase).toBe("PATCH_DRAFTED");
     expect(resume.suggestedNextAction).toBe("collect_evidence");
+  });
+
+  it("contract test: INITIALIZED -> PATCH_DRAFTED must fail without a workspace artifact", async () => {
+    const createResult = await tools["contrib_create_run"].handler({
+      repoFullName: "test-org/contract-negative-repo",
+      issueNumber: 43,
+      issueTitle: "Negative contract test",
+    });
+    const manifest = JSON.parse(createResult.content[0].text).manifest;
+
+    // Attempt to jump straight to PATCH_DRAFTED from INITIALIZED (no workspace).
+    const saveResult = await tools["contrib_save_artifact"].handler({
+      runId: manifest.runId,
+      artifactType: "patch",
+      content: "--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new",
+      autoAdvancePhase: "PATCH_DRAFTED",
+    });
+    expect(saveResult.isError).toBe(true);
+
+    // The run must still be in INITIALIZED — the failed advance was rejected.
+    const getResult = await tools["contrib_get_run"].handler({
+      runId: manifest.runId,
+    });
+    const summary = JSON.parse(getResult.content[0].text).run;
+    expect(summary.manifest.currentPhase).toBe("INITIALIZED");
   });
 
   it("contract test: contrib_prepare_workspace passes runId and saves workspace artifact with run-isolated branch", async () => {

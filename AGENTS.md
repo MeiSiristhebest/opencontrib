@@ -12,7 +12,7 @@ Execute open-source contribution tasks adhering to the 9-Phase OpenContrib Lifec
 - **Context Assembly:** `opencontrib discovery context --input <json>`
 - **Pointer Navigation:** `opencontrib pointer list` or `opencontrib pointer resolve <uri> --view slice`
 - **Sandbox Workspace:** `opencontrib workspace prepare --repo <owner/repo> --issue <id>`
-- **Evidence Verification:** `opencontrib evidence --test-cmd "<test_cmd>" --assertion "<pattern>"`
+- **Evidence Verification (RED→GREEN):** capture the failing baseline with `opencontrib evidence capture-red --test-cmd "<test_cmd>" --assertion "<pattern>"`, apply the fix, then verify with `opencontrib evidence verify-green --test-cmd "<test_cmd>"`
 - **Governance Audit:** `opencontrib governance audit --patch <file> --pr-title "<title>"`
 - **PR Description:** `opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"`
 - **Flywheel Sync:** `opencontrib flywheel sync --repo <owner/repo>`

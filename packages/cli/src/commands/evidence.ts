@@ -6,7 +6,10 @@ import {
   collectEvidence,
   buildContributionRunManager,
   verifyDualStageReproduction,
+  captureRedEvidence,
+  verifyGreenEvidence,
   type ContributionRunManager,
+  type RedEvidence,
 } from "@opencontrib/core";
 import { printJSON, printPhaseGuidance } from "../utils/output.js";
 
@@ -15,9 +18,57 @@ let _runManager: ContributionRunManager | null = null;
 const getRunManager = (): ContributionRunManager =>
   (_runManager ??= buildContributionRunManager());
 
+// Shared context resolution for evidence subcommands.
+interface EvidenceContextOptions {
+  cwd?: string;
+  runId?: string;
+  workspaceRoot?: string;
+  baselineSha?: string;
+  testCmd?: string;
+}
+function resolveEvidenceContext(opts: EvidenceContextOptions): {
+  runId?: string;
+  workspaceRoot?: string;
+  baselineSha?: string;
+  targetCwd: string;
+} {
+  const runId = getRunManager().resolveRunId(opts.runId);
+  let workspaceRoot = opts.workspaceRoot;
+  let baselineSha = opts.baselineSha;
+  let targetCwd = opts.cwd;
+
+  if (runId) {
+    try {
+      const run = getRunManager().getRun(runId);
+      if (run?.artifacts?.workspace?.workspacePath) {
+        if (!workspaceRoot)
+          workspaceRoot = String(run.artifacts.workspace.workspacePath);
+        if (!targetCwd)
+          targetCwd = String(run.artifacts.workspace.workspacePath);
+      }
+      if (run?.artifacts?.workspace?.baseCommitSha && !baselineSha) {
+        baselineSha = String(run.artifacts.workspace.baseCommitSha);
+      }
+    } catch (err: any) {
+      console.warn(`Warning: Could not resolve run "${runId}": ${err.message}`);
+    }
+  }
+
+  if (!targetCwd) {
+    targetCwd = process.cwd();
+  }
+  return { runId, workspaceRoot, baselineSha, targetCwd };
+}
+
 export const evidenceCommand = new Command("evidence")
   .description(
-    "Execute dual-stage empirical verification (pre-fix baseline + post-fix stress loop)",
+    "Empirical evidence: RED→GREEN dual-stage verification (one-shot via 'run', or capture-red + verify-green)",
+  );
+
+export const evidenceRunCommand = evidenceCommand
+  .command("run")
+  .description(
+    "Execute one-shot dual-stage empirical verification (pre-fix baseline + post-fix stress loop)",
   )
   .option(
     "--cwd <path>",
@@ -132,15 +183,16 @@ export const evidenceCommand = new Command("evidence")
         };
 
         let persistence: { saved: boolean; error?: string } | undefined;
+        const isVerified =
+          fullReport.reproductionVerified === true &&
+          fullReport.allTestsPassing;
         if (runId) {
           try {
             getRunManager().saveArtifact(
               runId,
               "evidence",
               fullReport,
-              fullReport.reproductionVerified || fullReport.allTestsPassing
-                ? "EVIDENCE_COLLECTED"
-                : undefined,
+              isVerified ? "EVIDENCE_COLLECTED" : undefined,
             );
             persistence = { saved: true };
           } catch (err: any) {
@@ -157,21 +209,220 @@ export const evidenceCommand = new Command("evidence")
           opts.pretty,
         );
 
-        const isVerified = Boolean(fullReport.reproductionVerified);
+        const redVerified = Boolean(fullReport.reproductionVerified);
         printPhaseGuidance({
-          currentPhase: isVerified ? "EVIDENCE_COLLECTED" : "PATCH_DRAFTED",
+          currentPhase: redVerified ? "EVIDENCE_COLLECTED" : "PATCH_DRAFTED",
           runId,
-          status: isVerified ? "SUCCESS" : "WARNING",
-          humanCheckpoint: isVerified
+          status: redVerified ? "SUCCESS" : "WARNING",
+          humanCheckpoint: redVerified
             ? "Checkpoint 2 (Empirical Reproduction Verified)"
-            : "Checkpoint 2 (Unverified Baseline - Passing Tests Only)",
-          nextCommand:
-            'opencontrib governance audit --patch <file> --pr-title "<title>"',
+            : "Checkpoint 2 (Unverified Baseline - RED Not Captured)",
+          nextCommand: redVerified
+            ? 'opencontrib governance audit --patch <file> --pr-title "<title>"'
+            : "opencontrib evidence capture-red --test-cmd '<cmd>' --assertion '<pattern>'",
           invariants: [
-            isVerified
+            redVerified
               ? "Empirical fail-first baseline confirmed and verified."
-              : "Warning: Dual-stage reproduction was not verified with --assertion.",
-            "Next, execute Phase 7 Governance Audit to verify RFC-100 line limit and anti-AI rubric.",
+              : "Warning: Dual-stage reproduction was not verified. Capture the RED baseline before proceeding to governance.",
+            redVerified
+              ? "Next, execute Phase 7 Governance Audit to verify RFC-100 line limit and anti-AI rubric."
+              : "Establish the failing baseline (RED) before running the governance audit.",
+          ],
+        });
+      } catch (err: any) {
+        printJSON({ status: "error", message: err.message }, opts.pretty);
+        process.exit(1);
+      }
+    },
+  );
+
+// Evidence V2 — capture-red: persist an immutable RED baseline before the fix.
+export const captureRedCommand = evidenceCommand
+  .command("capture-red")
+  .description(
+    "Capture immutable RED baseline (failing test + source tree hash) before applying the fix",
+  )
+  .requiredOption(
+    "--test-cmd <cmd>",
+    "Test command expected to FAIL on the buggy baseline",
+  )
+  .option("--assertion <regex>", "Expected failure assertion regex")
+  .option("--cwd <path>", "Workspace directory to run tests in")
+  .option("--run-id <id>", "Contribution run to persist the RED artifact into")
+  .option("--baseline-sha <sha>", "Baseline commit SHA before changes")
+  .option("--workspace-root <path>", "Root workspace for security boundary")
+  .option("--pretty", "Pretty-print", false)
+  .action(
+    async (opts: {
+      testCmd: string;
+      assertion?: string;
+      cwd?: string;
+      runId?: string;
+      baselineSha?: string;
+      workspaceRoot?: string;
+      pretty?: boolean;
+    }) => {
+      try {
+        const { runId, workspaceRoot, baselineSha, targetCwd } =
+          resolveEvidenceContext(opts);
+        const red = captureRedEvidence({
+          cwd: targetCwd,
+          testCommand: opts.testCmd,
+          workspaceRoot,
+          expectedAssertion: opts.assertion,
+          baselineCommitSha: baselineSha,
+        });
+        let persistence: { saved: boolean; error?: string } | undefined;
+        if (runId) {
+          // Persist RED as a partial evidence artifact; do NOT advance the phase yet.
+          getRunManager().saveArtifact(runId, "evidence", {
+            baselineTestedAt: red.capturedAt,
+            baselineFlakyTests: [],
+            stressLoopRuns: 0,
+            stressLoopPassed: false,
+            handleLeakCheckPassed: true,
+            passedUnitTestsCount: 0,
+            redEvidence: red,
+            reproductionVerified: false,
+          });
+          persistence = { saved: true };
+        }
+        printJSON(
+          {
+            status: "success",
+            redEvidence: red,
+            persistence,
+          },
+          opts.pretty,
+        );
+        printPhaseGuidance({
+          currentPhase: "PATCH_DRAFTED",
+          runId,
+          status: red.assertionMatched ? "SUCCESS" : "WARNING",
+          humanCheckpoint: "Checkpoint 2 (RED Baseline Captured)",
+          nextCommand:
+            "Apply the fix, then run: opencontrib evidence verify-green --test-cmd '<cmd>'",
+          invariants: [
+            red.assertionMatched
+              ? "RED baseline captured and failure assertion matched."
+              : "Warning: the test did not fail as expected; no valid RED baseline.",
+            "Apply the code change, then verify GREEN to advance to EVIDENCE_COLLECTED.",
+          ],
+        });
+      } catch (err: any) {
+        printJSON({ status: "error", message: err.message }, opts.pretty);
+        process.exit(1);
+      }
+    },
+  );
+
+// Evidence V2 — verify-green: verify the GREEN run and bind it to the captured RED.
+export const verifyGreenCommand = evidenceCommand
+  .command("verify-green")
+  .description(
+    "Verify the GREEN run, bind it to a captured RED baseline, and advance to EVIDENCE_COLLECTED when verified",
+  )
+  .requiredOption(
+    "--test-cmd <cmd>",
+    "Test command expected to PASS after the fix",
+  )
+  .option("--run-id <id>", "Contribution run holding the captured RED artifact")
+  .option("--cwd <path>", "Workspace directory to run tests in")
+  .option("--stress-loop <n>", "Stress loop iterations", (v) => Number(v), 1)
+  .option("--concurrency <n>", "Concurrent workers", (v) => Number(v), 1)
+  .option("--baseline-sha <sha>", "Baseline commit SHA")
+  .option("--workspace-root <path>", "Root workspace for security boundary")
+  .option("--pretty", "Pretty-print", false)
+  .action(
+    async (opts: {
+      testCmd: string;
+      runId?: string;
+      cwd?: string;
+      stressLoop?: number;
+      concurrency?: number;
+      baselineSha?: string;
+      workspaceRoot?: string;
+      pretty?: boolean;
+    }) => {
+      try {
+        const { runId, workspaceRoot, baselineSha, targetCwd } =
+          resolveEvidenceContext(opts);
+        // Load the previously captured RED baseline.
+        let redEvidence: RedEvidence | undefined;
+        if (runId) {
+          const run = getRunManager().getRun(runId);
+          const evidenceArtifact = run?.artifacts?.evidence as
+            | { redEvidence?: RedEvidence }
+            | undefined;
+          redEvidence = evidenceArtifact?.redEvidence;
+        }
+        if (!redEvidence || !redEvidence.sourceTreeSha256) {
+          throw new Error(
+            "No captured RED baseline found for this run. Run 'opencontrib evidence capture-red --test-cmd '<cmd>' --assertion '<pattern>' first.",
+          );
+        }
+        const green = verifyGreenEvidence({
+          cwd: targetCwd,
+          testCommand: opts.testCmd,
+          workspaceRoot,
+          redEvidence,
+          stressLoopCount: opts.stressLoop ?? 1,
+          concurrencyWorkers: opts.concurrency ?? 1,
+        });
+        const full = await collectEvidence({
+          cwd: targetCwd,
+          workspaceRoot,
+          baselineCommitSha: baselineSha,
+          testCommand: opts.testCmd,
+          stressLoopCount: opts.stressLoop ?? 1,
+          concurrencyWorkers: opts.concurrency ?? 1,
+        });
+        const report = {
+          ...full,
+          redEvidence,
+          greenEvidence: green.greenEvidence,
+          reproductionVerified:
+            green.reproductionVerified && Boolean(full.allTestsPassing),
+          allTestsPassing: Boolean(full.allTestsPassing),
+        };
+        let persistence: { saved: boolean; error?: string } | undefined;
+        if (runId) {
+          getRunManager().saveArtifact(
+            runId,
+            "evidence",
+            report,
+            report.reproductionVerified === true
+              ? "EVIDENCE_COLLECTED"
+              : undefined,
+          );
+          persistence = { saved: true };
+        }
+        const verified = report.reproductionVerified === true;
+        printJSON(
+          {
+            status: verified ? "success" : "PARTIAL_SUCCESS",
+            evidence: report,
+            persistence,
+          },
+          opts.pretty,
+        );
+        printPhaseGuidance({
+          currentPhase: verified ? "EVIDENCE_COLLECTED" : "PATCH_DRAFTED",
+          runId,
+          status: verified ? "SUCCESS" : "WARNING",
+          humanCheckpoint: verified
+            ? "Checkpoint 2 (RED→GREEN Reproduction Verified)"
+            : "Checkpoint 2 (GREEN Not Verified Against RED)",
+          nextCommand: verified
+            ? 'opencontrib governance audit --patch <file> --pr-title "<title>"'
+            : "Re-run: opencontrib evidence verify-green --test-cmd '<cmd>' (verify the tree changed and tests pass)",
+          invariants: [
+            verified
+              ? "RED baseline matched, source tree mutated, and GREEN run passes."
+              : "GREEN not verified: assert RED was captured, the tree changed, and the test passes.",
+            verified
+              ? "Next, execute Phase 7 Governance Audit."
+              : "Establish a verified RED→GREEN cycle before the governance audit.",
           ],
         });
       } catch (err: any) {

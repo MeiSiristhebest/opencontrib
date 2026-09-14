@@ -1,9 +1,18 @@
+import { createHash } from "crypto";
+import { execSync } from "child_process";
+import { readdirSync, statSync } from "fs";
+import { join } from "path";
 import {
   defaultSandboxRuntime,
   type SandboxExecutionResult,
 } from "../sandbox/sandbox-runtime.js";
 import { parseCommandSpec } from "../sandbox/command-spec.js";
-import type { EvidenceReport, FlakyTestRecord } from "../contracts/schemas.js";
+import type {
+  EvidenceReport,
+  FlakyTestRecord,
+  RedEvidence,
+  GreenEvidence,
+} from "../contracts/schemas.js";
 import { defaultTestOutputParserRegistry } from "./parsers/registry.js";
 import { defaultVcsDeltaAdapter, type VcsDeltaPort } from "./vcs-delta.port.js";
 
@@ -510,6 +519,155 @@ export function capturePreFixAssertion(
   }
 
   return repro;
+}
+
+/** Deterministic ASCII comparator (locale-independent) for hash stability. */
+function byAsciiOrder(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+/**
+ * Compute a stable content fingerprint of the source tree at `cwd`.
+ * Uses git when available (HEAD + tracked diff + untracked status); falls back
+ * to hashing a deterministic file listing so the check still works in non-git dirs.
+ */
+export function computeSourceTreeHash(cwd: string): string {
+  try {
+    const gitHead = execSync("git rev-parse HEAD", {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const gitStatus = execSync("git status --porcelain", {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const gitDiff = execSync("git diff --binary HEAD", {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const fingerprint = `git:${gitHead}\n${gitStatus}\n${gitDiff}`;
+    return createHash("sha256").update(fingerprint).digest("hex");
+  } catch {
+    try {
+      const entries: string[] = [];
+      const walk = (dir: string) => {
+        let items: string[] = [];
+        try {
+          items = readdirSync(dir);
+        } catch {
+          return;
+        }
+        for (const item of items) {
+          if (
+            item === "node_modules" ||
+            item === ".git" ||
+            item.startsWith(".opencontrib")
+          ) {
+            continue;
+          }
+          const full = join(dir, item);
+          let st;
+          try {
+            st = statSync(full);
+          } catch {
+            continue;
+          }
+          if (st.isDirectory()) {
+            walk(full);
+          } else {
+            entries.push(`${item}:${String(st.size)}`);
+          }
+        }
+      };
+      walk(cwd);
+      entries.sort(byAsciiOrder);
+      return createHash("sha256")
+        .update(`fallback:${entries.join("\n")}`)
+        .digest("hex");
+    } catch {
+      return "";
+    }
+  }
+}
+
+/**
+ * Evidence V2 — capture an immutable RED baseline artifact.
+ * Runs the test command once, records the observed failure, and binds the
+ * current source tree hash so a later GREEN can be proven to have mutated the tree.
+ */
+export function captureRedEvidence(input: {
+  cwd: string;
+  testCommand: string;
+  workspaceRoot?: string;
+  expectedAssertion?: string;
+  baselineCommitSha?: string;
+}): RedEvidence {
+  const preFix = capturePreFixAssertion(
+    input.cwd,
+    input.testCommand,
+    input.workspaceRoot,
+    input.expectedAssertion,
+  );
+  const assertionMatched = Boolean(preFix.assertionCaptured);
+  return {
+    command: input.testCommand,
+    expectedAssertion: input.expectedAssertion,
+    observedOutputSnippet: (
+      (preFix as { baselineOutput?: string }).baselineOutput ?? ""
+    ).slice(0, 500),
+    exitCode: assertionMatched ? 1 : 0,
+    sourceTreeSha256: computeSourceTreeHash(input.cwd),
+    baselineCommitSha: input.baselineCommitSha,
+    capturedAt: new Date().toISOString(),
+    assertionMatched,
+  };
+}
+
+/**
+ * Evidence V2 — verify GREEN and bind it to a previously captured RedEvidence.
+ * `reproductionVerified` is only true when the RED baseline assertion matched AND
+ * the current run passes AND the source tree actually changed since the RED capture.
+ */
+export function verifyGreenEvidence(input: {
+  cwd: string;
+  testCommand: string;
+  workspaceRoot?: string;
+  redEvidence: RedEvidence;
+  stressLoopCount?: number;
+  concurrencyWorkers?: number;
+}): {
+  greenEvidence: GreenEvidence;
+  reproductionVerified: boolean;
+  allTestsPassing: boolean;
+} {
+  const { redEvidence } = input;
+  const stressResult = runStressLoop(
+    input.cwd,
+    input.testCommand,
+    input.stressLoopCount ?? 1,
+    input.workspaceRoot,
+    input.concurrencyWorkers ?? 1,
+  );
+  const passed = stressResult.passed;
+  const greenTreeHash = computeSourceTreeHash(input.cwd);
+  const treeChanged = greenTreeHash !== redEvidence.sourceTreeSha256;
+  const greenEvidence: GreenEvidence = {
+    command: input.testCommand,
+    exitCode: passed ? 0 : 1,
+    outputSnippet: stressResult.lastOutput.slice(0, 500),
+    passed,
+    sourceTreeSha256: greenTreeHash,
+    capturedAt: new Date().toISOString(),
+    treeChangedComparedToRed: treeChanged,
+  };
+  const reproductionVerified =
+    redEvidence.assertionMatched === true && passed && treeChanged;
+  return { greenEvidence, reproductionVerified, allTestsPassing: passed };
 }
 
 /**

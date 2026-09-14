@@ -9,6 +9,7 @@ export interface ProtocolContractPhase {
   cli: {
     command: string;
     subcommand?: string;
+    subcommands?: string[];
     example: string;
   };
   mcp: {
@@ -162,7 +163,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "DO NOT modify production code while authoring reproduction PoC.",
     ],
     invariants: ["PoC must reliably fail against baseline code."],
-    suggestedNextAction: "opencontrib evidence --test-cmd '<test_cmd>'",
+    suggestedNextAction:
+      "opencontrib evidence capture-red --test-cmd '<test_cmd>' --assertion '<pattern>' && opencontrib evidence verify-green --test-cmd '<test_cmd>'",
   },
   PATCH_DRAFTED: {
     phase: "PATCH_DRAFTED",
@@ -186,7 +188,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Diff must be minimal, surgical, and preserve existing architecture idioms.",
     ],
-    suggestedNextAction: "opencontrib evidence --test-cmd '<test_cmd>'",
+    suggestedNextAction:
+      "opencontrib evidence capture-red --test-cmd '<test_cmd>' --assertion '<pattern>' && opencontrib evidence verify-green --test-cmd '<test_cmd>",
   },
   EVIDENCE_COLLECTED: {
     phase: "EVIDENCE_COLLECTED",
@@ -197,13 +200,20 @@ export const PROTOCOL_CONTRACT_PHASES = {
     requiredArtifacts: ["workspace", "evidence"],
     cli: {
       command: "evidence",
-      example: "opencontrib evidence --test-cmd '<test_cmd>'",
+      example:
+        "opencontrib evidence capture-red --test-cmd '<test_cmd>' --assertion '<pattern>' && opencontrib evidence verify-green --test-cmd '<test_cmd>'",
+      subcommands: ["capture-red", "verify-green"],
     },
     mcp: {
       tool: "contrib_collect_evidence",
     },
-    forbiddenActions: ["DO NOT skip pre-fix failure verification."],
+    forbiddenActions: [
+      "DO NOT skip pre-fix failure verification.",
+      "DO NOT enter this phase on a passing test alone — a captured RED baseline is required.",
+    ],
     invariants: [
+      "A RED baseline (failing test + matching assertion) must be captured before the fix.",
+      "The source tree must have changed between the RED capture and the GREEN run.",
       "Ensure unit test passed cleanly with 0 regressions before proceeding.",
     ],
     suggestedNextAction:

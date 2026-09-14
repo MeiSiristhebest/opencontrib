@@ -21,7 +21,6 @@ import { evalCommand } from "../src/commands/eval.js";
 import {
   printPhaseGuidance,
   printTable,
-  parseJSON,
 } from "../src/utils/output.js";
 
 describe("CLI Commands & Subcommands Test Suite", () => {
@@ -253,9 +252,11 @@ describe("CLI Commands & Subcommands Test Suite", () => {
   }, 15000);
 
   it("executes evidence command", async () => {
+    // One-shot dual-stage verification lives under the 'run' subcommand.
     await evidenceCommand.parseAsync([
       "node",
       "test",
+      "run",
       "--test-cmd",
       "echo pass",
       "--pre-fix-cmd",
