@@ -110,7 +110,10 @@ export class SmartPointerStore implements PointerStoreApi {
     // Prevent same-id overwrite: append counter only when duplicate id occurs in same session or file
     const counterKey = `${namespace}:${rawId}`;
     const existingCount = this.idCounters.get(counterKey);
-    const counter = existingCount !== undefined && existingCount > 0 ? `_${existingCount}` : "";
+    const counter =
+      existingCount !== undefined && existingCount > 0
+        ? `_${existingCount}`
+        : "";
     this.idCounters.set(counterKey, (existingCount || 0) + 1);
 
     const cleanId = `${rawId}${counter}`;

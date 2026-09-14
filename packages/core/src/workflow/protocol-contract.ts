@@ -23,7 +23,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
   INITIALIZED: {
     phase: "INITIALIZED",
     name: "Run Initialization",
-    description: "Fresh contribution session created, awaiting targeting and qualification.",
+    description:
+      "Fresh contribution session created, awaiting targeting and qualification.",
     allowedFromPhases: [],
     requiredArtifacts: [],
     cli: {
@@ -88,8 +89,13 @@ export const PROTOCOL_CONTRACT_PHASES = {
   CONTEXT_ASSEMBLED: {
     phase: "CONTEXT_ASSEMBLED",
     name: "Context Assembled",
-    description: "Minimal deterministic context bundle assembled without repository-wide token dump.",
-    allowedFromPhases: ["INITIALIZED", "OPPORTUNITY_SCOUTED", "PROBE_COMPLETED"],
+    description:
+      "Minimal deterministic context bundle assembled without repository-wide token dump.",
+    allowedFromPhases: [
+      "INITIALIZED",
+      "OPPORTUNITY_SCOUTED",
+      "PROBE_COMPLETED",
+    ],
     requiredArtifacts: ["context"],
     cli: {
       command: "discovery",
@@ -105,12 +111,14 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Context bundle must be minimal, structured, and contain exploration guidance.",
     ],
-    suggestedNextAction: "opencontrib workspace prepare --repo <owner/repo> --issue <id>",
+    suggestedNextAction:
+      "opencontrib workspace prepare --repo <owner/repo> --issue <id>",
   },
   WORKSPACE_PREPARED: {
     phase: "WORKSPACE_PREPARED",
     name: "Workspace Sandbox Prepared",
-    description: "Clean-room Git worktree allocated and isolated from working directory.",
+    description:
+      "Clean-room Git worktree allocated and isolated from working directory.",
     allowedFromPhases: [
       "INITIALIZED",
       "OPPORTUNITY_SCOUTED",
@@ -133,12 +141,14 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "All development must take place inside isolated worktree sandbox.",
     ],
-    suggestedNextAction: "opencontrib evidence --test-cmd '<test_cmd>' --assertion '<pattern>'",
+    suggestedNextAction:
+      "opencontrib evidence --test-cmd '<test_cmd>' --assertion '<pattern>'",
   },
   POC_GENERATED: {
     phase: "POC_GENERATED",
     name: "Reproduction PoC Generated",
-    description: "Standalone reproducible test or script demonstrating the bug before fix.",
+    description:
+      "Standalone reproducible test or script demonstrating the bug before fix.",
     allowedFromPhases: ["WORKSPACE_PREPARED"],
     requiredArtifacts: ["workspace", "poc"],
     cli: {
@@ -157,7 +167,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
   PATCH_DRAFTED: {
     phase: "PATCH_DRAFTED",
     name: "Patch Drafted",
-    description: "Targeted code fix implemented in worktree, awaiting verification.",
+    description:
+      "Targeted code fix implemented in worktree, awaiting verification.",
     allowedFromPhases: ["INITIALIZED", "WORKSPACE_PREPARED", "POC_GENERATED"],
     requiredArtifacts: [],
     cli: {
@@ -179,7 +190,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
   EVIDENCE_COLLECTED: {
     phase: "EVIDENCE_COLLECTED",
     name: "Evidence Collected",
-    description: "Dual-stage RED->GREEN reproduction and stress loop evidence captured.",
+    description:
+      "Dual-stage RED->GREEN reproduction and stress loop evidence captured.",
     allowedFromPhases: ["WORKSPACE_PREPARED", "POC_GENERATED", "PATCH_DRAFTED"],
     requiredArtifacts: ["workspace", "evidence"],
     cli: {
@@ -193,18 +205,21 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Ensure unit test passed cleanly with 0 regressions before proceeding.",
     ],
-    suggestedNextAction: 'opencontrib governance audit --patch <file> --pr-title "<title>"',
+    suggestedNextAction:
+      'opencontrib governance audit --patch <file> --pr-title "<title>"',
   },
   GOVERNANCE_AUDITED: {
     phase: "GOVERNANCE_AUDITED",
     name: "Governance Audited",
-    description: "RFC-100 line limit, anti-AI rubric, and quality confidence score verified.",
+    description:
+      "RFC-100 line limit, anti-AI rubric, and quality confidence score verified.",
     allowedFromPhases: ["EVIDENCE_COLLECTED"],
     requiredArtifacts: ["workspace", "evidence", "governance"],
     cli: {
       command: "governance",
       subcommand: "audit",
-      example: 'opencontrib governance audit --patch <file> --pr-title "<title>"',
+      example:
+        'opencontrib governance audit --patch <file> --pr-title "<title>"',
     },
     mcp: {
       tool: "contrib_audit_governance",
@@ -215,18 +230,21 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Present patch diff and audit report to human reviewer before PR submission.",
     ],
-    suggestedNextAction: 'Call contrib_audit_governance to audit patch quality and anti-AI rubric.',
+    suggestedNextAction:
+      "Call contrib_audit_governance to audit patch quality and anti-AI rubric.",
   },
   PR_SUBMITTED: {
     phase: "PR_SUBMITTED",
     name: "PR Submitted",
-    description: "PR successfully submitted to target repository with verified PR number and URL.",
+    description:
+      "PR successfully submitted to target repository with verified PR number and URL.",
     allowedFromPhases: ["GOVERNANCE_AUDITED"],
     requiredArtifacts: ["workspace", "evidence", "governance"],
     cli: {
       command: "governance",
       subcommand: "pr-template",
-      example: 'opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"',
+      example:
+        'opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"',
     },
     mcp: {
       tool: "contrib_render_pr_template",
@@ -242,7 +260,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
   COMPLETED: {
     phase: "COMPLETED",
     name: "Contribution Completed",
-    description: "All 9 phases completed, memory ledger and developer heuristics synchronized.",
+    description:
+      "All 9 phases completed, memory ledger and developer heuristics synchronized.",
     allowedFromPhases: ["PR_SUBMITTED", "GOVERNANCE_AUDITED"],
     requiredArtifacts: ["workspace"],
     cli: {
@@ -286,7 +305,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
     },
     forbiddenActions: [],
     invariants: [],
-    suggestedNextAction: "Inspect error logs and resume run with opencontrib run resume [run_id]",
+    suggestedNextAction:
+      "Inspect error logs and resume run with opencontrib run resume [run_id]",
   },
 } satisfies Record<ContributionRunPhase, ProtocolContractPhase>;
 

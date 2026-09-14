@@ -13,9 +13,7 @@ import type {
   GovernanceAuditResult,
   EvidenceReport,
 } from "../contracts/schemas.js";
-import {
-  validateMarkdownIntegrity,
-} from "../governance/markdown-validator.js";
+import { validateMarkdownIntegrity } from "../governance/markdown-validator.js";
 
 /**
  * Advanced Semantic & Behavioral Anti-AI Patterns
@@ -292,7 +290,9 @@ export function auditGovernance(
 
     const calibrated = deriveEvidenceBackedQualityRubric({
       hasReproductionAssertion: Boolean(input.evidence?.reproductionVerified),
-      testsPassed: Boolean(input.evidence?.allTestsPassing ?? (passedTestsCount > 0)),
+      testsPassed: Boolean(
+        input.evidence?.allTestsPassing ?? passedTestsCount > 0,
+      ),
       passedTestsCount,
       testCoveragePercent: input.evidence?.testCoveragePercent,
       diffLines: lines,

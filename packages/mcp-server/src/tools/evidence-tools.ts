@@ -1,36 +1,68 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import * as path from 'path';
-import * as os from 'os';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import * as path from "path";
+import * as os from "os";
 import {
   capturePreFixAssertion,
   collectEvidence,
   ContributionRunManager,
   verifyDualStageReproduction,
-} from '@opencontrib/core';
+} from "@opencontrib/core";
 
-export function registerEvidenceTools(server: McpServer, runManager: ContributionRunManager): void {
+export function registerEvidenceTools(
+  server: McpServer,
+  runManager: ContributionRunManager,
+): void {
   // -------------------------------------------------------------
   // Tool: contrib_collect_evidence (双阶段物证：Pre-Fix 失败断言 + Post-Fix 压测)
   // -------------------------------------------------------------
   server.tool(
-    'contrib_collect_evidence',
-    'Execute dual-stage empirical verification (capturing pre-fix failing baseline assertion and post-fix stress loop pass)',
+    "contrib_collect_evidence",
+    "Execute dual-stage empirical verification (capturing pre-fix failing baseline assertion and post-fix stress loop pass)",
     {
-      cwd: z.string().describe('Workspace directory to execute test command in'),
-      workspaceRoot: z.string().optional().describe('Optional root workspace directory to enforce security boundary (auto-resolved from runId if omitted)'),
-      baselineCommitSha: z.string().optional().describe('Optional baseline commit SHA before contribution changes (auto-resolved from workspace artifact in runId)'),
-      testCommand: z.string().describe('Exact test command, e.g. "npm test" or "pytest"'),
+      cwd: z
+        .string()
+        .describe("Workspace directory to execute test command in"),
+      workspaceRoot: z
+        .string()
+        .optional()
+        .describe(
+          "Optional root workspace directory to enforce security boundary (auto-resolved from runId if omitted)",
+        ),
+      baselineCommitSha: z
+        .string()
+        .optional()
+        .describe(
+          "Optional baseline commit SHA before contribution changes (auto-resolved from workspace artifact in runId)",
+        ),
+      testCommand: z
+        .string()
+        .describe('Exact test command, e.g. "npm test" or "pytest"'),
       preFixAssertionProbe: z
         .string()
         .optional()
-        .describe('Expected failure assertion regex or snippet observed before fix (for dual-stage verification)'),
+        .describe(
+          "Expected failure assertion regex or snippet observed before fix (for dual-stage verification)",
+        ),
       preFixTestCommand: z
         .string()
         .optional()
-        .describe('Optional separate reproduction script/command to trigger pre-fix failure baseline'),
-      stressLoopCount: z.number().optional().default(1).describe('Number of test execution runs / stress loop iterations (default 1, use >1 for concurrency/race tests)'),
-      runId: z.string().optional().describe('Optional runId to automatically resolve workspaceRoot and save evidence.json artifact'),
+        .describe(
+          "Optional separate reproduction script/command to trigger pre-fix failure baseline",
+        ),
+      stressLoopCount: z
+        .number()
+        .optional()
+        .default(1)
+        .describe(
+          "Number of test execution runs / stress loop iterations (default 1, use >1 for concurrency/race tests)",
+        ),
+      runId: z
+        .string()
+        .optional()
+        .describe(
+          "Optional runId to automatically resolve workspaceRoot and save evidence.json artifact",
+        ),
     },
     async (args) => {
       let resolvedWorkspaceRoot = args.workspaceRoot;
@@ -41,15 +73,27 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
         try {
           const run = runManager.getRun(args.runId);
           if (run) {
-            if (run.artifacts?.workspace?.workspacePath && !resolvedWorkspaceRoot) {
-              resolvedWorkspaceRoot = String(run.artifacts.workspace.workspacePath);
+            if (
+              run.artifacts?.workspace?.workspacePath &&
+              !resolvedWorkspaceRoot
+            ) {
+              resolvedWorkspaceRoot = String(
+                run.artifacts.workspace.workspacePath,
+              );
             }
-            if (run.artifacts?.workspace?.baseCommitSha && !resolvedBaselineCommitSha) {
-              resolvedBaselineCommitSha = String(run.artifacts.workspace.baseCommitSha);
+            if (
+              run.artifacts?.workspace?.baseCommitSha &&
+              !resolvedBaselineCommitSha
+            ) {
+              resolvedBaselineCommitSha = String(
+                run.artifacts.workspace.baseCommitSha,
+              );
             }
           }
         } catch (err: any) {
-          console.warn(`[evidence-tools] Error auto-resolving run "${args.runId}": ${err.message}`);
+          console.warn(
+            `[evidence-tools] Error auto-resolving run "${args.runId}": ${err.message}`,
+          );
         }
       }
 
@@ -60,22 +104,44 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
         if (!resolvedCwd.startsWith(root + path.sep) && resolvedCwd !== root) {
           return {
             isError: true,
-            content: [{
-              type: 'text',
-              text: JSON.stringify({ status: 'error', message: `Security violation: cwd "${resolvedCwd}" escapes workspace root "${root}"` }, null, 2),
-            }],
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    status: "error",
+                    message: `Security violation: cwd "${resolvedCwd}" escapes workspace root "${root}"`,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
           };
         }
       } else {
         // Validate cwd is within home directory
-        const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
-        if (!resolvedCwd.startsWith(path.resolve(home) + path.sep) && resolvedCwd !== path.resolve(home)) {
+        const home =
+          process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
+        if (
+          !resolvedCwd.startsWith(path.resolve(home) + path.sep) &&
+          resolvedCwd !== path.resolve(home)
+        ) {
           return {
             isError: true,
-            content: [{
-              type: 'text',
-              text: JSON.stringify({ status: 'error', message: `cwd "${resolvedCwd}" is outside the allowed workspace boundary. Set workspaceRoot explicitly.` }, null, 2),
-            }],
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    status: "error",
+                    message: `cwd "${resolvedCwd}" is outside the allowed workspace boundary. Set workspaceRoot explicitly.`,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
           };
         }
       }
@@ -85,7 +151,7 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
         args.stressLoopCount = 100;
       }
 
-      let dualStageResult: any = undefined;
+      let dualStageResult: any;
 
       // 1. Dual-stage verification if preFixAssertionProbe is provided
       if (args.preFixAssertionProbe) {
@@ -116,8 +182,12 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
 
       const fullEvidenceReport = {
         ...evidence,
-        reproductionVerified: dualStageResult ? Boolean(dualStageResult.isReproductionVerified) : false,
-        allTestsPassing: evidence.stressLoopPassed && (evidence.failedUnitTestsCount ?? 0) === 0,
+        reproductionVerified: dualStageResult
+          ? Boolean(dualStageResult.isReproductionVerified)
+          : false,
+        allTestsPassing:
+          evidence.stressLoopPassed &&
+          (evidence.failedUnitTestsCount ?? 0) === 0,
         dualStage: dualStageResult,
       };
 
@@ -126,9 +196,9 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
         try {
           runManager.saveArtifact(
             args.runId,
-            'evidence',
+            "evidence",
             fullEvidenceReport,
-            'EVIDENCE_COLLECTED',
+            "EVIDENCE_COLLECTED",
           );
           persistence = { saved: true };
         } catch (err: any) {
@@ -139,10 +209,10 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
       return {
         content: [
           {
-            type: 'text',
+            type: "text",
             text: JSON.stringify(
               {
-                status: persistence.error ? 'PARTIAL_SUCCESS' : 'success',
+                status: persistence.error ? "PARTIAL_SUCCESS" : "success",
                 evidence: fullEvidenceReport,
                 persistence: args.runId ? persistence : undefined,
               },
@@ -159,73 +229,117 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
   // Tool: contrib_verify_poc (执行自主 Fail-First PoC 闭环验证)
   // -------------------------------------------------------------
   server.tool(
-    'contrib_verify_poc',
-    'Execute autonomous 4-phase closed-loop verification (Red -> Green -> Blue) for a Smart Pointer finding inside a clean-room worktree sandbox',
+    "contrib_verify_poc",
+    "Execute autonomous 4-phase closed-loop verification (Red -> Green -> Blue) for a Smart Pointer finding inside a clean-room worktree sandbox",
     {
-      repoPath: z.string().describe('Target repository path'),
-      pointerUri: z.string().describe('Smart Pointer URI to verify, e.g. "ptr://ast-grep/ssrf-test/src/fetch.ts:42"'),
-      testCommand: z.string().optional().describe('Optional custom test command override'),
-      timeoutMs: z.number().optional().default(30000).describe('Execution timeout in ms'),
-      runId: z.string().optional().describe('Optional runId to automatically record poc artifact and advance phase to POC_GENERATED'),
+      repoPath: z.string().describe("Target repository path"),
+      pointerUri: z
+        .string()
+        .describe(
+          'Smart Pointer URI to verify, e.g. "ptr://ast-grep/ssrf-test/src/fetch.ts:42"',
+        ),
+      testCommand: z
+        .string()
+        .optional()
+        .describe("Optional custom test command override"),
+      timeoutMs: z
+        .number()
+        .optional()
+        .default(30000)
+        .describe("Execution timeout in ms"),
+      runId: z
+        .string()
+        .optional()
+        .describe(
+          "Optional runId to automatically record poc artifact and advance phase to POC_GENERATED",
+        ),
     },
     async (args) => {
       try {
-        const { AutonomousPoCVerifier, SmartPointerStore } = await import('@opencontrib/core');
+        const { AutonomousPoCVerifier, SmartPointerStore } = await import(
+          "@opencontrib/core"
+        );
 
         // Validate repoPath against home directory boundary
         const resolvedRepoPath = path.resolve(args.repoPath);
-        const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
+        const home =
+          process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
         const allowedRoot = path.resolve(home);
-        if (!resolvedRepoPath.startsWith(allowedRoot + path.sep) && resolvedRepoPath !== allowedRoot) {
+        if (
+          !resolvedRepoPath.startsWith(allowedRoot + path.sep) &&
+          resolvedRepoPath !== allowedRoot
+        ) {
           return {
             isError: true,
-            content: [{
-              type: 'text',
-              text: JSON.stringify({ status: 'error', message: `repoPath "${resolvedRepoPath}" is outside the allowed workspace boundary` }, null, 2),
-            }],
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    status: "error",
+                    message: `repoPath "${resolvedRepoPath}" is outside the allowed workspace boundary`,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
           };
         }
 
-        const store = new SmartPointerStore(path.join(resolvedRepoPath, '.opencontrib', 'pointers'));
-        
+        const store = new SmartPointerStore(
+          path.join(resolvedRepoPath, ".opencontrib", "pointers"),
+        );
+
         let finding: any;
         try {
-          const resolved = store.resolve(args.pointerUri, 'stub');
+          const resolved = store.resolve(args.pointerUri, "stub");
           finding = resolved;
         } catch {
           // Fallback minimal finding stub
           finding = {
-            id: args.pointerUri.split('/').pop() || 'finding-0',
-            namespace: 'custom',
-            title: 'Custom Defect Finding',
-            category: 'security_cwe',
-            severity: 'high',
-            file: 'unknown',
+            id: args.pointerUri.split("/").pop() || "finding-0",
+            namespace: "custom",
+            title: "Custom Defect Finding",
+            category: "security_cwe",
+            severity: "high",
+            file: "unknown",
             line: 1,
             confidence: 80,
           };
         }
 
-        const report = await AutonomousPoCVerifier.verifyFinding(resolvedRepoPath, finding, {
-          testCommand: args.testCommand,
-          timeoutMs: args.timeoutMs,
-        });
+        const report = await AutonomousPoCVerifier.verifyFinding(
+          resolvedRepoPath,
+          finding,
+          {
+            testCommand: args.testCommand,
+            timeoutMs: args.timeoutMs,
+          },
+        );
 
         if (args.runId) {
           try {
-            runManager.saveArtifact(args.runId, 'poc', report as any, 'POC_GENERATED');
+            runManager.saveArtifact(
+              args.runId,
+              "poc",
+              report as any,
+              "POC_GENERATED",
+            );
           } catch (err: any) {
-            console.warn(`[evidence-tools] Failed to auto-save poc artifact: ${err.message}`);
+            console.warn(
+              `[evidence-tools] Failed to auto-save poc artifact: ${err.message}`,
+            );
           }
         }
 
         return {
           content: [
             {
-              type: 'text',
+              type: "text",
               text: JSON.stringify(
                 {
-                  status: report.status === 'VERIFIED' ? 'success' : 'failed',
+                  status: report.status === "VERIFIED" ? "success" : "failed",
                   report,
                 },
                 null,
@@ -237,7 +351,16 @@ export function registerEvidenceTools(server: McpServer, runManager: Contributio
       } catch (err: any) {
         return {
           isError: true,
-          content: [{ type: 'text', text: JSON.stringify({ status: 'error', message: err.message }, null, 2) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                { status: "error", message: err.message },
+                null,
+                2,
+              ),
+            },
+          ],
         };
       }
     },

@@ -4,9 +4,7 @@ import {
 } from "../sandbox/sandbox-runtime.js";
 import { parseCommandSpec } from "../sandbox/command-spec.js";
 import type { EvidenceReport, FlakyTestRecord } from "../contracts/schemas.js";
-import {
-  defaultTestOutputParserRegistry,
-} from "./parsers/registry.js";
+import { defaultTestOutputParserRegistry } from "./parsers/registry.js";
 import { defaultVcsDeltaAdapter, type VcsDeltaPort } from "./vcs-delta.port.js";
 
 export interface EvidenceCollectionOptions {
@@ -152,7 +150,11 @@ export function runStressLoop(
 
   // If multi-worker concurrency requested (>1), spawn parallel worker processes
   if (concurrencyWorkers > 1) {
-    const workerResults: Array<{ passed: boolean; output: string; elapsed: number }> = [];
+    const workerResults: Array<{
+      passed: boolean;
+      output: string;
+      elapsed: number;
+    }> = [];
 
     // Use sandboxed execution across parallel worker batch
     for (let w = 0; w < concurrencyWorkers; w++) {

@@ -187,7 +187,8 @@ const auditCommand = new Command("audit")
               currentPhase: "GOVERNANCE_AUDITED",
               runId,
               status: "WARNING",
-              humanCheckpoint: "Checkpoint 3 (Quality Gate WAIVED by explicit --allow-unverified)",
+              humanCheckpoint:
+                "Checkpoint 3 (Quality Gate WAIVED by explicit --allow-unverified)",
               nextCommand: `opencontrib governance pr-template --issue <id> --issue-title "${opts.prTitle}" --summary "<summary>"`,
               invariants: [
                 "WARNING: Governance quality gate threshold was failed but waived via --allow-unverified.",
@@ -308,14 +309,8 @@ const prTemplateCommand = new Command("pr-template")
   .requiredOption("--issue <num>", "Fixed issue number")
   .requiredOption("--issue-title <text>", "Title of the issue")
   .requiredOption("--summary <text>", "Concise fix summary")
-  .option(
-    "--validation-cmd <cmd>",
-    "Command used to verify the fix",
-  )
-  .option(
-    "--validation-output <text>",
-    "Test passing log excerpt",
-  )
+  .option("--validation-cmd <cmd>", "Command used to verify the fix")
+  .option("--validation-output <text>", "Test passing log excerpt")
   .option(
     "--native-template <text>",
     "Raw markdown of target repo PULL_REQUEST_TEMPLATE.md",

@@ -129,9 +129,7 @@ const contextCommand = new Command("context")
   .option("--run-id <id>", "Contribution run ID (defaults to active session)")
   .option("--pretty", "Pretty-print", false)
   .action(
-    async (
-      opts: { input?: string; runId?: string; pretty?: boolean },
-    ) => {
+    async (opts: { input?: string; runId?: string; pretty?: boolean }) => {
       try {
         const input = (opts as any).input ?? (await readStdin());
         const parsed = parseJSON(input, "stdin") as any;

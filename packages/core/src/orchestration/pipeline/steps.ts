@@ -758,7 +758,9 @@ export class PrSubmissionStep implements PipelineStep {
       rootCause: activePatch?.rationale || "Targeted surgical bugfix",
       keyChanges: activePatch?.implementationSteps || ["Applied surgical fix"],
       reproductionCommand: activePatch?.regressionTestPlan?.[0],
-      verificationCommand: ctx.evidenceReport ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand : undefined,
+      verificationCommand: ctx.evidenceReport
+        ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand
+        : undefined,
       testCount: ctx.evidenceReport?.passedUnitTestsCount,
       dcoAuthorName: "OpenContrib",
       dcoAuthorEmail: "bot@opencontrib.dev",
