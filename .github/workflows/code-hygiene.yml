@@ -5,13 +5,13 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - 'packages/**'
-      - 'scripts/**'
-      - 'eslint.config.mjs'
-      - 'knip.json'
-      - 'package.json'
-      - 'bun.lock'
-      - '.github/workflows/code-hygiene.yml'
+      - "packages/**"
+      - "scripts/**"
+      - "eslint.config.mjs"
+      - "knip.json"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/code-hygiene.yml"
   workflow_dispatch:
 
 permissions:
