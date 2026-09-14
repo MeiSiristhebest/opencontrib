@@ -50,10 +50,6 @@ const flywheelSync = new Command("sync")
 
         const runId = parsed.runId || getRunManager().resolveRunId();
         const status = parsed.status || "submitted";
-        const techStack =
-          parsed.techStack && parsed.techStack.length > 0
-            ? parsed.techStack
-            : ["general"];
 
         if (!runId) {
           console.error(
@@ -81,15 +77,23 @@ const flywheelSync = new Command("sync")
           evidenceSummary: parsed.evidenceSummary || "",
         } as any);
 
-        // Only advance phase to COMPLETED if PR is actually submitted or verified
         const isActualSubmission =
-          parsed.prNumber ||
-          (parsed.prUrl && parsed.prUrl.length > 0) ||
+          Boolean(parsed.prNumber && parsed.prUrl) ||
           status === "merged" ||
           status === "completed";
 
-        try {
-          if (isActualSubmission) {
+        let persistenceError: string | undefined;
+        if (isActualSubmission) {
+          try {
+            // First ensure run transitions through PR_SUBMITTED if currently at GOVERNANCE_AUDITED
+            const currentRun = getRunManager().getRun(runId);
+            if (currentRun?.manifest.currentPhase === "GOVERNANCE_AUDITED") {
+              try {
+                getRunManager().updateRunPhase(runId, "PR_SUBMITTED");
+              } catch (phaseErr: any) {
+                console.warn(`[Flywheel] Could not auto-advance to PR_SUBMITTED: ${phaseErr.message}`);
+              }
+            }
             getRunManager().saveArtifact(
               runId,
               "result",
@@ -97,27 +101,34 @@ const flywheelSync = new Command("sync")
               "COMPLETED",
             );
             defaultActiveSessionManager.updatePhase("COMPLETED", runId);
-          } else {
+          } catch (err: any) {
+            persistenceError = err.message;
+          }
+        } else {
+          try {
             getRunManager().saveArtifact(runId, "result", {
               flywheelResult: result,
               status,
             } as any);
+          } catch (err: any) {
+            persistenceError = err.message;
           }
-        } catch {
-          // Flywheel artifact persistence is best-effort; the result is still
-          // reported to stdout below even if the manifest write fails.
         }
+
+        const effectivePhase = persistenceError
+          ? (getRunManager().getRun(runId)?.manifest.currentPhase || "GOVERNANCE_AUDITED")
+          : (isActualSubmission ? "COMPLETED" : "GOVERNANCE_AUDITED");
 
         printJSON({ status: "success", flywheelResult: result }, opts.pretty);
 
         printPhaseGuidance({
-          currentPhase: isActualSubmission ? "COMPLETED" : "GOVERNANCE_AUDITED",
+          currentPhase: effectivePhase,
           runId,
           status: "SUCCESS",
           invariants: [
-            isActualSubmission
+            effectivePhase === "COMPLETED"
               ? "All 9 phases of OpenContrib contribution engine completed successfully."
-              : "Contribution record saved to flywheel memory ledger.",
+              : "Contribution record saved to flywheel memory ledger (awaiting verified PR submission).",
             "Memory ledger and developer heuristics synchronized.",
           ],
         });

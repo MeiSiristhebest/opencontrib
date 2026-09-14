@@ -246,9 +246,10 @@ export function registerDiscoveryTools(server: McpServer): void {
           }),
         )
         .describe('List of file paths from GitHub MCP get_file_contents or git tree'),
+      runId: z.string().optional().describe('Optional runId to automatically save context artifact and advance phase to CONTEXT_ASSEMBLED'),
     },
     wrapHandler(async (args) => {
-      const { ContextAssembler } = await import('@opencontrib/core');
+      const { ContextAssembler, buildContributionRunManager } = await import('@opencontrib/core');
       const assembler = new ContextAssembler();
 
       const context = await assembler.assembleContext({
@@ -278,6 +279,15 @@ export function registerDiscoveryTools(server: McpServer): void {
         })),
       });
 
+      if (args.runId) {
+        try {
+          const runManager = buildContributionRunManager();
+          runManager.saveArtifact(args.runId, 'context', context as any, 'CONTEXT_ASSEMBLED');
+        } catch (err: any) {
+          console.warn(`[discovery-tools] Failed to auto-save context artifact: ${err.message}`);
+        }
+      }
+
       return {
         content: [{
           type: 'text',
@@ -299,6 +309,7 @@ export function registerDiscoveryTools(server: McpServer): void {
       focusAreas: z.array(z.string()).optional().describe('Developer focus areas (e.g. ["bugfix", "testing", "docs"])'),
       limit: z.number().optional().describe('Maximum number of ranked candidates to return (default 5)'),
       minStars: z.number().optional().describe('Minimum repository stars filter (default 50)'),
+      runId: z.string().optional().describe('Optional runId to automatically save opportunity artifact and advance phase to OPPORTUNITY_SCOUTED'),
     },
     wrapHandler(async (args) => {
       const profile = {
@@ -316,6 +327,21 @@ export function registerDiscoveryTools(server: McpServer): void {
       };
 
       const opportunities = await scoutOpportunities(profile, scoutOpts);
+
+      if (args.runId && opportunities.length > 0) {
+        try {
+          const { buildContributionRunManager } = await import('@opencontrib/core');
+          const runManager = buildContributionRunManager();
+          runManager.saveArtifact(
+            args.runId,
+            'opportunity',
+            { target: args.target, opportunities, topOpportunity: opportunities[0] },
+            'OPPORTUNITY_SCOUTED',
+          );
+        } catch (err: any) {
+          console.warn(`[discovery-tools] Failed to auto-save opportunity artifact: ${err.message}`);
+        }
+      }
 
       return {
         content: [{

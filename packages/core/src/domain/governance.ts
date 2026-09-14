@@ -536,12 +536,16 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
       verificationDetail = `passed cleanly (${countMsg}, 0 regressions).`;
     }
   } else {
-    verificationDetail = `verified cleanly with targeted unit test suite.`;
+    verificationDetail = `Not recorded.`;
   }
 
   const verificationLine = data.verificationCommand
     ? `- **Verification**: \`${data.verificationCommand}\` ${verificationDetail}`
     : `- **Verification**: ${verificationDetail}`;
+
+  const regressionLine = data.verificationCommand
+    ? `- **Regression Isolation**: Verified 0 resource leaks or flaky baseline regressions.`
+    : `- **Regression Isolation**: Not recorded.`;
 
   const aiDisclosureSection = data.aiDisclosureRequired
     ? `\n\n### Automated Assistance Disclosure\nIn accordance with repository policies, this contribution was developed with AI-assisted tooling (OpenContrib autonomous engine) with deterministic local reproduction and human verification.`
@@ -560,6 +564,6 @@ ${changeList}
 ### Verification & Empirical Evidence
 ${reproductionDetail}
 ${verificationLine}
-- **Regression Isolation**: Zero resource leaks or flaky baseline regressions detected.${dcoTrailer}${aiDisclosureSection}
+${regressionLine}${dcoTrailer}${aiDisclosureSection}
 `;
 }

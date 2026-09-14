@@ -156,6 +156,7 @@ const runSave = new Command("save")
     }
     return v;
   })
+  .option("--content <json>", "Artifact payload as JSON string")
   .option("--pretty", "Pretty-print", false)
   .action(
     async (

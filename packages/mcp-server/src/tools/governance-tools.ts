@@ -34,7 +34,7 @@ function wrapHandler(fn: (args: any) => Promise<any>) {
 
 export function registerGovernanceTools(
   server: McpServer,
-  memory: RepoMemoryLedger,
+  _memory: RepoMemoryLedger,
   flywheel: ProfileFlywheel,
 ): void {
   // -------------------------------------------------------------
@@ -49,14 +49,18 @@ export function registerGovernanceTools(
       prBody: z.string().describe("Proposed PR body text"),
       evidence: z
         .object({
-          stressLoopPassed: z.boolean(),
-          passedTestsCount: z.number(),
-          hasReproductionAssertion: z.boolean().optional(),
-          handleLeakFree: z.boolean().optional(),
+          stressLoopPassed: z.boolean().optional(),
+          passedUnitTestsCount: z.number().optional(),
+          failedUnitTestsCount: z.number().optional(),
+          reproductionVerified: z.boolean().optional(),
+          allTestsPassing: z.boolean().optional(),
+          testCoveragePercent: z.number().optional(),
+          handleLeakCheckPassed: z.boolean().optional(),
         })
+        .passthrough()
         .optional()
         .describe(
-          "Empirical evidence from contrib_collect_evidence for ground-truth rubric calculation",
+          "Empirical evidence report (EvidenceReport) from contrib_collect_evidence",
         ),
       subagentQualityScore: z
         .number()

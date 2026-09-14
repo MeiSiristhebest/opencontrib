@@ -262,8 +262,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "Contribution Completed",
     description:
       "All 9 phases completed, memory ledger and developer heuristics synchronized.",
-    allowedFromPhases: ["PR_SUBMITTED", "GOVERNANCE_AUDITED"],
-    requiredArtifacts: ["workspace"],
+    allowedFromPhases: ["PR_SUBMITTED"],
+    requiredArtifacts: ["workspace", "result"],
     cli: {
       command: "flywheel",
       subcommand: "sync",

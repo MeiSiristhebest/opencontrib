@@ -20,7 +20,11 @@ describe('End-to-End Autonomous Contribution Closed Loop & Permission Sandboxing
 
   afterEach(() => {
     if (fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+      } catch (err: any) {
+        console.warn(`[e2e-cleanup] Could not remove temp dir "${tempDir}": ${err.message}`);
+      }
     }
   });
 
