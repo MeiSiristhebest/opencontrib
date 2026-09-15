@@ -797,10 +797,13 @@ export class PrSubmissionStep implements PipelineStep {
 
     try {
       // Unify Autonomous protocol with trusted Governance -> Approval -> Permit -> GitHubSubmissionService
-      const runId = ctx.telemetry?.runId || `run_${Date.now()}`;
-      const existingRun = defaultRunManager.getRun(runId);
-      if (!existingRun) {
-        defaultRunManager.createRun(runId);
+      let runId = ctx.telemetry?.runId;
+      if (!runId || !defaultRunManager.getRun(runId)) {
+        const created = defaultRunManager.createRun({
+          repoFullName: `${owner}/${repo}`,
+          issueNumber: selectedOpp.issueNumber,
+        });
+        runId = created.runId;
       }
 
       // Ensure required stage artifacts are present for governance & approval

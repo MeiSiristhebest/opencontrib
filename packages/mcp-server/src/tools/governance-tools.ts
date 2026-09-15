@@ -8,6 +8,8 @@ import {
   ProfileFlywheel,
   renderMasterPrTemplate,
   RepoMemoryLedger,
+  type ContributionRunManager,
+  type GitTreeEntry,
 } from "@opencontrib/core";
 
 function wrapHandler(fn: (args: any) => Promise<any>) {
@@ -32,10 +34,67 @@ function wrapHandler(fn: (args: any) => Promise<any>) {
   };
 }
 
+interface TrustedPatchShape {
+  title?: string;
+  files?: Array<{ path?: unknown; content?: unknown; operation?: unknown }>;
+}
+
+/**
+ * Provenance boundary: PR payload files come from the trusted "patch"
+ * artifact on the run — never from free caller input. Fail-closed: throws
+ * when the artifact is missing, unparseable, or has zero usable files.
+ */
+function loadTrustedFiles(
+  runManager: ContributionRunManager,
+  runId: string,
+): { files: GitTreeEntry[]; commitMessage: string } {
+  const run = runManager.getRun(runId);
+  const patchRaw = run?.artifacts?.patch;
+  if (typeof patchRaw !== "string" || patchRaw.trim() === "") {
+    throw new Error(
+      `No trusted patch artifact found for run ${runId}. ` +
+        "Complete the patch-draft stage before submitting.",
+    );
+  }
+  let patch: TrustedPatchShape;
+  try {
+    patch = JSON.parse(patchRaw) as TrustedPatchShape;
+  } catch {
+    throw new Error(
+      `Trusted patch artifact for run ${runId} is not a parseable PatchDraft; ` +
+        "refusing to submit without trusted file contents.",
+    );
+  }
+  const files: GitTreeEntry[] = (patch.files ?? [])
+    .filter(
+      (f) =>
+        !!f &&
+        typeof f.path === "string" &&
+        f.path.trim() !== "" &&
+        typeof f.content === "string",
+    )
+    .map((f) => ({
+      path: f.path as string,
+      content: f.content as string,
+      mode: "100644" as const,
+    }));
+  if (files.length === 0) {
+    throw new Error(
+      `Trusted patch for run ${runId} contains no file contents; refusing to open an empty PR.`,
+    );
+  }
+  const commitMessage =
+    typeof patch.title === "string" && patch.title.trim() !== ""
+      ? patch.title.trim()
+      : "chore: opencontrib contribution";
+  return { files, commitMessage };
+}
+
 export function registerGovernanceTools(
   server: McpServer,
   _memory: RepoMemoryLedger,
   flywheel: ProfileFlywheel,
+  runManager: ContributionRunManager,
 ): void {
   // -------------------------------------------------------------
   // Tool: contrib_audit_governance (多维质量红线与置信度审计)
@@ -556,10 +615,19 @@ export function registerGovernanceTools(
       body: z.string().describe("PR body text or markdown"),
       branch: z.string().describe("Branch name to submit"),
       draft: z.boolean().optional().describe("Create as draft PR"),
+      commitMessage: z
+        .string()
+        .optional()
+        .describe("Commit message (defaults to trusted patch title)"),
     },
     wrapHandler(async (args) => {
       const { GitHubSubmissionService, GitHubClient, ContributionPrService } =
         await import("@opencontrib/core");
+
+      // Provenance: files + default commit message come from the trusted patch artifact.
+      const trusted = loadTrustedFiles(runManager, args.runId);
+      const files = trusted.files;
+      const commitMessage = args.commitMessage ?? trusted.commitMessage;
 
       const client = new GitHubClient();
       const prService = new ContributionPrService(client);
@@ -586,6 +654,8 @@ export function registerGovernanceTools(
           title: args.title,
           body: args.body,
           branchName: args.branch,
+          files,
+          commitMessage,
           isDraft: args.draft ?? false,
         },
       });

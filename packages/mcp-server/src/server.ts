@@ -33,7 +33,7 @@ export function createOpenContribMcpServer(): McpServer {
   registerDiscoveryTools(server);
   registerWorkspaceTools(server, worktreeManager, runManager);
   registerEvidenceTools(server, runManager);
-  registerGovernanceTools(server, memory, flywheel);
+  registerGovernanceTools(server, memory, flywheel, runManager);
   registerRunTools(server, runManager);
   registerEvalTools(server);
   registerPointerTools(server);

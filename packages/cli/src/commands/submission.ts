@@ -1,12 +1,90 @@
+/** `opencontrib submission <sub>` — Authorize and submit PR via the verified service. */
+
 import { Command } from "commander";
-import { getRunManager } from "../utils/context.js";
-import { printJSON } from "../utils/printer.js";
-import { CliExitError } from "../utils/exit.js";
 import {
-  GitHubSubmissionService,
   GitHubClient,
+  GitHubSubmissionService,
   ContributionPrService,
+  buildContributionRunManager,
+  type ContributionRunManager,
+  type GitTreeEntry,
 } from "@opencontrib/core";
+import { printJSON } from "../utils/output.js";
+import { CliExitError } from "../utils/exit.js";
+
+// Lazy factory: constructed on first use, not at module load time.
+let _runManager: ContributionRunManager | null = null;
+const getRunManager = (): ContributionRunManager =>
+  (_runManager ??= buildContributionRunManager());
+
+/**
+ * Structural view of the trusted "patch" artifact (a JSON-serialized PatchDraft).
+ * Kept local (not imported) because contracts/index does not re-export llm-schemas.
+ */
+interface TrustedPatchShape {
+  title?: string;
+  files?: Array<{
+    path?: unknown;
+    content?: unknown;
+    operation?: unknown;
+  }>;
+}
+
+/**
+ * Provenance boundary: the PR payload files must come from the trusted
+ * "patch" artifact recorded on the run — NEVER from free caller input.
+ * Fail-closed: throws when the artifact is missing, unparseable, or has
+ * zero usable file entries (we never open an empty PR).
+ */
+function loadTrustedSubmissionPayload(
+  runId: string,
+): { files: GitTreeEntry[]; commitMessage: string } {
+  const run = getRunManager().getRun(runId);
+  const patchRaw = run?.artifacts?.patch;
+  if (typeof patchRaw !== "string" || patchRaw.trim() === "") {
+    throw new Error(
+      `No trusted patch artifact found for run ${runId}. ` +
+        "Complete the patch-draft stage before submitting.",
+    );
+  }
+
+  let patch: TrustedPatchShape;
+  try {
+    patch = JSON.parse(patchRaw) as TrustedPatchShape;
+  } catch {
+    throw new Error(
+      `Trusted patch artifact for run ${runId} is not a parseable PatchDraft; ` +
+        "refusing to submit without trusted file contents.",
+    );
+  }
+
+  const files: GitTreeEntry[] = (patch.files ?? [])
+    .filter(
+      (f) =>
+        !!f &&
+        typeof f.path === "string" &&
+        f.path.trim() !== "" &&
+        typeof f.content === "string",
+    )
+    .map((f) => ({
+      path: f.path as string,
+      content: f.content as string,
+      mode: "100644" as const,
+    }));
+
+  if (files.length === 0) {
+    throw new Error(
+      `Trusted patch for run ${runId} contains no file contents; refusing to open an empty PR.`,
+    );
+  }
+
+  const commitMessage =
+    typeof patch.title === "string" && patch.title.trim() !== ""
+      ? patch.title.trim()
+      : "chore: opencontrib contribution";
+
+  return { files, commitMessage };
+}
 
 export const submissionCommand = new Command("submission")
   .description(
@@ -17,8 +95,9 @@ export const submissionCommand = new Command("submission")
   .requiredOption("--owner <owner>", "Target upstream repository owner")
   .requiredOption("--repo <repo>", "Target upstream repository name")
   .requiredOption("--title <title>", "PR title")
-  .requiredOption("--body <body>", "PR body text or markdown")
+  .option("--body <body>", "PR body text or markdown (falls back to trusted pr_draft artifact)")
   .requiredOption("--branch <branch>", "Branch name to submit")
+  .option("--commit-message <msg>", "Commit message (defaults to trusted patch title)")
   .option("--run-id <id>", "Contribution run ID (defaults to active session)")
   .option("--draft", "Create as draft PR", false)
   .option("--pretty", "Pretty-print", false)
@@ -27,14 +106,16 @@ export const submissionCommand = new Command("submission")
       owner: string;
       repo: string;
       title: string;
-      body: string;
+      body?: string;
       branch: string;
+      commitMessage?: string;
       runId?: string;
       draft?: boolean;
       pretty?: boolean;
     }) => {
       try {
-        const runId = getRunManager().resolveRunId(opts.runId);
+        const runManager = getRunManager();
+        const runId = runManager.resolveRunId(opts.runId);
         if (!runId) {
           console.error(
             "❌ No runId found in active session or --run-id option.",
@@ -42,7 +123,19 @@ export const submissionCommand = new Command("submission")
           throw new CliExitError(1);
         }
 
-        const runManager = getRunManager();
+        // Provenance: files + default commit message come from the trusted patch artifact.
+        const trusted = loadTrustedSubmissionPayload(runId);
+        const files = trusted.files;
+        const commitMessage = opts.commitMessage ?? trusted.commitMessage;
+
+        // Prefer the trusted pr_draft artifact for the body; fall back to the free flag.
+        const run = runManager.getRun(runId);
+        const prDraftRaw = run?.artifacts?.prDraft;
+        const body =
+          typeof prDraftRaw === "string" && prDraftRaw.trim() !== ""
+            ? prDraftRaw
+            : opts.body ?? "";
+
         const client = new GitHubClient();
         const prService = new ContributionPrService(client);
         const submissionService = new GitHubSubmissionService(
@@ -51,14 +144,14 @@ export const submissionCommand = new Command("submission")
           runManager,
         );
 
-        // 1. Authorize submission first (zero external side effects if gates or approvals fail)
+        // 1. Authorize submission first (zero external side effects if gates or approvals fail).
         const permit = submissionService.authorizeSubmission(
           runId,
           opts.owner,
           opts.repo,
         );
 
-        // 2. Submit and verify PR with provider (fail-closed)
+        // 2. Submit and verify PR with provider (fail-closed).
         const result = await submissionService.submitAndVerifyPullRequest({
           runId,
           permit,
@@ -66,8 +159,10 @@ export const submissionCommand = new Command("submission")
             upstreamOwner: opts.owner,
             upstreamRepo: opts.repo,
             title: opts.title,
-            body: opts.body,
+            body,
             branchName: opts.branch,
+            files,
+            commitMessage,
             isDraft: opts.draft ?? false,
           },
         });
