@@ -133,37 +133,86 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
     expect(res.error?.message).toContain("EvidenceBundleV2");
   });
 
-  test("gate: EVIDENCE_COLLECTED is allowed for a valid RED→GREEN bundle", () => {
-    const summary = makeSummary("PATCH_DRAFTED", {
-      workspace: { workspacePath: "/tmp/ws" },
-      evidence: {
-        reproductionVerified: true,
+  test("real producer-contract integration: captureRedEvidence -> mutate source -> verifyGreenEvidence -> saveArtifact -> phase == EVIDENCE_COLLECTED", async () => {
+    const wsDir = mkdtempSync(join(tmpdir(), "oc-real-e2e-ws-"));
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-real-e2e-runs-"));
+    try {
+      const stateFile = join(wsDir, "status.txt");
+      // Initially failing state (RED)
+      writeFileSync(stateFile, "FAIL\n");
+
+      // Test command that inspects status.txt
+      const testCmd = pickCmd(
+        `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERROR_SAMPLE; exit 1 } else { Write-Output PASS; exit 0 }"`,
+        `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERROR_SAMPLE; exit 1; else echo PASS; exit 0; fi"`,
+      );
+
+      // 1. Capture real RED baseline
+      const red = captureRedEvidence({
+        cwd: wsDir,
+        testCommand: testCmd,
+        expectedAssertion: "ASSERTION_ERROR_SAMPLE",
+      });
+
+      expect(red.assertionMatched).toBe(true);
+      expect(red.exitCode).toBe(1);
+      expect(red.assertionMatchedFingerprint).toBeDefined();
+
+      const { ContributionRunManager } = await import("../src/run/run-manager.js");
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({
+        repoFullName: "test/repo",
+        issueNumber: 1,
+      });
+
+      // Advance to PATCH_DRAFTED
+      manager.saveArtifact(manifest.runId, "workspace", { workspacePath: wsDir }, "WORKSPACE_PREPARED");
+      manager.saveArtifact(manifest.runId, "patch", "diff...", "PATCH_DRAFTED");
+
+      // 2. Mutate source to fix bug (GREEN)
+      writeFileSync(stateFile, "PASS LONGER MUTATION STRING\n");
+
+      // 3. Verify real GREEN evidence
+      const green = verifyGreenEvidence({
+        cwd: wsDir,
+        testCommand: testCmd,
+        redEvidence: red,
+      });
+
+      expect(green.greenEvidence.passed).toBe(true);
+      expect(green.greenEvidence.treeChangedComparedToRed).toBe(true);
+      expect(green.greenEvidence.treeHashMatchesRed).toBe(false);
+      expect(green.greenEvidence.stressLoopPassed).toBe(true);
+      expect(green.greenEvidence.assertionMatchedFingerprint).toBe(red.assertionMatchedFingerprint);
+      expect(green.reproductionVerified).toBe(true);
+      expect(green.allTestsPassing).toBe(true);
+
+      const report = {
+        baselineTestedAt: red.capturedAt,
+        baselineFlakyTests: [],
+        stressLoopRuns: 1,
+        stressLoopPassed: true,
+        handleLeakCheckPassed: true,
+        passedUnitTestsCount: 1,
         allTestsPassing: true,
-        redEvidence: {
-          command: "bun test",
-          observedOutputSnippet: "AssertionError: expected",
-          exitCode: 1,
-          sourceTreeSha256: "aaaaaaaa",
-          capturedAt: "2026-07-01T00:00:00.000Z",
-          assertionMatched: true,
-          assertionMatchedFingerprint: "fp-1",
-        },
-        greenEvidence: {
-          command: "bun test",
-          exitCode: 0,
-          outputSnippet: "0 failed",
-          passed: true,
-          sourceTreeSha256: "bbbbbbbb",
-          capturedAt: "2026-07-01T00:01:00.000Z",
-          treeChangedComparedToRed: true,
-          treeHashMatchesRed: false,
-          stressLoopPassed: true,
-          assertionMatchedFingerprint: "fp-1",
-        },
-      },
-    });
-    const res = validatePhaseGate(summary, "EVIDENCE_COLLECTED");
-    expect(res.ok).toBe(true);
-    expect(res.error).toBeUndefined();
+        reproductionVerified: true,
+        redEvidence: red,
+        greenEvidence: green.greenEvidence,
+      };
+
+      // 4. Save artifact via trusted canonical flow and advance to EVIDENCE_COLLECTED
+      manager.saveArtifactTrusted(
+        manifest.runId,
+        "evidence",
+        report,
+        "EVIDENCE_COLLECTED",
+      );
+
+      const updated = manager.getRun(manifest.runId);
+      expect(updated?.manifest.currentPhase).toBe("EVIDENCE_COLLECTED");
+    } finally {
+      rmSync(wsDir, { recursive: true, force: true });
+      rmSync(baseDir, { recursive: true, force: true });
+    }
   });
 });

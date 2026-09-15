@@ -7,6 +7,8 @@ import {
   collectEvidence,
   ContributionRunManager,
   verifyDualStageReproduction,
+  captureRedEvidence,
+  verifyGreenEvidence,
 } from "@opencontrib/core";
 
 export function registerEvidenceTools(
@@ -199,12 +201,20 @@ export function registerEvidenceTools(
           fullEvidenceReport.reproductionVerified === true &&
           fullEvidenceReport.allTestsPassing;
         try {
-          runManager.saveArtifact(
-            args.runId,
-            "evidence",
-            fullEvidenceReport,
-            isVerified ? "EVIDENCE_COLLECTED" : undefined,
-          );
+          if (isVerified) {
+            runManager.saveArtifactTrusted(
+              args.runId,
+              "evidence",
+              fullEvidenceReport,
+              "EVIDENCE_COLLECTED",
+            );
+          } else {
+            runManager.saveArtifact(
+              args.runId,
+              "evidence",
+              fullEvidenceReport,
+            );
+          }
           persistence = { saved: true };
         } catch (err: any) {
           persistence = { saved: false, error: err.message };
@@ -227,6 +237,178 @@ export function registerEvidenceTools(
           },
         ],
       };
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool: contrib_capture_red (Evidence V2: 捕获不可篡改 RED 基线)
+  // -------------------------------------------------------------
+  server.tool(
+    "contrib_capture_red",
+    "Capture immutable RED baseline (failing test + source tree hash) before applying fix",
+    {
+      cwd: z.string().describe("Workspace directory to execute test command in"),
+      testCommand: z.string().describe("Test command expected to FAIL on baseline"),
+      assertion: z.string().optional().describe("Expected failure assertion regex"),
+      runId: z.string().optional().describe("Contribution run ID to persist RED baseline into"),
+      baselineCommitSha: z.string().optional().describe("Baseline commit SHA before changes"),
+      workspaceRoot: z.string().optional().describe("Root workspace directory"),
+    },
+    async (args) => {
+      try {
+        const red = captureRedEvidence({
+          cwd: args.cwd,
+          testCommand: args.testCommand,
+          workspaceRoot: args.workspaceRoot,
+          expectedAssertion: args.assertion,
+          baselineCommitSha: args.baselineCommitSha,
+        });
+
+        let persistence: { saved: boolean; error?: string } = { saved: false };
+        if (args.runId) {
+          try {
+            runManager.saveArtifact(args.runId, "evidence", {
+              baselineTestedAt: red.capturedAt,
+              baselineFlakyTests: [],
+              stressLoopRuns: 0,
+              stressLoopPassed: false,
+              handleLeakCheckPassed: true,
+              passedUnitTestsCount: 0,
+              redEvidence: red,
+              reproductionVerified: false,
+            });
+            persistence = { saved: true };
+          } catch (err: any) {
+            persistence = { saved: false, error: err.message };
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: red.assertionMatched ? "success" : "failed",
+                  redEvidence: red,
+                  persistence: args.runId ? persistence : undefined,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ status: "error", message: err.message }, null, 2),
+            },
+          ],
+        };
+      }
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool: contrib_verify_green (Evidence V2: 验证 GREEN 并与 RED 绑定推进阶段)
+  // -------------------------------------------------------------
+  server.tool(
+    "contrib_verify_green",
+    "Verify GREEN run, bind it to previously captured RED baseline, and advance to EVIDENCE_COLLECTED",
+    {
+      cwd: z.string().describe("Workspace directory to execute test command in"),
+      testCommand: z.string().describe("Test command expected to PASS after fix"),
+      runId: z.string().describe("Contribution run holding the captured RED artifact"),
+      stressLoopCount: z.number().optional().default(1).describe("Stress loop iterations"),
+      concurrencyWorkers: z.number().optional().default(1).describe("Concurrent workers"),
+      baselineCommitSha: z.string().optional().describe("Baseline commit SHA"),
+      workspaceRoot: z.string().optional().describe("Root workspace directory"),
+    },
+    async (args) => {
+      try {
+        const run = runManager.getRun(args.runId);
+        const evidenceArtifact = run?.artifacts?.evidence as
+          | { redEvidence?: any }
+          | undefined;
+        const redEvidence = evidenceArtifact?.redEvidence;
+        if (!redEvidence || !redEvidence.sourceTreeSha256) {
+          throw new Error(
+            "No captured RED baseline found for this run. Call contrib_capture_red first.",
+          );
+        }
+
+        const green = verifyGreenEvidence({
+          cwd: args.cwd,
+          testCommand: args.testCommand,
+          workspaceRoot: args.workspaceRoot,
+          redEvidence,
+          stressLoopCount: args.stressLoopCount ?? 1,
+          concurrencyWorkers: args.concurrencyWorkers ?? 1,
+        });
+
+        const full = await collectEvidence({
+          cwd: args.cwd,
+          workspaceRoot: args.workspaceRoot,
+          baselineCommitSha: args.baselineCommitSha,
+          testCommand: args.testCommand,
+          stressLoopCount: args.stressLoopCount ?? 1,
+          concurrencyWorkers: args.concurrencyWorkers ?? 1,
+        });
+
+        const report = {
+          ...full,
+          redEvidence,
+          greenEvidence: green.greenEvidence,
+          reproductionVerified:
+            green.reproductionVerified && Boolean(full.allTestsPassing),
+          allTestsPassing: Boolean(full.allTestsPassing),
+        };
+
+        let persistence: { saved: boolean; error?: string } = { saved: false };
+        if (report.reproductionVerified === true) {
+          runManager.saveArtifactTrusted(
+            args.runId,
+            "evidence",
+            report,
+            "EVIDENCE_COLLECTED",
+          );
+          persistence = { saved: true };
+        } else {
+          runManager.saveArtifact(args.runId, "evidence", report);
+          persistence = { saved: true };
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: report.reproductionVerified ? "success" : "failed",
+                  evidence: report,
+                  persistence,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ status: "error", message: err.message }, null, 2),
+            },
+          ],
+        };
+      }
     },
   );
 

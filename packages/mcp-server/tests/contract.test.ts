@@ -21,6 +21,8 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
       "contrib_assemble_context",
       "contrib_prepare_workspace",
       "contrib_collect_evidence",
+      "contrib_capture_red",
+      "contrib_verify_green",
       "contrib_verify_poc",
       "contrib_audit_governance",
       "contrib_analyze_impact",

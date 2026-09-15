@@ -250,7 +250,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     description:
       "PR successfully submitted to target repository with verified PR number and URL.",
     allowedFromPhases: ["GOVERNANCE_AUDITED"],
-    requiredArtifacts: ["workspace", "evidence", "governance"],
+    requiredArtifacts: ["workspace", "evidence", "governance", "submission"],
     cli: {
       command: "governance",
       subcommand: "pr-template",

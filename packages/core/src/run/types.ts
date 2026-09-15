@@ -42,6 +42,8 @@ export type ArtifactType =
   | "patch"
   | "evidence"
   | "governance"
+  | "approval"
+  | "submission"
   | "pr_draft"
   | "result";
 
@@ -73,6 +75,8 @@ export interface ContributionRunSummary {
     patch?: string;
     evidence?: Record<string, unknown>;
     governance?: Record<string, unknown>;
+    approval?: Record<string, unknown>;
+    submission?: Record<string, unknown>;
     prDraft?: string;
     result?: Record<string, unknown>;
   };

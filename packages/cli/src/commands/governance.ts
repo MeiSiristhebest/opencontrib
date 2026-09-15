@@ -151,7 +151,7 @@ const auditCommand = new Command("audit")
 
         if (runId) {
           try {
-            getRunManager().saveArtifact(
+            getRunManager().saveArtifactTrusted(
               runId,
               "governance",
               audit as any,

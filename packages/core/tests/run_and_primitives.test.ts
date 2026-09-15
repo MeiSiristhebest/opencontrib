@@ -117,7 +117,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
         assertionMatchedFingerprint: "fp-1",
       },
     };
-    manager.saveArtifact(
+    manager.saveArtifactTrusted(
       manifest.runId,
       "evidence",
       evidenceReport,
@@ -239,6 +239,13 @@ describe("Discrete Opportunity Signals Engine (contrib_rank_opportunity)", () =>
 
 describe("Enhanced Context Assembler with Exploration Guidance", () => {
   it("generates suggested reading order, target test files, and risk surface", () => {
+    const mockDoctorReport: any = {
+      environment: { os: "linux", arch: "x64", hasDocker: false },
+      system: { os: "linux", arch: "x64" },
+      git: { version: "2.40.0" },
+      runtimes: [],
+      tools: [],
+    };
     const assembler = new ContextAssembler();
     const assembled = assembler.assemble({
       repoFullName: "bytedance/flowgram.ai",
@@ -247,6 +254,7 @@ describe("Enhanced Context Assembler with Exploration Guidance", () => {
       issueNumber: 101,
       packageManifest: '{"name": "flowgram", "package.json": true}',
       primaryLanguage: "TypeScript",
+      doctorReport: mockDoctorReport,
     });
 
     expect(assembled.guidance).toBeDefined();

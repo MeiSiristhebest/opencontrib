@@ -22,6 +22,8 @@ import { detectSystemCapabilities } from "../../discovery/feasibility.js";
 import {
   verifyEmpiricalReproduction,
   collectEvidence,
+  captureRedEvidence,
+  verifyGreenEvidence,
 } from "../../evidence/evidence-collector.js";
 import { generateSubagentReviewPrompt } from "../../governance/subagent-reviewer.js";
 import { deriveEvidenceBackedQualityRubric } from "../../governance/governance-auditor.js";
@@ -187,13 +189,15 @@ export class ContextAssemblyStep implements PipelineStep {
 
     let preFixReproductionCaptured = false;
     let preFixOutput = "";
+    let redEvidence: any;
     if (testCmd) {
-      const preCheck = verifyEmpiricalReproduction({
+      const red = captureRedEvidence({
         cwd: ctx.workspace!.workspacePath,
         testCommand: testCmd,
       });
-      preFixReproductionCaptured = preCheck.assertionCaptured;
-      preFixOutput = preCheck.baselineOutput;
+      preFixReproductionCaptured = red.assertionMatched;
+      preFixOutput = red.observedOutputSnippet;
+      redEvidence = red;
     }
 
     ctx.assembledContext = assembledContext;
@@ -201,6 +205,7 @@ export class ContextAssemblyStep implements PipelineStep {
     ctx.testCmd = testCmd;
     ctx.preFixReproductionCaptured = preFixReproductionCaptured;
     ctx.preFixOutput = preFixOutput;
+    ctx.evidenceReport = { redEvidence };
     return continuePipeline();
   }
 }
@@ -351,12 +356,28 @@ export class ImplementValidateLoopStep implements PipelineStep {
         });
       } else if (testCmd) {
         try {
+          let green: any;
+          if (ctx.evidenceReport?.redEvidence) {
+            green = verifyGreenEvidence({
+              cwd: workspacePath,
+              testCommand: testCmd,
+              redEvidence: ctx.evidenceReport.redEvidence,
+              stressLoopCount: loopRuns,
+            });
+          }
+
           evidenceReport = await collectEvidence({
             cwd: workspacePath,
             testCommand: testCmd,
             stressLoopCount: loopRuns,
             runFlakyBaseline: false,
           });
+
+          if (green) {
+            evidenceReport.redEvidence = ctx.evidenceReport.redEvidence;
+            evidenceReport.greenEvidence = green.greenEvidence;
+            evidenceReport.reproductionVerified = green.reproductionVerified && Boolean(evidenceReport.allTestsPassing);
+          }
 
           const output = `Stress loops passed: ${evidenceReport.stressLoopPassed}, Passed tests: ${evidenceReport.passedUnitTestsCount}, Failed tests: ${evidenceReport.failedUnitTestsCount || 0}`;
           toolFeedback.push({

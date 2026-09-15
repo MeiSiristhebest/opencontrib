@@ -74,6 +74,12 @@ export function registerGovernanceTools(
         .describe(
           "Whether the caller is preparing for autonomous PR submission (demands empirical evidence)",
         ),
+      humanApproved: z
+        .boolean()
+        .optional()
+        .describe(
+          "Explicit human approval boolean. Must be true to pass approvalGate without a waiver",
+        ),
       confidenceBreakdown: ConfidenceBreakdownSchema.optional().describe(
         "Optional detailed 7-dimensional confidence scores",
       ),
@@ -86,6 +92,7 @@ export function registerGovernanceTools(
         evidence: args.evidence,
         subagentQualityScore: args.subagentQualityScore,
         isAutonomousPrSubmission: args.isAutonomousPrSubmission,
+        humanApproved: args.humanApproved,
         confidenceBreakdown: args.confidenceBreakdown,
       });
 

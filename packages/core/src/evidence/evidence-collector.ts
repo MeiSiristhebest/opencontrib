@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { execSync } from "child_process";
-import { readdirSync, statSync } from "fs";
+import { readdirSync, statSync, readFileSync } from "fs";
 import { join } from "path";
 import {
   defaultSandboxRuntime,
@@ -399,6 +399,7 @@ export function verifyEmpiricalReproduction(input: {
   isFailingOnBaseline: boolean;
   baselineOutput: string;
   assertionCaptured: boolean;
+  exitCode?: number;
 } {
   const {
     cwd,
@@ -450,6 +451,7 @@ export function verifyEmpiricalReproduction(input: {
     isFailingOnBaseline: hasFailureFlag,
     baselineOutput: full,
     assertionCaptured: hasFailureFlag,
+    exitCode: res.exitCode !== null ? res.exitCode : hasFailureFlag ? 1 : 0,
   };
 }
 
@@ -515,6 +517,7 @@ export function capturePreFixAssertion(
       ...repro,
       assertionCaptured: repro.assertionCaptured && match.matched,
       expectedAssertionMatched: match.matched,
+      exitCode: repro.exitCode,
     };
   }
 
@@ -580,7 +583,14 @@ export function computeSourceTreeHash(cwd: string): string {
           if (st.isDirectory()) {
             walk(full);
           } else {
-            entries.push(`${item}:${String(st.size)}`);
+            try {
+              const relPath = full.slice(cwd.length).replace(/^[\\/]+/, "").replace(/\\/g, "/");
+              const fileContent = readFileSync(full);
+              const fileHash = createHash("sha256").update(fileContent).digest("hex");
+              entries.push(`${relPath}:${String(st.size)}:${fileHash}`);
+            } catch {
+              entries.push(`${item}:${String(st.size)}`);
+            }
           }
         }
       };
@@ -595,6 +605,19 @@ export function computeSourceTreeHash(cwd: string): string {
   }
 }
 
+export function computeTestIdentityFingerprint(input: {
+  testCommand: string;
+  expectedAssertion?: string;
+  testFileSha256?: string;
+}): string {
+  const normCmd = input.testCommand.trim().replace(/\s+/g, " ");
+  const normAssert = (input.expectedAssertion || "").trim();
+  const filePart = input.testFileSha256 || "";
+  return createHash("sha256")
+    .update(`identity:${normCmd}:${normAssert}:${filePart}`)
+    .digest("hex");
+}
+
 /**
  * Evidence V2 — capture an immutable RED baseline artifact.
  * Runs the test command once, records the observed failure, and binds the
@@ -605,6 +628,7 @@ export function captureRedEvidence(input: {
   testCommand: string;
   workspaceRoot?: string;
   expectedAssertion?: string;
+  testFileSha256?: string;
   baselineCommitSha?: string;
 }): RedEvidence {
   const preFix = capturePreFixAssertion(
@@ -614,17 +638,31 @@ export function captureRedEvidence(input: {
     input.expectedAssertion,
   );
   const assertionMatched = Boolean(preFix.assertionCaptured);
+  const exitCode =
+    typeof (preFix as { exitCode?: number }).exitCode === "number"
+      ? (preFix as { exitCode?: number }).exitCode!
+      : assertionMatched
+        ? 1
+        : 0;
+  const assertionMatchedFingerprint = computeTestIdentityFingerprint({
+    testCommand: input.testCommand,
+    expectedAssertion: input.expectedAssertion,
+    testFileSha256: input.testFileSha256,
+  });
+
   return {
     command: input.testCommand,
     expectedAssertion: input.expectedAssertion,
     observedOutputSnippet: (
       (preFix as { baselineOutput?: string }).baselineOutput ?? ""
     ).slice(0, 500),
-    exitCode: assertionMatched ? 1 : 0,
+    exitCode,
     sourceTreeSha256: computeSourceTreeHash(input.cwd),
+    testFileSha256: input.testFileSha256,
     baselineCommitSha: input.baselineCommitSha,
     capturedAt: new Date().toISOString(),
     assertionMatched,
+    assertionMatchedFingerprint,
   };
 }
 
@@ -656,6 +694,14 @@ export function verifyGreenEvidence(input: {
   const passed = stressResult.passed;
   const greenTreeHash = computeSourceTreeHash(input.cwd);
   const treeChanged = greenTreeHash !== redEvidence.sourceTreeSha256;
+  const fingerprint =
+    redEvidence.assertionMatchedFingerprint ||
+    computeTestIdentityFingerprint({
+      testCommand: input.testCommand,
+      expectedAssertion: redEvidence.expectedAssertion,
+      testFileSha256: redEvidence.testFileSha256,
+    });
+
   const greenEvidence: GreenEvidence = {
     command: input.testCommand,
     exitCode: passed ? 0 : 1,
@@ -664,6 +710,10 @@ export function verifyGreenEvidence(input: {
     sourceTreeSha256: greenTreeHash,
     capturedAt: new Date().toISOString(),
     treeChangedComparedToRed: treeChanged,
+    treeHashMatchesRed: !treeChanged,
+    stressLoopPassed: stressResult.passed,
+    allTestsPassing: passed,
+    assertionMatchedFingerprint: fingerprint,
   };
   const reproductionVerified =
     redEvidence.assertionMatched === true && passed && treeChanged;

@@ -65,6 +65,13 @@ export interface ResumeRunResult {
 import { validatePhaseGate } from "./state-machine.js";
 import { getOpenContribHome } from "../kernel/home.js";
 
+export const PRIVILEGED_PHASES = new Set<ContributionRunPhase>([
+  "EVIDENCE_COLLECTED",
+  "GOVERNANCE_AUDITED",
+  "PR_SUBMITTED",
+  "COMPLETED",
+]);
+
 export class ContributionRunManager {
   private bundleManager: ArtifactBundleManager;
   private baseDir: string;
@@ -197,6 +204,29 @@ export class ContributionRunManager {
   }
 
   saveArtifact(
+    runId: string,
+    type: ArtifactType,
+    content: string | Record<string, unknown>,
+    autoAdvancePhase?: ContributionRunPhase,
+  ): SavedArtifactResult {
+    if (autoAdvancePhase && PRIVILEGED_PHASES.has(autoAdvancePhase)) {
+      throw new Error(
+        `PrivilegedPhaseViolationError: Phase '${autoAdvancePhase}' is privileged and cannot be advanced via generic save. Use canonical service.`,
+      );
+    }
+    return this._saveArtifactInternal(runId, type, content, autoAdvancePhase);
+  }
+
+  saveArtifactTrusted(
+    runId: string,
+    type: ArtifactType,
+    content: string | Record<string, unknown>,
+    autoAdvancePhase?: ContributionRunPhase,
+  ): SavedArtifactResult {
+    return this._saveArtifactInternal(runId, type, content, autoAdvancePhase);
+  }
+
+  private _saveArtifactInternal(
     runId: string,
     type: ArtifactType,
     content: string | Record<string, unknown>,

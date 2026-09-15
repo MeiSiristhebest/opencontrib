@@ -187,7 +187,7 @@ export const evidenceRunCommand = evidenceCommand
           fullReport.allTestsPassing;
         if (runId) {
           try {
-            getRunManager().saveArtifact(
+            getRunManager().saveArtifactTrusted(
               runId,
               "evidence",
               fullReport,
@@ -386,7 +386,7 @@ export const verifyGreenCommand = evidenceCommand
         };
         let persistence: { saved: boolean; error?: string } | undefined;
         if (runId) {
-          getRunManager().saveArtifact(
+          getRunManager().saveArtifactTrusted(
             runId,
             "evidence",
             report,

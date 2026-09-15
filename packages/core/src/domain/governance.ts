@@ -306,8 +306,8 @@ export function auditGovernance(
     typeof input.lineCount === "number"
       ? input.lineCount
       : patch.split("\n").length;
-  // Separate technical quality assessment from explicit human approval
-  const humanApproved = input.humanApproved ?? !input.isAutonomousPrSubmission;
+  // Explicit human approval only: no silent implicit approval when isAutonomousPrSubmission is undefined/false
+  const humanApproved = input.humanApproved === true;
   const maxDiffAllowed = input.maxDiffLines ?? 100;
 
   let breakdown = input.confidenceBreakdown;
@@ -379,18 +379,22 @@ export function auditGovernance(
     approved: Boolean(humanApproved),
   };
 
+  let submissionStatus: "ALLOWED" | "BLOCKED" | "WAIVED";
+  let submissionReason: string | undefined;
+  if (isGatedPassed) {
+    submissionStatus = "ALLOWED";
+    submissionReason = undefined;
+  } else {
+    submissionStatus = "BLOCKED";
+    submissionReason = !isTechnicalGatePassed
+      ? "Technical quality gate criteria not met"
+      : "Pending explicit human approval";
+  }
+
   const submissionDecision = {
     allowed: isGatedPassed,
-    status: isGatedPassed
-      ? ("ALLOWED" as const)
-      : !isTechnicalGatePassed
-        ? ("BLOCKED" as const)
-        : ("WAIVED" as const),
-    reason: isGatedPassed
-      ? undefined
-      : !isTechnicalGatePassed
-        ? "Technical quality gate criteria not met"
-        : "Pending explicit human approval",
+    status: submissionStatus,
+    reason: submissionReason,
   };
 
   const remediationSuggestions: string[] = [];

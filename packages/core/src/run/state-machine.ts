@@ -164,15 +164,57 @@ export function validatePhaseGate(
     }
   }
 
+  if (targetPhase === "PR_SUBMITTED") {
+    const sub = runSummary.artifacts.submission;
+    const submission = sub ? SubmissionArtifactSchema.safeParse(sub) : undefined;
+    const validPrUrl =
+      typeof submission?.data?.prUrl === "string" &&
+      /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9][0-9]*$/i.test(
+        submission.data.prUrl,
+      );
+    if (
+      !submission?.success ||
+      !submission.data.verified ||
+      !submission.data.prNumber ||
+      !submission.data.prUrl ||
+      !submission.data.headSha ||
+      !validPrUrl
+    ) {
+      return {
+        ok: false,
+        error: new PhaseGateViolationError(
+          runSummary.manifest.runId,
+          currentPhase,
+          targetPhase,
+          [
+            !sub
+              ? "Missing submission artifact: cannot enter PR_SUBMITTED without a verified SubmissionArtifact."
+              : !submission?.success
+                ? `Submission artifact fails semantic validity: ${submission?.error.issues[0]?.message ?? "invalid schema"}`
+                : !submission.data.verified
+                  ? "Submission artifact fails semantic validity: SubmissionArtifact.verified must be true."
+                  : "Submission artifact fails semantic validity: valid github PR URL, headSha, and prNumber required.",
+          ],
+          "Submit PR through verified SubmissionService to generate SubmissionArtifact.",
+        ),
+      };
+    }
+  }
+
   if (targetPhase === "COMPLETED") {
     const res = runSummary.artifacts.result as
       | (Partial<{ prNumber: number; prUrl: string }> & {
           submission?: SubmissionArtifact;
         })
       | undefined;
-    const submission = res?.submission
+    const submissionArtifact = runSummary.artifacts.submission
+      ? SubmissionArtifactSchema.safeParse(runSummary.artifacts.submission)
+      : undefined;
+    const resSubmission = res?.submission
       ? SubmissionArtifactSchema.safeParse(res.submission)
       : undefined;
+    const submission = resSubmission?.success ? resSubmission : submissionArtifact;
+
     const validPrUrl =
       typeof res?.prUrl === "string" &&
       /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9][0-9]*$/i.test(

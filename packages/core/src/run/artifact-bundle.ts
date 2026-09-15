@@ -103,6 +103,10 @@ export class ArtifactBundleManager {
         return "evidence.json";
       case "governance":
         return "governance.json";
+      case "approval":
+        return "approval.json";
+      case "submission":
+        return "submission.json";
       case "pr_draft":
         return "pr_draft.md";
       case "result":
@@ -123,6 +127,27 @@ export class ArtifactBundleManager {
 
     const stringContent =
       typeof content === "string" ? content : JSON.stringify(content, null, 2);
+
+    // WORM (Write-Once-Read-Many) immutability:
+    // If saving RED baseline in evidence artifact or dedicated red evidence, disallow mutation
+    if (type === "evidence" && existsSync(filePath)) {
+      try {
+        const existing = JSON.parse(readFileSync(filePath, "utf-8"));
+        if (existing?.redEvidence && typeof content === "object" && content !== null) {
+          const newRed = (content as any).redEvidence;
+          if (newRed && JSON.stringify(existing.redEvidence) !== JSON.stringify(newRed)) {
+            throw new Error(
+              `ImmutableArtifactViolationError: RED baseline in evidence is write-once and cannot be overwritten.`,
+            );
+          }
+        }
+      } catch (err: any) {
+        if (err.message?.includes("ImmutableArtifactViolationError")) {
+          throw err;
+        }
+      }
+    }
+
     writeAtomic(filePath, stringContent);
 
     return {
@@ -289,6 +314,8 @@ export class ArtifactBundleManager {
         patch: this.readArtifact(runId, "patch") ?? undefined,
         evidence: this.readArtifact(runId, "evidence") ?? undefined,
         governance: this.readArtifact(runId, "governance") ?? undefined,
+        approval: this.readArtifact(runId, "approval") ?? undefined,
+        submission: this.readArtifact(runId, "submission") ?? undefined,
         prDraft: this.readArtifact(runId, "pr_draft") ?? undefined,
         result: this.readArtifact(runId, "result") ?? undefined,
       },

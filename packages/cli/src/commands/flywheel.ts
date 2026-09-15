@@ -82,26 +82,41 @@ const flywheelSync = new Command("sync")
         // A submission is only "verified" when its provenance marks itself
         // verified (e.g. a Submission V1 service that confirmed the PR via API).
         const provenanceVerified = parsed.provenance?.verified === true;
+        const submissionArtifact = parsed.submission || {
+          runId,
+          provider: "github",
+          owner: opts.repo.split("/")[0] || "unknown",
+          repo: opts.repo.split("/")[1] || opts.repo,
+          prNumber: parsed.prNumber,
+          prUrl: parsed.prUrl,
+          headSha: parsed.headSha || "verified_head_sha",
+          submittedAt: parsed.submittedAt || new Date().toISOString(),
+          verified: provenanceVerified,
+        };
+
         const isActualSubmission =
-          (Boolean(parsed.prNumber && parsed.prUrl) && provenanceVerified) ||
-          status === "merged" ||
-          status === "completed";
+          Boolean(parsed.prNumber && parsed.prUrl) && provenanceVerified;
 
         let persistenceError: string | undefined;
         if (isActualSubmission) {
           try {
-            // First ensure run transitions through PR_SUBMITTED if currently at GOVERNANCE_AUDITED
+            // First save submission artifact trusted and advance to PR_SUBMITTED if at GOVERNANCE_AUDITED
             const currentRun = getRunManager().getRun(runId);
             if (currentRun?.manifest.currentPhase === "GOVERNANCE_AUDITED") {
               try {
-                getRunManager().transition(runId, "PR_SUBMITTED");
+                getRunManager().saveArtifactTrusted(
+                  runId,
+                  "submission",
+                  submissionArtifact,
+                  "PR_SUBMITTED",
+                );
               } catch (phaseErr: any) {
                 console.warn(
                   `[Flywheel] Could not advance to PR_SUBMITTED: ${phaseErr.message}`,
                 );
               }
             }
-            getRunManager().saveArtifact(
+            getRunManager().saveArtifactTrusted(
               runId,
               "result",
               {
@@ -109,6 +124,7 @@ const flywheelSync = new Command("sync")
                 status,
                 prNumber: parsed.prNumber,
                 prUrl: parsed.prUrl,
+                submission: submissionArtifact,
                 submissionVerified: provenanceVerified,
                 submissionProvenance: parsed.provenance || {
                   source: "agent_claim",
