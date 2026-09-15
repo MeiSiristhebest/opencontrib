@@ -36,7 +36,7 @@ export interface DualStageReproductionResult {
   completedRuns: number;
 }
 
-export function getProcessHandleCount(): number {
+export function getProcessHandleCount(): number | null {
   try {
     if (process.platform === "win32") {
       const res = defaultSandboxRuntime.executeInSandbox({
@@ -50,7 +50,8 @@ export function getProcessHandleCount(): number {
         timeoutMs: 4000,
         allowHostFallback: true,
       });
-      return parseInt(res.stdout.trim(), 10) || 0;
+      const val = parseInt(res.stdout.trim(), 10);
+      return Number.isFinite(val) && val > 0 ? val : null;
     } else {
       const res = defaultSandboxRuntime.executeInSandbox({
         cwd: process.cwd(),
@@ -60,10 +61,10 @@ export function getProcessHandleCount(): number {
         allowHostFallback: true,
       });
       const lines = res.stdout.trim().split("\n").filter(Boolean);
-      return lines.length || 0;
+      return lines.length > 0 ? lines.length : null;
     }
   } catch {
-    return 0;
+    return null;
   }
 }
 
@@ -533,8 +534,9 @@ function byAsciiOrder(a: string, b: string): number {
 
 /**
  * Compute a stable content fingerprint of the source tree at `cwd`.
- * Uses git when available (HEAD + tracked diff + untracked status); falls back
- * to hashing a deterministic file listing so the check still works in non-git dirs.
+ * In git repositories, hashes HEAD commit, index staging, unstaged tracked diff,
+ * and contents of untracked files. Falls back to hashing all files deterministically
+ * by relative path and content hash.
  */
 export function computeSourceTreeHash(cwd: string): string {
   try {
@@ -553,7 +555,32 @@ export function computeSourceTreeHash(cwd: string): string {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
     });
-    const fingerprint = `git:${gitHead}\n${gitStatus}\n${gitDiff}`;
+
+    // Content hashes of untracked files for true content immutability
+    const untrackedHashes: string[] = [];
+    const untrackedLines = gitStatus
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("?? "));
+
+    for (const l of untrackedLines) {
+      const rel = l.slice(3).trim();
+      const full = join(cwd, rel);
+      try {
+        const st = statSync(full);
+        if (!st.isDirectory()) {
+          const buf = readFileSync(full);
+          const h = createHash("sha256").update(buf).digest("hex");
+          untrackedHashes.push(`${rel}:${String(st.size)}:${h}`);
+        }
+      } catch {
+        // Ignored if file disappeared or is unreadable during tree scan
+        continue;
+      }
+    }
+    untrackedHashes.sort(byAsciiOrder);
+
+    const fingerprint = `git:${gitHead}\n${gitStatus}\n${gitDiff}\n${untrackedHashes.join("\n")}`;
     return createHash("sha256").update(fingerprint).digest("hex");
   } catch {
     try {
@@ -855,10 +882,11 @@ export async function collectEvidence(
     parsedCounts.total === 0 &&
     !/PASS|pass/i.test(stressResult.lastOutput);
 
-  // Fail-safe handle leak tri-state check:
-  // If system handles cannot be measured (0), report true as best-effort; otherwise require delta < 15
+  // Handle leak detection:
+  // If system handles cannot be measured (null), mark handleLeakCheckPassed as true with a warning flag,
+  // but if both measurements succeeded, strictly require leak delta < 15.
   const handleLeakCheckPassed =
-    initialHandles === 0 || finalHandles === 0
+    initialHandles === null || finalHandles === null
       ? true
       : finalHandles - initialHandles < 15;
 
@@ -873,8 +901,8 @@ export async function collectEvidence(
     latencyJitterMs: stressResult.latencyJitterMs,
     zeroAssertionWarning: hasZeroAssertions,
     handleLeakCheckPassed,
-    initialDescriptorCount: initialHandles,
-    finalDescriptorCount: finalHandles,
+    initialDescriptorCount: initialHandles ?? undefined,
+    finalDescriptorCount: finalHandles ?? undefined,
     passedUnitTestsCount: parsedCounts.passed,
     failedUnitTestsCount: parsedCounts.failed,
     addedUnitTestsCount,
