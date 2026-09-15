@@ -158,7 +158,9 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       expect(red.exitCode).toBe(1);
       expect(red.assertionMatchedFingerprint).toBeDefined();
 
-      const { ContributionRunManager } = await import("../src/run/run-manager.js");
+      const { ContributionRunManager } = await import(
+        "../src/run/run-manager.js"
+      );
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({
         repoFullName: "test/repo",
@@ -166,7 +168,12 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       });
 
       // Advance to PATCH_DRAFTED
-      manager.saveArtifact(manifest.runId, "workspace", { workspacePath: wsDir }, "WORKSPACE_PREPARED");
+      manager.saveArtifact(
+        manifest.runId,
+        "workspace",
+        { workspacePath: wsDir },
+        "WORKSPACE_PREPARED",
+      );
       manager.saveArtifact(manifest.runId, "patch", "diff...", "PATCH_DRAFTED");
 
       // 2. Mutate source to fix bug (GREEN)
@@ -183,7 +190,9 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       expect(green.greenEvidence.treeChangedComparedToRed).toBe(true);
       expect(green.greenEvidence.treeHashMatchesRed).toBe(false);
       expect(green.greenEvidence.stressLoopPassed).toBe(true);
-      expect(green.greenEvidence.assertionMatchedFingerprint).toBe(red.assertionMatchedFingerprint);
+      expect(green.greenEvidence.assertionMatchedFingerprint).toBe(
+        red.assertionMatchedFingerprint,
+      );
       expect(green.reproductionVerified).toBe(true);
       expect(green.allTestsPassing).toBe(true);
 

@@ -376,7 +376,9 @@ export class ImplementValidateLoopStep implements PipelineStep {
           if (green) {
             evidenceReport.redEvidence = ctx.evidenceReport.redEvidence;
             evidenceReport.greenEvidence = green.greenEvidence;
-            evidenceReport.reproductionVerified = green.reproductionVerified && Boolean(evidenceReport.allTestsPassing);
+            evidenceReport.reproductionVerified =
+              green.reproductionVerified &&
+              Boolean(evidenceReport.allTestsPassing);
           }
 
           const output = `Stress loops passed: ${evidenceReport.stressLoopPassed}, Passed tests: ${evidenceReport.passedUnitTestsCount}, Failed tests: ${evidenceReport.failedUnitTestsCount || 0}`;

@@ -100,7 +100,9 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
-      manager.saveArtifact(manifest.runId, "workspace", { workspacePath: "/tmp" });
+      manager.saveArtifact(manifest.runId, "workspace", {
+        workspacePath: "/tmp",
+      });
       manager.saveArtifact(manifest.runId, "evidence", {
         redEvidence: {
           command: "test",
@@ -210,7 +212,10 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           },
         },
       };
-      const validCompletedGate = validatePhaseGate(nextPhaseSummary, "COMPLETED");
+      const validCompletedGate = validatePhaseGate(
+        nextPhaseSummary,
+        "COMPLETED",
+      );
       expect(validCompletedGate.ok).toBe(true);
     } finally {
       rmSync(baseDir, { recursive: true, force: true });

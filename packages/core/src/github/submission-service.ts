@@ -1,4 +1,8 @@
-import type { ContributionPrService, PrSubmissionOptions, PrSubmissionResult } from "./contribution-pr-service.js";
+import type {
+  ContributionPrService,
+  PrSubmissionOptions,
+  PrSubmissionResult,
+} from "./contribution-pr-service.js";
 import type { GitHubClient } from "../discovery/github-client.js";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import {
@@ -18,9 +22,7 @@ export class GitHubSubmissionService {
     private readonly runManager: ContributionRunManager,
   ) {}
 
-  async submitAndVerifyPullRequest(
-    options: SubmitRunPrOptions,
-  ): Promise<{
+  async submitAndVerifyPullRequest(options: SubmitRunPrOptions): Promise<{
     submissionResult: PrSubmissionResult;
     submissionArtifact: SubmissionArtifact;
   }> {

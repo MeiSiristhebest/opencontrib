@@ -209,11 +209,7 @@ export function registerEvidenceTools(
               "EVIDENCE_COLLECTED",
             );
           } else {
-            runManager.saveArtifact(
-              args.runId,
-              "evidence",
-              fullEvidenceReport,
-            );
+            runManager.saveArtifact(args.runId, "evidence", fullEvidenceReport);
           }
           persistence = { saved: true };
         } catch (err: any) {
@@ -247,11 +243,24 @@ export function registerEvidenceTools(
     "contrib_capture_red",
     "Capture immutable RED baseline (failing test + source tree hash) before applying fix",
     {
-      cwd: z.string().describe("Workspace directory to execute test command in"),
-      testCommand: z.string().describe("Test command expected to FAIL on baseline"),
-      assertion: z.string().optional().describe("Expected failure assertion regex"),
-      runId: z.string().optional().describe("Contribution run ID to persist RED baseline into"),
-      baselineCommitSha: z.string().optional().describe("Baseline commit SHA before changes"),
+      cwd: z
+        .string()
+        .describe("Workspace directory to execute test command in"),
+      testCommand: z
+        .string()
+        .describe("Test command expected to FAIL on baseline"),
+      assertion: z
+        .string()
+        .optional()
+        .describe("Expected failure assertion regex"),
+      runId: z
+        .string()
+        .optional()
+        .describe("Contribution run ID to persist RED baseline into"),
+      baselineCommitSha: z
+        .string()
+        .optional()
+        .describe("Baseline commit SHA before changes"),
       workspaceRoot: z.string().optional().describe("Root workspace directory"),
     },
     async (args) => {
@@ -305,7 +314,11 @@ export function registerEvidenceTools(
           content: [
             {
               type: "text",
-              text: JSON.stringify({ status: "error", message: err.message }, null, 2),
+              text: JSON.stringify(
+                { status: "error", message: err.message },
+                null,
+                2,
+              ),
             },
           ],
         };
@@ -320,11 +333,25 @@ export function registerEvidenceTools(
     "contrib_verify_green",
     "Verify GREEN run, bind it to previously captured RED baseline, and advance to EVIDENCE_COLLECTED",
     {
-      cwd: z.string().describe("Workspace directory to execute test command in"),
-      testCommand: z.string().describe("Test command expected to PASS after fix"),
-      runId: z.string().describe("Contribution run holding the captured RED artifact"),
-      stressLoopCount: z.number().optional().default(1).describe("Stress loop iterations"),
-      concurrencyWorkers: z.number().optional().default(1).describe("Concurrent workers"),
+      cwd: z
+        .string()
+        .describe("Workspace directory to execute test command in"),
+      testCommand: z
+        .string()
+        .describe("Test command expected to PASS after fix"),
+      runId: z
+        .string()
+        .describe("Contribution run holding the captured RED artifact"),
+      stressLoopCount: z
+        .number()
+        .optional()
+        .default(1)
+        .describe("Stress loop iterations"),
+      concurrencyWorkers: z
+        .number()
+        .optional()
+        .default(1)
+        .describe("Concurrent workers"),
       baselineCommitSha: z.string().optional().describe("Baseline commit SHA"),
       workspaceRoot: z.string().optional().describe("Root workspace directory"),
     },
@@ -404,7 +431,11 @@ export function registerEvidenceTools(
           content: [
             {
               type: "text",
-              text: JSON.stringify({ status: "error", message: err.message }, null, 2),
+              text: JSON.stringify(
+                { status: "error", message: err.message },
+                null,
+                2,
+              ),
             },
           ],
         };

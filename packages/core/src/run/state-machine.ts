@@ -166,7 +166,9 @@ export function validatePhaseGate(
 
   if (targetPhase === "PR_SUBMITTED") {
     const sub = runSummary.artifacts.submission;
-    const submission = sub ? SubmissionArtifactSchema.safeParse(sub) : undefined;
+    const submission = sub
+      ? SubmissionArtifactSchema.safeParse(sub)
+      : undefined;
     const validPrUrl =
       typeof submission?.data?.prUrl === "string" &&
       /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9][0-9]*$/i.test(
@@ -213,7 +215,9 @@ export function validatePhaseGate(
     const resSubmission = res?.submission
       ? SubmissionArtifactSchema.safeParse(res.submission)
       : undefined;
-    const submission = resSubmission?.success ? resSubmission : submissionArtifact;
+    const submission = resSubmission?.success
+      ? resSubmission
+      : submissionArtifact;
 
     const validPrUrl =
       typeof res?.prUrl === "string" &&

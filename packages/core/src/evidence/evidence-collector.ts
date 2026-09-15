@@ -584,9 +584,14 @@ export function computeSourceTreeHash(cwd: string): string {
             walk(full);
           } else {
             try {
-              const relPath = full.slice(cwd.length).replace(/^[\\/]+/, "").replace(/\\/g, "/");
+              const relPath = full
+                .slice(cwd.length)
+                .replace(/^[\\/]+/, "")
+                .replace(/\\/g, "/");
               const fileContent = readFileSync(full);
-              const fileHash = createHash("sha256").update(fileContent).digest("hex");
+              const fileHash = createHash("sha256")
+                .update(fileContent)
+                .digest("hex");
               entries.push(`${relPath}:${String(st.size)}:${fileHash}`);
             } catch {
               entries.push(`${item}:${String(st.size)}`);

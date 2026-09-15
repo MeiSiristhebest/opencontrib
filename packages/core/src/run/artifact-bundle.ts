@@ -133,9 +133,16 @@ export class ArtifactBundleManager {
     if (type === "evidence" && existsSync(filePath)) {
       try {
         const existing = JSON.parse(readFileSync(filePath, "utf-8"));
-        if (existing?.redEvidence && typeof content === "object" && content !== null) {
+        if (
+          existing?.redEvidence &&
+          typeof content === "object" &&
+          content !== null
+        ) {
           const newRed = (content as any).redEvidence;
-          if (newRed && JSON.stringify(existing.redEvidence) !== JSON.stringify(newRed)) {
+          if (
+            newRed &&
+            JSON.stringify(existing.redEvidence) !== JSON.stringify(newRed)
+          ) {
             throw new Error(
               `ImmutableArtifactViolationError: RED baseline in evidence is write-once and cannot be overwritten.`,
             );

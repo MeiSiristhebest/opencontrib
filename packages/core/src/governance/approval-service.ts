@@ -49,11 +49,7 @@ export class ApprovalService {
 
     ApprovalArtifactSchema.parse(artifact);
 
-    this.runManager.saveArtifactTrusted(
-      input.runId,
-      "approval",
-      artifact,
-    );
+    this.runManager.saveArtifactTrusted(input.runId, "approval", artifact);
 
     return artifact;
   }
