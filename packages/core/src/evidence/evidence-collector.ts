@@ -452,7 +452,7 @@ export function verifyEmpiricalReproduction(input: {
     isFailingOnBaseline: hasFailureFlag,
     baselineOutput: full,
     assertionCaptured: hasFailureFlag,
-    exitCode: res.exitCode !== null ? res.exitCode : hasFailureFlag ? 1 : 0,
+    exitCode: res.exitCode === null ? (hasFailureFlag ? 1 : 0) : res.exitCode,
   };
 }
 
@@ -545,7 +545,7 @@ export function computeSourceTreeHash(cwd: string): string {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    const gitStatus = execSync("git status --porcelain", {
+    const gitStatus = execSync("git status --porcelain --untracked-files=all", {
       cwd,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
@@ -573,10 +573,7 @@ export function computeSourceTreeHash(cwd: string): string {
           const h = createHash("sha256").update(buf).digest("hex");
           untrackedHashes.push(`${rel}:${String(st.size)}:${h}`);
         }
-      } catch {
-        // Ignored if file disappeared or is unreadable during tree scan
-        continue;
-      }
+      } catch {}
     }
     untrackedHashes.sort(byAsciiOrder);
 
@@ -726,13 +723,11 @@ export function verifyGreenEvidence(input: {
   const passed = stressResult.passed;
   const greenTreeHash = computeSourceTreeHash(input.cwd);
   const treeChanged = greenTreeHash !== redEvidence.sourceTreeSha256;
-  const fingerprint =
-    redEvidence.assertionMatchedFingerprint ||
-    computeTestIdentityFingerprint({
-      testCommand: input.testCommand,
-      expectedAssertion: redEvidence.expectedAssertion,
-      testFileSha256: redEvidence.testFileSha256,
-    });
+  const greenFingerprint = computeTestIdentityFingerprint({
+    testCommand: input.testCommand,
+    expectedAssertion: redEvidence.expectedAssertion,
+    testFileSha256: redEvidence.testFileSha256,
+  });
 
   const greenEvidence: GreenEvidence = {
     command: input.testCommand,
@@ -745,10 +740,16 @@ export function verifyGreenEvidence(input: {
     treeHashMatchesRed: !treeChanged,
     stressLoopPassed: stressResult.passed,
     allTestsPassing: passed,
-    assertionMatchedFingerprint: fingerprint,
+    assertionMatchedFingerprint: greenFingerprint,
   };
+  const sameIdentity =
+    Boolean(redEvidence.assertionMatchedFingerprint) &&
+    greenFingerprint === redEvidence.assertionMatchedFingerprint;
   const reproductionVerified =
-    redEvidence.assertionMatched === true && passed && treeChanged;
+    redEvidence.assertionMatched === true &&
+    passed &&
+    treeChanged &&
+    sameIdentity;
   return { greenEvidence, reproductionVerified, allTestsPassing: passed };
 }
 

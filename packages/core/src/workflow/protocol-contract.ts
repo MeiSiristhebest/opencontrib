@@ -205,7 +205,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       subcommands: ["capture-red", "verify-green"],
     },
     mcp: {
-      tool: "contrib_collect_evidence",
+      tool: "contrib_verify_green",
     },
     forbiddenActions: [
       "DO NOT skip pre-fix failure verification.",

@@ -151,6 +151,14 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       expect(resGate.ok).toBe(false);
       expect(resGate.error?.message).toContain("submission");
 
+      // Record valid ApprovalArtifact prior to submission authorization
+      const approvalService = new ApprovalService(manager);
+      approvalService.recordApproval({
+        runId: manifest.runId,
+        approvedBy: "reviewer",
+        approvalMode: "explicit_human",
+      });
+
       // Now use GitHubSubmissionService mock/double
       const mockPrService = {
         submitPullRequest: async () => ({
@@ -180,8 +188,16 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         manager,
       );
 
+      // Authorize submission (creates SubmissionPermit)
+      const permit = submissionService.authorizeSubmission(
+        manifest.runId,
+        "org",
+        "repo",
+      );
+
       const submitted = await submissionService.submitAndVerifyPullRequest({
         runId: manifest.runId,
+        permit,
         submissionOptions: {
           upstreamOwner: "org",
           upstreamRepo: "repo",

@@ -172,6 +172,7 @@ export const ApprovalArtifactSchema = z.object({
   runId: z.string(),
   patchSha256: z.string(),
   evidenceSha256: z.string().optional(),
+  governanceSha256: z.string().optional(),
   prBodySha256: z.string().optional(),
   approvedBy: z.string().default("human_reviewer"),
   approvedAt: z.string(),

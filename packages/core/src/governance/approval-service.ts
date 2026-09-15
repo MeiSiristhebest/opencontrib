@@ -30,6 +30,13 @@ export class ApprovalService {
         .digest("hex");
     }
 
+    let governanceSha256: string | undefined;
+    if (summary.artifacts.governance) {
+      governanceSha256 = createHash("sha256")
+        .update(JSON.stringify(summary.artifacts.governance))
+        .digest("hex");
+    }
+
     let prBodySha256: string | undefined;
     if (summary.artifacts.prDraft) {
       prBodySha256 = createHash("sha256")
@@ -41,6 +48,7 @@ export class ApprovalService {
       runId: input.runId,
       patchSha256,
       evidenceSha256,
+      governanceSha256,
       prBodySha256,
       approvedBy: input.approvedBy || "human_reviewer",
       approvedAt: new Date().toISOString(),
@@ -87,6 +95,32 @@ export class ApprovalService {
           valid: false,
           reason:
             "TOCTOU violation: evidence has changed since approval was recorded.",
+        };
+      }
+    }
+
+    if (summary.artifacts.governance && approval.governanceSha256) {
+      const currentGovSha256 = createHash("sha256")
+        .update(JSON.stringify(summary.artifacts.governance))
+        .digest("hex");
+      if (currentGovSha256 !== approval.governanceSha256) {
+        return {
+          valid: false,
+          reason:
+            "TOCTOU violation: governance audit has changed since approval was recorded.",
+        };
+      }
+    }
+
+    if (summary.artifacts.prDraft && approval.prBodySha256) {
+      const currentPrBodySha256 = createHash("sha256")
+        .update(String(summary.artifacts.prDraft))
+        .digest("hex");
+      if (currentPrBodySha256 !== approval.prBodySha256) {
+        return {
+          valid: false,
+          reason:
+            "TOCTOU violation: PR draft body has changed since approval was recorded.",
         };
       }
     }

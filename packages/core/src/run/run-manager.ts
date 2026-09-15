@@ -347,3 +347,5 @@ export class ContributionRunManager {
     };
   }
 }
+
+export const defaultRunManager = new ContributionRunManager();

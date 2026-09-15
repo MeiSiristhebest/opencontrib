@@ -8,6 +8,7 @@ import {
   EvidenceBundleV2Schema,
   GovernanceAuditResultSchema,
   SubmissionArtifactSchema,
+  ApprovalArtifactSchema,
   type EvidenceBundleV2,
   type SubmissionArtifact,
 } from "../contracts/schemas.js";
@@ -165,6 +166,25 @@ export function validatePhaseGate(
   }
 
   if (targetPhase === "PR_SUBMITTED") {
+    const app = runSummary.artifacts.approval;
+    const approval = app ? ApprovalArtifactSchema.safeParse(app) : undefined;
+    if (!approval?.success) {
+      return {
+        ok: false,
+        error: new PhaseGateViolationError(
+          runSummary.manifest.runId,
+          currentPhase,
+          targetPhase,
+          [
+            !app
+              ? "Missing approval artifact: cannot enter PR_SUBMITTED without recorded ApprovalArtifact."
+              : `Approval artifact fails semantic validity: ${approval?.error.issues[0]?.message ?? "invalid schema"}`,
+          ],
+          "Record approval via ApprovalService before submitting PR.",
+        ),
+      };
+    }
+
     const sub = runSummary.artifacts.submission;
     const submission = sub
       ? SubmissionArtifactSchema.safeParse(sub)
@@ -288,6 +308,11 @@ function validateEvidenceBundleIdentity(
     [
       redEvidence.exitCode !== 0,
       "RED baseline must record a non-zero exit code.",
+    ],
+    [
+      redEvidence.command.trim().replace(/\s+/g, " ") ===
+        greenEvidence.command.trim().replace(/\s+/g, " "),
+      "GREEN test command must match RED baseline test command.",
     ],
     [
       redEvidence.assertionMatchedFingerprint ===

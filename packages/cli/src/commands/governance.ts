@@ -510,6 +510,72 @@ const gateCommand = new Command("gate")
     }
   });
 
+// ─── governance approve ───────────────────────────────────────────────────────
+const approveCommand = new Command("approve")
+  .description(
+    "Record explicit human or policy-waived approval artifact binding patch, evidence, governance, and PR body hashes",
+  )
+  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
+  .option(
+    "--approved-by <name>",
+    "Name or identity of human reviewer",
+    "human_reviewer",
+  )
+  .option(
+    "--waive",
+    "Record as policy-waived approval instead of explicit human approval",
+    false,
+  )
+  .option("--pretty", "Pretty-print", false)
+  .action(
+    async (opts: {
+      runId?: string;
+      approvedBy?: string;
+      waive?: boolean;
+      pretty?: boolean;
+    }) => {
+      try {
+        const runId = getRunManager().resolveRunId(opts.runId);
+        if (!runId) {
+          console.error(
+            "❌ No runId found in active session or --run-id option.",
+          );
+          throw new CliExitError(1);
+        }
+
+        const { ApprovalService } = await import("@opencontrib/core");
+        const approvalService = new ApprovalService(getRunManager());
+
+        const artifact = approvalService.recordApproval({
+          runId,
+          approvedBy: opts.approvedBy,
+          approvalMode: opts.waive ? "policy_waived" : "explicit_human",
+        });
+
+        printJSON(
+          { status: "success", approvalArtifact: artifact },
+          opts.pretty,
+        );
+
+        printPhaseGuidance({
+          currentPhase: "GOVERNANCE_AUDITED",
+          runId,
+          status: "SUCCESS",
+          humanCheckpoint: "Checkpoint 3 (Approval Cryptographically Bound)",
+          nextCommand: `opencontrib submission submit --run-id ${runId}`,
+          invariants: [
+            "Patch, evidence, governance, and PR draft body hashes bound to ApprovalArtifact.",
+            "Any mutation of source code or evidence will cause TOCTOU gate rejection.",
+          ],
+        });
+      } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
+        printJSON({ status: "error", message: err.message }, opts.pretty);
+        throw new CliExitError(1);
+      }
+    },
+  );
+
 // ─── Top-level command ────────────────────────────────────────────────────────
 
 export const governanceCommand = new Command("governance")
@@ -517,6 +583,7 @@ export const governanceCommand = new Command("governance")
     "Governance audit, impact analysis, CI diagnosis, PR template rendering, Issue Claim generation, community gate detection, and Markdown linting",
   )
   .addCommand(auditCommand)
+  .addCommand(approveCommand)
   .addCommand(gateCommand)
   .addCommand(impactCommand)
   .addCommand(ciDiagnoseCommand)

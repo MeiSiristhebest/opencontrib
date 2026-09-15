@@ -77,58 +77,33 @@ const flywheelSync = new Command("sync")
           evidenceSummary: parsed.evidenceSummary || "",
         } as any);
 
-        // Trust boundary: COMPLETED must be gated on *verified* submission
-        // provenance, not merely the presence of agent-supplied prNumber/prUrl.
-        // A submission is only "verified" when its provenance marks itself
-        // verified (e.g. a Submission V1 service that confirmed the PR via API).
-        const provenanceVerified = parsed.provenance?.verified === true;
-        const submissionArtifact = parsed.submission || {
-          runId,
-          provider: "github",
-          owner: opts.repo.split("/")[0] || "unknown",
-          repo: opts.repo.split("/")[1] || opts.repo,
-          prNumber: parsed.prNumber,
-          prUrl: parsed.prUrl,
-          headSha: parsed.headSha || "verified_head_sha",
-          submittedAt: parsed.submittedAt || new Date().toISOString(),
-          verified: provenanceVerified,
-        };
-
-        const isActualSubmission =
-          Boolean(parsed.prNumber && parsed.prUrl) && provenanceVerified;
+        // Trust boundary: Flywheel NEVER creates/synthesizes SubmissionArtifact.
+        // It only consumes an existing trusted submission artifact created by GitHubSubmissionService.
+        const existingRun = getRunManager().getRun(runId);
+        const trustedSubmission = existingRun?.artifacts?.submission as any;
+        const isVerifiedSubmission = Boolean(
+          trustedSubmission &&
+            trustedSubmission.verified === true &&
+            trustedSubmission.prNumber &&
+            trustedSubmission.prUrl,
+        );
 
         let persistenceError: string | undefined;
-        if (isActualSubmission) {
+        if (isVerifiedSubmission) {
           try {
-            // First save submission artifact trusted and advance to PR_SUBMITTED if at GOVERNANCE_AUDITED
-            const currentRun = getRunManager().getRun(runId);
-            if (currentRun?.manifest.currentPhase === "GOVERNANCE_AUDITED") {
-              try {
-                getRunManager().saveArtifactTrusted(
-                  runId,
-                  "submission",
-                  submissionArtifact,
-                  "PR_SUBMITTED",
-                );
-              } catch (phaseErr: any) {
-                console.warn(
-                  `[Flywheel] Could not advance to PR_SUBMITTED: ${phaseErr.message}`,
-                );
-              }
-            }
             getRunManager().saveArtifactTrusted(
               runId,
               "result",
               {
                 flywheelResult: result,
                 status,
-                prNumber: parsed.prNumber,
-                prUrl: parsed.prUrl,
-                submission: submissionArtifact,
-                submissionVerified: provenanceVerified,
-                submissionProvenance: parsed.provenance || {
-                  source: "agent_claim",
-                  verified: false,
+                prNumber: trustedSubmission.prNumber,
+                prUrl: trustedSubmission.prUrl,
+                submission: trustedSubmission,
+                submissionVerified: true,
+                submissionProvenance: {
+                  source: "github_submission_service",
+                  verified: true,
                 },
               } as any,
               "COMPLETED",
@@ -152,9 +127,9 @@ const flywheelSync = new Command("sync")
         const effectivePhase = persistenceError
           ? getRunManager().getRun(runId)?.manifest.currentPhase ||
             "GOVERNANCE_AUDITED"
-          : isActualSubmission
+          : isVerifiedSubmission
             ? "COMPLETED"
-            : "GOVERNANCE_AUDITED";
+            : existingRun?.manifest.currentPhase || "GOVERNANCE_AUDITED";
 
         printJSON({ status: "success", flywheelResult: result }, opts.pretty);
 

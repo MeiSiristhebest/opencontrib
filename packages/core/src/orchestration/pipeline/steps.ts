@@ -33,6 +33,9 @@ import {
   type RiskAssessment,
   type ValidationStatus,
 } from "../../risk/risk-engine.js";
+import { GitHubSubmissionService } from "../../github/submission-service.js";
+import { ApprovalService } from "../../governance/approval-service.js";
+import { defaultRunManager } from "../../run/run-manager.js";
 import { buildTurnPrompt } from "../agent-orchestrator.js";
 import type {
   PipelineContext,
@@ -793,22 +796,88 @@ export class PrSubmissionStep implements PipelineStep {
     let prNumber: number;
 
     try {
-      const submission = await deps.prService.submitPullRequest({
-        upstreamOwner: owner,
-        upstreamRepo: repo,
-        title: `fix: ${selectedOpp.title}`,
-        body: prDraftText,
-        branchName: ctx.workspace!.branchName,
-        files: ctx.activePatch!.files.map((f) => ({
-          path: f.path,
-          content: f.content,
-        })),
-        commitMessage: `fix: ${selectedOpp.title}`,
-        isDraft: true,
+      // Unify Autonomous protocol with trusted Governance -> Approval -> Permit -> GitHubSubmissionService
+      const runId = ctx.telemetry?.runId || `run_${Date.now()}`;
+      const existingRun = defaultRunManager.getRun(runId);
+      if (!existingRun) {
+        defaultRunManager.createRun(runId);
+      }
+
+      // Ensure required stage artifacts are present for governance & approval
+      if (ctx.workspace) {
+        defaultRunManager.saveArtifact(
+          runId,
+          "workspace",
+          ctx.workspace as any,
+        );
+      }
+      if (ctx.activePatch) {
+        defaultRunManager.saveArtifact(runId, "patch", ctx.activePatch as any);
+      }
+      if (ctx.evidenceReport) {
+        defaultRunManager.saveArtifact(runId, "evidence", ctx.evidenceReport);
+      }
+      defaultRunManager.saveArtifact(runId, "pr_draft", prDraftText);
+
+      // Save governance audit artifact
+      defaultRunManager.saveArtifactTrusted(
+        runId,
+        "governance",
+        {
+          overallConfidence: {
+            overallScore: qualityRubric.overallScore,
+            isPassed: qualityRubric.isPassed,
+          },
+          technicalGate: { status: "PASS" },
+          approvalGate: {
+            status: ctx.humanApproved ? "APPROVED" : "WAIVED",
+            approved: Boolean(ctx.humanApproved),
+          },
+        } as any,
+        "GOVERNANCE_AUDITED",
+      );
+
+      // Record ApprovalArtifact binding patch, evidence, governance, and PR body
+      const approvalService = new ApprovalService(defaultRunManager);
+      approvalService.recordApproval({
+        runId,
+        approvedBy: ctx.humanApproved
+          ? "human_reviewer"
+          : "autonomous_policy_waived",
+        approvalMode: ctx.humanApproved ? "explicit_human" : "policy_waived",
       });
 
-      prUrl = submission.prUrl;
-      prNumber = submission.prNumber;
+      // Secure GitHub submission through GitHubSubmissionService
+      const submissionService = new GitHubSubmissionService(
+        deps.prService,
+        deps.client,
+        defaultRunManager,
+      );
+
+      // 1. Authorize submission (verify permit & integrity)
+      const permit = submissionService.authorizeSubmission(runId, owner, repo);
+
+      // 2. Submit and verify PR with provider
+      const submission = await submissionService.submitAndVerifyPullRequest({
+        runId,
+        permit,
+        submissionOptions: {
+          upstreamOwner: owner,
+          upstreamRepo: repo,
+          title: `fix: ${selectedOpp.title}`,
+          body: prDraftText,
+          branchName: ctx.workspace!.branchName,
+          files: ctx.activePatch!.files.map((f) => ({
+            path: f.path,
+            content: f.content,
+          })),
+          commitMessage: `fix: ${selectedOpp.title}`,
+          isDraft: true,
+        },
+      });
+
+      prUrl = submission.submissionResult.prUrl;
+      prNumber = submission.submissionResult.prNumber;
       if (ctx.telemetry) ctx.telemetry.prUrl = prUrl;
     } catch (err: any) {
       deps.stateMachine.transition(

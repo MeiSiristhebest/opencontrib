@@ -504,6 +504,111 @@ export function registerGovernanceTools(
   );
 
   // -------------------------------------------------------------
+  // Tool: contrib_record_approval (记录不可伪造的物证/代码审查批准凭证)
+  // -------------------------------------------------------------
+  server.tool(
+    "contrib_record_approval",
+    "Record explicit human or policy-waived approval artifact binding patch, evidence, governance, and PR body hashes",
+    {
+      runId: z.string().describe("Contribution run ID"),
+      approvedBy: z.string().optional().describe("Reviewer identity"),
+      waive: z
+        .boolean()
+        .optional()
+        .describe("Record policy waiver rather than explicit human approval"),
+    },
+    wrapHandler(async (args) => {
+      const { ApprovalService } = await import("@opencontrib/core");
+      const approvalService = new ApprovalService(runManager);
+
+      const artifact = approvalService.recordApproval({
+        runId: args.runId,
+        approvedBy: args.approvedBy,
+        approvalMode: args.waive ? "policy_waived" : "explicit_human",
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { status: "success", approvalArtifact: artifact },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    }),
+  );
+
+  // -------------------------------------------------------------
+  // Tool: contrib_submit_pr (受信任的 PR 授权与真实提交)
+  // -------------------------------------------------------------
+  server.tool(
+    "contrib_submit_pr",
+    "Authorize and submit PR via GitHubSubmissionService, verifying provider head SHA and advancing to PR_SUBMITTED",
+    {
+      runId: z.string().describe("Contribution run ID"),
+      owner: z.string().describe("Upstream owner"),
+      repo: z.string().describe("Upstream repo"),
+      title: z.string().describe("PR title"),
+      body: z.string().describe("PR body text or markdown"),
+      branch: z.string().describe("Branch name to submit"),
+      draft: z.boolean().optional().describe("Create as draft PR"),
+    },
+    wrapHandler(async (args) => {
+      const { GitHubSubmissionService, GitHubClient, ContributionPrService } =
+        await import("@opencontrib/core");
+
+      const client = new GitHubClient();
+      const prService = new ContributionPrService(client);
+      const submissionService = new GitHubSubmissionService(
+        prService,
+        client,
+        runManager,
+      );
+
+      // 1. Authorize submission first
+      const permit = submissionService.authorizeSubmission(
+        args.runId,
+        args.owner,
+        args.repo,
+      );
+
+      // 2. Submit and verify with provider
+      const result = await submissionService.submitAndVerifyPullRequest({
+        runId: args.runId,
+        permit,
+        submissionOptions: {
+          upstreamOwner: args.owner,
+          upstreamRepo: args.repo,
+          title: args.title,
+          body: args.body,
+          branchName: args.branch,
+          isDraft: args.draft ?? false,
+        },
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                status: "success",
+                submissionArtifact: result.submissionArtifact,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    }),
+  );
+
+  // -------------------------------------------------------------
   // Tool: contrib_lint_markdown (5层工业级 Markdown 静态完整性校验)
   // -------------------------------------------------------------
   server.tool(

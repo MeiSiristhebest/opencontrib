@@ -129,22 +129,21 @@ export class ArtifactBundleManager {
       typeof content === "string" ? content : JSON.stringify(content, null, 2);
 
     // WORM (Write-Once-Read-Many) immutability:
-    // If saving RED baseline in evidence artifact or dedicated red evidence, disallow mutation
+    // If saving RED baseline in evidence artifact or dedicated red evidence, disallow mutation or deletion
     if (type === "evidence" && existsSync(filePath)) {
       try {
         const existing = JSON.parse(readFileSync(filePath, "utf-8"));
-        if (
-          existing?.redEvidence &&
-          typeof content === "object" &&
-          content !== null
-        ) {
-          const newRed = (content as any).redEvidence;
+        if (existing?.redEvidence) {
+          const newRed =
+            typeof content === "object" && content !== null
+              ? (content as any).redEvidence
+              : undefined;
           if (
-            newRed &&
+            !newRed ||
             JSON.stringify(existing.redEvidence) !== JSON.stringify(newRed)
           ) {
             throw new Error(
-              `ImmutableArtifactViolationError: RED baseline in evidence is write-once and cannot be overwritten.`,
+              `ImmutableArtifactViolationError: RED baseline in evidence is write-once and cannot be mutated or deleted.`,
             );
           }
         }

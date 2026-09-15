@@ -18,6 +18,7 @@ import { scoutCommand } from "./commands/scout.js";
 import { workspaceCommand } from "./commands/workspace.js";
 import { evalCommand } from "./commands/eval.js";
 import { setupCommand } from "./commands/setup.js";
+import { submissionCommand } from "./commands/submission.js";
 import { displayFirstRunBannerIfNeeded } from "./utils/banner.js";
 import { sendAnonymousPing } from "./utils/telemetry.js";
 import { CliExitError } from "./utils/exit.js";
@@ -108,6 +109,7 @@ program.addCommand(scoutCommand);
 program.addCommand(workspaceCommand);
 program.addCommand(evalCommand);
 program.addCommand(setupCommand);
+program.addCommand(submissionCommand);
 
 // Graceful shutdown on SIGINT / SIGTERM
 const shutdown = (signal: "SIGINT" | "SIGTERM") => {

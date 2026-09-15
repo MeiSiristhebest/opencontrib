@@ -195,22 +195,10 @@ export function registerEvidenceTools(
 
       let persistence: { saved: boolean; error?: string } = { saved: false };
       if (args.runId) {
-        // Only auto-advance to EVIDENCE_COLLECTED when a verified RED→GREEN
-        // cycle was produced; otherwise save the artifact without advancing.
-        const isVerified =
-          fullEvidenceReport.reproductionVerified === true &&
-          fullEvidenceReport.allTestsPassing;
+        // contrib_collect_evidence is a metrics/diagnostic collector, not a privileged phase-transition tool.
+        // Canonical Evidence V2 transition is strictly reserved for contrib_verify_green.
         try {
-          if (isVerified) {
-            runManager.saveArtifactTrusted(
-              args.runId,
-              "evidence",
-              fullEvidenceReport,
-              "EVIDENCE_COLLECTED",
-            );
-          } else {
-            runManager.saveArtifact(args.runId, "evidence", fullEvidenceReport);
-          }
+          runManager.saveArtifact(args.runId, "evidence", fullEvidenceReport);
           persistence = { saved: true };
         } catch (err: any) {
           persistence = { saved: false, error: err.message };
