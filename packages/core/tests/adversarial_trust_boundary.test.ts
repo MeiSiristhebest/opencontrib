@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +8,8 @@ import {
   GitHubSubmissionService,
   SubmissionVerificationError,
   validatePhaseGate,
+  computeTestIdentity,
+  resolveTestFiles,
   type ContributionPrService,
   type GitHubClient,
 } from "../src/index.js";
@@ -333,6 +335,186 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       expect(() => {
         submissionService.authorizeSubmission(manifest.runId, "org", "repo");
       }).toThrow(/PR draft body has changed since approval/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("Attack 6: Agent keeps the SAME test command but mutates the regression test file to always pass", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-pen-test-6-"));
+    try {
+      // A real regression test file that currently FAILS.
+      const testFileRel = "regression.test.ts";
+      writeFileSync(
+        join(baseDir, testFileRel),
+        "test('sum', () => { expect(1 + 1).toBe(3); });\n",
+      );
+
+      // RED: capture the test-file CONTENT identity before the fix.
+      const redIdentity = computeTestIdentity(
+        baseDir,
+        `bun test ${testFileRel}`,
+        "toBe(3)",
+      );
+      // Sanity: resolution actually bound the concrete file by content hash.
+      expect(
+        resolveTestFiles(baseDir, `bun test ${testFileRel}`).length,
+      ).toBeGreaterThanOrEqual(1);
+      expect(redIdentity.testFiles.some((f) => f.path === testFileRel)).toBe(
+        true,
+      );
+
+      // Agent applies a fix and ALSO edits the test file to always pass.
+      writeFileSync(
+        join(baseDir, testFileRel),
+        "test('sum', () => { expect(1 + 1).toBe(2); });\n",
+      );
+
+      // GREEN: recompute identity from the CURRENT (mutated) test file.
+      const greenIdentity = computeTestIdentity(
+        baseDir,
+        `bun test ${testFileRel}`,
+        "toBe(3)",
+      );
+
+      // The mutation MUST be detected: identical command, different content.
+      expect(greenIdentity.identitySha256).not.toBe(
+        redIdentity.identitySha256,
+      );
+
+      // Forged bundle: commands + assertion fingerprint all match, only the
+      // test-file content changed. The gate must reject it.
+      const forgedBundle = {
+        redEvidence: {
+          command: `bun test ${testFileRel}`,
+          exitCode: 1,
+          observedOutputSnippet: "1 failed",
+          sourceTreeSha256: "sha-before-fix",
+          capturedAt: "2026-01-01T00:00:00Z",
+          assertionMatched: true,
+          assertionMatchedFingerprint: "fp",
+          testIdentity: redIdentity,
+        },
+        greenEvidence: {
+          command: `bun test ${testFileRel}`, // SAME command
+          exitCode: 0,
+          outputSnippet: "pass",
+          passed: true,
+          sourceTreeSha256: "sha-after-fix",
+          capturedAt: "2026-01-01T00:01:00Z",
+          treeChangedComparedToRed: true,
+          treeHashMatchesRed: false,
+          stressLoopPassed: true,
+          allTestsPassing: true,
+          assertionMatchedFingerprint: "fp", // forged to match RED
+          testIdentity: greenIdentity, // differs only in test-file content
+        },
+        reproductionVerified: true,
+        allTestsPassing: true,
+      };
+
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const prospectiveSummary = {
+        manifest: { ...manifest, currentPhase: "WORKSPACE_PREPARED" as const },
+        artifacts: {
+          workspace: { workspacePath: baseDir },
+          evidence: forgedBundle,
+        },
+        availableArtifactFiles: [],
+      };
+      const gateResult = validatePhaseGate(
+        prospectiveSummary,
+        "EVIDENCE_COLLECTED",
+      );
+      expect(gateResult.ok).toBe(false);
+      expect(gateResult.error?.message).toContain("TestIdentity mismatch");
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("Attack 6b: test-file mutation under an explicit testMutationAllowed + recorded testDiffSha256 audit is accepted", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-pen-test-6b-"));
+    try {
+      const testFileRel = "regression.test.ts";
+      writeFileSync(join(baseDir, testFileRel), "expect(1).toBe(0);\n");
+      const redIdentity = computeTestIdentity(
+        baseDir,
+        `bun test ${testFileRel}`,
+        "toBe(0)",
+      );
+      writeFileSync(
+        join(baseDir, testFileRel),
+        "expect(1).toBe(1);\n", // mutated test (legitimate, audited)
+      );
+      const greenIdentity = computeTestIdentity(
+        baseDir,
+        `bun test ${testFileRel}`,
+        "toBe(0)",
+      );
+
+      // Legitimate: testMutationAllowed=true + a recorded test diff audit hash.
+      const okBundle = {
+        redEvidence: {
+          command: `bun test ${testFileRel}`,
+          exitCode: 1,
+          observedOutputSnippet: "1 failed",
+          sourceTreeSha256: "sha-before",
+          capturedAt: "2026-01-01T00:00:00Z",
+          assertionMatched: true,
+          assertionMatchedFingerprint: "fp",
+          testIdentity: redIdentity,
+          testMutationAllowed: true,
+        },
+        greenEvidence: {
+          command: `bun test ${testFileRel}`,
+          exitCode: 0,
+          outputSnippet: "pass",
+          passed: true,
+          sourceTreeSha256: "sha-after",
+          capturedAt: "2026-01-01T00:01:00Z",
+          treeChangedComparedToRed: true,
+          treeHashMatchesRed: false,
+          stressLoopPassed: true,
+          allTestsPassing: true,
+          assertionMatchedFingerprint: "fp",
+          testIdentity: greenIdentity,
+          testDiffSha256: "audit-hash-of-changed-test",
+        },
+        reproductionVerified: true,
+        allTestsPassing: true,
+      };
+
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const prospectiveSummary = {
+        manifest: { ...manifest, currentPhase: "WORKSPACE_PREPARED" as const },
+        artifacts: {
+          workspace: { workspacePath: baseDir },
+          evidence: okBundle,
+        },
+        availableArtifactFiles: [],
+      };
+      // Explicit, audited test mutation is allowed through the gate.
+      expect(validatePhaseGate(prospectiveSummary, "EVIDENCE_COLLECTED").ok).toBe(
+        true,
+      );
+
+      // ...but the SAME mutation WITHOUT the audit hash must be rejected.
+      const missingAudit = JSON.parse(JSON.stringify(okBundle)) as any;
+      missingAudit.greenEvidence.testDiffSha256 = undefined;
+      const blockedSummary = {
+        manifest: { ...manifest, currentPhase: "WORKSPACE_PREPARED" as const },
+        artifacts: {
+          workspace: { workspacePath: baseDir },
+          evidence: missingAudit,
+        },
+        availableArtifactFiles: [],
+      };
+      expect(
+        validatePhaseGate(blockedSummary, "EVIDENCE_COLLECTED").ok,
+      ).toBe(false);
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }

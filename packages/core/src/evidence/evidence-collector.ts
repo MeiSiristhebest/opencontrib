@@ -12,6 +12,8 @@ import type {
   FlakyTestRecord,
   RedEvidence,
   GreenEvidence,
+  TestIdentity,
+  TestIdentityFile,
 } from "../contracts/schemas.js";
 import { defaultTestOutputParserRegistry } from "./parsers/registry.js";
 import { defaultVcsDeltaAdapter, type VcsDeltaPort } from "./vcs-delta.port.js";
@@ -573,7 +575,10 @@ export function computeSourceTreeHash(cwd: string): string {
           const h = createHash("sha256").update(buf).digest("hex");
           untrackedHashes.push(`${rel}:${String(st.size)}:${h}`);
         }
-      } catch {}
+      } catch {
+        // Untracked file vanished or is unreadable at capture time — skip it;
+        // the git status/diff lines still contribute to the fingerprint.
+      }
     }
     untrackedHashes.sort(byAsciiOrder);
 
@@ -648,6 +653,75 @@ export function computeTestIdentityFingerprint(input: {
 }
 
 /**
+ * Extract the concrete test file path(s) a test command targets, and hash
+ * their current on-disk contents. Deterministic between RED and GREEN because
+ * both derive the same candidate paths from the same command string; only the
+ * content sha256 changes if the Agent edits a test file in between.
+ *
+ * This closes the "same command, mutated test file" bypass: the identity
+ * fingerprint is bound to test-file CONTENT, not just the command string.
+ */
+export function resolveTestFiles(
+  cwd: string,
+  testCommand: string,
+): TestIdentityFile[] {
+  const tokens = testCommand.split(/[\s"'`]+/).filter(Boolean);
+  const testFileToken =
+    /\.(test|spec)\.[cm]?[jt]s$|\.(test|spec)\.py$|_test\.go$|^test_[a-z0-9_.]+\.py$|\.test$|\.spec$/i;
+  const candidates: string[] = [];
+  for (const tok of tokens) {
+    const cleaned = tok.replace(/^[^/]*=/, "").trim();
+    // A token is a candidate test-file path if it names a file with a
+    // test-ish extension (or any existing file referenced by the command).
+    if (testFileToken.test(cleaned) || cleaned.includes("/")) {
+      candidates.push(cleaned);
+    }
+  }
+  const files: TestIdentityFile[] = [];
+  for (const rel of candidates) {
+    try {
+      const full = join(cwd, rel);
+      const st = statSync(full);
+      if (st.isFile()) {
+        const buf = readFileSync(full);
+        const sha = createHash("sha256").update(buf).digest("hex");
+        files.push({ path: rel.replace(/^[\\/]+/, ""), sha256: sha });
+      }
+    } catch {
+      // Candidate path not present on disk — record it path-only so the
+      // identity still binds which file the command targets (and a missing
+      // file at GREEN time will differ from a RED that had it).
+      files.push({ path: rel, sha256: "" });
+    }
+  }
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return files;
+}
+
+/** Compute the stable TestIdentity for a test command at `cwd`. */
+export function computeTestIdentity(
+  cwd: string,
+  testCommand: string,
+  expectedAssertion?: string,
+): TestIdentity {
+  const normalizedCommand = testCommand.trim().replace(/\s+/g, " ");
+  const testFiles = resolveTestFiles(cwd, testCommand);
+  const normAssert = (expectedAssertion || "").trim();
+  const filePart = testFiles.map((f) => `${f.path}:${f.sha256}`);
+  const identitySha256 = createHash("sha256")
+    .update(
+      `testIdentity:${normalizedCommand}:${normAssert}:${filePart.join("|")}`,
+    )
+    .digest("hex");
+  return {
+    normalizedCommand,
+    testFiles,
+    expectedAssertion: expectedAssertion,
+    identitySha256,
+  };
+}
+
+/**
  * Evidence V2 — capture an immutable RED baseline artifact.
  * Runs the test command once, records the observed failure, and binds the
  * current source tree hash so a later GREEN can be proven to have mutated the tree.
@@ -659,6 +733,7 @@ export function captureRedEvidence(input: {
   expectedAssertion?: string;
   testFileSha256?: string;
   baselineCommitSha?: string;
+  testMutationAllowed?: boolean;
 }): RedEvidence {
   const preFix = capturePreFixAssertion(
     input.cwd,
@@ -678,6 +753,13 @@ export function captureRedEvidence(input: {
     expectedAssertion: input.expectedAssertion,
     testFileSha256: input.testFileSha256,
   });
+  // Bind the concrete test-file CONTENT identity so GREEN must prove the same
+  // test body went fail -> pass, not merely that the same command now passes.
+  const testIdentity = computeTestIdentity(
+    input.cwd,
+    input.testCommand,
+    input.expectedAssertion,
+  );
 
   return {
     command: input.testCommand,
@@ -692,6 +774,8 @@ export function captureRedEvidence(input: {
     capturedAt: new Date().toISOString(),
     assertionMatched,
     assertionMatchedFingerprint,
+    testIdentity,
+    testMutationAllowed: input.testMutationAllowed,
   };
 }
 
@@ -729,6 +813,50 @@ export function verifyGreenEvidence(input: {
     testFileSha256: redEvidence.testFileSha256,
   });
 
+  // Recompute the GREEN test-file CONTENT identity from the current on-disk
+  // test files. Never copy RED's fingerprint — a mutated test file changes
+  // the content sha256 and therefore the identity.
+  const greenTestIdentity = computeTestIdentity(
+    input.cwd,
+    input.testCommand,
+    redEvidence.expectedAssertion,
+  );
+  const redTestIdentity = redEvidence.testIdentity;
+
+  let testIdentityValid: boolean;
+  let testDiffSha256: string | undefined;
+  if (redTestIdentity) {
+    const redFileSig = redTestIdentity.testFiles
+      .map((f) => `${f.path}:${f.sha256}`)
+      .join("|");
+    const greenFileSig = greenTestIdentity.testFiles
+      .map((f) => `${f.path}:${f.sha256}`)
+      .join("|");
+    const testFilesChanged = redFileSig !== greenFileSig;
+    if (!testFilesChanged) {
+      // Same test body -> the recomputed identity must match RED's.
+      testIdentityValid =
+        greenTestIdentity.identitySha256 === redTestIdentity.identitySha256;
+      testDiffSha256 = undefined;
+    } else if (redEvidence.testMutationAllowed === true) {
+      // Explicit policy: the fix legitimately edited the test. Audit it by
+      // recording a separate hash of the changed test-file signature.
+      testIdentityValid = true;
+      testDiffSha256 = createHash("sha256")
+        .update(`testdiff:${greenFileSig}`)
+        .digest("hex");
+    } else {
+      // Default: test files are NOT allowed to change between RED and GREEN.
+      testIdentityValid = false;
+      testDiffSha256 = undefined;
+    }
+  } else {
+    // Legacy RED without TestIdentity: fall back to the assertion fingerprint.
+    testIdentityValid =
+      Boolean(redEvidence.assertionMatchedFingerprint) &&
+      greenFingerprint === redEvidence.assertionMatchedFingerprint;
+  }
+
   const greenEvidence: GreenEvidence = {
     command: input.testCommand,
     exitCode: passed ? 0 : 1,
@@ -741,15 +869,14 @@ export function verifyGreenEvidence(input: {
     stressLoopPassed: stressResult.passed,
     allTestsPassing: passed,
     assertionMatchedFingerprint: greenFingerprint,
+    testIdentity: greenTestIdentity,
+    testDiffSha256,
   };
-  const sameIdentity =
-    Boolean(redEvidence.assertionMatchedFingerprint) &&
-    greenFingerprint === redEvidence.assertionMatchedFingerprint;
   const reproductionVerified =
     redEvidence.assertionMatched === true &&
     passed &&
     treeChanged &&
-    sameIdentity;
+    testIdentityValid;
   return { greenEvidence, reproductionVerified, allTestsPassing: passed };
 }
 

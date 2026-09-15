@@ -319,6 +319,25 @@ function validateEvidenceBundleIdentity(
         greenEvidence.assertionMatchedFingerprint,
       "GREEN evidence must bind to the same assertion fingerprint as RED.",
     ],
+    [
+      (() => {
+        const hasIdentity = redEvidence.testIdentity && greenEvidence.testIdentity;
+        if (!hasIdentity) return true; // legacy bundle without TestIdentity
+        if (
+          redEvidence.testIdentity!.identitySha256 ===
+          greenEvidence.testIdentity!.identitySha256
+        ) {
+          return true; // same test body went fail -> pass
+        }
+        // Differing test-file content is only acceptable under an explicit
+        // testMutationAllowed policy with a recorded testDiffSha256 audit.
+        return (
+          redEvidence.testMutationAllowed === true &&
+          Boolean(greenEvidence.testDiffSha256)
+        );
+      })(),
+      "TestIdentity mismatch: GREEN test-file contents must equal RED's, unless an explicit testMutationAllowed policy with a recorded testDiffSha256 audit is present.",
+    ],
     [greenEvidence.passed === true, "GREEN tests must pass."],
     [
       greenEvidence.treeChangedComparedToRed === true,

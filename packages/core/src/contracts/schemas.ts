@@ -139,6 +139,23 @@ export type RepoProbeResult = z.infer<typeof RepoProbeResultSchema>;
 // ==========================================
 // 4. Empirical Evidence Contracts (Evidence V2)
 // ==========================================
+// TestIdentity binds the concrete test file(s) a command targets (by path +
+// content sha256), so GREEN must prove the SAME test body went fail -> pass,
+// not just that the same command string now exits 0.
+export const TestIdentityFileSchema = z.object({
+  path: z.string(),
+  sha256: z.string(),
+});
+export type TestIdentityFile = z.infer<typeof TestIdentityFileSchema>;
+
+export const TestIdentitySchema = z.object({
+  normalizedCommand: z.string(),
+  testFiles: z.array(TestIdentityFileSchema).default([]),
+  expectedAssertion: z.string().optional(),
+  identitySha256: z.string(),
+});
+export type TestIdentity = z.infer<typeof TestIdentitySchema>;
+
 export const RedEvidenceSchema = z.object({
   command: z.string(),
   expectedAssertion: z.string().optional(),
@@ -150,6 +167,8 @@ export const RedEvidenceSchema = z.object({
   capturedAt: z.string(),
   assertionMatched: z.boolean(),
   assertionMatchedFingerprint: z.string().optional(),
+  testIdentity: TestIdentitySchema.optional(),
+  testMutationAllowed: z.boolean().optional(),
 });
 export type RedEvidence = z.infer<typeof RedEvidenceSchema>;
 
@@ -165,6 +184,8 @@ export const GreenEvidenceSchema = z.object({
   stressLoopPassed: z.boolean().optional(),
   allTestsPassing: z.boolean().optional(),
   assertionMatchedFingerprint: z.string().optional(),
+  testIdentity: TestIdentitySchema.optional(),
+  testDiffSha256: z.string().optional(),
 });
 export type GreenEvidence = z.infer<typeof GreenEvidenceSchema>;
 
