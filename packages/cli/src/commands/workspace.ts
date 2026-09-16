@@ -5,6 +5,7 @@ import {
   WorktreeManager,
   buildContributionRunManager,
   defaultActiveSessionManager,
+  saveCanonicalArtifact,
   type ContributionRunManager,
 } from "@opencontrib/core";
 import { printJSON, printPhaseGuidance } from "../utils/output.js";
@@ -70,7 +71,8 @@ const workspacePrepare = new Command("prepare")
         let persistence: { saved: boolean; error?: string } | undefined;
         if (effectiveRunId) {
           try {
-            getRunManager().saveArtifact(
+            saveCanonicalArtifact(
+              getRunManager(),
               effectiveRunId,
               "workspace",
               {

@@ -143,7 +143,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "All development must take place inside isolated worktree sandbox.",
     ],
     suggestedNextAction:
-      "opencontrib evidence --test-cmd '<test_cmd>' --assertion '<pattern>'",
+      "opencontrib evidence capture-red --test-cmd '<test_cmd>' --assertion '<pattern>'",
   },
   POC_GENERATED: {
     phase: "POC_GENERATED",
@@ -242,7 +242,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "Present patch diff and audit report to human reviewer before PR submission.",
     ],
     suggestedNextAction:
-      "Call contrib_audit_governance to audit patch quality and anti-AI rubric.",
+      "opencontrib governance request-approval --run-id <run_id>",
   },
   PR_SUBMITTED: {
     phase: "PR_SUBMITTED",
@@ -262,7 +262,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       command: "submission",
       subcommand: "submit",
       example:
-        'opencontrib submission submit --run-id <id> --owner <owner> --repo <repo> --title "<title>" --branch <branch>',
+        'opencontrib submission submit --run-id <id>',
     },
     mcp: {
       tool: "contrib_submit_pr",

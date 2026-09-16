@@ -73,7 +73,8 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     );
 
     // 2.5 Save workspace sandbox
-    manager.saveArtifact(
+    saveCanonicalArtifact(
+      manager,
       manifest.runId,
       "workspace",
       { workspacePath: "/tmp/workspaces/kitex" },

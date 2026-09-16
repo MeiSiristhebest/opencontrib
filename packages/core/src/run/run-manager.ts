@@ -79,6 +79,7 @@ export const PRIVILEGED_PHASES = new Set<ContributionRunPhase>([
  * GovernanceService, ApprovalService, SubmissionService).
  */
 export const AUTHORITATIVE_ARTIFACT_TYPES = new Set<ArtifactType>([
+  "workspace",
   "evidence_red",
   "evidence",
   "governance",

@@ -40,11 +40,19 @@ export class EvidenceService {
     if (!run) {
       throw new Error(`Contribution run ${input.runId} does not exist`);
     }
+    const ws = run.artifacts.workspace;
+    if (!ws?.workspacePath) {
+      throw new Error(
+        `EvidenceWorkspaceRequiredError: run ${input.runId} has no canonical workspace artifact. Prepare workspace first.`,
+      );
+    }
+    const targetCwd = String(ws.workspacePath);
+    const resolvedWorkspaceRoot = input.workspaceRoot || String(ws.workspacePath);
 
     const red = captureRedEvidence({
-      cwd: input.cwd,
+      cwd: targetCwd,
       testCommand: input.testCommand,
-      workspaceRoot: input.workspaceRoot,
+      workspaceRoot: resolvedWorkspaceRoot,
       expectedAssertion: input.expectedAssertion,
       testFileSha256: input.testFileSha256,
       baselineCommitSha: input.baselineCommitSha,
@@ -96,18 +104,27 @@ export class EvidenceService {
       );
     }
 
+    const ws = run.artifacts.workspace;
+    if (!ws?.workspacePath) {
+      throw new Error(
+        `EvidenceWorkspaceRequiredError: run ${input.runId} has no canonical workspace artifact. Prepare workspace first.`,
+      );
+    }
+    const targetCwd = String(ws.workspacePath);
+    const resolvedWorkspaceRoot = input.workspaceRoot || String(ws.workspacePath);
+
     const green = verifyGreenEvidence({
-      cwd: input.cwd,
+      cwd: targetCwd,
       testCommand: input.testCommand,
-      workspaceRoot: input.workspaceRoot,
+      workspaceRoot: resolvedWorkspaceRoot,
       redEvidence,
       stressLoopCount: input.stressLoopCount ?? 1,
       concurrencyWorkers: input.concurrencyWorkers ?? 1,
     });
 
     const full = await collectEvidence({
-      cwd: input.cwd,
-      workspaceRoot: input.workspaceRoot,
+      cwd: targetCwd,
+      workspaceRoot: resolvedWorkspaceRoot,
       baselineCommitSha: input.baselineCommitSha,
       testCommand: input.testCommand,
       stressLoopCount: input.stressLoopCount ?? 1,

@@ -585,16 +585,10 @@ export function registerGovernanceTools(
     "Authorize and submit PR via GitHubSubmissionService, verifying provider head SHA and advancing to PR_SUBMITTED",
     {
       runId: z.string().describe("Contribution run ID"),
-      owner: z.string().describe("Upstream owner"),
-      repo: z.string().describe("Upstream repo"),
-      title: z.string().describe("PR title"),
-      body: z.string().describe("PR body text or markdown"),
-      branch: z.string().describe("Branch name to submit"),
-      draft: z.boolean().optional().describe("Create as draft PR"),
-      commitMessage: z
+      expectedIntentSha256: z
         .string()
         .optional()
-        .describe("Commit message (defaults to trusted patch title)"),
+        .describe("Optional expected intent SHA256 to guard against concurrent mutations"),
     },
     wrapHandler(async (args) => {
       const { GitHubSubmissionService, GitHubClient, ContributionPrService } =

@@ -70,14 +70,13 @@ export function registerRunTools(
   // -------------------------------------------------------------
   server.tool(
     "contrib_save_artifact",
-    "Save discrete stage artifact (opportunity, context, workspace, patch, evidence, governance, pr_draft, result) to run bundle",
+    "Save discrete stage artifact (opportunity, context, patch, evidence, governance, pr_draft, result) to run bundle. Use contrib_prepare_workspace to save workspace artifacts.",
     {
       runId: z.string().describe("Unique contribution run ID"),
       artifactType: z.enum([
         "opportunity",
         "probe",
         "context",
-        "workspace",
         "poc",
         "patch",
         "evidence",

@@ -33,6 +33,7 @@ import {
 import { GitHubSubmissionService } from "../../github/submission-service.js";
 import { ApprovalService } from "../../governance/approval-service.js";
 import { defaultRunManager } from "../../run/run-manager.js";
+import { saveCanonicalArtifact } from "../../run/canonical-writer.js";
 import { buildTurnPrompt } from "../agent-orchestrator.js";
 import type {
   PipelineContext,
@@ -165,11 +166,17 @@ export class WorkspaceAllocationStep implements PipelineStep {
       workspacePath: workspace.workspacePath,
       branchName: workspace.branchName,
     };
-    runManager.saveArtifact(ctx.runId, "workspace", {
-      workspacePath: workspace.workspacePath,
-      branchName: workspace.branchName,
-      baseCommitSha: (workspace as any).baseCommitSha,
-    });
+    saveCanonicalArtifact(
+      runManager,
+      ctx.runId,
+      "workspace",
+      {
+        workspacePath: workspace.workspacePath,
+        branchName: workspace.branchName,
+        baseCommitSha: (workspace as any).baseCommitSha,
+      },
+      "WORKSPACE_PREPARED",
+    );
     return continuePipeline();
   }
 }
@@ -275,6 +282,15 @@ export class PatchGenerationStep implements PipelineStep {
 
     ctx.patchDraft = patchDraft;
     ctx.activePatch = patchDraft;
+    if (ctx.runId) {
+      const runManager = deps.runManager ?? defaultRunManager;
+      runManager.saveArtifact(
+        ctx.runId,
+        "patch",
+        patchDraft as any,
+        "PATCH_DRAFTED",
+      );
+    }
     return continuePipeline();
   }
 }
@@ -817,8 +833,8 @@ export class PrSubmissionStep implements PipelineStep {
 
       // Ensure only non-authoritative stage artifacts are written generically;
       // evidence must already have been produced by EvidenceService.
-      if (ctx.workspace) {
-        runManager.saveArtifact(runId, "workspace", ctx.workspace as any);
+      if (ctx.workspace && !runManager.getRun(runId)?.artifacts.workspace) {
+        saveCanonicalArtifact(runManager, runId, "workspace", ctx.workspace as any, "WORKSPACE_PREPARED");
       }
       if (ctx.activePatch) {
         runManager.saveArtifact(runId, "patch", ctx.activePatch as any);

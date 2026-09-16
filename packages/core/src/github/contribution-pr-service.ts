@@ -207,7 +207,7 @@ export class ContributionPrService {
         owner: forkOwner,
         repo: upstreamRepo,
         ref: `refs/heads/${branchName}`,
-        sha: baseCommitSha,
+        sha: newCommit.data.sha,
       });
     } catch (err: any) {
       if (err?.status !== 409) {

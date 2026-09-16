@@ -13,6 +13,7 @@ import {
   validatePhaseGate,
 } from "../src/index.js";
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
+import { EvidenceService } from "../src/evidence/evidence-service.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
 
 const testApprovalAuthority = () =>
@@ -28,7 +29,8 @@ function seedGovernanceReadyRun(
   runId: string,
   body = "pr body",
 ): void {
-  manager.saveArtifact(
+  saveCanonicalArtifact(
+    manager,
     runId,
     "workspace",
     {
@@ -322,6 +324,115 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         "COMPLETED",
       );
       expect(validCompletedGate.ok).toBe(true);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+  it("ContributionPrService.submitPullRequest points createRef directly at newCommit.data.sha", async () => {
+    let createdRefSha: string | undefined;
+    let createdRefName: string | undefined;
+
+    const fakeOctokit: any = {
+      rest: {
+        users: {
+          getAuthenticated: async () => ({
+            data: { login: "fork-user", name: "Fork User" },
+          }),
+        },
+        repos: {
+          get: async () => ({
+            data: {
+              name: "repo",
+              owner: { login: "fork-user" },
+              default_branch: "main",
+              fork: true,
+              parent: { full_name: "upstream-owner/repo", owner: { login: "upstream-owner" } },
+            },
+          }),
+          getBranch: async () => ({
+            data: {
+              name: "main",
+              commit: { sha: "base-commit-sha-1234" },
+            },
+          }),
+        },
+        git: {
+          getTree: async () => ({
+            data: { sha: "base-tree-sha" },
+          }),
+          createBlob: async () => ({
+            data: { sha: "blob-sha-9999" },
+          }),
+          createTree: async () => ({
+            data: { sha: "new-tree-sha" },
+          }),
+          createCommit: async () => ({
+            data: { sha: "commit-sha-5678" },
+          }),
+          getCommit: async () => ({
+            data: { tree: { sha: "base-tree-sha" } },
+          }),
+          getRef: async () => ({
+            data: { object: { sha: "base-commit-sha-1234" } },
+          }),
+          createRef: async (args: any) => {
+            createdRefName = args.ref;
+            createdRefSha = args.sha;
+            return { data: {} };
+          },
+        },
+        pulls: {
+          list: async () => ({ data: [] }),
+          create: async () => ({
+            data: {
+              number: 101,
+              html_url: "https://github.com/upstream-owner/repo/pull/101",
+            },
+          }),
+        },
+      },
+    };
+
+    const fakeClient = {
+      octokit: fakeOctokit,
+      getRepoDetails: async () => ({
+        success: true,
+        data: { defaultBranch: "main" },
+      }),
+    } as any;
+    const prService = new ContributionPrService(fakeClient);
+
+    const res = await prService.submitPullRequest({
+      upstreamOwner: "upstream-owner",
+      upstreamRepo: "repo",
+      title: "fix: sample bug",
+      body: "fixes #1",
+      branchName: "opencontrib/run-123",
+      files: [{ path: "fix.ts", content: "export const x = 1;" }],
+      commitMessage: "fix: sample bug",
+    });
+
+    expect(res.status).toBe("SUCCESS");
+    expect(res.commitSha).toBe("commit-sha-5678");
+    expect(createdRefName).toBe("refs/heads/opencontrib/run-123");
+    // Explicit verification: createRef points to newly produced commit SHA, not base SHA!
+    expect(createdRefSha).toBe("commit-sha-5678");
+  });
+
+  it("EvidenceService throws EvidenceWorkspaceRequiredError when run has no canonical workspace artifact", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ev-no-ws-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+
+      const evidenceService = new EvidenceService(manager);
+      expect(() => {
+        evidenceService.captureRed({
+          runId: manifest.runId,
+          cwd: "/some/unrelated/cwd",
+          testCommand: "bun test",
+        });
+      }).toThrow("EvidenceWorkspaceRequiredError");
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }

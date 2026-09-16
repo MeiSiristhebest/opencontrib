@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as path from 'path';
 import * as os from 'os';
-import { ContributionRunManager, WorktreeManager } from '@opencontrib/core';
+import { ContributionRunManager, WorktreeManager, saveCanonicalArtifact } from '@opencontrib/core';
 
 export function registerWorkspaceTools(
   server: McpServer,
@@ -33,7 +33,8 @@ export function registerWorkspaceTools(
         let persistence: { saved: boolean; error?: string } = { saved: false };
         if (args.runId) {
           try {
-            runManager.saveArtifact(
+            saveCanonicalArtifact(
+              runManager,
               args.runId,
               'workspace',
               {

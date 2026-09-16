@@ -175,6 +175,7 @@ export class AgentOrchestrator {
       clock,
       llmService,
       runManager,
+      approvalAuthority: options.deps?.approvalAuthority,
     };
   }
 

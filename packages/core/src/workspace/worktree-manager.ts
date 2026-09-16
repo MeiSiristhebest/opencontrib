@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir as osHomedir, tmpdir } from 'os';
 import { dirname, join, resolve, sep } from 'path';
 import { sanitizeRunId } from '../run/artifact-bundle.js';
+import { runBranchName } from '../run/run-branch.js';
 import { ensureWorkspaceGuard, releaseWorkspaceGuard, isProtectedWorkspace } from './workspace-guard.js';
 import { getOpenContribHome } from '../kernel/home.js';
 
@@ -142,7 +143,7 @@ export class WorktreeManager {
     const sanitizedRepoName = repoFullName.replace('/', '__');
     const cleanRunId = runId ? sanitizeRunId(runId) : '';
     const runSuffix = cleanRunId ? `-${cleanRunId.slice(-6)}` : '';
-    const branchName = `opencontrib/fix-${issueOrTaskId}${runSuffix}`;
+    const branchName = runId ? runBranchName(runId) : `opencontrib/fix-${issueOrTaskId}${runSuffix}`;
     const workspacePath = join(this.workspaceRoot, `${sanitizedRepoName}__${issueOrTaskId}${runSuffix}`);
 
     if (existsSync(workspacePath)) {

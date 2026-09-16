@@ -32,7 +32,7 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
     expect(res.error?.missingPrerequisites).toContain(
       "Missing artifact: evidence",
     );
-    expect(res.error?.suggestedAction).toContain("contrib_audit_governance");
+    expect(res.error?.suggestedAction).toMatch(/governance/);
   });
 
   it("allows advancing to GOVERNANCE_AUDITED when workspace, patch, and evidence are present", () => {

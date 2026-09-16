@@ -9,5 +9,4 @@ export * from './markdown-validator.js';
 export * from './community-gate.js';
 export * from './approval-service.js';
 export * from './governance-service.js';
-
-
+export * from './approval-authority.js';

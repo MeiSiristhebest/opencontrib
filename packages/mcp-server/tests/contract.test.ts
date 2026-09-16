@@ -148,19 +148,27 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(manifest.runId).toStartWith("run_");
     expect(manifest.currentPhase).toBe("INITIALIZED");
 
-    // PATCH_DRAFTED requires a prepared workspace, so save the workspace
-    // artifact and advance to WORKSPACE_PREPARED before drafting the patch.
-    const wsResult = await tools["contrib_save_artifact"].handler({
+    // PATCH_DRAFTED requires a prepared workspace, so use contrib_prepare_workspace
+    // to save the workspace artifact and advance to WORKSPACE_PREPARED.
+    const tempDir = mkdtempSync(join(tmpdir(), "opencontrib-contract-test-"));
+    spawnSync("git", ["init", "-b", "main"], { cwd: tempDir });
+    spawnSync("git", ["config", "user.name", "Tester"], { cwd: tempDir });
+    spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: tempDir });
+    writeFileSync(join(tempDir, "README.md"), "# Test\n");
+    spawnSync("git", ["add", "."], { cwd: tempDir });
+    spawnSync("git", ["commit", "-m", "initial"], { cwd: tempDir });
+
+    const wsResult = await tools["contrib_prepare_workspace"].handler({
+      repoFullName: "test-org/contract-test-repo",
+      issueOrTaskId: 42,
+      localRepoPath: tempDir,
       runId: manifest.runId,
-      artifactType: "workspace",
-      content: JSON.stringify({
-        workspacePath: "/tmp/sandbox",
-        branchName: "opencontrib/fix-42",
-        baseCommitSha: "abc123",
-      }),
-      autoAdvancePhase: "WORKSPACE_PREPARED",
     });
     expect(wsResult.isError).toBeUndefined();
+    const wsData = JSON.parse(wsResult.content[0].text);
+    expect(wsData.status).toBe("success");
+
+    try { rmSync(tempDir, { recursive: true, force: true }); } catch { /* best-effort */ }
 
     // Save artifact and advance phase
     const saveResult = await tools["contrib_save_artifact"].handler({
@@ -243,7 +251,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(wsResult.isError).toBeUndefined();
     const ws = JSON.parse(wsResult.content[0].text);
     expect(ws.status).toBe("success");
-    expect(ws.branchName).toContain("opencontrib/fix-101");
+    expect(ws.branchName).toMatch(/opencontrib\/(fix-101|run-)/);
     expect(ws.baseCommitSha).toBeDefined();
     expect(ws.persistence?.saved).toBe(true);
 

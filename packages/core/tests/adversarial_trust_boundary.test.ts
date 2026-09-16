@@ -31,7 +31,8 @@ function seedGovernanceReadyRun(
   runId: string,
   body = "pr body",
 ): void {
-  manager.saveArtifact(
+  saveCanonicalArtifact(
+    manager,
     runId,
     "workspace",
     {

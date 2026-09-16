@@ -52,6 +52,7 @@ export function saveCanonicalArtifact(
   autoAdvancePhase?: ContributionRunPhase,
 ): SavedArtifactResult {
   const authoritativeTypes = new Set<ArtifactType>([
+    "workspace",
     "evidence_red",
     "evidence",
     "governance",

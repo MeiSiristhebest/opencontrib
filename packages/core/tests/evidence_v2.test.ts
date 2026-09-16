@@ -172,7 +172,8 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       });
 
       // Advance to PATCH_DRAFTED
-      manager.saveArtifact(
+      saveCanonicalArtifact(
+        manager,
         manifest.runId,
         "workspace",
         { workspacePath: wsDir },

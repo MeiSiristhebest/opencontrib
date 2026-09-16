@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
+import { runBranchName } from "../run/run-branch.js";
 import {
   GovernanceDecisionArtifactSchema,
   SubmissionIntentArtifactSchema,
@@ -143,7 +144,7 @@ export class SubmissionIntentService {
       );
     }
 
-    const branchName = runOwnedBranch(input.runId);
+    const branchName = runBranchName(input.runId);
     if (input.branchName !== undefined && input.branchName !== branchName) {
       throw new Error(
         `SubmissionBranchMismatchError: branch must be the run-owned branch '${branchName}'.`,
