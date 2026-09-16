@@ -20,11 +20,8 @@ import { scoutOpportunities } from "../../discovery/scout.js";
 import { MultiSignalHeuristicRanker } from "../../discovery/ranking.js";
 import { detectSystemCapabilities } from "../../discovery/feasibility.js";
 import {
-  verifyEmpiricalReproduction,
-  collectEvidence,
-  captureRedEvidence,
-  verifyGreenEvidence,
 } from "../../evidence/evidence-collector.js";
+import { EvidenceService } from "../../evidence/evidence-service.js";
 import { generateSubagentReviewPrompt } from "../../governance/subagent-reviewer.js";
 import { deriveEvidenceBackedQualityRubric } from "../../governance/governance-auditor.js";
 import { buildPrDescription } from "../../governance/template-merger.js";
@@ -147,6 +144,14 @@ export class WorkspaceAllocationStep implements PipelineStep {
     deps: PipelineDeps,
   ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
+    const runManager = deps.runManager ?? defaultRunManager;
+    if (!ctx.runId) {
+      ctx.runId = runManager.createRun({
+        repoFullName: selectedOpp.repoFullName,
+        issueNumber: selectedOpp.issueNumber,
+        issueTitle: selectedOpp.title,
+      }).runId;
+    }
     deps.stateMachine.transition(
       "ONBOARDING",
       `Preparing clean-room worktree for ${selectedOpp.repoFullName}`,
@@ -160,6 +165,11 @@ export class WorkspaceAllocationStep implements PipelineStep {
       workspacePath: workspace.workspacePath,
       branchName: workspace.branchName,
     };
+    runManager.saveArtifact(ctx.runId, "workspace", {
+      workspacePath: workspace.workspacePath,
+      branchName: workspace.branchName,
+      baseCommitSha: (workspace as any).baseCommitSha,
+    });
     return continuePipeline();
   }
 }
@@ -193,8 +203,10 @@ export class ContextAssemblyStep implements PipelineStep {
     let preFixReproductionCaptured = false;
     let preFixOutput = "";
     let redEvidence: any;
-    if (testCmd) {
-      const red = captureRedEvidence({
+    if (testCmd && ctx.runId) {
+      const runManager = deps.runManager ?? defaultRunManager;
+      const red = new EvidenceService(runManager).captureRed({
+        runId: ctx.runId,
         cwd: ctx.workspace!.workspacePath,
         testCommand: testCmd,
       });
@@ -209,6 +221,13 @@ export class ContextAssemblyStep implements PipelineStep {
     ctx.preFixReproductionCaptured = preFixReproductionCaptured;
     ctx.preFixOutput = preFixOutput;
     ctx.evidenceReport = { redEvidence };
+    if (ctx.runId) {
+      (deps.runManager ?? defaultRunManager).saveArtifact(
+        ctx.runId,
+        "context",
+        assembledContext as any,
+      );
+    }
     return continuePipeline();
   }
 }
@@ -269,6 +288,7 @@ export class ImplementValidateLoopStep implements PipelineStep {
     deps: PipelineDeps,
   ): Promise<StepOutcome> {
     const workspacePath = ctx.workspace!.workspacePath;
+    const runManager = deps.runManager ?? defaultRunManager;
     const prompt = ctx.prompt!;
     const testCmd = ctx.testCmd;
     const activePatchRef = { patch: ctx.activePatch! };
@@ -359,30 +379,16 @@ export class ImplementValidateLoopStep implements PipelineStep {
         });
       } else if (testCmd) {
         try {
-          let green: any;
-          if (ctx.evidenceReport?.redEvidence) {
-            green = verifyGreenEvidence({
-              cwd: workspacePath,
-              testCommand: testCmd,
-              redEvidence: ctx.evidenceReport.redEvidence,
-              stressLoopCount: loopRuns,
-            });
+          if (!ctx.runId) {
+            throw new Error("Canonical run is missing; refusing to persist evidence.");
           }
-
-          evidenceReport = await collectEvidence({
+          evidenceReport = await new EvidenceService(runManager).verifyGreen({
+            runId: ctx.runId,
             cwd: workspacePath,
             testCommand: testCmd,
+            workspaceRoot: workspacePath,
             stressLoopCount: loopRuns,
-            runFlakyBaseline: false,
           });
-
-          if (green) {
-            evidenceReport.redEvidence = ctx.evidenceReport.redEvidence;
-            evidenceReport.greenEvidence = green.greenEvidence;
-            evidenceReport.reproductionVerified =
-              green.reproductionVerified &&
-              Boolean(evidenceReport.allTestsPassing);
-          }
 
           const output = `Stress loops passed: ${evidenceReport.stressLoopPassed}, Passed tests: ${evidenceReport.passedUnitTestsCount}, Failed tests: ${evidenceReport.failedUnitTestsCount || 0}`;
           toolFeedback.push({
@@ -777,6 +783,7 @@ export class PrSubmissionStep implements PipelineStep {
     const riskAssessment = ctx.riskAssessment!;
     const owner = ctx.owner!;
     const repo = ctx.repo!;
+    const runManager = deps.runManager ?? defaultRunManager;
 
     const prDraftText = buildPrDescription({
       issueNumber: selectedOpp.issueNumber,
@@ -796,88 +803,84 @@ export class PrSubmissionStep implements PipelineStep {
     let prNumber: number;
 
     try {
-      // Unify Autonomous protocol with trusted Governance -> Approval -> Permit -> GitHubSubmissionService
-      let runId = ctx.telemetry?.runId;
-      if (!runId || !defaultRunManager.getRun(runId)) {
-        const created = defaultRunManager.createRun({
+      // Unify autonomous orchestration with the trusted run-scoped protocol.
+      let runId = ctx.runId;
+      if (!runId || !runManager.getRun(runId)) {
+        const created = runManager.createRun({
           repoFullName: `${owner}/${repo}`,
           issueNumber: selectedOpp.issueNumber,
+          issueTitle: selectedOpp.title,
         });
         runId = created.runId;
+        ctx.runId = runId;
       }
 
-      // Ensure required stage artifacts are present for governance & approval
+      // Ensure only non-authoritative stage artifacts are written generically;
+      // evidence must already have been produced by EvidenceService.
       if (ctx.workspace) {
-        defaultRunManager.saveArtifact(
-          runId,
-          "workspace",
-          ctx.workspace as any,
-        );
+        runManager.saveArtifact(runId, "workspace", ctx.workspace as any);
       }
       if (ctx.activePatch) {
-        defaultRunManager.saveArtifact(runId, "patch", ctx.activePatch as any);
+        runManager.saveArtifact(runId, "patch", ctx.activePatch as any);
       }
-      if (ctx.evidenceReport) {
-        defaultRunManager.saveArtifact(runId, "evidence", ctx.evidenceReport);
+      const persistedRun = runManager.getRun(runId);
+      if (!persistedRun?.artifacts.evidence) {
+        throw new Error(
+          "CanonicalEvidenceRequiredError: submission cannot proceed without EvidenceService output.",
+        );
       }
-      defaultRunManager.saveArtifact(runId, "pr_draft", prDraftText);
+      runManager.saveArtifact(runId, "pr_draft", prDraftText);
 
-      // Save governance audit artifact
-      defaultRunManager.saveArtifactTrusted(
-        runId,
-        "governance",
-        {
-          overallConfidence: {
-            overallScore: qualityRubric.overallScore,
-            isPassed: qualityRubric.isPassed,
-          },
-          technicalGate: { status: "PASS" },
-          approvalGate: {
-            status: ctx.humanApproved ? "APPROVED" : "WAIVED",
-            approved: Boolean(ctx.humanApproved),
-          },
-        } as any,
-        "GOVERNANCE_AUDITED",
+      const { GovernanceService } = await import(
+        "../../governance/governance-service.js"
       );
-
-      // Record ApprovalArtifact binding patch, evidence, governance, and PR body
-      const approvalService = new ApprovalService(defaultRunManager);
-      approvalService.recordApproval({
-        runId,
-        approvedBy: ctx.humanApproved
-          ? "human_reviewer"
-          : "autonomous_policy_waived",
-        approvalMode: ctx.humanApproved ? "explicit_human" : "policy_waived",
+      const governanceService = new GovernanceService(runManager);
+      governanceService.audit(runId, {
+        prTitle: `fix: ${selectedOpp.title}`,
+        prBody: prDraftText,
+        subagentScore: qualityRubric.overallScore,
       });
 
-      // Secure GitHub submission through GitHubSubmissionService
+      const { SubmissionIntentService } = await import(
+        "../../submission/submission-intent-service.js"
+      );
+      const intentService = new SubmissionIntentService(runManager);
+      const intent = intentService.createIntent({
+        runId,
+        upstreamOwner: owner,
+        upstreamRepo: repo,
+        title: `fix: ${selectedOpp.title}`,
+        body: prDraftText,
+        branchName: ctx.workspace!.branchName,
+        commitMessage: `fix: ${selectedOpp.title}`,
+        isDraft: true,
+      });
+
+      if (!ctx.humanApproved) {
+        throw new Error(
+          "HumanApprovalRequiredError: autonomous submission requires an external approval decision.",
+        );
+      }
+      if (!deps.approvalAuthority) {
+        throw new Error(
+          "ApprovalAuthorityRequiredError: no host-issued trusted approval capability is available.",
+        );
+      }
+      const approvalService = new ApprovalService(
+        runManager,
+        deps.approvalAuthority,
+      );
+      approvalService.recordApproval({
+        runId,
+        expectedIntentSha256: intent.intentSha256,
+      });
+
       const submissionService = new GitHubSubmissionService(
         deps.prService,
         deps.client,
-        defaultRunManager,
+        runManager,
       );
-
-      // 1. Authorize submission (verify permit & integrity)
-      const permit = submissionService.authorizeSubmission(runId, owner, repo);
-
-      // 2. Submit and verify PR with provider
-      const submission = await submissionService.submitAndVerifyPullRequest({
-        runId,
-        permit,
-        submissionOptions: {
-          upstreamOwner: owner,
-          upstreamRepo: repo,
-          title: `fix: ${selectedOpp.title}`,
-          body: prDraftText,
-          branchName: ctx.workspace!.branchName,
-          files: ctx.activePatch!.files.map((f) => ({
-            path: f.path,
-            content: f.content,
-          })),
-          commitMessage: `fix: ${selectedOpp.title}`,
-          isDraft: true,
-        },
-      });
+      const submission = await submissionService.submit(runId);
 
       prUrl = submission.submissionResult.prUrl;
       prNumber = submission.submissionResult.prNumber;
@@ -912,23 +915,34 @@ export class PrSubmissionStep implements PipelineStep {
       prUrl,
     });
 
-    deps.flywheel.saveRecord({
-      id: `${selectedOpp.repoFullName}#${prNumber}`,
-      repoFullName: selectedOpp.repoFullName,
-      issueNumber: selectedOpp.issueNumber,
-      issueTitle: selectedOpp.title,
-      prNumber,
-      prUrl,
-      status: "submitted",
-      submittedAt: deps.clock.nowIso(),
-      diffStat: `~${activePatch?.estimatedDiffLines || 10} lines`,
-      evidenceSummary: `Verified across ${ctx.implementationAttempts} attempt(s) with ${qualityRubric.overallScore}% quality score (${validationStatus})`,
-      provenance: {
-        source: "system_recorded",
-        verified: true,
-        verifiedAt: deps.clock.nowIso(),
-      },
-    });
+    try {
+      if (!ctx.runId) {
+        throw new Error("Canonical run is missing after verified submission.");
+      }
+      deps.flywheel.syncFromRun(runManager, ctx.runId);
+    } catch (err: any) {
+      deps.stateMachine.transition(
+        "BLOCKED",
+        `Verified submission could not be synced from canonical run: ${err.message}`,
+      );
+      return halt({
+        status: "BLOCKED",
+        stage: "FLYWHEEL_SYNC",
+        selectedOpportunity: selectedOpp,
+        workspacePath: ctx.workspace?.workspacePath,
+        patchDraft: ctx.patchDraft || undefined,
+        appliedFiles: ctx.appliedFiles,
+        implementationAttempts: ctx.implementationAttempts,
+        validationStatus,
+        confidenceScore: qualityRubric.overallScore,
+        subagentReview: ctx.subagentReview,
+        riskAssessment,
+        telemetry: { ...ctx.telemetry!, status: "FAILED" },
+        prUrl,
+        prNumber,
+        reportSummary: `PR submission was provider-verified, but canonical flywheel synchronization failed: ${err.message}.`,
+      });
+    }
 
     // Cleanup workspace if configured
     if (policy.autoPurgeSandboxOnFinish) {

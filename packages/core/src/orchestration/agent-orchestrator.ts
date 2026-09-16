@@ -3,6 +3,7 @@ import { RepoMemoryLedger } from '../memory/repo-memory.js';
 import { ProfileFlywheel } from '../flywheel/profile-sync.js';
 import { WorktreeManager } from '../workspace/worktree-manager.js';
 import { ContributionPrService } from '../github/contribution-pr-service.js';
+import { ContributionRunManager } from '../run/run-manager.js';
 import { LLMService } from '../llm/llm-service.js';
 import { ContextAssembler } from '../discovery/context-assembler.js';
 import { ContributionStateMachine } from './state-machine.js';
@@ -160,6 +161,7 @@ export class AgentOrchestrator {
     const stateMachine =
       options.deps?.stateMachine ?? new ContributionStateMachine(options.policy);
     const clock = options.deps?.clock ?? new SystemClock();
+    const runManager = options.deps?.runManager ?? new ContributionRunManager();
     const llmService = options.deps?.llmService ?? resolveLlmService(options.llmService);
 
     this.deps = {
@@ -172,6 +174,7 @@ export class AgentOrchestrator {
       stateMachine,
       clock,
       llmService,
+      runManager,
     };
   }
 

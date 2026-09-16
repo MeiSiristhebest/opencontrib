@@ -22,6 +22,8 @@ import type { ContextAssembler } from '../../discovery/context-assembler.js';
 import type { RepoMemoryLedger } from '../../memory/repo-memory.js';
 import type { ProfileFlywheel } from '../../flywheel/profile-sync.js';
 import type { ContributionPrService } from '../../github/contribution-pr-service.js';
+import type { ContributionRunManager } from '../../run/run-manager.js';
+import type { TrustedApprovalAuthority } from '../../governance/approval-authority.js';
 import type { Clock } from '../../ports/clock.port.js';
 import type {
   OrchestratorRunResult,
@@ -51,6 +53,10 @@ export interface PipelineDeps {
   contextAssembler: ContextAssembler;
   stateMachine: ContributionStateMachine;
   clock: Clock;
+  /** Canonical run/artifact authority; defaults only for legacy test wiring. */
+  runManager?: ContributionRunManager;
+  /** Optional host-issued capability; agent input can never mint approval. */
+  approvalAuthority?: TrustedApprovalAuthority;
 }
 
 /**
@@ -88,6 +94,7 @@ export interface PipelineContext {
   qualityRubric?: { overallScore: number; isPassed: boolean; [k: string]: unknown };
   riskAssessment?: RiskAssessment;
   telemetry?: TelemetryRecord;
+  runId?: string;
   requiresHumanGate?: boolean;
 }
 

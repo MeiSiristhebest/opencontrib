@@ -4,7 +4,6 @@ import { Command } from "commander";
 import {
   ProfileFlywheel,
   buildContributionRunManager,
-  defaultActiveSessionManager,
   type ContributionRunManager,
 } from "@opencontrib/core";
 import {
@@ -26,122 +25,52 @@ const flywheelSync = new Command("sync")
   .description(
     "Persist contribution memory, update skill weights, refine heuristics",
   )
-  .requiredOption("--repo <name>", "Repository full name")
-  .option("-f, --input-file <path>", "Path to JSON file containing record")
-  .option("--input <json>", "Record JSON (runId, status, techStack, etc.)")
+  .option("--repo <name>", "Inspection-only expected repository")
+  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
+  .option("-f, --input-file <path>", "Optional JSON containing only runId/repo")
+  .option("--input <json>", "Optional JSON containing only runId/repo")
   .option("--pretty", "Pretty-print", false)
   .action(
     async (opts: {
-      repo: string;
+      repo?: string;
+      runId?: string;
       inputFile?: string;
       input?: string;
       pretty?: boolean;
     }) => {
       try {
-        let input = "";
+        let parsed: { runId?: string; repo?: string } = {};
         if (opts.inputFile && fs.existsSync(opts.inputFile)) {
-          input = fs.readFileSync(opts.inputFile, "utf-8");
+          parsed = (parseJSON(fs.readFileSync(opts.inputFile, "utf-8"), "input-file") as typeof parsed) || {};
         } else if (opts.input) {
-          input = opts.input;
-        } else {
-          input = await readStdin();
+          parsed = (parseJSON(opts.input, "--input") as typeof parsed) || {};
+        } else if (!opts.runId) {
+          const stdin = await readStdin();
+          if (stdin.trim()) parsed = (parseJSON(stdin, "stdin") as typeof parsed) || {};
         }
-        const parsed = (parseJSON(input, "stdin/--input") as any) || {};
 
-        const runId = parsed.runId || getRunManager().resolveRunId();
-        const status = parsed.status || "submitted";
-
+        const runManager = getRunManager();
+        const runId = opts.runId || parsed.runId || runManager.resolveRunId();
         if (!runId) {
-          console.error(
-            "❌ Missing runId (no active session found and not provided in input JSON)",
-          );
-          process.exit(1);
+          throw new Error("Missing runId; provide --run-id or create an active contribution run.");
+        }
+        const run = runManager.getRun(runId);
+        if (!run) throw new Error(`Unknown contribution run: ${runId}`);
+        const expectedRepo = opts.repo || parsed.repo;
+        if (expectedRepo && expectedRepo.toLowerCase() !== run.manifest.repoFullName.toLowerCase()) {
+          throw new Error("FlywheelSyncError: --repo does not match the run manifest.");
         }
 
-        const result = await flywheel.recordContribution(opts.repo, {
-          id: runId,
-          repoFullName: opts.repo,
-          issueNumber: parsed.issueNumber,
-          issueTitle: parsed.issueTitle || "",
-          prNumber: parsed.prNumber,
-          prUrl: parsed.prUrl || "",
-          status,
-          provenance: parsed.provenance || {
-            source: "agent_claim",
-            verified: false,
-          },
-          submittedAt: parsed.submittedAt || new Date().toISOString(),
-          mergedAt: parsed.mergedAt,
-          closedAt: parsed.closedAt,
-          diffStat: parsed.diffStat || "",
-          evidenceSummary: parsed.evidenceSummary || "",
-        } as any);
-
-        // Trust boundary: Flywheel NEVER creates/synthesizes SubmissionArtifact.
-        // It only consumes an existing trusted submission artifact created by GitHubSubmissionService.
-        const existingRun = getRunManager().getRun(runId);
-        const trustedSubmission = existingRun?.artifacts?.submission as any;
-        const isVerifiedSubmission = Boolean(
-          trustedSubmission &&
-            trustedSubmission.verified === true &&
-            trustedSubmission.prNumber &&
-            trustedSubmission.prUrl,
-        );
-
-        let persistenceError: string | undefined;
-        if (isVerifiedSubmission) {
-          try {
-            getRunManager().saveArtifactTrusted(
-              runId,
-              "result",
-              {
-                flywheelResult: result,
-                status,
-                prNumber: trustedSubmission.prNumber,
-                prUrl: trustedSubmission.prUrl,
-                submission: trustedSubmission,
-                submissionVerified: true,
-                submissionProvenance: {
-                  source: "github_submission_service",
-                  verified: true,
-                },
-              } as any,
-              "COMPLETED",
-            );
-            defaultActiveSessionManager.updatePhase("COMPLETED", runId);
-          } catch (err: any) {
-            persistenceError = err.message;
-          }
-        } else {
-          try {
-            getRunManager().saveArtifact(runId, "result", {
-              flywheelResult: result,
-              status,
-              submissionVerified: false,
-            } as any);
-          } catch (err: any) {
-            persistenceError = err.message;
-          }
-        }
-
-        const effectivePhase = persistenceError
-          ? getRunManager().getRun(runId)?.manifest.currentPhase ||
-            "GOVERNANCE_AUDITED"
-          : isVerifiedSubmission
-            ? "COMPLETED"
-            : existingRun?.manifest.currentPhase || "GOVERNANCE_AUDITED";
-
+        const result = flywheel.syncFromRun(runManager, runId);
+        const effectivePhase = runManager.getRun(runId)?.manifest.currentPhase || "COMPLETED";
         printJSON({ status: "success", flywheelResult: result }, opts.pretty);
-
         printPhaseGuidance({
           currentPhase: effectivePhase,
           runId,
           status: "SUCCESS",
           invariants: [
-            effectivePhase === "COMPLETED"
-              ? "All 9 phases of OpenContrib contribution engine completed successfully."
-              : "Contribution record saved to flywheel memory ledger (awaiting verified PR submission).",
-            "Memory ledger and developer heuristics synchronized.",
+            "Profile data was derived only from canonical verified submission and evidence artifacts.",
+            "The canonical result artifact and completion transition were produced by the trusted flywheel service.",
           ],
         });
       } catch (err: any) {

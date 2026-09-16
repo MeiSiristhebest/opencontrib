@@ -64,12 +64,28 @@ export interface ResumeRunResult {
 
 import { validatePhaseGate } from "./state-machine.js";
 import { getOpenContribHome } from "../kernel/home.js";
+import { registerCanonicalRunWriter } from "./canonical-writer.js";
 
 export const PRIVILEGED_PHASES = new Set<ContributionRunPhase>([
   "EVIDENCE_COLLECTED",
   "GOVERNANCE_AUDITED",
   "PR_SUBMITTED",
   "COMPLETED",
+]);
+
+/**
+ * Authoritative artifacts that CANNOT be created or overwritten via generic saveArtifact.
+ * They must only be written through trusted internal services (e.g. EvidenceService,
+ * GovernanceService, ApprovalService, SubmissionService).
+ */
+export const AUTHORITATIVE_ARTIFACT_TYPES = new Set<ArtifactType>([
+  "evidence_red",
+  "evidence",
+  "governance",
+  "submission_intent",
+  "approval",
+  "submission",
+  "result",
 ]);
 
 export class ContributionRunManager {
@@ -93,6 +109,15 @@ export class ContributionRunManager {
     this.clock = deps.clock ?? new SystemClock();
     this.idGenerator = deps.idGenerator ?? new RandomIdGenerator();
     this.activeSession = deps.activeSession ?? defaultActiveSessionManager;
+
+    // Register the service-only capability after construction. The capability
+    // is held in a private WeakMap and is not exposed through the public core
+    // barrel; canonical services use it to persist authoritative artifacts.
+    registerCanonicalRunWriter(this, {
+      saveArtifact: (runId, type, content, autoAdvancePhase) =>
+        this._saveArtifactInternal(runId, type, content, autoAdvancePhase),
+      transition: (runId, targetPhase) => this.transition(runId, targetPhase),
+    });
   }
 
   resolveRunId(runId?: string): string | undefined {
@@ -154,7 +179,7 @@ export class ContributionRunManager {
    * It runs validatePhaseGate() before persisting, so it rejects invalid
    * jumps (e.g. PR_SUBMITTED without a governance artifact, or COMPLETED
    * without a verified submission). Callers that must move a run forward
-   * use this method — never the raw updateRunPhase() primitive.
+   * use this method — there is no public raw phase-persistence primitive.
    */
   transition(
     runId: string,
@@ -170,15 +195,14 @@ export class ContributionRunManager {
       throw gateResult.error;
     }
 
-    return this.updateRunPhase(runId, targetPhase);
+    return this._updateRunPhase(runId, targetPhase);
   }
 
   /**
-   * Internal phase persistence. Not for direct public use —
-   * all production code must go through transition() which validates the gate.
-   * Kept public only for RunManager internal and test infrastructure use.
+   * Internal phase persistence. All callers reach this through transition(),
+   * which validates the phase gate before this method is invoked.
    */
-  updateRunPhase(
+  private _updateRunPhase(
     runId: string,
     newPhase: ContributionRunPhase,
   ): ContributionRunManifest {
@@ -209,20 +233,16 @@ export class ContributionRunManager {
     content: string | Record<string, unknown>,
     autoAdvancePhase?: ContributionRunPhase,
   ): SavedArtifactResult {
+    if (AUTHORITATIVE_ARTIFACT_TYPES.has(type)) {
+      throw new Error(
+        `AuthoritativeArtifactViolationError: Artifact type '${type}' is authoritative and cannot be written via generic save. Use canonical service.`,
+      );
+    }
     if (autoAdvancePhase && PRIVILEGED_PHASES.has(autoAdvancePhase)) {
       throw new Error(
         `PrivilegedPhaseViolationError: Phase '${autoAdvancePhase}' is privileged and cannot be advanced via generic save. Use canonical service.`,
       );
     }
-    return this._saveArtifactInternal(runId, type, content, autoAdvancePhase);
-  }
-
-  saveArtifactTrusted(
-    runId: string,
-    type: ArtifactType,
-    content: string | Record<string, unknown>,
-    autoAdvancePhase?: ContributionRunPhase,
-  ): SavedArtifactResult {
     return this._saveArtifactInternal(runId, type, content, autoAdvancePhase);
   }
 
@@ -266,7 +286,7 @@ export class ContributionRunManager {
     });
 
     if (autoAdvancePhase && autoAdvancePhase !== manifest.currentPhase) {
-      this.updateRunPhase(runId, autoAdvancePhase);
+      this.transition(runId, autoAdvancePhase);
     } else {
       manifest.updatedAt = this.clock.nowIso();
       this.bundleManager.saveManifest(manifest);

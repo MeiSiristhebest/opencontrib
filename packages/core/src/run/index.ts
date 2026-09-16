@@ -3,4 +3,5 @@ export * from './artifact-bundle.js';
 export * from './run-manager.js';
 export * from './state-machine.js';
 export * from './active-session.js';
+export * from './canonical-writer.js';
 

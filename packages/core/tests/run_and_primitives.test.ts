@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import {
   ContextAssembler,
   ContributionRunManager,
@@ -88,6 +89,11 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     );
 
     // 4. Save evidence (a verified RED→GREEN cycle is required to advance)
+    const testIdentity = {
+      normalizedCommand: "bun test",
+      testFiles: [{ path: "pool_test.go", sha256: "hash-test" }],
+      identitySha256: "id-sha-12345",
+    };
     const evidenceReport = {
       passed: true,
       stressLoopSuccessRate: 1.0,
@@ -102,6 +108,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
         capturedAt: "2026-07-01T00:00:00.000Z",
         assertionMatched: true,
         assertionMatchedFingerprint: "fp-1",
+        testIdentity,
       },
       greenEvidence: {
         command: "bun test",
@@ -115,9 +122,11 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
         stressLoopPassed: true,
         allTestsPassing: true,
         assertionMatchedFingerprint: "fp-1",
+        testIdentity,
       },
     };
-    manager.saveArtifactTrusted(
+    saveCanonicalArtifact(
+      manager,
       manifest.runId,
       "evidence",
       evidenceReport,

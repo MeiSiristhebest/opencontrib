@@ -189,7 +189,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "Diff must be minimal, surgical, and preserve existing architecture idioms.",
     ],
     suggestedNextAction:
-      "opencontrib evidence capture-red --test-cmd '<test_cmd>' --assertion '<pattern>' && opencontrib evidence verify-green --test-cmd '<test_cmd>",
+      "opencontrib evidence capture-red --test-cmd '<test_cmd>' --assertion '<pattern>' && opencontrib evidence verify-green --test-cmd '<test_cmd>'",
   },
   EVIDENCE_COLLECTED: {
     phase: "EVIDENCE_COLLECTED",
@@ -250,15 +250,22 @@ export const PROTOCOL_CONTRACT_PHASES = {
     description:
       "PR successfully submitted to target repository with verified PR number and URL.",
     allowedFromPhases: ["GOVERNANCE_AUDITED"],
-    requiredArtifacts: ["workspace", "evidence", "governance", "submission"],
+    requiredArtifacts: [
+      "workspace",
+      "evidence",
+      "governance",
+      "submission_intent",
+      "approval",
+      "submission",
+    ],
     cli: {
-      command: "governance",
-      subcommand: "pr-template",
+      command: "submission",
+      subcommand: "submit",
       example:
-        'opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"',
+        'opencontrib submission submit --run-id <id> --owner <owner> --repo <repo> --title "<title>" --branch <branch>',
     },
     mcp: {
-      tool: "contrib_render_pr_template",
+      tool: "contrib_submit_pr",
     },
     forbiddenActions: [
       'DO NOT submit PR without linking issue ("Fixes #<id>").',
@@ -274,7 +281,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     description:
       "All 9 phases completed, memory ledger and developer heuristics synchronized.",
     allowedFromPhases: ["PR_SUBMITTED"],
-    requiredArtifacts: ["workspace", "result"],
+    requiredArtifacts: ["workspace", "submission", "result"],
     cli: {
       command: "flywheel",
       subcommand: "sync",

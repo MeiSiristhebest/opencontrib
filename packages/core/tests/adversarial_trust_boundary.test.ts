@@ -2,17 +2,118 @@ import { describe, it, expect } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import {
   ContributionRunManager,
   ApprovalService,
   GitHubSubmissionService,
   SubmissionVerificationError,
+  SubmissionIntentService,
   validatePhaseGate,
   computeTestIdentity,
   resolveTestFiles,
   type ContributionPrService,
   type GitHubClient,
 } from "../src/index.js";
+import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
+import { GovernanceService } from "../src/governance/governance-service.js";
+
+const testApprovalAuthority = () =>
+  createTrustedApprovalAuthority({
+    issueApproval: () => ({
+      approvedBy: "test-authority",
+      approvalMode: "explicit_human",
+    }),
+  });
+
+function seedGovernanceReadyRun(
+  manager: ContributionRunManager,
+  runId: string,
+  body = "pr body",
+): void {
+  manager.saveArtifact(
+    runId,
+    "workspace",
+    {
+      workspacePath: "/tmp",
+      branchName: "fixture-branch",
+    },
+    "WORKSPACE_PREPARED",
+  );
+  manager.saveArtifact(
+    runId,
+    "patch",
+    JSON.stringify({
+      title: "fix: bug",
+      summary: "fix",
+      rationale: "reproduce and correct the defect",
+      targetFiles: [{ path: "src/fix.ts", reason: "correct defect" }],
+      files: [
+        {
+          path: "src/fix.ts",
+          operation: "MODIFY",
+          content: "fixed",
+          explanation: "correct defect",
+        },
+      ],
+      implementationSteps: ["apply fix"],
+      regressionTestPlan: ["bun test"],
+      estimatedDiffLines: 1,
+    }),
+  );
+  const testIdentity = {
+    normalizedCommand: "bun test regression.test.ts",
+    testFiles: [{ path: "regression.test.ts", sha256: "same" }],
+    identitySha256: "identity-same",
+  };
+  saveCanonicalArtifact(
+    manager,
+    runId,
+    "evidence",
+    {
+      baselineTestedAt: "2026-01-01T00:00:00.000Z",
+      baselineFlakyTests: [],
+      stressLoopRuns: 1,
+      stressLoopPassed: true,
+      handleLeakCheckPassed: true,
+      passedUnitTestsCount: 1,
+      failedUnitTestsCount: 0,
+      reproductionVerified: true,
+      allTestsPassing: true,
+      redEvidence: {
+        command: "bun test regression.test.ts",
+        observedOutputSnippet: "failed",
+        exitCode: 1,
+        sourceTreeSha256: "before",
+        capturedAt: "2026-01-01T00:00:00.000Z",
+        assertionMatched: true,
+        assertionMatchedFingerprint: "fp",
+        testIdentity,
+      },
+      greenEvidence: {
+        command: "bun test regression.test.ts",
+        exitCode: 0,
+        outputSnippet: "passed",
+        passed: true,
+        sourceTreeSha256: "after",
+        capturedAt: "2026-01-01T00:01:00.000Z",
+        treeChangedComparedToRed: true,
+        treeHashMatchesRed: false,
+        stressLoopPassed: true,
+        allTestsPassing: true,
+        assertionMatchedFingerprint: "fp",
+        testIdentity,
+      },
+    },
+    "EVIDENCE_COLLECTED",
+  );
+  manager.saveArtifact(runId, "pr_draft", body);
+  new GovernanceService(manager).audit(runId, {
+    prTitle: "fix: bug",
+    prBody: body,
+    subagentScore: 100,
+  });
+}
 
 describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
   it("Attack 1: Agent substitutes RED test command A with different GREEN test command B", () => {
@@ -21,9 +122,6 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
-      // Hand-craft a forged evidence bundle:
-      // - redEvidence.assertionMatched = true with command A
-      // - greenEvidence uses command B but has a fingerprint copied from RED (classic bypass)
       const forgedBundle = {
         redEvidence: {
           command: "bun test failing.test.ts", // command A
@@ -33,6 +131,11 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           capturedAt: "2026-01-01T00:00:00Z",
           assertionMatched: true,
           assertionMatchedFingerprint: "shared-fp",
+          testIdentity: {
+            normalizedCommand: "bun test failing.test.ts",
+            testFiles: [{ path: "failing.test.ts", sha256: "same" }],
+            identitySha256: "identity-same",
+          },
         },
         greenEvidence: {
           command: "echo PASS", // command B — attacker substitutes a different command!
@@ -46,6 +149,11 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           stressLoopPassed: true,
           allTestsPassing: true,
           assertionMatchedFingerprint: "shared-fp", // forged to match RED fingerprint!
+          testIdentity: {
+            normalizedCommand: "echo PASS",
+            testFiles: [{ path: "failing.test.ts", sha256: "same" }],
+            identitySha256: "identity-same",
+          },
         },
         reproductionVerified: true,
         allTestsPassing: true,
@@ -81,7 +189,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
       // Save initial RED evidence
-      manager.saveArtifact(manifest.runId, "evidence", {
+      saveCanonicalArtifact(manager, manifest.runId, "evidence", {
         redEvidence: {
           command: "bun test",
           exitCode: 1,
@@ -94,14 +202,14 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
 
       // Attack: overwrite without redEvidence (trying to erase it)
       expect(() => {
-        manager.saveArtifact(manifest.runId, "evidence", {
+        saveCanonicalArtifact(manager, manifest.runId, "evidence", {
           foo: "bar",
         });
       }).toThrow(/ImmutableArtifactViolationError/);
 
       // Attack: overwrite with different redEvidence
       expect(() => {
-        manager.saveArtifact(manifest.runId, "evidence", {
+        saveCanonicalArtifact(manager, manifest.runId, "evidence", {
           redEvidence: {
             command: "bun test",
             exitCode: 1,
@@ -123,43 +231,22 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
-      manager.saveArtifact(manifest.runId, "workspace", {
-        workspacePath: baseDir,
-      });
-      manager.saveArtifact(manifest.runId, "evidence", {
-        redEvidence: {
-          command: "test",
-          exitCode: 1,
-          sourceTreeSha256: "h1",
-          capturedAt: "now",
-          assertionMatched: true,
-          assertionMatchedFingerprint: "fp",
-        },
-        greenEvidence: {
-          command: "test",
-          exitCode: 0,
-          outputSnippet: "pass",
-          passed: true,
-          sourceTreeSha256: "h2",
-          capturedAt: "now",
-          treeChangedComparedToRed: true,
-          treeHashMatchesRed: false,
-          stressLoopPassed: true,
-          allTestsPassing: true,
-          assertionMatchedFingerprint: "fp",
-        },
-        reproductionVerified: true,
-        allTestsPassing: true,
-      });
-      manager.saveArtifact(manifest.runId, "governance", {
-        overallScore: 95,
-        technicalGate: { status: "PASS" },
-        approvalGate: { status: "APPROVED" },
-      });
-      manager.updateRunPhase(manifest.runId, "GOVERNANCE_AUDITED");
+      seedGovernanceReadyRun(manager, manifest.runId);
 
-      const approvalService = new ApprovalService(manager);
-      approvalService.recordApproval({ runId: manifest.runId });
+      const intentService = new SubmissionIntentService(manager);
+      const intent = intentService.createIntent({
+        runId: manifest.runId,
+        upstreamOwner: "org",
+        upstreamRepo: "repo",
+        title: "fix: bug",
+        body: "pr body",
+      });
+
+      const approvalService = new ApprovalService(manager, testApprovalAuthority());
+      approvalService.recordApproval({
+        runId: manifest.runId,
+        expectedIntentSha256: intent.intentSha256,
+      });
 
       // Mock PR service succeeds in external call
       const mockPrService = {
@@ -168,6 +255,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           prUrl: "https://github.com/org/repo/pull/99",
           branchUrl: "https://github.com/org/repo/tree/fix",
           isDraft: false,
+          commitSha: "expected_commit_sha",
           status: "SUCCESS" as const,
         }),
       } as unknown as ContributionPrService;
@@ -207,8 +295,6 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
             upstreamRepo: "repo",
             title: "fix: bug",
             body: "pr body",
-            branchName: "fix",
-            files: [],
             commitMessage: "fix: bug",
           },
         }),
@@ -238,6 +324,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
             prUrl: "https://github.com/org/repo/pull/101",
             branchUrl: "https://github.com/org/repo/tree/fix",
             isDraft: false,
+            commitSha: "commit_sha",
             status: "SUCCESS" as const,
           };
         },
@@ -268,45 +355,23 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
-      manager.saveArtifact(manifest.runId, "workspace", {
-        workspacePath: baseDir,
+      seedGovernanceReadyRun(manager, manifest.runId, "Original PR Body");
+
+      const intentService = new SubmissionIntentService(manager);
+      const intent = intentService.createIntent({
+        runId: manifest.runId,
+        upstreamOwner: "org",
+        upstreamRepo: "repo",
+        title: "fix: bug",
+        body: "Original PR Body",
       });
-      manager.saveArtifact(manifest.runId, "evidence", {
-        redEvidence: {
-          command: "test",
-          exitCode: 1,
-          sourceTreeSha256: "h1",
-          capturedAt: "now",
-          assertionMatched: true,
-          assertionMatchedFingerprint: "fp",
-        },
-        greenEvidence: {
-          command: "test",
-          exitCode: 0,
-          outputSnippet: "pass",
-          passed: true,
-          sourceTreeSha256: "h2",
-          capturedAt: "now",
-          treeChangedComparedToRed: true,
-          treeHashMatchesRed: false,
-          stressLoopPassed: true,
-          allTestsPassing: true,
-          assertionMatchedFingerprint: "fp",
-        },
-        reproductionVerified: true,
-        allTestsPassing: true,
-      });
-      manager.saveArtifact(manifest.runId, "governance", {
-        overallScore: 95,
-        technicalGate: { status: "PASS" },
-        approvalGate: { status: "APPROVED" },
-      });
-      manager.saveArtifact(manifest.runId, "pr_draft", "Original PR Body");
-      manager.updateRunPhase(manifest.runId, "GOVERNANCE_AUDITED");
 
       // Record approval on original PR body
-      const approvalService = new ApprovalService(manager);
-      approvalService.recordApproval({ runId: manifest.runId });
+      const approvalService = new ApprovalService(manager, testApprovalAuthority());
+      approvalService.recordApproval({
+        runId: manifest.runId,
+        expectedIntentSha256: intent.intentSha256,
+      });
 
       // Malicious agent mutates PR body after approval
       manager.saveArtifact(
@@ -321,6 +386,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           prUrl: "https://github.com/org/repo/pull/102",
           branchUrl: "https://github.com/org/repo/tree/fix",
           isDraft: false,
+          commitSha: "sha",
           status: "SUCCESS" as const,
         }),
       } as unknown as ContributionPrService;
@@ -334,7 +400,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       // Must fail closed due to PR draft body TOCTOU mutation!
       expect(() => {
         submissionService.authorizeSubmission(manifest.runId, "org", "repo");
-      }).toThrow(/PR draft body has changed since approval/);
+      }).toThrow(/TOCTOU violation: PR body has changed since approval/);
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }
@@ -343,20 +409,17 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
   it("Attack 6: Agent keeps the SAME test command but mutates the regression test file to always pass", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-pen-test-6-"));
     try {
-      // A real regression test file that currently FAILS.
       const testFileRel = "regression.test.ts";
       writeFileSync(
         join(baseDir, testFileRel),
         "test('sum', () => { expect(1 + 1).toBe(3); });\n",
       );
 
-      // RED: capture the test-file CONTENT identity before the fix.
       const redIdentity = computeTestIdentity(
         baseDir,
         `bun test ${testFileRel}`,
         "toBe(3)",
       );
-      // Sanity: resolution actually bound the concrete file by content hash.
       expect(
         resolveTestFiles(baseDir, `bun test ${testFileRel}`).length,
       ).toBeGreaterThanOrEqual(1);
@@ -364,26 +427,19 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         true,
       );
 
-      // Agent applies a fix and ALSO edits the test file to always pass.
       writeFileSync(
         join(baseDir, testFileRel),
         "test('sum', () => { expect(1 + 1).toBe(2); });\n",
       );
 
-      // GREEN: recompute identity from the CURRENT (mutated) test file.
       const greenIdentity = computeTestIdentity(
         baseDir,
         `bun test ${testFileRel}`,
         "toBe(3)",
       );
 
-      // The mutation MUST be detected: identical command, different content.
-      expect(greenIdentity.identitySha256).not.toBe(
-        redIdentity.identitySha256,
-      );
+      expect(greenIdentity.identitySha256).not.toBe(redIdentity.identitySha256);
 
-      // Forged bundle: commands + assertion fingerprint all match, only the
-      // test-file content changed. The gate must reject it.
       const forgedBundle = {
         redEvidence: {
           command: `bun test ${testFileRel}`,
@@ -406,23 +462,29 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           treeHashMatchesRed: false,
           stressLoopPassed: true,
           allTestsPassing: true,
-          assertionMatchedFingerprint: "fp", // forged to match RED
-          testIdentity: greenIdentity, // differs only in test-file content
+          assertionMatchedFingerprint: "fp",
+          testIdentity: greenIdentity, // BUT DIFFERENT test-file content!
         },
         reproductionVerified: true,
         allTestsPassing: true,
       };
 
-      const manager = new ContributionRunManager({ baseDir });
-      const manifest = manager.createRun({ repoFullName: "org/repo" });
       const prospectiveSummary = {
-        manifest: { ...manifest, currentPhase: "WORKSPACE_PREPARED" as const },
+        manifest: {
+          runId: "r1",
+          schemaVersion: "1.0.0",
+          repoFullName: "org/repo",
+          currentPhase: "WORKSPACE_PREPARED" as const,
+          createdAt: "now",
+          updatedAt: "now",
+        },
         artifacts: {
           workspace: { workspacePath: baseDir },
           evidence: forgedBundle,
         },
         availableArtifactFiles: [],
       };
+
       const gateResult = validatePhaseGate(
         prospectiveSummary,
         "EVIDENCE_COLLECTED",
@@ -434,19 +496,23 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
     }
   });
 
-  it("Attack 6b: test-file mutation under an explicit testMutationAllowed + recorded testDiffSha256 audit is accepted", () => {
+  it("Attack 6b: test-file mutation under an explicit testMutationPolicy with matching diff hash is accepted", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-pen-test-6b-"));
     try {
       const testFileRel = "regression.test.ts";
-      writeFileSync(join(baseDir, testFileRel), "expect(1).toBe(0);\n");
+      writeFileSync(
+        join(baseDir, testFileRel),
+        "test('sum', () => { expect(1 + 1).toBe(3); });\n",
+      );
       const redIdentity = computeTestIdentity(
         baseDir,
         `bun test ${testFileRel}`,
-        "toBe(0)",
+        "toBe(3)",
       );
+
       writeFileSync(
         join(baseDir, testFileRel),
-        "expect(1).toBe(1);\n", // mutated test (legitimate, audited)
+        "test('sum', () => { expect(1 + 1).toBe(2); });\n",
       );
       const greenIdentity = computeTestIdentity(
         baseDir,
@@ -454,7 +520,8 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         "toBe(0)",
       );
 
-      // Legitimate: testMutationAllowed=true + a recorded test diff audit hash.
+      const diffHash = "audit-hash-of-changed-test";
+
       const okBundle = {
         redEvidence: {
           command: `bun test ${testFileRel}`,
@@ -465,7 +532,10 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           assertionMatched: true,
           assertionMatchedFingerprint: "fp",
           testIdentity: redIdentity,
-          testMutationAllowed: true,
+          testMutationPolicy: {
+            allowed: true,
+            expectedDiffSha256: diffHash,
+          },
         },
         greenEvidence: {
           command: `bun test ${testFileRel}`,
@@ -480,7 +550,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           allTestsPassing: true,
           assertionMatchedFingerprint: "fp",
           testIdentity: greenIdentity,
-          testDiffSha256: "audit-hash-of-changed-test",
+          actualTestDiffSha256: diffHash,
         },
         reproductionVerified: true,
         allTestsPassing: true,
@@ -496,25 +566,26 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         },
         availableArtifactFiles: [],
       };
-      // Explicit, audited test mutation is allowed through the gate.
-      expect(validatePhaseGate(prospectiveSummary, "EVIDENCE_COLLECTED").ok).toBe(
-        true,
-      );
+      // Audited test mutation with matching diff hash is allowed through the gate.
+      expect(
+        validatePhaseGate(prospectiveSummary, "EVIDENCE_COLLECTED").ok,
+      ).toBe(true);
 
-      // ...but the SAME mutation WITHOUT the audit hash must be rejected.
-      const missingAudit = JSON.parse(JSON.stringify(okBundle)) as any;
-      missingAudit.greenEvidence.testDiffSha256 = undefined;
+      // ...but the SAME mutation with mismatched diff hash must be rejected.
+      const mismatchedAudit = JSON.parse(JSON.stringify(okBundle)) as any;
+      mismatchedAudit.greenEvidence.actualTestDiffSha256 =
+        "different-diff-hash";
       const blockedSummary = {
         manifest: { ...manifest, currentPhase: "WORKSPACE_PREPARED" as const },
         artifacts: {
           workspace: { workspacePath: baseDir },
-          evidence: missingAudit,
+          evidence: mismatchedAudit,
         },
         availableArtifactFiles: [],
       };
-      expect(
-        validatePhaseGate(blockedSummary, "EVIDENCE_COLLECTED").ok,
-      ).toBe(false);
+      expect(validatePhaseGate(blockedSummary, "EVIDENCE_COLLECTED").ok).toBe(
+        false,
+      );
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }

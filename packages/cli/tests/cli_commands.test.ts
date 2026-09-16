@@ -262,15 +262,43 @@ describe("CLI Commands & Subcommands Test Suite", () => {
   });
 
   it("executes flywheel subcommands (sync, pr-track)", async () => {
-    await flywheelCommand.parseAsync([
-      "node",
-      "test",
-      "sync",
-      "--repo",
-      "owner/repo",
-      "--input",
-      JSON.stringify({ status: "merged", techStack: ["typescript"] }),
-    ]);
+    const { ProfileFlywheel } = await import("@opencontrib/core");
+    const origSync = ProfileFlywheel.prototype.syncFromRun;
+    ProfileFlywheel.prototype.syncFromRun = () => ({
+      success: true,
+      recordCount: 1,
+      record: {
+        id: "rec-1",
+        runId: "run-test",
+        repo: "owner/repo-test-cli",
+        category: "bug",
+        prNumber: 99,
+        prUrl: "https://github.com/owner/repo-test-cli/pull/99",
+        merged: true,
+        ciPassing: true,
+        reproductionVerified: true,
+        testsAddedOrUpdated: 1,
+        stressLoopPassed: true,
+        concurrencyStampedePassed: true,
+        handleLeakCheckPassed: true,
+        allTestsPassing: true,
+        syncedAt: new Date().toISOString(),
+      } as any,
+    });
+
+    try {
+      await flywheelCommand.parseAsync([
+        "node",
+        "test",
+        "sync",
+        "--repo",
+        "owner/repo-test-cli",
+        "--input",
+        JSON.stringify({ status: "merged", techStack: ["typescript"] }),
+      ]);
+    } finally {
+      ProfileFlywheel.prototype.syncFromRun = origSync;
+    }
 
     await flywheelCommand.parseAsync([
       "node",

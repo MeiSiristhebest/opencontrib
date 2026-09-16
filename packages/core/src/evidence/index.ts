@@ -1,4 +1,5 @@
 export * from './evidence-collector.js';
+export * from './evidence-service.js';
 export * from './parsers/types.js';
 export * from './parsers/registry.js';
 export * from './parsers/node-parser.js';

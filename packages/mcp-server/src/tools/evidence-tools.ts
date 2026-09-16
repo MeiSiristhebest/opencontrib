@@ -8,7 +8,7 @@ import {
   ContributionRunManager,
   verifyDualStageReproduction,
   captureRedEvidence,
-  verifyGreenEvidence,
+  EvidenceService,
 } from "@opencontrib/core";
 
 export function registerEvidenceTools(
@@ -193,17 +193,13 @@ export function registerEvidenceTools(
         dualStage: dualStageResult,
       };
 
-      let persistence: { saved: boolean; error?: string } = { saved: false };
-      if (args.runId) {
-        // contrib_collect_evidence is a metrics/diagnostic collector, not a privileged phase-transition tool.
-        // Canonical Evidence V2 transition is strictly reserved for contrib_verify_green.
-        try {
-          runManager.saveArtifact(args.runId, "evidence", fullEvidenceReport);
-          persistence = { saved: true };
-        } catch (err: any) {
-          persistence = { saved: false, error: err.message };
-        }
-      }
+      const persistence: { saved: boolean; error?: string } = args.runId
+        ? {
+            saved: false,
+            error:
+              "Diagnostic evidence is not authoritative; use contrib_capture_red followed by contrib_verify_green.",
+          }
+        : { saved: false };
 
       return {
         content: [
@@ -253,31 +249,27 @@ export function registerEvidenceTools(
     },
     async (args) => {
       try {
-        const red = captureRedEvidence({
-          cwd: args.cwd,
-          testCommand: args.testCommand,
-          workspaceRoot: args.workspaceRoot,
-          expectedAssertion: args.assertion,
-          baselineCommitSha: args.baselineCommitSha,
-        });
-
+        let red;
         let persistence: { saved: boolean; error?: string } = { saved: false };
         if (args.runId) {
-          try {
-            runManager.saveArtifact(args.runId, "evidence", {
-              baselineTestedAt: red.capturedAt,
-              baselineFlakyTests: [],
-              stressLoopRuns: 0,
-              stressLoopPassed: false,
-              handleLeakCheckPassed: true,
-              passedUnitTestsCount: 0,
-              redEvidence: red,
-              reproductionVerified: false,
-            });
-            persistence = { saved: true };
-          } catch (err: any) {
-            persistence = { saved: false, error: err.message };
-          }
+          const evidenceService = new EvidenceService(runManager);
+          red = evidenceService.captureRed({
+            runId: args.runId,
+            cwd: args.cwd,
+            testCommand: args.testCommand,
+            workspaceRoot: args.workspaceRoot,
+            expectedAssertion: args.assertion,
+            baselineCommitSha: args.baselineCommitSha,
+          });
+          persistence = { saved: true };
+        } else {
+          red = captureRedEvidence({
+            cwd: args.cwd,
+            testCommand: args.testCommand,
+            workspaceRoot: args.workspaceRoot,
+            expectedAssertion: args.assertion,
+            baselineCommitSha: args.baselineCommitSha,
+          });
         }
 
         return {
@@ -345,57 +337,19 @@ export function registerEvidenceTools(
     },
     async (args) => {
       try {
-        const run = runManager.getRun(args.runId);
-        const evidenceArtifact = run?.artifacts?.evidence as
-          | { redEvidence?: any }
-          | undefined;
-        const redEvidence = evidenceArtifact?.redEvidence;
-        if (!redEvidence || !redEvidence.sourceTreeSha256) {
-          throw new Error(
-            "No captured RED baseline found for this run. Call contrib_capture_red first.",
-          );
-        }
-
-        const green = verifyGreenEvidence({
+        const evidenceService = new EvidenceService(runManager);
+        const report = await evidenceService.verifyGreen({
+          runId: args.runId,
           cwd: args.cwd,
           testCommand: args.testCommand,
-          workspaceRoot: args.workspaceRoot,
-          redEvidence,
-          stressLoopCount: args.stressLoopCount ?? 1,
-          concurrencyWorkers: args.concurrencyWorkers ?? 1,
-        });
-
-        const full = await collectEvidence({
-          cwd: args.cwd,
           workspaceRoot: args.workspaceRoot,
           baselineCommitSha: args.baselineCommitSha,
-          testCommand: args.testCommand,
           stressLoopCount: args.stressLoopCount ?? 1,
           concurrencyWorkers: args.concurrencyWorkers ?? 1,
         });
-
-        const report = {
-          ...full,
-          redEvidence,
-          greenEvidence: green.greenEvidence,
-          reproductionVerified:
-            green.reproductionVerified && Boolean(full.allTestsPassing),
-          allTestsPassing: Boolean(full.allTestsPassing),
+        const persistence: { saved: boolean; error?: string } = {
+          saved: report.reproductionVerified === true,
         };
-
-        let persistence: { saved: boolean; error?: string } = { saved: false };
-        if (report.reproductionVerified === true) {
-          runManager.saveArtifactTrusted(
-            args.runId,
-            "evidence",
-            report,
-            "EVIDENCE_COLLECTED",
-          );
-          persistence = { saved: true };
-        } else {
-          runManager.saveArtifact(args.runId, "evidence", report);
-          persistence = { saved: true };
-        }
 
         return {
           content: [

@@ -8,6 +8,7 @@ import {
   verifyDualStageReproduction,
   captureRedEvidence,
   verifyGreenEvidence,
+  EvidenceService,
   type ContributionRunManager,
   type RedEvidence,
 } from "@opencontrib/core";
@@ -186,17 +187,14 @@ export const evidenceRunCommand = evidenceCommand
           fullReport.reproductionVerified === true &&
           fullReport.allTestsPassing;
         if (runId) {
-          try {
-            getRunManager().saveArtifactTrusted(
-              runId,
-              "evidence",
-              fullReport,
-              isVerified ? "EVIDENCE_COLLECTED" : undefined,
-            );
-            persistence = { saved: true };
-          } catch (err: any) {
-            persistence = { saved: false, error: err.message };
-          }
+          // `evidence run` is diagnostic one-shot mode. It cannot create a
+          // canonical RED artifact and GREEN artifact in one agent turn, so
+          // never persist its self-reported bundle as authoritative evidence.
+          persistence = {
+            saved: false,
+            error:
+              "One-shot evidence is diagnostic-only; use capture-red followed by verify-green to persist canonical Evidence V2.",
+          };
         }
 
         printJSON(
@@ -273,16 +271,14 @@ export const captureRedCommand = evidenceCommand
         });
         let persistence: { saved: boolean; error?: string } | undefined;
         if (runId) {
-          // Persist RED as a partial evidence artifact; do NOT advance the phase yet.
-          getRunManager().saveArtifact(runId, "evidence", {
-            baselineTestedAt: red.capturedAt,
-            baselineFlakyTests: [],
-            stressLoopRuns: 0,
-            stressLoopPassed: false,
-            handleLeakCheckPassed: true,
-            passedUnitTestsCount: 0,
-            redEvidence: red,
-            reproductionVerified: false,
+          const evidenceService = new EvidenceService(getRunManager());
+          evidenceService.captureRed({
+            runId,
+            cwd: targetCwd,
+            testCommand: opts.testCmd,
+            expectedAssertion: opts.assertion,
+            workspaceRoot,
+            baselineCommitSha: baselineSha,
           });
           persistence = { saved: true };
         }
@@ -360,41 +356,45 @@ export const verifyGreenCommand = evidenceCommand
             "No captured RED baseline found for this run. Run 'opencontrib evidence capture-red --test-cmd '<cmd>' --assertion '<pattern>' first.",
           );
         }
-        const green = verifyGreenEvidence({
-          cwd: targetCwd,
-          testCommand: opts.testCmd,
-          workspaceRoot,
-          redEvidence,
-          stressLoopCount: opts.stressLoop ?? 1,
-          concurrencyWorkers: opts.concurrency ?? 1,
-        });
-        const full = await collectEvidence({
-          cwd: targetCwd,
-          workspaceRoot,
-          baselineCommitSha: baselineSha,
-          testCommand: opts.testCmd,
-          stressLoopCount: opts.stressLoop ?? 1,
-          concurrencyWorkers: opts.concurrency ?? 1,
-        });
-        const report = {
-          ...full,
-          redEvidence,
-          greenEvidence: green.greenEvidence,
-          reproductionVerified:
-            green.reproductionVerified && Boolean(full.allTestsPassing),
-          allTestsPassing: Boolean(full.allTestsPassing),
-        };
+        let report: any;
         let persistence: { saved: boolean; error?: string } | undefined;
         if (runId) {
-          getRunManager().saveArtifactTrusted(
+          const evidenceService = new EvidenceService(getRunManager());
+          report = await evidenceService.verifyGreen({
             runId,
-            "evidence",
-            report,
-            report.reproductionVerified === true
-              ? "EVIDENCE_COLLECTED"
-              : undefined,
-          );
-          persistence = { saved: true };
+            cwd: targetCwd,
+            testCommand: opts.testCmd,
+            workspaceRoot,
+            baselineCommitSha: baselineSha,
+            stressLoopCount: opts.stressLoop ?? 1,
+            concurrencyWorkers: opts.concurrency ?? 1,
+          });
+          persistence = { saved: report.reproductionVerified === true };
+        } else {
+          const green = verifyGreenEvidence({
+            cwd: targetCwd,
+            testCommand: opts.testCmd,
+            workspaceRoot,
+            redEvidence: redEvidence!,
+            stressLoopCount: opts.stressLoop ?? 1,
+            concurrencyWorkers: opts.concurrency ?? 1,
+          });
+          const full = await collectEvidence({
+            cwd: targetCwd,
+            workspaceRoot,
+            baselineCommitSha: baselineSha,
+            testCommand: opts.testCmd,
+            stressLoopCount: opts.stressLoop ?? 1,
+            concurrencyWorkers: opts.concurrency ?? 1,
+          });
+          report = {
+            ...full,
+            redEvidence,
+            greenEvidence: green.greenEvidence,
+            reproductionVerified:
+              green.reproductionVerified && Boolean(full.allTestsPassing),
+            allTestsPassing: Boolean(full.allTestsPassing),
+          };
         }
         const verified = report.reproductionVerified === true;
         printJSON(

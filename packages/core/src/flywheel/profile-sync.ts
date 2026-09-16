@@ -8,7 +8,15 @@ import {
 } from "fs";
 import { join } from "path";
 
-import type { ContributionRecord } from "../contracts/schemas.js";
+import { saveCanonicalArtifact } from "../run/canonical-writer.js";
+import {
+  ContributionRecordSchema,
+  EvidenceReportSchema,
+  ResultArtifactSchema,
+  SubmissionArtifactSchema,
+  type ContributionRecord,
+} from "../contracts/schemas.js";
+import type { ContributionRunManager } from "../run/run-manager.js";
 import { getOpenContribHome } from "../kernel/home.js";
 
 export class ProfileFlywheel {
@@ -38,6 +46,7 @@ export class ProfileFlywheel {
   }
 
   saveRecord(record: ContributionRecord): void {
+    const validated = ContributionRecordSchema.parse(record);
     let records: ContributionRecord[];
     try {
       records = this.loadRecords();
@@ -48,12 +57,12 @@ export class ProfileFlywheel {
       );
     }
     const existingIndex = records.findIndex(
-      (r) => r.id === record.id || (r.prUrl && r.prUrl === record.prUrl),
+      (r) => r.id === validated.id || (r.prUrl && r.prUrl === validated.prUrl),
     );
     if (existingIndex >= 0) {
-      records[existingIndex] = record;
+      records[existingIndex] = validated;
     } else {
-      records.unshift(record);
+      records.unshift(validated);
     }
     const tmpPath = this.ledgerPath + ".tmp";
     try {
@@ -113,36 +122,63 @@ export class ProfileFlywheel {
 </svg>`;
   }
 
-  recordContribution(
-    repoFullName: string,
-    record: any,
-  ): { success: boolean; recordCount: number } {
-    const fullRecord: ContributionRecord = {
-      id: record.runId || record.id || `rec-${Date.now()}`,
-      repoFullName,
-      issueNumber: record.issueNumber,
-      issueTitle:
-        record.issueTitle || record.title || "Open Source Contribution",
-      prNumber: record.prNumber,
-      prUrl:
-        record.prUrl ||
-        `https://github.com/${repoFullName}/pull/${record.prNumber || "1"}`,
-      status: record.status === "merged" ? "merged" : "submitted",
-      submittedAt: record.timestamp || new Date().toISOString(),
-      mergedAt:
-        record.status === "merged"
-          ? record.timestamp || new Date().toISOString()
-          : undefined,
-      diffStat: record.diffStat || "+10 -2",
-      evidenceSummary:
-        record.evidenceSummary || "Verified in clean-room sandbox",
+  syncFromRun(
+    runManager: ContributionRunManager,
+    runId: string,
+  ): { success: boolean; recordCount: number; record: ContributionRecord } {
+    const run = runManager.getRun(runId);
+    if (!run) throw new Error(`Unknown contribution run: ${runId}`);
+    if (run.manifest.currentPhase !== "PR_SUBMITTED" && run.manifest.currentPhase !== "COMPLETED") {
+      throw new Error(
+        `FlywheelSyncError: run ${runId} is not submission-verified (phase ${run.manifest.currentPhase}).`,
+      );
+    }
+    const submissionResult = SubmissionArtifactSchema.safeParse(run.artifacts.submission);
+    if (!submissionResult.success || submissionResult.data.verified !== true) {
+      throw new Error(
+        "FlywheelSyncError: only a verified canonical submission may enter the profile ledger.",
+      );
+    }
+    const evidenceResult = EvidenceReportSchema.safeParse(run.artifacts.evidence);
+    if (!evidenceResult.success || evidenceResult.data.reproductionVerified !== true) {
+      throw new Error(
+        "FlywheelSyncError: canonical verified evidence is required before profile ingestion.",
+      );
+    }
+
+    const submission = submissionResult.data;
+    const evidence = evidenceResult.data;
+    const existingResult = ResultArtifactSchema.safeParse(run.artifacts.result);
+    if (!existingResult.success) {
+      const result = {
+        runId,
+        submission,
+        submissionVerified: true as const,
+        prNumber: submission.prNumber,
+        prUrl: submission.prUrl,
+        completedAt: new Date().toISOString(),
+      };
+      ResultArtifactSchema.parse(result);
+      saveCanonicalArtifact(runManager, runId, "result", result, "COMPLETED");
+    }
+    const record: ContributionRecord = {
+      id: runId,
+      repoFullName: run.manifest.repoFullName,
+      issueNumber: run.manifest.issueNumber,
+      issueTitle: run.manifest.issueTitle || "Open Source Contribution",
+      prNumber: submission.prNumber,
+      prUrl: submission.prUrl,
+      status: "submitted",
+      submittedAt: submission.submittedAt,
+      diffStat: `verified head ${submission.headSha}`,
+      evidenceSummary: `reproduction verified; ${evidence.stressLoopRuns} stress loop run(s); all tests passing=${evidence.allTestsPassing === true}`,
       provenance: {
         source: "system_recorded",
         verified: true,
         verifiedAt: new Date().toISOString(),
       },
     };
-    this.saveRecord(fullRecord);
-    return { success: true, recordCount: this.loadRecords().length };
+    this.saveRecord(record);
+    return { success: true, recordCount: this.loadRecords().length, record };
   }
 }

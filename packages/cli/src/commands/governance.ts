@@ -111,7 +111,7 @@ const auditCommand = new Command("audit")
 
         const runId = getRunManager().resolveRunId(opts.runId);
 
-        let evidence: any = undefined;
+        let evidence: any;
         if (opts.evidenceFile && fs.existsSync(opts.evidenceFile)) {
           try {
             evidence = JSON.parse(fs.readFileSync(opts.evidenceFile, "utf-8"));
@@ -151,14 +151,19 @@ const auditCommand = new Command("audit")
 
         if (runId) {
           try {
-            getRunManager().saveArtifactTrusted(
-              runId,
-              "governance",
-              audit as any,
-              isPassed ? "GOVERNANCE_AUDITED" : undefined,
+            const { GovernanceService } = await import("@opencontrib/core");
+            const govService = new GovernanceService(getRunManager());
+            govService.audit(runId, {
+              prTitle: opts.prTitle,
+              prBody: prBodyContent,
+              subagentScore: opts.subagentScore,
+              isAutonomous: opts.isAutonomous,
+              allowUnverified: opts.allowUnverified,
+            });
+          } catch (err: any) {
+            console.warn(
+              `[Governance] Canonical audit persistence warning: ${err.message}`,
             );
-          } catch {
-            // Artifact persistence is best-effort; audit results still output to stdout
           }
         }
 
@@ -171,18 +176,7 @@ const auditCommand = new Command("audit")
         );
 
         if (!isPassed) {
-          if (!opts.allowUnverified) {
-            printPhaseGuidance({
-              currentPhase: "GOVERNANCE_AUDITED",
-              runId,
-              status: "GATED_BLOCKED",
-              humanCheckpoint: "Checkpoint 3 (Governance Quality Gate Failure)",
-              forbiddenActions: audit.guidance.forbiddenActions,
-              invariants: audit.guidance.invariants,
-              nextCommand: audit.guidance.nextCommand,
-            });
-            throw new CliExitError(2);
-          } else {
+          if (opts.allowUnverified) {
             printPhaseGuidance({
               currentPhase: "GOVERNANCE_AUDITED",
               runId,
@@ -196,6 +190,17 @@ const auditCommand = new Command("audit")
               ],
             });
             return;
+          } else {
+            printPhaseGuidance({
+              currentPhase: "GOVERNANCE_AUDITED",
+              runId,
+              status: "GATED_BLOCKED",
+              humanCheckpoint: "Checkpoint 3 (Governance Quality Gate Failure)",
+              forbiddenActions: audit.guidance.forbiddenActions,
+              invariants: audit.guidance.invariants,
+              nextCommand: audit.guidance.nextCommand,
+            });
+            throw new CliExitError(2);
           }
         }
 
@@ -510,30 +515,15 @@ const gateCommand = new Command("gate")
     }
   });
 
-// ─── governance approve ───────────────────────────────────────────────────────
-const approveCommand = new Command("approve")
+// ─── governance request-approval ─────────────────────────────────────────────
+const approveCommand = new Command("request-approval")
   .description(
-    "Record explicit human or policy-waived approval artifact binding patch, evidence, governance, and PR body hashes",
+    "Create a cryptographically bound approval challenge; only a trusted host may mint the approval artifact",
   )
   .option("--run-id <id>", "Contribution run ID (defaults to active session)")
-  .option(
-    "--approved-by <name>",
-    "Name or identity of human reviewer",
-    "human_reviewer",
-  )
-  .option(
-    "--waive",
-    "Record as policy-waived approval instead of explicit human approval",
-    false,
-  )
   .option("--pretty", "Pretty-print", false)
   .action(
-    async (opts: {
-      runId?: string;
-      approvedBy?: string;
-      waive?: boolean;
-      pretty?: boolean;
-    }) => {
+    async (opts: { runId?: string; pretty?: boolean }) => {
       try {
         const runId = getRunManager().resolveRunId(opts.runId);
         if (!runId) {
@@ -544,28 +534,25 @@ const approveCommand = new Command("approve")
         }
 
         const { ApprovalService } = await import("@opencontrib/core");
-        const approvalService = new ApprovalService(getRunManager());
-
-        const artifact = approvalService.recordApproval({
-          runId,
-          approvedBy: opts.approvedBy,
-          approvalMode: opts.waive ? "policy_waived" : "explicit_human",
-        });
-
+        const challenge = new ApprovalService(getRunManager()).requestApproval(runId);
         printJSON(
-          { status: "success", approvalArtifact: artifact },
+          {
+            status: "APPROVAL_REQUESTED",
+            challenge,
+            message:
+              "Challenge issued. A trusted human/policy host must mint the approval; this CLI command never self-approves.",
+          },
           opts.pretty,
         );
-
         printPhaseGuidance({
           currentPhase: "GOVERNANCE_AUDITED",
           runId,
           status: "SUCCESS",
-          humanCheckpoint: "Checkpoint 3 (Approval Cryptographically Bound)",
+          humanCheckpoint: "Checkpoint 3 (Awaiting Trusted Approval Authority)",
           nextCommand: `opencontrib submission submit --run-id ${runId}`,
           invariants: [
-            "Patch, evidence, governance, and PR draft body hashes bound to ApprovalArtifact.",
-            "Any mutation of source code or evidence will cause TOCTOU gate rejection.",
+            "No approval artifact was minted by the agent-facing CLI.",
+            "Submission remains blocked until a trusted authority records the exact challenge hash.",
           ],
         });
       } catch (err: any) {

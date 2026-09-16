@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { execSync } from "child_process";
 import { readdirSync, statSync, readFileSync } from "fs";
-import { join } from "path";
+import { join, relative, resolve, sep } from "path";
 import {
   defaultSandboxRuntime,
   type SandboxExecutionResult,
@@ -157,7 +157,7 @@ export async function runStressLoopAsync(
     testCommand.trim() === "pytest" ||
     testCommand.trim() === "cargo test";
 
-  const targetCount = count === undefined ? (isBroadSuite ? 1 : 3) : count;
+  const targetCount = count ?? (isBroadSuite ? 1 : 3);
   const spec = parseCommandSpec(testCommand);
 
   // If multi-worker concurrency requested (>1), spawn simultaneous worker processes via Promise.all
@@ -282,7 +282,7 @@ export function runStressLoop(
     testCommand.trim() === "pytest" ||
     testCommand.trim() === "cargo test";
 
-  const targetCount = count === undefined ? (isBroadSuite ? 1 : 3) : count;
+  const targetCount = count ?? (isBroadSuite ? 1 : 3);
   const spec = parseCommandSpec(testCommand);
 
   // If multi-worker concurrency requested (>1), spawn parallel worker processes
@@ -450,11 +450,12 @@ export function verifyEmpiricalReproduction(input: {
   const hasFailureFlag =
     !res.passed || (isRealFailurePattern && !isFalsePositiveZeroError);
 
+  const exitCode = res.exitCode === null ? (hasFailureFlag ? 1 : 0) : res.exitCode;
   return {
     isFailingOnBaseline: hasFailureFlag,
     baselineOutput: full,
     assertionCaptured: hasFailureFlag,
-    exitCode: res.exitCode === null ? (hasFailureFlag ? 1 : 0) : res.exitCode,
+    exitCode,
   };
 }
 
@@ -603,7 +604,7 @@ export function computeSourceTreeHash(cwd: string): string {
             continue;
           }
           const full = join(dir, item);
-          let st;
+          let st: ReturnType<typeof statSync>;
           try {
             st = statSync(full);
           } catch {
@@ -661,41 +662,118 @@ export function computeTestIdentityFingerprint(input: {
  * This closes the "same command, mutated test file" bypass: the identity
  * fingerprint is bound to test-file CONTENT, not just the command string.
  */
+function isWithinDirectory(root: string, target: string): boolean {
+  const rootPath = resolve(root);
+  const targetPath = resolve(target);
+  return targetPath === rootPath || targetPath.startsWith(`${rootPath}${sep}`);
+}
+
+function isLikelyTestFile(pathName: string): boolean {
+  const normalized = pathName.replace(/\\/g, "/");
+  const base = normalized.split("/").pop() || normalized;
+  return (
+    /(?:^|\/)(?:tests?|__tests__|spec)(?:\/|$)/i.test(normalized) ||
+    /\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(base) ||
+    /(?:^|_)test\.(?:py|go|rs|rb|php)$/i.test(base) ||
+    /^test_[^/]+\.py$/i.test(base) ||
+    /Test\.(?:java|kt|cs)$/i.test(base)
+  );
+}
+
+function addFileIdentity(cwd: string, candidate: string, files: Map<string, TestIdentityFile>): void {
+  const full = resolve(cwd, candidate);
+  if (!isWithinDirectory(cwd, full)) return;
+  const normalizedPath = relative(cwd, full).replace(/\\/g, "/");
+  try {
+    const st = statSync(full);
+    if (st.isDirectory()) {
+      const entries = readdirSync(full, { withFileTypes: true });
+      for (const entry of entries) {
+        if (["node_modules", ".git", ".opencontrib", "dist", "build", "coverage", "target"].includes(entry.name)) continue;
+        addFileIdentity(cwd, join(full, entry.name), files);
+      }
+      return;
+    }
+    if (!st.isFile()) return;
+    const content = readFileSync(full);
+    files.set(normalizedPath, {
+      path: normalizedPath,
+      sha256: createHash("sha256").update(content).digest("hex"),
+    });
+  } catch {
+    // Missing explicit paths remain represented with an empty digest, so RED
+    // and GREEN cannot silently switch to a different file.
+    files.set(normalizedPath, { path: normalizedPath, sha256: "" });
+  }
+}
+
+function discoverTestFiles(cwd: string, files: Map<string, TestIdentityFile>): void {
+  // Walk once and retain only deterministic test candidates for broad commands.
+  // only deterministic test candidates for broad commands.
+  const discovered = new Map<string, TestIdentityFile>();
+  const walk = (dir: string): void => {
+    let entries: Array<{
+      name: string;
+      isDirectory(): boolean;
+      isFile(): boolean;
+    }> = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (["node_modules", ".git", ".opencontrib", "dist", "build", "coverage", "target"].includes(entry.name)) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile()) {
+        const pathName = relative(cwd, full).replace(/\\/g, "/");
+        if (isLikelyTestFile(pathName)) addFileIdentity(cwd, full, discovered);
+      }
+    }
+  };
+  walk(cwd);
+  for (const [pathName, identity] of discovered) files.set(pathName, identity);
+}
+
 export function resolveTestFiles(
   cwd: string,
   testCommand: string,
+  explicitTestFile?: string | string[],
 ): TestIdentityFile[] {
-  const tokens = testCommand.split(/[\s"'`]+/).filter(Boolean);
+  const spec = parseCommandSpec(testCommand);
+  const candidates = new Set<string>();
+  const explicit = Array.isArray(explicitTestFile)
+    ? explicitTestFile
+    : explicitTestFile
+      ? [explicitTestFile]
+      : [];
+  for (const candidate of explicit) if (candidate.trim()) candidates.add(candidate.trim());
+
   const testFileToken =
-    /\.(test|spec)\.[cm]?[jt]s$|\.(test|spec)\.py$|_test\.go$|^test_[a-z0-9_.]+\.py$|\.test$|\.spec$/i;
-  const candidates: string[] = [];
-  for (const tok of tokens) {
-    const cleaned = tok.replace(/^[^/]*=/, "").trim();
-    // A token is a candidate test-file path if it names a file with a
-    // test-ish extension (or any existing file referenced by the command).
-    if (testFileToken.test(cleaned) || cleaned.includes("/")) {
-      candidates.push(cleaned);
+    /\.(test|spec)\.[cm]?[jt]sx?$|\.(test|spec)\.py$|_test\.(?:go|rs)$|^test_[a-z0-9_.]+\.py$|\.test$|\.spec$/i;
+  for (const token of spec.args) {
+    const cleaned = token.replace(/^[^=]+=\s*/, "").trim();
+    if (
+      testFileToken.test(cleaned) ||
+      cleaned.includes("/") ||
+      cleaned.includes("\\") ||
+      /^[A-Za-z]:/.test(cleaned)
+    ) {
+      candidates.add(cleaned);
     }
   }
-  const files: TestIdentityFile[] = [];
-  for (const rel of candidates) {
-    try {
-      const full = join(cwd, rel);
-      const st = statSync(full);
-      if (st.isFile()) {
-        const buf = readFileSync(full);
-        const sha = createHash("sha256").update(buf).digest("hex");
-        files.push({ path: rel.replace(/^[\\/]+/, ""), sha256: sha });
-      }
-    } catch {
-      // Candidate path not present on disk — record it path-only so the
-      // identity still binds which file the command targets (and a missing
-      // file at GREEN time will differ from a RED that had it).
-      files.push({ path: rel, sha256: "" });
-    }
-  }
-  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return files;
+
+  const files = new Map<string, TestIdentityFile>();
+  for (const candidate of candidates) addFileIdentity(cwd, candidate, files);
+  // Broad commands such as `bun test`, `pytest`, `cargo test`, and `npm test`
+  // receive a deterministic repository test-file set rather than an empty
+  // identity. If no set can be resolved, the phase gate remains unavailable.
+  if (files.size === 0) discoverTestFiles(cwd, files);
+
+  return [...files.values()].sort((a, b) =>
+    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+  );
 }
 
 /** Compute the stable TestIdentity for a test command at `cwd`. */
@@ -703,22 +781,38 @@ export function computeTestIdentity(
   cwd: string,
   testCommand: string,
   expectedAssertion?: string,
+  explicitTestFile?: string | string[],
 ): TestIdentity {
   const normalizedCommand = testCommand.trim().replace(/\s+/g, " ");
-  const testFiles = resolveTestFiles(cwd, testCommand);
+  const testFiles = resolveTestFiles(cwd, testCommand, explicitTestFile);
   const normAssert = (expectedAssertion || "").trim();
   const filePart = testFiles.map((f) => `${f.path}:${f.sha256}`);
   const identitySha256 = createHash("sha256")
-    .update(
-      `testIdentity:${normalizedCommand}:${normAssert}:${filePart.join("|")}`,
-    )
+    .update(`testIdentity:${normalizedCommand}:${normAssert}:${filePart.join("|")}`)
     .digest("hex");
   return {
     normalizedCommand,
     testFiles,
-    expectedAssertion: expectedAssertion,
+    expectedAssertion,
     identitySha256,
   };
+}
+
+/** Content-derived diff identity for test files; never caller supplied. */
+export function computeTestFileDiffSha256(
+  redFiles: TestIdentityFile[],
+  greenFiles: TestIdentityFile[],
+): string | undefined {
+  const red = new Map(redFiles.map((file) => [file.path, file.sha256]));
+  const green = new Map(greenFiles.map((file) => [file.path, file.sha256]));
+  const paths = [...new Set([...red.keys(), ...green.keys()])].sort();
+  const changes = paths.flatMap((path) => {
+    const before = red.get(path) || "";
+    const after = green.get(path) || "";
+    return before === after ? [] : [`${path}:${before}->${after}`];
+  });
+  if (changes.length === 0) return undefined;
+  return createHash("sha256").update(`testDiff:${changes.join("|")}`).digest("hex");
 }
 
 /**
@@ -731,6 +825,7 @@ export function captureRedEvidence(input: {
   testCommand: string;
   workspaceRoot?: string;
   expectedAssertion?: string;
+  testFile?: string | string[];
   testFileSha256?: string;
   baselineCommitSha?: string;
   testMutationAllowed?: boolean;
@@ -742,24 +837,30 @@ export function captureRedEvidence(input: {
     input.expectedAssertion,
   );
   const assertionMatched = Boolean(preFix.assertionCaptured);
+  const observedExitCode = (preFix as { exitCode?: number }).exitCode;
   const exitCode =
-    typeof (preFix as { exitCode?: number }).exitCode === "number"
-      ? (preFix as { exitCode?: number }).exitCode!
-      : assertionMatched
-        ? 1
-        : 0;
-  const assertionMatchedFingerprint = computeTestIdentityFingerprint({
-    testCommand: input.testCommand,
-    expectedAssertion: input.expectedAssertion,
-    testFileSha256: input.testFileSha256,
-  });
+    typeof observedExitCode === "number" ? observedExitCode : assertionMatched ? 1 : 0;
   // Bind the concrete test-file CONTENT identity so GREEN must prove the same
   // test body went fail -> pass, not merely that the same command now passes.
   const testIdentity = computeTestIdentity(
     input.cwd,
     input.testCommand,
     input.expectedAssertion,
+    input.testFile,
   );
+  const assertionMatchedFingerprint = computeTestIdentityFingerprint({
+    testCommand: input.testCommand,
+    expectedAssertion: input.expectedAssertion,
+  });
+  if (
+    input.testFileSha256 &&
+    testIdentity.testFiles.length === 1 &&
+    testIdentity.testFiles[0].sha256 !== input.testFileSha256
+  ) {
+    throw new Error(
+      "EvidenceIdentityError: supplied testFileSha256 does not match the on-disk RED test file content.",
+    );
+  }
 
   return {
     command: input.testCommand,
@@ -769,7 +870,10 @@ export function captureRedEvidence(input: {
     ).slice(0, 500),
     exitCode,
     sourceTreeSha256: computeSourceTreeHash(input.cwd),
-    testFileSha256: input.testFileSha256,
+    testFileSha256:
+      testIdentity.testFiles.length === 1
+        ? testIdentity.testFiles[0].sha256
+        : undefined,
     baselineCommitSha: input.baselineCommitSha,
     capturedAt: new Date().toISOString(),
     assertionMatched,
@@ -810,8 +914,10 @@ export function verifyGreenEvidence(input: {
   const greenFingerprint = computeTestIdentityFingerprint({
     testCommand: input.testCommand,
     expectedAssertion: redEvidence.expectedAssertion,
-    testFileSha256: redEvidence.testFileSha256,
   });
+
+  const redTestIdentity = redEvidence.testIdentity;
+  const explicitTestFiles = redTestIdentity?.testFiles.map((file) => file.path) || [];
 
   // Recompute the GREEN test-file CONTENT identity from the current on-disk
   // test files. Never copy RED's fingerprint — a mutated test file changes
@@ -819,42 +925,30 @@ export function verifyGreenEvidence(input: {
   const greenTestIdentity = computeTestIdentity(
     input.cwd,
     input.testCommand,
-    redEvidence.expectedAssertion,
+    redTestIdentity?.expectedAssertion ?? redEvidence.expectedAssertion,
+    explicitTestFiles,
   );
-  const redTestIdentity = redEvidence.testIdentity;
 
-  let testIdentityValid: boolean;
-  let testDiffSha256: string | undefined;
+  let testIdentityValid = false;
+  let actualTestDiffSha256: string | undefined;
   if (redTestIdentity) {
-    const redFileSig = redTestIdentity.testFiles
-      .map((f) => `${f.path}:${f.sha256}`)
-      .join("|");
-    const greenFileSig = greenTestIdentity.testFiles
-      .map((f) => `${f.path}:${f.sha256}`)
-      .join("|");
-    const testFilesChanged = redFileSig !== greenFileSig;
-    if (!testFilesChanged) {
-      // Same test body -> the recomputed identity must match RED's.
-      testIdentityValid =
-        greenTestIdentity.identitySha256 === redTestIdentity.identitySha256;
-      testDiffSha256 = undefined;
-    } else if (redEvidence.testMutationAllowed === true) {
-      // Explicit policy: the fix legitimately edited the test. Audit it by
-      // recording a separate hash of the changed test-file signature.
-      testIdentityValid = true;
-      testDiffSha256 = createHash("sha256")
-        .update(`testdiff:${greenFileSig}`)
-        .digest("hex");
-    } else {
-      // Default: test files are NOT allowed to change between RED and GREEN.
-      testIdentityValid = false;
-      testDiffSha256 = undefined;
-    }
-  } else {
-    // Legacy RED without TestIdentity: fall back to the assertion fingerprint.
+    const redFiles = redTestIdentity.testFiles || [];
+    const greenFiles = greenTestIdentity.testFiles || [];
+    actualTestDiffSha256 = computeTestFileDiffSha256(redFiles, greenFiles);
     testIdentityValid =
-      Boolean(redEvidence.assertionMatchedFingerprint) &&
-      greenFingerprint === redEvidence.assertionMatchedFingerprint;
+      redFiles.length > 0 &&
+      greenFiles.length > 0 &&
+      greenTestIdentity.identitySha256 === redTestIdentity.identitySha256;
+    if (
+      !testIdentityValid &&
+      redEvidence.testMutationPolicy?.allowed === true &&
+      actualTestDiffSha256 &&
+      redEvidence.testMutationPolicy.expectedDiffSha256 === actualTestDiffSha256
+    ) {
+      testIdentityValid = true;
+    }
+    // A bare testMutationAllowed flag is intentionally ignored. Only the
+    // content-derived diff hash can authorize an audited test mutation.
   }
 
   const greenEvidence: GreenEvidence = {
@@ -870,7 +964,7 @@ export function verifyGreenEvidence(input: {
     allTestsPassing: passed,
     assertionMatchedFingerprint: greenFingerprint,
     testIdentity: greenTestIdentity,
-    testDiffSha256,
+    actualTestDiffSha256,
   };
   const reproductionVerified =
     redEvidence.assertionMatched === true &&

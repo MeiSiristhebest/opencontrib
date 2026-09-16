@@ -150,11 +150,21 @@ export type TestIdentityFile = z.infer<typeof TestIdentityFileSchema>;
 
 export const TestIdentitySchema = z.object({
   normalizedCommand: z.string(),
-  testFiles: z.array(TestIdentityFileSchema).default([]),
+  // A canonical RED→GREEN bundle must identify at least one concrete test
+  // file. Broad commands with no deterministic test-file resolution are
+  // diagnostic-only and cannot advance the run.
+  testFiles: z.array(TestIdentityFileSchema).min(1),
   expectedAssertion: z.string().optional(),
   identitySha256: z.string(),
 });
 export type TestIdentity = z.infer<typeof TestIdentitySchema>;
+
+export const TestMutationPolicySchema = z.object({
+  allowed: z.boolean(),
+  expectedDiffSha256: z.string(),
+  reason: z.string().optional(),
+});
+export type TestMutationPolicy = z.infer<typeof TestMutationPolicySchema>;
 
 export const RedEvidenceSchema = z.object({
   command: z.string(),
@@ -169,6 +179,7 @@ export const RedEvidenceSchema = z.object({
   assertionMatchedFingerprint: z.string().optional(),
   testIdentity: TestIdentitySchema.optional(),
   testMutationAllowed: z.boolean().optional(),
+  testMutationPolicy: TestMutationPolicySchema.optional(),
 });
 export type RedEvidence = z.infer<typeof RedEvidenceSchema>;
 
@@ -186,15 +197,48 @@ export const GreenEvidenceSchema = z.object({
   assertionMatchedFingerprint: z.string().optional(),
   testIdentity: TestIdentitySchema.optional(),
   testDiffSha256: z.string().optional(),
+  actualTestDiffSha256: z.string().optional(),
 });
 export type GreenEvidence = z.infer<typeof GreenEvidenceSchema>;
 
+export const SubmissionIntentFileSchema = z.object({
+  path: z.string(),
+  content: z.string(),
+  mode: z.enum(["100644", "100755", "120000"]).default("100644"),
+  operation: z.enum(["CREATE", "MODIFY", "DELETE"]).default("MODIFY"),
+  contentSha256: z.string(),
+});
+export type SubmissionIntentFile = z.infer<typeof SubmissionIntentFileSchema>;
+
+export const SubmissionIntentArtifactSchema = z.object({
+  runId: z.string(),
+  upstreamOwner: z.string(),
+  upstreamRepo: z.string(),
+  baseBranch: z.string().default("main"),
+  branchName: z.string(),
+  title: z.string(),
+  body: z.string(),
+  bodySha256: z.string(),
+  commitMessage: z.string(),
+  isDraft: z.boolean().default(true),
+  files: z.array(SubmissionIntentFileSchema),
+  patchSha256: z.string(),
+  evidenceSha256: z.string(),
+  governanceSha256: z.string(),
+  intentSha256: z.string(),
+  createdAt: z.string(),
+});
+export type SubmissionIntentArtifact = z.infer<
+  typeof SubmissionIntentArtifactSchema
+>;
+
 export const ApprovalArtifactSchema = z.object({
   runId: z.string(),
+  intentSha256: z.string(),
   patchSha256: z.string(),
-  evidenceSha256: z.string().optional(),
-  governanceSha256: z.string().optional(),
-  prBodySha256: z.string().optional(),
+  evidenceSha256: z.string(),
+  governanceSha256: z.string(),
+  prBodySha256: z.string(),
   approvedBy: z.string().default("human_reviewer"),
   approvedAt: z.string(),
   approvalMode: z.enum(["explicit_human", "policy_waived"]),
@@ -206,6 +250,12 @@ export const SubmissionArtifactSchema = z.object({
   provider: z.literal("github"),
   owner: z.string(),
   repo: z.string(),
+  baseBranch: z.string(),
+  branchName: z.string(),
+  intentSha256: z.string(),
+  patchSha256: z.string(),
+  evidenceSha256: z.string(),
+  governanceSha256: z.string(),
   prNumber: z.number(),
   prUrl: z.string(),
   headSha: z.string(),
@@ -260,8 +310,13 @@ export const EvidenceReportSchema = z.object({
 export type EvidenceReport = z.infer<typeof EvidenceReportSchema>;
 
 export const EvidenceBundleV2Schema = z.object({
-  redEvidence: RedEvidenceSchema,
-  greenEvidence: GreenEvidenceSchema,
+  redEvidence: RedEvidenceSchema.extend({
+    testIdentity: TestIdentitySchema,
+  }),
+  greenEvidence: GreenEvidenceSchema.extend({
+    testIdentity: TestIdentitySchema,
+    actualTestDiffSha256: z.string().optional(),
+  }),
   reproductionVerified: z.literal(true),
   allTestsPassing: z.literal(true),
 });
@@ -330,6 +385,31 @@ export const GovernanceAuditResultSchema = z.object({
     }),
 });
 export type GovernanceAuditResult = z.infer<typeof GovernanceAuditResultSchema>;
+
+export const GovernanceDecisionArtifactSchema = z.object({
+  runId: z.string(),
+  patchSha256: z.string(),
+  evidenceSha256: z.string(),
+  prDraftSha256: z.string(),
+  prTitle: z.string(),
+  prTitleSha256: z.string(),
+  auditResult: GovernanceAuditResultSchema,
+  passed: z.boolean(),
+  auditedAt: z.string(),
+});
+export type GovernanceDecisionArtifact = z.infer<
+  typeof GovernanceDecisionArtifactSchema
+>;
+
+export const ResultArtifactSchema = z.object({
+  runId: z.string(),
+  submission: SubmissionArtifactSchema,
+  submissionVerified: z.literal(true),
+  prNumber: z.number(),
+  prUrl: z.string(),
+  completedAt: z.string(),
+});
+export type ResultArtifact = z.infer<typeof ResultArtifactSchema>;
 
 // ==========================================
 // 6. Memory & Contribution Flywheel Contracts

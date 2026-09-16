@@ -9,7 +9,6 @@ import {
   renderMasterPrTemplate,
   RepoMemoryLedger,
   type ContributionRunManager,
-  type GitTreeEntry,
 } from "@opencontrib/core";
 
 function wrapHandler(fn: (args: any) => Promise<any>) {
@@ -34,62 +33,6 @@ function wrapHandler(fn: (args: any) => Promise<any>) {
   };
 }
 
-interface TrustedPatchShape {
-  title?: string;
-  files?: Array<{ path?: unknown; content?: unknown; operation?: unknown }>;
-}
-
-/**
- * Provenance boundary: PR payload files come from the trusted "patch"
- * artifact on the run — never from free caller input. Fail-closed: throws
- * when the artifact is missing, unparseable, or has zero usable files.
- */
-function loadTrustedFiles(
-  runManager: ContributionRunManager,
-  runId: string,
-): { files: GitTreeEntry[]; commitMessage: string } {
-  const run = runManager.getRun(runId);
-  const patchRaw = run?.artifacts?.patch;
-  if (typeof patchRaw !== "string" || patchRaw.trim() === "") {
-    throw new Error(
-      `No trusted patch artifact found for run ${runId}. ` +
-        "Complete the patch-draft stage before submitting.",
-    );
-  }
-  let patch: TrustedPatchShape;
-  try {
-    patch = JSON.parse(patchRaw) as TrustedPatchShape;
-  } catch {
-    throw new Error(
-      `Trusted patch artifact for run ${runId} is not a parseable PatchDraft; ` +
-        "refusing to submit without trusted file contents.",
-    );
-  }
-  const files: GitTreeEntry[] = (patch.files ?? [])
-    .filter(
-      (f) =>
-        !!f &&
-        typeof f.path === "string" &&
-        f.path.trim() !== "" &&
-        typeof f.content === "string",
-    )
-    .map((f) => ({
-      path: f.path as string,
-      content: f.content as string,
-      mode: "100644" as const,
-    }));
-  if (files.length === 0) {
-    throw new Error(
-      `Trusted patch for run ${runId} contains no file contents; refusing to open an empty PR.`,
-    );
-  }
-  const commitMessage =
-    typeof patch.title === "string" && patch.title.trim() !== ""
-      ? patch.title.trim()
-      : "chore: opencontrib contribution";
-  return { files, commitMessage };
-}
-
 export function registerGovernanceTools(
   server: McpServer,
   _memory: RepoMemoryLedger,
@@ -103,9 +46,20 @@ export function registerGovernanceTools(
     "contrib_audit_governance",
     "Audit patch diff size, anti-AI text patterns, and compute evidence-backed 7D quality rubric & confidence breakdown",
     {
-      patchContent: z.string().describe("Git unified diff string"),
-      prTitle: z.string().describe("Proposed PR title"),
-      prBody: z.string().describe("Proposed PR body text"),
+      runId: z
+        .string()
+        .optional()
+        .describe(
+          "Contribution run ID to perform canonical audit and advance to GOVERNANCE_AUDITED",
+        ),
+      patchContent: z
+        .string()
+        .optional()
+        .describe(
+          "Git unified diff string for diagnostic inspection (ignored when runId is provided)",
+        ),
+      prTitle: z.string().optional().describe("Proposed PR title"),
+      prBody: z.string().optional().describe("Proposed PR body text"),
       evidence: z
         .object({
           stressLoopPassed: z.boolean().optional(),
@@ -144,9 +98,37 @@ export function registerGovernanceTools(
       ),
     },
     wrapHandler(async (args) => {
+      if (args.runId) {
+        const { GovernanceService } = await import("@opencontrib/core");
+        const govService = new GovernanceService(runManager);
+        const decision = govService.audit(args.runId, {
+          prTitle: args.prTitle,
+          prBody: args.prBody,
+          subagentScore: args.subagentQualityScore,
+          isAutonomous: args.isAutonomousPrSubmission,
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: decision.passed ? "passed" : "failed",
+                  governanceDecision: decision,
+                  audit: decision.auditResult,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
       const audit = auditGovernance({
-        patchContent: args.patchContent,
-        prTitle: args.prTitle,
+        patchContent: args.patchContent || "",
+        prTitle: args.prTitle || "chore: opencontrib contribution",
         prBody: args.prBody,
         evidence: args.evidence,
         subagentQualityScore: args.subagentQualityScore,
@@ -385,47 +367,22 @@ export function registerGovernanceTools(
     "contrib_sync_flywheel",
     "Persist completed or in-flight contribution memory, update developer skill weights, and refine repo-specific heuristics",
     {
-      repoFullName: z.string().describe('Target repository, e.g. "owner/repo"'),
-      record: z.object({
-        runId: z.string().describe("Unique contribution run identifier"),
-        issueNumber: z.number().optional().describe("GitHub issue number"),
-        prNumber: z.number().optional().describe("GitHub PR number if created"),
-        status: z
-          .enum(["merged", "open", "closed", "rejected", "in_progress"])
-          .describe("Contribution state"),
-        techStack: z
-          .array(z.string())
-          .describe('Tech stack tags (e.g. ["typescript", "react"])'),
-        qualityRubricScore: z
-          .number()
-          .min(0)
-          .max(100)
-          .describe("Evidence-backed confidence rubric score"),
-        maintainerFeedback: z
-          .string()
-          .optional()
-          .describe("Maintainer review comments or bot feedback"),
-        failureLessons: z
-          .string()
-          .optional()
-          .describe(
-            "Key insights or failure root causes learned during this run",
-          ),
-      }),
+      runId: z.string().describe("Canonical contribution run identifier"),
+      repoFullName: z
+        .string()
+        .optional()
+        .describe("Optional expected repository; must match the run manifest"),
     },
     wrapHandler(async (args) => {
-      const result = flywheel.recordContribution(args.repoFullName, {
-        runId: args.record.runId,
-        repoFullName: args.repoFullName,
-        issueNumber: args.record.issueNumber,
-        prNumber: args.record.prNumber,
-        status: args.record.status === "merged" ? "merged" : "submitted",
-        techStack: args.record.techStack,
-        qualityRubricScore: args.record.qualityRubricScore,
-        maintainerFeedback: args.record.maintainerFeedback,
-        failureLessons: args.record.failureLessons,
-        timestamp: new Date().toISOString(),
-      });
+      const run = runManager.getRun(args.runId);
+      if (!run) throw new Error(`Unknown contribution run: ${args.runId}`);
+      if (
+        args.repoFullName &&
+        args.repoFullName.toLowerCase() !== run.manifest.repoFullName.toLowerCase()
+      ) {
+        throw new Error("FlywheelSyncError: repository does not match the run manifest.");
+      }
+      const result = flywheel.syncFromRun(runManager, args.runId);
 
       return {
         content: [
@@ -563,35 +520,54 @@ export function registerGovernanceTools(
   );
 
   // -------------------------------------------------------------
-  // Tool: contrib_record_approval (记录不可伪造的物证/代码审查批准凭证)
+  // Tool: contrib_request_approval (发起人工审查挑战挑战书，Agent 不得自批)
   // -------------------------------------------------------------
   server.tool(
-    "contrib_record_approval",
-    "Record explicit human or policy-waived approval artifact binding patch, evidence, governance, and PR body hashes",
+    "contrib_request_approval",
+    "Request human approval challenge binding immutable SubmissionIntentSha256. Agent cannot mint approval directly.",
     {
       runId: z.string().describe("Contribution run ID"),
-      approvedBy: z.string().optional().describe("Reviewer identity"),
-      waive: z
-        .boolean()
-        .optional()
-        .describe("Record policy waiver rather than explicit human approval"),
+      upstreamOwner: z.string().describe("Target upstream repository owner"),
+      upstreamRepo: z.string().describe("Target upstream repository name"),
+      title: z.string().optional().describe("Proposed PR title"),
+      body: z.string().optional().describe("Proposed PR body"),
+      branchName: z.string().optional().describe("Proposed branch name"),
+      commitMessage: z.string().optional().describe("Proposed commit message"),
+      isDraft: z.boolean().optional().describe("Whether PR will be draft"),
     },
     wrapHandler(async (args) => {
-      const { ApprovalService } = await import("@opencontrib/core");
-      const approvalService = new ApprovalService(runManager);
+      const { SubmissionIntentService } = await import("@opencontrib/core");
+      const intentService = new SubmissionIntentService(runManager);
 
-      const artifact = approvalService.recordApproval({
+      const intent = intentService.createIntent({
         runId: args.runId,
-        approvedBy: args.approvedBy,
-        approvalMode: args.waive ? "policy_waived" : "explicit_human",
+        upstreamOwner: args.upstreamOwner,
+        upstreamRepo: args.upstreamRepo,
+        title: args.title,
+        body: args.body,
+        branchName: args.branchName,
+        commitMessage: args.commitMessage,
+        isDraft: args.isDraft,
       });
+      const { ApprovalService } = await import("@opencontrib/core");
+      const challenge = new ApprovalService(runManager).requestApproval(args.runId);
 
       return {
         content: [
           {
             type: "text",
             text: JSON.stringify(
-              { status: "success", approvalArtifact: artifact },
+              {
+                status: "CHALLENGE_ISSUED",
+                message:
+                  "SubmissionIntent created. Awaiting explicit human or trusted authority approval.",
+                intentSha256: intent.intentSha256,
+                runId: args.runId,
+                targetRepo: `${intent.upstreamOwner}/${intent.upstreamRepo}`,
+                branch: intent.branchName,
+                filesCount: intent.files.length,
+                challenge,
+              },
               null,
               2,
             ),
@@ -624,11 +600,6 @@ export function registerGovernanceTools(
       const { GitHubSubmissionService, GitHubClient, ContributionPrService } =
         await import("@opencontrib/core");
 
-      // Provenance: files + default commit message come from the trusted patch artifact.
-      const trusted = loadTrustedFiles(runManager, args.runId);
-      const files = trusted.files;
-      const commitMessage = args.commitMessage ?? trusted.commitMessage;
-
       const client = new GitHubClient();
       const prService = new ContributionPrService(client);
       const submissionService = new GitHubSubmissionService(
@@ -637,28 +608,8 @@ export function registerGovernanceTools(
         runManager,
       );
 
-      // 1. Authorize submission first
-      const permit = submissionService.authorizeSubmission(
-        args.runId,
-        args.owner,
-        args.repo,
-      );
-
-      // 2. Submit and verify with provider
-      const result = await submissionService.submitAndVerifyPullRequest({
-        runId: args.runId,
-        permit,
-        submissionOptions: {
-          upstreamOwner: args.owner,
-          upstreamRepo: args.repo,
-          title: args.title,
-          body: args.body,
-          branchName: args.branch,
-          files,
-          commitMessage,
-          isDraft: args.draft ?? false,
-        },
-      });
+      // Submit PR strictly binding to the approved immutable SubmissionIntent
+      const result = await submissionService.submit(args.runId);
 
       return {
         content: [

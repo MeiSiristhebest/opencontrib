@@ -21,6 +21,15 @@ import type {
 } from "./types.js";
 import { getOpenContribHome } from "../kernel/home.js";
 
+const WRITE_ONCE_ARTIFACT_TYPES = new Set<ArtifactType>([
+  "evidence_red",
+  "governance",
+  "submission_intent",
+  "approval",
+  "submission",
+  "result",
+]);
+
 export function writeAtomic(filePath: string, content: string): void {
   const dir = dirname(filePath);
   if (!existsSync(dir)) {
@@ -99,10 +108,14 @@ export class ArtifactBundleManager {
         return "workspace.json";
       case "patch":
         return "patch.diff";
+      case "evidence_red":
+        return "evidence_red.json";
       case "evidence":
         return "evidence.json";
       case "governance":
         return "governance.json";
+      case "submission_intent":
+        return "submission_intent.json";
       case "approval":
         return "approval.json";
       case "submission":
@@ -128,29 +141,41 @@ export class ArtifactBundleManager {
     const stringContent =
       typeof content === "string" ? content : JSON.stringify(content, null, 2);
 
-    // WORM (Write-Once-Read-Many) immutability:
-    // If saving RED baseline in evidence artifact or dedicated red evidence, disallow mutation or deletion
-    if (type === "evidence" && existsSync(filePath)) {
+    // Authoritative artifacts are write-once. Evidence is the one exception:
+    // its RED portion is immutable while the canonical service may attach the
+    // later GREEN/report fields. Non-authoritative artifacts (like pr_draft or patch)
+    // can be written/overwritten, allowing detection of TOCTOU by subsequent verification.
+    if (existsSync(filePath) && (type === "evidence" || WRITE_ONCE_ARTIFACT_TYPES.has(type))) {
+      const existingRaw = readFileSync(filePath, "utf-8");
+      let existingValue: unknown;
+      let nextValue: unknown;
       try {
-        const existing = JSON.parse(readFileSync(filePath, "utf-8"));
-        if (existing?.redEvidence) {
-          const newRed =
-            typeof content === "object" && content !== null
-              ? (content as any).redEvidence
-              : undefined;
-          if (
-            !newRed ||
-            JSON.stringify(existing.redEvidence) !== JSON.stringify(newRed)
-          ) {
-            throw new Error(
-              `ImmutableArtifactViolationError: RED baseline in evidence is write-once and cannot be mutated or deleted.`,
-            );
-          }
+        existingValue = JSON.parse(existingRaw);
+        nextValue = JSON.parse(stringContent);
+      } catch {
+        throw new Error(
+          `ImmutableArtifactViolationError: Authoritative artifact '${type}' cannot be overwritten with non-JSON content.`,
+        );
+      }
+
+      if (type === "evidence") {
+        const existingRed = (existingValue as any)?.redEvidence;
+        const nextRed = (nextValue as any)?.redEvidence;
+        if (
+          existingRed &&
+          (!nextRed || JSON.stringify(existingRed) !== JSON.stringify(nextRed))
+        ) {
+          throw new Error(
+            `ImmutableArtifactViolationError: RED baseline in evidence is write-once and cannot be mutated or deleted.`,
+          );
         }
-      } catch (err: any) {
-        if (err.message?.includes("ImmutableArtifactViolationError")) {
-          throw err;
-        }
+      } else if (
+        WRITE_ONCE_ARTIFACT_TYPES.has(type) &&
+        JSON.stringify(existingValue) !== JSON.stringify(nextValue)
+      ) {
+        throw new Error(
+          `ImmutableArtifactViolationError: Authoritative artifact '${type}' is write-once and cannot be mutated.`,
+        );
       }
     }
 
@@ -318,8 +343,11 @@ export class ArtifactBundleManager {
         workspace: this.readArtifact(runId, "workspace") ?? undefined,
         poc: this.readArtifact(runId, "poc") ?? undefined,
         patch: this.readArtifact(runId, "patch") ?? undefined,
+        evidenceRed: this.readArtifact(runId, "evidence_red") ?? undefined,
         evidence: this.readArtifact(runId, "evidence") ?? undefined,
         governance: this.readArtifact(runId, "governance") ?? undefined,
+        submissionIntent:
+          this.readArtifact(runId, "submission_intent") ?? undefined,
         approval: this.readArtifact(runId, "approval") ?? undefined,
         submission: this.readArtifact(runId, "submission") ?? undefined,
         prDraft: this.readArtifact(runId, "pr_draft") ?? undefined,

@@ -1,16 +1,18 @@
-import { Octokit } from '@octokit/rest';
-import { GitHubClient } from '../discovery/github-client.js';
+import { Octokit } from "@octokit/rest";
+import { GitHubClient } from "../discovery/github-client.js";
 
 export interface GitTreeEntry {
   path: string;
   content: string;
-  mode?: '100644' | '100755' | '120000';
-  type?: 'blob' | 'commit' | 'tree';
+  mode?: "100644" | "100755" | "120000";
+  type?: "blob" | "commit" | "tree";
+  operation?: "CREATE" | "MODIFY" | "DELETE";
 }
 
 export interface PrSubmissionOptions {
   upstreamOwner: string;
   upstreamRepo: string;
+  baseBranch?: string;
   title: string;
   body: string;
   branchName: string;
@@ -25,7 +27,14 @@ export interface PrSubmissionResult {
   prUrl: string;
   branchUrl: string;
   isDraft: boolean;
-  status: 'SUCCESS' | 'DRY_RUN';
+  commitSha: string;
+  status: "SUCCESS" | "DRY_RUN";
+}
+
+function isSafeGitPath(path: string): boolean {
+  if (!path || path.includes("\0") || path.includes("\\")) return false;
+  if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return false;
+  return path.split("/").every((part) => part.length > 0 && part !== "." && part !== "..");
 }
 
 export class ContributionPrService {
@@ -41,28 +50,52 @@ export class ContributionPrService {
     try {
       const userResp = await this.octokit.rest.users.getAuthenticated();
       const currentUser = userResp.data.login;
-
-      // Check if fork already exists
+      let repoData: any;
       try {
-        await this.octokit.rest.repos.get({ owner: currentUser, repo });
-        return currentUser;
-      } catch {
-        // Create fork
+        const repoResp = await this.octokit.rest.repos.get({
+          owner: currentUser,
+          repo,
+        });
+        repoData = repoResp.data;
+      } catch (err: any) {
+        // Only a provider-confirmed 404 means the fork is absent. Treat auth,
+        // rate-limit, and network failures as errors; never create/overwrite
+        // a repository based on an ambiguous response.
+        if (err?.status !== 404) throw err;
         await this.octokit.rest.repos.createFork({ owner, repo });
-        // Wait 3s for GitHub to initialize fork
-        await new Promise((r) => setTimeout(r, 3000));
-        return currentUser;
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        const created = await this.octokit.rest.repos.get({
+          owner: currentUser,
+          repo,
+        });
+        repoData = created.data;
       }
-    } catch (err) {
-      if ((err as any).status === 401 || (err as any).status === 403) {
-        throw new Error(`GitHub auth failed (${(err as any).status}) when forking ${owner}/${repo}: ${(err as any).message}`);
+
+      const expectedParent = `${owner}/${repo}`.toLowerCase();
+      if (
+        repoData?.fork !== true ||
+        repoData?.parent?.full_name?.toLowerCase() !== expectedParent
+      ) {
+        throw new Error(
+          `Fork lineage collision: "${currentUser}/${repo}" is not a fork of "${owner}/${repo}". Refusing to write to an unrelated repository.`,
+        );
       }
-      // Any other fork error — do not silently fall back to upstream
-      throw new Error(`Fork operation failed for ${owner}/${repo}: ${(err as any).message}`);
+      return currentUser;
+    } catch (err: any) {
+      if (err?.status === 401 || err?.status === 403) {
+        throw new Error(
+          `GitHub auth failed (${err.status}) when forking ${owner}/${repo}: ${err.message}`,
+        );
+      }
+      throw new Error(
+        `Fork operation failed for ${owner}/${repo}: ${err?.message || String(err)}`,
+      );
     }
   }
 
-  async submitPullRequest(options: PrSubmissionOptions): Promise<PrSubmissionResult> {
+  async submitPullRequest(
+    options: PrSubmissionOptions,
+  ): Promise<PrSubmissionResult> {
     const {
       upstreamOwner,
       upstreamRepo,
@@ -75,20 +108,40 @@ export class ContributionPrService {
       dcoSignOff = true,
     } = options;
 
+    if (!/^opencontrib\/[A-Za-z0-9][A-Za-z0-9._-]{1,100}$/.test(branchName)) {
+      throw new Error(
+        `Security error: branch "${branchName}" is not a run-owned opencontrib branch.`,
+      );
+    }
+    const seenPaths = new Set<string>();
+    for (const file of files) {
+      if (!isSafeGitPath(file.path)) {
+        throw new Error(`Security error: unsafe Git path "${file.path}".`);
+      }
+      if (seenPaths.has(file.path)) {
+        throw new Error(`Security error: duplicate Git path "${file.path}".`);
+      }
+      seenPaths.add(file.path);
+    }
+    if (files.length === 0) {
+      throw new Error("Security error: refusing to create an empty contribution commit.");
+    }
+
     const forkOwner = await this.ensureFork(upstreamOwner, upstreamRepo);
 
-    // 1. Get base default branch and Base Commit & Tree SHA
-    const repoDetails = await this.client.getRepoDetails(upstreamOwner, upstreamRepo);
-    const baseBranch = repoDetails.data?.defaultBranch || 'main';
-
+    // Resolve the exact base branch bound by the submission intent. The
+    // provider default is used only when the intent did not specify one.
+    const repoDetails = await this.client.getRepoDetails(
+      upstreamOwner,
+      upstreamRepo,
+    );
+    const baseBranch = options.baseBranch || repoDetails.data?.defaultBranch || "main";
     const baseRef = await this.octokit.rest.git.getRef({
       owner: upstreamOwner,
       repo: upstreamRepo,
       ref: `heads/${baseBranch}`,
     });
     const baseCommitSha = baseRef.data.object.sha;
-
-    // Correctly query the base commit to obtain the genuine base_tree SHA (not commit SHA)
     const baseCommit = await this.octokit.rest.git.getCommit({
       owner: upstreamOwner,
       repo: upstreamRepo,
@@ -96,49 +149,33 @@ export class ContributionPrService {
     });
     const baseTreeSha = baseCommit.data.tree.sha;
 
-    // 2. Validate and sanitize branch name (allow / for GitHub-standard namespace branches)
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{1,100}$/.test(branchName)) {
-      throw new Error(`Invalid branch name "${branchName}": must be 2-102 chars, alphanumeric with dots/underscores/hyphens/forward-slashes`);
-    }
-
-    try {
-      await this.octokit.rest.git.createRef({
-        owner: forkOwner,
-        repo: upstreamRepo,
-        ref: `refs/heads/${branchName}`,
-        sha: baseCommitSha,
-      });
-    } catch (err) {
-      const error = err as any;
-      if (error.status !== 409) {
-        throw new Error(`Failed to create branch "${branchName}": ${error.message || String(err)}`);
-      }
-      await this.octokit.rest.git.updateRef({
-        owner: forkOwner,
-        repo: upstreamRepo,
-        ref: `heads/${branchName}`,
-        sha: baseCommitSha,
-        force: true,
-      });
-    }
-
-    // 3. Create tree and commit
+    // Create the exact tree, preserving executable/symlink modes and DELETE
+    // operations. A DELETE is represented by a null blob SHA.
     const treeItems: any[] = [];
-    for (const f of files) {
-      const blob = await this.octokit.rest.git.createBlob({
-        owner: forkOwner,
-        repo: upstreamRepo,
-        content: Buffer.from(f.content).toString('base64'),
-        encoding: 'base64',
-      });
-      treeItems.push({
-        path: f.path,
-        mode: (f as GitTreeEntry).mode || '100644',
-        type: (f as GitTreeEntry).type || 'blob',
-        sha: blob.data.sha,
-      });
+    for (const file of files) {
+      const entry = file as GitTreeEntry;
+      if (entry.operation === "DELETE") {
+        treeItems.push({
+          path: entry.path,
+          mode: entry.mode || "100644",
+          type: entry.type || "blob",
+          sha: null,
+        });
+      } else {
+        const blob = await this.octokit.rest.git.createBlob({
+          owner: forkOwner,
+          repo: upstreamRepo,
+          content: Buffer.from(entry.content).toString("base64"),
+          encoding: "base64",
+        });
+        treeItems.push({
+          path: entry.path,
+          mode: entry.mode || "100644",
+          type: entry.type || "blob",
+          sha: blob.data.sha,
+        });
+      }
     }
-
     const newTree = await this.octokit.rest.git.createTree({
       owner: forkOwner,
       repo: upstreamRepo,
@@ -147,12 +184,9 @@ export class ContributionPrService {
     });
 
     let finalCommitMessage = commitMessage;
-    if (dcoSignOff && !finalCommitMessage.includes('Signed-off-by:')) {
+    if (dcoSignOff && !finalCommitMessage.includes("Signed-off-by:")) {
       const user = await this.octokit.rest.users.getAuthenticated();
       const email = user.data.email || `${user.data.login}@users.noreply.github.com`;
-      if (email.endsWith('@noreply.github.com')) {
-        console.warn(`[contribution-pr] DCO sign-off uses GitHub no-reply email "${email}" — may fail DCO check`);
-      }
       finalCommitMessage += `\n\nSigned-off-by: ${user.data.name || user.data.login} <${email}>`;
     }
 
@@ -164,31 +198,102 @@ export class ContributionPrService {
       parents: [baseCommitSha],
     });
 
-    await this.octokit.rest.git.updateRef({
-      owner: forkOwner,
-      repo: upstreamRepo,
-      ref: `heads/${branchName}`,
-      sha: newCommit.data.sha,
-      force: true,
-    });
+    // Branch creation/update is deliberately non-forced. A retry may reuse a
+    // branch only when it is still at base or already points at the exact tree
+    // produced by this intent; divergent history is a hard conflict.
+    let branchHeadSha = newCommit.data.sha;
+    try {
+      await this.octokit.rest.git.createRef({
+        owner: forkOwner,
+        repo: upstreamRepo,
+        ref: `refs/heads/${branchName}`,
+        sha: baseCommitSha,
+      });
+    } catch (err: any) {
+      if (err?.status !== 409) {
+        throw new Error(`Failed to create branch "${branchName}": ${err?.message || String(err)}`);
+      }
+      const existingRef = await this.octokit.rest.git.getRef({
+        owner: forkOwner,
+        repo: upstreamRepo,
+        ref: `heads/${branchName}`,
+      });
+      const existingSha = existingRef.data.object.sha;
+      if (existingSha !== baseCommitSha && existingSha !== newCommit.data.sha) {
+        const existingCommit = await this.octokit.rest.git.getCommit({
+          owner: forkOwner,
+          repo: upstreamRepo,
+          commit_sha: existingSha,
+        });
+        if (
+          existingCommit.data.tree.sha !== newTree.data.sha ||
+          existingCommit.data.parents?.[0]?.sha !== baseCommitSha
+        ) {
+          throw new Error(
+            `BranchConflictError: run-owned branch "${branchName}" diverged; refusing to force-reset it.`,
+          );
+        }
+        branchHeadSha = existingSha;
+      }
+      if (existingSha === baseCommitSha) {
+        await this.octokit.rest.git.updateRef({
+          owner: forkOwner,
+          repo: upstreamRepo,
+          ref: `heads/${branchName}`,
+          sha: newCommit.data.sha,
+        });
+      } else if (existingSha === newCommit.data.sha) {
+        branchHeadSha = existingSha;
+      } else {
+        // Existing commit has the exact tree/parent but a different timestamp;
+        // it is already the idempotent result and needs no ref update.
+        branchHeadSha = existingSha;
+      }
+    }
 
-    // 4. Create Pull Request
-    const prResp = await this.octokit.rest.pulls.create({
-      owner: upstreamOwner,
-      repo: upstreamRepo,
-      title,
-      body,
-      head: `${forkOwner}:${branchName}`,
-      base: baseBranch,
-      draft: isDraft,
-    });
+    let prResp: any;
+    try {
+      const existingPrs = await this.octokit.rest.pulls.list({
+        owner: upstreamOwner,
+        repo: upstreamRepo,
+        head: `${forkOwner}:${branchName}`,
+        state: "open",
+      });
+      if (existingPrs.data && existingPrs.data.length > 0) {
+        const existing = existingPrs.data[0];
+        if (
+          existing.base?.ref !== baseBranch ||
+          existing.title !== title ||
+          existing.body !== body
+        ) {
+          throw new Error(
+            "IdempotencyConflictError: an open PR already exists for this run-owned branch with different title, body, or base branch.",
+          );
+        }
+        prResp = { data: existing };
+        branchHeadSha = existing.head?.sha || branchHeadSha;
+      } else {
+        prResp = await this.octokit.rest.pulls.create({
+          owner: upstreamOwner,
+          repo: upstreamRepo,
+          title,
+          body,
+          head: `${forkOwner}:${branchName}`,
+          base: baseBranch,
+          draft: isDraft,
+        });
+      }
+    } catch (err: any) {
+      throw new Error(`Failed to create or reconcile pull request: ${err.message}`);
+    }
 
     return {
       prNumber: prResp.data.number,
       prUrl: prResp.data.html_url,
       branchUrl: `https://github.com/${forkOwner}/${upstreamRepo}/tree/${branchName}`,
       isDraft,
-      status: 'SUCCESS',
+      commitSha: branchHeadSha,
+      status: "SUCCESS",
     };
   }
 }

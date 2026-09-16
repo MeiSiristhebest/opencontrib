@@ -46,7 +46,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
       "contrib_probe_run",
       "contrib_probe_hotspot",
       "contrib_probe_fuzz",
-      "contrib_record_approval",
+      "contrib_request_approval",
       "contrib_submit_pr",
       "contrib_plan_capabilities",
       "contrib_list_plugins",
@@ -255,8 +255,9 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     });
     expect(evResult.isError).toBeUndefined();
     const ev = JSON.parse(evResult.content[0].text);
-    expect(ev.status).toBe("success");
-    expect(ev.persistence?.saved).toBe(true);
+    expect(ev.status).toBe("PARTIAL_SUCCESS");
+    expect(ev.persistence?.saved).toBe(false);
+    expect(ev.persistence?.error).toContain("Diagnostic evidence is not authoritative");
 
     try {
       rmSync(tempDir, { recursive: true, force: true });

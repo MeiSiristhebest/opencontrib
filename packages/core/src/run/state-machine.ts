@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   ArtifactType,
   ContributionRunPhase,
@@ -6,11 +7,13 @@ import {
 import { DERIVED_PHASE_REQUIREMENTS } from "../workflow/protocol-contract.js";
 import {
   EvidenceBundleV2Schema,
+  GovernanceDecisionArtifactSchema,
   GovernanceAuditResultSchema,
+  SubmissionIntentArtifactSchema,
   SubmissionArtifactSchema,
   ApprovalArtifactSchema,
+  ResultArtifactSchema,
   type EvidenceBundleV2,
-  type SubmissionArtifact,
 } from "../contracts/schemas.js";
 
 export class PhaseGateViolationError extends Error {
@@ -49,16 +52,25 @@ export function validatePhaseGate(
   if (!req) return { ok: true };
 
   const currentPhase = runSummary.manifest.currentPhase;
-  const availableArtifacts = Object.keys(
-    runSummary.artifacts,
-  ) as ArtifactType[];
 
-  const missingArtifacts = req.requiredArtifacts.filter(
-    (art) =>
-      !availableArtifacts.includes(art) ||
-      runSummary.artifacts[art as keyof typeof runSummary.artifacts] ===
-        undefined,
-  );
+  const toSummaryKey = (type: ArtifactType): string => {
+    switch (type) {
+      case "pr_draft":
+        return "prDraft";
+      case "evidence_red":
+        return "evidenceRed";
+      case "submission_intent":
+        return "submissionIntent";
+      default:
+        return type;
+    }
+  };
+
+  const missingArtifacts = req.requiredArtifacts.filter((art) => {
+    const key = toSummaryKey(art);
+    const value = (runSummary.artifacts as any)[key] ?? (runSummary.artifacts as any)[art];
+    return value === undefined;
+  });
 
   if (missingArtifacts.length > 0) {
     return {
@@ -73,7 +85,8 @@ export function validatePhaseGate(
     };
   }
 
-  // Semantic artifact predicates
+  // Evidence is the first privileged phase and is accepted only when the
+  // canonical Evidence V2 producer emitted a complete, content-bound bundle.
   if (targetPhase === "EVIDENCE_COLLECTED") {
     const ev = runSummary.artifacts.evidence;
     const evidence = ev ? EvidenceBundleV2Schema.safeParse(ev) : undefined;
@@ -86,17 +99,16 @@ export function validatePhaseGate(
           currentPhase,
           targetPhase,
           [
-            !ev
-              ? "Missing evidence artifact: cannot enter EVIDENCE_COLLECTED without a RED→GREEN evidence bundle."
-              : `Evidence artifact fails EvidenceBundleV2 semantic validity: ${issue ?? "missing RED/GREEN evidence or verified status."}`,
+            ev
+              ? `Evidence artifact fails EvidenceBundleV2 semantic validity: ${issue ?? "missing RED/GREEN evidence or verified status."}`
+              : "Missing evidence artifact: cannot enter EVIDENCE_COLLECTED without a RED→GREEN evidence bundle.",
           ],
           "Capture the RED baseline: opencontrib evidence capture-red --test-cmd '<cmd>' --assertion '<pattern>', then opencontrib evidence verify-green --test-cmd '<cmd>'.",
         ),
       };
     }
 
-    const bundle = evidence.data;
-    const invalid = validateEvidenceBundleIdentity(bundle);
+    const invalid = validateEvidenceBundleIdentity(evidence.data);
     if (invalid) {
       return {
         ok: false,
@@ -111,10 +123,35 @@ export function validatePhaseGate(
     }
   }
 
+  // Governance is a technical audit phase. Human/policy approval is a separate
+  // authority-controlled artifact and is required only for PR_SUBMITTED.
   if (targetPhase === "GOVERNANCE_AUDITED") {
     const gov = runSummary.artifacts.governance;
-    const audit = gov ? GovernanceAuditResultSchema.safeParse(gov) : undefined;
-    if (!audit?.success) {
+    let decision = gov
+      ? GovernanceDecisionArtifactSchema.safeParse(gov)
+      : undefined;
+    if (!decision?.success && gov) {
+      const legacyAudit = GovernanceAuditResultSchema.safeParse(gov);
+      if (legacyAudit.success) {
+        decision = {
+          success: true,
+          data: {
+            runId: runSummary.manifest.runId,
+            patchSha256: hashArtifact(runSummary.artifacts.patch),
+            evidenceSha256: hashArtifact(runSummary.artifacts.evidence),
+            prDraftSha256: runSummary.artifacts.prDraft
+              ? hashArtifact(runSummary.artifacts.prDraft)
+              : undefined,
+            prTitle: "chore: contribution",
+            prTitleSha256: hashArtifact("chore: contribution"),
+            auditResult: legacyAudit.data,
+            passed: legacyAudit.data.technicalGate?.status === "PASS",
+            auditedAt: new Date().toISOString(),
+          },
+        } as any;
+      }
+    }
+    if (!decision?.success) {
       return {
         ok: false,
         error: new PhaseGateViolationError(
@@ -122,33 +159,20 @@ export function validatePhaseGate(
           currentPhase,
           targetPhase,
           [
-            !gov
-              ? "Missing governance artifact: cannot enter GOVERNANCE_AUDITED without audit result."
-              : `Governance artifact fails semantic validity: ${audit?.error.issues[0]?.message ?? "invalid audit result."}`,
+            gov
+              ? `Governance artifact fails semantic validity: ${decision?.error.issues[0]?.message ?? "invalid governance decision."}`
+              : "Missing governance artifact: cannot enter GOVERNANCE_AUDITED without an authoritative audit result.",
           ],
-          "Run opencontrib governance audit --patch <file> --pr-title '<title>'.",
+          "Run the canonical GovernanceService audit after Evidence V2 completes.",
         ),
       };
     }
 
-    const gate = audit.data;
-    if (gate.technicalGate?.status !== "PASS") {
-      return {
-        ok: false,
-        error: new PhaseGateViolationError(
-          runSummary.manifest.runId,
-          currentPhase,
-          targetPhase,
-          [
-            "Governance artifact fails semantic validity: technicalGate.status must be PASS.",
-          ],
-          "Fix the patch/governance audit failures before advancing to GOVERNANCE_AUDITED.",
-        ),
-      };
-    }
+    const audit = decision.data;
     if (
-      gate.approvalGate?.status !== "APPROVED" &&
-      gate.approvalGate?.status !== "WAIVED"
+      !audit.passed ||
+      audit.auditResult.technicalGate?.status !== "PASS" ||
+      audit.auditResult.technicalGate?.passed !== true
     ) {
       return {
         ok: false,
@@ -157,119 +181,152 @@ export function validatePhaseGate(
           currentPhase,
           targetPhase,
           [
-            "Governance artifact fails semantic validity: approvalGate must be APPROVED or WAIVED.",
+            "Governance artifact fails semantic validity: technicalGate.status and passed must both be PASS/true.",
           ],
-          "Complete explicit human approval or a recorded policy waiver before advancing to GOVERNANCE_AUDITED.",
+          "Fix the patch/governance audit failures before advancing to GOVERNANCE_AUDITED.",
+        ),
+      };
+    }
+
+    const patchSha256 = hashArtifact(runSummary.artifacts.patch);
+    const evidenceSha256 = hashArtifact(runSummary.artifacts.evidence);
+    const prDraftSha256 = runSummary.artifacts.prDraft
+      ? hashArtifact(runSummary.artifacts.prDraft)
+      : undefined;
+    if (
+      audit.patchSha256 !== patchSha256 ||
+      audit.evidenceSha256 !== evidenceSha256 ||
+      audit.prDraftSha256 !== prDraftSha256
+    ) {
+      return {
+        ok: false,
+        error: new PhaseGateViolationError(
+          runSummary.manifest.runId,
+          currentPhase,
+          targetPhase,
+          [
+            "Governance artifact provenance hashes do not match the current patch, evidence, and PR draft artifacts.",
+          ],
+          "Re-run GovernanceService.audit against the stored run artifacts.",
         ),
       };
     }
   }
 
   if (targetPhase === "PR_SUBMITTED") {
-    const app = runSummary.artifacts.approval;
-    const approval = app ? ApprovalArtifactSchema.safeParse(app) : undefined;
-    if (!approval?.success) {
-      return {
-        ok: false,
-        error: new PhaseGateViolationError(
-          runSummary.manifest.runId,
-          currentPhase,
-          targetPhase,
-          [
-            !app
-              ? "Missing approval artifact: cannot enter PR_SUBMITTED without recorded ApprovalArtifact."
-              : `Approval artifact fails semantic validity: ${approval?.error.issues[0]?.message ?? "invalid schema"}`,
-          ],
-          "Record approval via ApprovalService before submitting PR.",
-        ),
-      };
+    const intentResult = SubmissionIntentArtifactSchema.safeParse(
+      runSummary.artifacts.submissionIntent,
+    );
+    const approvalResult = ApprovalArtifactSchema.safeParse(
+      runSummary.artifacts.approval,
+    );
+    const submissionResult = SubmissionArtifactSchema.safeParse(
+      runSummary.artifacts.submission,
+    );
+
+    if (!intentResult.success || !approvalResult.success) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [
+          intentResult.success
+            ? undefined
+            : "Missing or invalid SubmissionIntentArtifact.",
+          approvalResult.success
+            ? undefined
+            : "Missing or invalid ApprovalArtifact from a trusted approval authority.",
+        ],
+        "Create a SubmissionIntent and obtain explicit approval from a trusted authority before submitting.",
+      );
     }
 
-    const sub = runSummary.artifacts.submission;
-    const submission = sub
-      ? SubmissionArtifactSchema.safeParse(sub)
+    const intent = intentResult.data;
+    const approval = approvalResult.data;
+    const submission = submissionResult.success
+      ? submissionResult.data
       : undefined;
+    const expectedHashes = currentRunHashes(runSummary);
+    const approvalBound =
+      approval.runId === runSummary.manifest.runId &&
+      approval.intentSha256 === intent.intentSha256 &&
+      approval.patchSha256 === expectedHashes.patchSha256 &&
+      approval.evidenceSha256 === expectedHashes.evidenceSha256 &&
+      approval.governanceSha256 === expectedHashes.governanceSha256 &&
+      approval.prBodySha256 === hashArtifact(intent.body);
+    const intentBound =
+      intent.runId === runSummary.manifest.runId &&
+      intent.patchSha256 === expectedHashes.patchSha256 &&
+      intent.evidenceSha256 === expectedHashes.evidenceSha256 &&
+      intent.governanceSha256 === expectedHashes.governanceSha256 &&
+      intent.bodySha256 === hashArtifact(intent.body);
+    const submissionBound =
+      !!submission &&
+      submission.verified === true &&
+      submission.runId === runSummary.manifest.runId &&
+      submission.intentSha256 === intent.intentSha256 &&
+      submission.patchSha256 === approval.patchSha256 &&
+      submission.evidenceSha256 === approval.evidenceSha256 &&
+      submission.governanceSha256 === approval.governanceSha256 &&
+      submission.owner.toLowerCase() === intent.upstreamOwner.toLowerCase() &&
+      submission.repo.toLowerCase() === intent.upstreamRepo.toLowerCase() &&
+      submission.baseBranch === intent.baseBranch &&
+      submission.branchName === intent.branchName;
     const validPrUrl =
-      typeof submission?.data?.prUrl === "string" &&
+      !!submission &&
       /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9][0-9]*$/i.test(
-        submission.data.prUrl,
+        submission.prUrl,
       );
-    if (
-      !submission?.success ||
-      !submission.data.verified ||
-      !submission.data.prNumber ||
-      !submission.data.prUrl ||
-      !submission.data.headSha ||
-      !validPrUrl
-    ) {
-      return {
-        ok: false,
-        error: new PhaseGateViolationError(
-          runSummary.manifest.runId,
-          currentPhase,
-          targetPhase,
-          [
-            !sub
-              ? "Missing submission artifact: cannot enter PR_SUBMITTED without a verified SubmissionArtifact."
-              : !submission?.success
-                ? `Submission artifact fails semantic validity: ${submission?.error.issues[0]?.message ?? "invalid schema"}`
-                : !submission.data.verified
-                  ? "Submission artifact fails semantic validity: SubmissionArtifact.verified must be true."
-                  : "Submission artifact fails semantic validity: valid github PR URL, headSha, and prNumber required.",
-          ],
-          "Submit PR through verified SubmissionService to generate SubmissionArtifact.",
-        ),
-      };
+
+    if (!approvalBound || !intentBound || !submissionBound || !validPrUrl) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [
+          approvalBound
+            ? undefined
+            : "ApprovalArtifact hashes do not bind the current intent and run artifacts.",
+          intentBound
+            ? undefined
+            : "SubmissionIntentArtifact hashes do not bind the current run artifacts.",
+          submissionResult.success
+            ? submissionBound
+              ? undefined
+              : "SubmissionArtifact does not bind the approved intent, hashes, target, or run-owned branch."
+            : "Missing or invalid verified SubmissionArtifact.",
+          validPrUrl
+            ? undefined
+            : "SubmissionArtifact must contain a valid GitHub PR URL.",
+        ],
+        "Submit only through GitHubSubmissionService after rechecking the immutable intent and approval.",
+      );
     }
   }
 
   if (targetPhase === "COMPLETED") {
-    const res = runSummary.artifacts.result as
-      | (Partial<{ prNumber: number; prUrl: string }> & {
-          submission?: SubmissionArtifact;
-        })
-      | undefined;
-    const submissionArtifact = runSummary.artifacts.submission
-      ? SubmissionArtifactSchema.safeParse(runSummary.artifacts.submission)
-      : undefined;
-    const resSubmission = res?.submission
-      ? SubmissionArtifactSchema.safeParse(res.submission)
-      : undefined;
-    const submission = resSubmission?.success
-      ? resSubmission
-      : submissionArtifact;
-
-    const validPrUrl =
-      typeof res?.prUrl === "string" &&
-      /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9][0-9]*$/i.test(
-        res.prUrl,
+    const result = ResultArtifactSchema.safeParse(runSummary.artifacts.result);
+    const submission = SubmissionArtifactSchema.safeParse(
+      runSummary.artifacts.submission,
+    );
+    const matches =
+      result.success &&
+      submission.success &&
+      result.data.runId === runSummary.manifest.runId &&
+      result.data.submission.runId === submission.data.runId &&
+      result.data.submission.intentSha256 === submission.data.intentSha256 &&
+      result.data.submission.headSha === submission.data.headSha &&
+      result.data.prNumber === submission.data.prNumber &&
+      result.data.prUrl === submission.data.prUrl &&
+      result.data.submissionVerified === true &&
+      submission.data.verified === true;
+    if (!matches) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [
+          "Result artifact must be a canonical, verified result bound to the stored SubmissionArtifact.",
+        ],
+        "Sync the flywheel from the verified run after PR_SUBMITTED; do not synthesize a result.",
       );
-    if (
-      !submission?.success ||
-      !submission.data.verified ||
-      !submission.data.prNumber ||
-      !submission.data.prUrl ||
-      !submission.data.headSha ||
-      !validPrUrl ||
-      res?.prNumber !== submission.data.prNumber ||
-      res?.prUrl !== submission.data.prUrl
-    ) {
-      return {
-        ok: false,
-        error: new PhaseGateViolationError(
-          runSummary.manifest.runId,
-          currentPhase,
-          targetPhase,
-          [
-            !submission?.success
-              ? "Result artifact fails semantic validity: missing verified SubmissionArtifact."
-              : !submission.data.verified
-                ? "Result artifact fails semantic validity: SubmissionArtifact.verified must be true."
-                : "Result artifact fails semantic validity: prNumber/prUrl must match the verified SubmissionArtifact.",
-          ],
-          "Submit PR through the verified SubmissionService before completing run.",
-        ),
-      };
     }
   }
 
@@ -293,6 +350,42 @@ export function validatePhaseGate(
   }
 
   return { ok: true };
+}
+
+function gateError(
+  runSummary: ContributionRunSummary,
+  targetPhase: ContributionRunPhase,
+  messages: Array<string | undefined>,
+  suggestedAction: string,
+): { ok: false; error: PhaseGateViolationError } {
+  return {
+    ok: false,
+    error: new PhaseGateViolationError(
+      runSummary.manifest.runId,
+      runSummary.manifest.currentPhase,
+      targetPhase,
+      messages.filter((message): message is string => Boolean(message)),
+      suggestedAction,
+    ),
+  };
+}
+
+function hashArtifact(value: unknown): string {
+  const content =
+    typeof value === "string" ? value : JSON.stringify(value ?? "");
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function currentRunHashes(runSummary: ContributionRunSummary): {
+  patchSha256: string;
+  evidenceSha256: string;
+  governanceSha256: string;
+} {
+  return {
+    patchSha256: hashArtifact(runSummary.artifacts.patch),
+    evidenceSha256: hashArtifact(runSummary.artifacts.evidence),
+    governanceSha256: hashArtifact(runSummary.artifacts.governance),
+  };
 }
 
 function validateEvidenceBundleIdentity(
@@ -320,23 +413,14 @@ function validateEvidenceBundleIdentity(
       "GREEN evidence must bind to the same assertion fingerprint as RED.",
     ],
     [
-      (() => {
-        const hasIdentity = redEvidence.testIdentity && greenEvidence.testIdentity;
-        if (!hasIdentity) return true; // legacy bundle without TestIdentity
-        if (
-          redEvidence.testIdentity!.identitySha256 ===
-          greenEvidence.testIdentity!.identitySha256
-        ) {
-          return true; // same test body went fail -> pass
-        }
-        // Differing test-file content is only acceptable under an explicit
-        // testMutationAllowed policy with a recorded testDiffSha256 audit.
-        return (
-          redEvidence.testMutationAllowed === true &&
-          Boolean(greenEvidence.testDiffSha256)
-        );
-      })(),
-      "TestIdentity mismatch: GREEN test-file contents must equal RED's, unless an explicit testMutationAllowed policy with a recorded testDiffSha256 audit is present.",
+      redEvidence.testIdentity.identitySha256 ===
+        greenEvidence.testIdentity.identitySha256,
+      "TestIdentity mismatch: GREEN test-file contents must equal RED's unless an audited mutation diff matches.",
+    ],
+    [
+      redEvidence.testIdentity.testFiles.length > 0 &&
+        greenEvidence.testIdentity.testFiles.length > 0,
+      "TestIdentity must resolve at least one concrete test file for both RED and GREEN.",
     ],
     [greenEvidence.passed === true, "GREEN tests must pass."],
     [
@@ -351,6 +435,26 @@ function validateEvidenceBundleIdentity(
     [reproductionVerified === true, "reproductionVerified must be true."],
     [allTestsPassing === true, "allTestsPassing must be true."],
   ];
+
+  const identitiesMatch =
+    redEvidence.testIdentity.identitySha256 ===
+    greenEvidence.testIdentity.identitySha256;
+  if (!identitiesMatch) {
+    const policy = redEvidence.testMutationPolicy;
+    const actual = greenEvidence.actualTestDiffSha256;
+    if (
+      !policy ||
+      policy.allowed !== true ||
+      !actual ||
+      policy.expectedDiffSha256 !== actual
+    ) {
+      return "TestIdentity mismatch: GREEN test-file contents must equal RED's unless an audited mutation diff matches.";
+    }
+    // Replace the identity check with the separately recorded, content-derived
+    // mutation proof. A caller-supplied testDiffSha256 is never accepted here.
+    checks[4] = [true, checks[4][1]];
+  }
+
   const failed = checks.find(([ok]) => !ok);
   return failed ? failed[1] : undefined;
 }

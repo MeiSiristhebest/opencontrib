@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import {
   computeSourceTreeHash,
   captureRedEvidence,
   verifyGreenEvidence,
+  computeTestIdentity,
+  computeTestFileDiffSha256,
 } from "../src/evidence/evidence-collector.js";
 import {
   validatePhaseGate,
@@ -152,6 +155,7 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
         cwd: wsDir,
         testCommand: testCmd,
         expectedAssertion: "ASSERTION_ERROR_SAMPLE",
+        testFile: "status.txt",
       });
 
       expect(red.assertionMatched).toBe(true);
@@ -179,11 +183,29 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       // 2. Mutate source to fix bug (GREEN)
       writeFileSync(stateFile, "PASS LONGER MUTATION STRING\n");
 
-      // 3. Verify real GREEN evidence
+      // 3. Verify real GREEN evidence. The fixture mutates an explicit file,
+      // so it must provide the content-derived audited mutation proof.
+      const greenIdentity = computeTestIdentity(
+        wsDir,
+        testCmd,
+        "ASSERTION_ERROR_SAMPLE",
+        "status.txt",
+      );
+      const expectedTestDiffSha256 = computeTestFileDiffSha256(
+        red.testIdentity!.testFiles,
+        greenIdentity.testFiles,
+      );
+      const redWithPolicy = {
+        ...red,
+        testMutationPolicy: {
+          allowed: true,
+          expectedDiffSha256: expectedTestDiffSha256!,
+        },
+      };
       const green = verifyGreenEvidence({
         cwd: wsDir,
         testCommand: testCmd,
-        redEvidence: red,
+        redEvidence: redWithPolicy,
       });
 
       expect(green.greenEvidence.passed).toBe(true);
@@ -205,12 +227,12 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
         passedUnitTestsCount: 1,
         allTestsPassing: true,
         reproductionVerified: true,
-        redEvidence: red,
+        redEvidence: redWithPolicy,
         greenEvidence: green.greenEvidence,
       };
 
       // 4. Save artifact via trusted canonical flow and advance to EVIDENCE_COLLECTED
-      manager.saveArtifactTrusted(
+      saveCanonicalArtifact(manager, 
         manifest.runId,
         "evidence",
         report,

@@ -40,8 +40,10 @@ export type ArtifactType =
   | "workspace"
   | "poc"
   | "patch"
+  | "evidence_red"
   | "evidence"
   | "governance"
+  | "submission_intent"
   | "approval"
   | "submission"
   | "pr_draft"
@@ -73,8 +75,10 @@ export interface ContributionRunSummary {
     workspace?: Record<string, unknown>;
     poc?: Record<string, unknown>;
     patch?: string;
+    evidenceRed?: Record<string, unknown>;
     evidence?: Record<string, unknown>;
     governance?: Record<string, unknown>;
+    submissionIntent?: Record<string, unknown>;
     approval?: Record<string, unknown>;
     submission?: Record<string, unknown>;
     prDraft?: string;
