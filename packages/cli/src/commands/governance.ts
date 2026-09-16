@@ -147,19 +147,22 @@ const auditCommand = new Command("audit")
           humanApproved: opts.humanApproved,
         });
 
-        const isPassed = audit.overallConfidence.isPassed;
+        let canonicalDecision: any = undefined;
+        let isPassed = audit.overallConfidence.isPassed;
 
         if (runId) {
           try {
             const { GovernanceService } = await import("@opencontrib/core");
             const govService = new GovernanceService(getRunManager());
-            govService.audit(runId, {
+            canonicalDecision = govService.audit(runId, {
               prTitle: opts.prTitle,
               prBody: prBodyContent,
               subagentScore: opts.subagentScore,
               isAutonomous: opts.isAutonomous,
               allowUnverified: opts.allowUnverified,
             });
+            // When running against a tracked run, the authoritative GovernanceService decision is the source of truth
+            isPassed = Boolean(canonicalDecision?.passed);
           } catch (err: any) {
             console.warn(
               `[Governance] Canonical audit persistence warning: ${err.message}`,
@@ -171,6 +174,7 @@ const auditCommand = new Command("audit")
           {
             status: isPassed ? "passed" : "failed",
             audit,
+            canonicalDecision,
           },
           opts.pretty,
         );
@@ -391,10 +395,12 @@ const prTemplateCommand = new Command("pr-template")
           runId,
           status: "SUCCESS",
           humanCheckpoint: "Checkpoint 3 (PR Drafted & Ready for Human Review)",
-          nextCommand: `gh pr create --title "${opts.issueTitle}" --body-file pr-body.md`,
+          nextCommand: runId
+            ? `opencontrib governance request-approval --run-id ${runId}`
+            : "opencontrib governance request-approval",
           invariants: [
             'Ensure the PR description includes "Fixes #<issue_number>".',
-            'After PR is actually submitted via gh pr create, run "opencontrib flywheel sync" to record the contribution.',
+            'Submit only via "opencontrib submission submit" after human/policy approval.',
           ],
         });
       } catch (err: any) {
@@ -533,14 +539,37 @@ const approveCommand = new Command("request-approval")
           throw new CliExitError(1);
         }
 
+        const runManager = getRunManager();
+        const run = runManager.getRun(runId);
+        if (!run) {
+          throw new Error(`Run "${runId}" does not exist.`);
+        }
+
+        const [owner, repo] = (run.manifest.repoFullName || "").split("/");
+        if (!owner || !repo) {
+          throw new Error(
+            `Cannot determine upstream repository from manifest "${run.manifest.repoFullName}".`,
+          );
+        }
+
+        // Ensure SubmissionIntent exists before challenging approval
+        if (!run.artifacts?.submissionIntent) {
+          const { SubmissionIntentService } = await import("@opencontrib/core");
+          new SubmissionIntentService(runManager).createIntent({
+            runId,
+            upstreamOwner: owner,
+            upstreamRepo: repo,
+          });
+        }
+
         const { ApprovalService } = await import("@opencontrib/core");
-        const challenge = new ApprovalService(getRunManager()).requestApproval(runId);
+        const challenge = new ApprovalService(runManager).requestApproval(runId);
         printJSON(
           {
             status: "APPROVAL_REQUESTED",
             challenge,
             message:
-              "Challenge issued. A trusted human/policy host must mint the approval; this CLI command never self-approves.",
+              "SubmissionIntent created & Challenge issued. A trusted human/policy host must mint the approval; this CLI command never self-approves.",
           },
           opts.pretty,
         );

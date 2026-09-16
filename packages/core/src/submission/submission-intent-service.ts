@@ -151,7 +151,11 @@ export class SubmissionIntentService {
       );
     }
 
-    const baseBranch = input.baseBranch || "main";
+    const wsArtifact = run.artifacts.workspace as Record<string, unknown> | undefined;
+    const baseBranch =
+      input.baseBranch ||
+      (typeof wsArtifact?.baseBranch === "string" ? wsArtifact.baseBranch : undefined) ||
+      "main";
     const commitMessage = input.commitMessage || title;
     const isDraft = input.isDraft ?? true;
 

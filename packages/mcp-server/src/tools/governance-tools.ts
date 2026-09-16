@@ -602,6 +602,17 @@ export function registerGovernanceTools(
         runManager,
       );
 
+      // Guard against concurrent mutations if expectedIntentSha256 is supplied
+      if (args.expectedIntentSha256) {
+        const run = runManager.getRun(args.runId);
+        const intentSha = (run?.artifacts?.submissionIntent as any)?.intentSha256;
+        if (intentSha && intentSha !== args.expectedIntentSha256) {
+          throw new Error(
+            `SubmissionIntentMismatchError: expected intent SHA "${args.expectedIntentSha256}" does not match recorded intent SHA "${intentSha}".`,
+          );
+        }
+      }
+
       // Submit PR strictly binding to the approved immutable SubmissionIntent
       const result = await submissionService.submit(args.runId);
 

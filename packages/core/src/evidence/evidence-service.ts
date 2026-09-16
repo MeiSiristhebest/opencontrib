@@ -59,7 +59,20 @@ export class EvidenceService {
       testFile: input.testFile,
     });
 
-    // Save authoritative evidence_red artifact
+    // Only seal authoritative evidence_red when RED actually reproduced a valid failure (exitCode !== 0)
+    // If test passed unexpectedly or assertion failed, do not seal immutable evidence_red.
+    if (red.exitCode === 0) {
+      throw new Error(
+        `RedReproductionFailedError: test command exited with code 0 (expected failure). Evidence_red not saved so run is not permanently bricked. Output snippet: ${red.observedOutputSnippet.slice(0, 200)}`,
+      );
+    }
+    if (input.expectedAssertion && !red.assertionMatched) {
+      throw new Error(
+        `RedAssertionMismatchError: expected assertion "${input.expectedAssertion}" was not observed in test output. Evidence_red not saved. Output snippet: ${red.observedOutputSnippet.slice(0, 200)}`,
+      );
+    }
+
+    // Save authoritative evidence_red artifact only after passing verification
     saveCanonicalArtifact(
       this.runManager,
       input.runId,

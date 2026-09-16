@@ -3,9 +3,9 @@
 import { Command } from "commander";
 import {
   WorktreeManager,
+  WorkspaceService,
   buildContributionRunManager,
   defaultActiveSessionManager,
-  saveCanonicalArtifact,
   type ContributionRunManager,
 } from "@opencontrib/core";
 import { printJSON, printPhaseGuidance } from "../utils/output.js";
@@ -23,10 +23,13 @@ const workspacePrepare = new Command("prepare")
     "--repo <name>",
     'Repository full name, e.g. "microsoft/vscode"',
   )
-  .requiredOption("--issue <id>", "Issue number or task identifier")
+  .requiredOption(
+    "--issue <id>",
+    "Issue number or task identifier to isolate fix branch",
+  )
   .option(
     "--local-path <path>",
-    "Local path of existing repo to create worktree from",
+    "Optional local existing clone to worktree from",
   )
   .option(
     "--run-id <id>",
@@ -42,24 +45,25 @@ const workspacePrepare = new Command("prepare")
       pretty?: boolean;
     }) => {
       try {
-        const runId = getRunManager().resolveRunId(opts.runId);
-        const context = worktreeManager.createIsolatedWorkspace({
-          repoFullName: opts.repo,
-          issueOrTaskId: opts.issue,
-          localRepoPath: opts.localPath,
-          runId,
-        });
-
-        let effectiveRunId = runId;
+        const runManager = getRunManager();
+        let effectiveRunId = runManager.resolveRunId(opts.runId);
         if (!effectiveRunId) {
-          // Create real tracked run session so activeSession and RunManager are 100% synchronized
-          const manifest = getRunManager().createRun({
+          // Invert sequence: first ensure a canonical run exists, so runId is deterministic
+          const manifest = runManager.createRun({
             repoFullName: opts.repo,
             issueNumber: parseInt(opts.issue, 10) || undefined,
             issueTitle: `Workspace for issue ${opts.issue}`,
           });
           effectiveRunId = manifest.runId;
         }
+
+        const workspaceService = new WorkspaceService(runManager, worktreeManager);
+        const { context, artifact, alreadyPrepared } = workspaceService.prepare({
+          runId: effectiveRunId,
+          issueOrTaskId: opts.issue,
+          localRepoPath: opts.localPath,
+          repoFullName: opts.repo,
+        });
 
         defaultActiveSessionManager.setActiveSession({
           runId: effectiveRunId,
@@ -68,44 +72,23 @@ const workspacePrepare = new Command("prepare")
           currentPhase: "WORKSPACE_PREPARED",
         });
 
-        let persistence: { saved: boolean; error?: string } | undefined;
-        if (effectiveRunId) {
-          try {
-            saveCanonicalArtifact(
-              getRunManager(),
-              effectiveRunId,
-              "workspace",
-              {
-                workspacePath: context.workspacePath,
-                branchName: context.branchName,
-                isWorktree: context.isWorktree,
-                baseRepoPath: context.baseRepoPath,
-                baseCommitSha: context.baseCommitSha,
-                repoFullName: opts.repo,
-              },
-              "WORKSPACE_PREPARED",
-            );
-            persistence = { saved: true };
-          } catch (err: any) {
-            persistence = { saved: false, error: err.message };
-          }
-        }
-
         printJSON(
           {
-            status: persistence?.error ? "PARTIAL_SUCCESS" : "success",
+            status: "success",
             workspacePath: context.workspacePath,
             branchName: context.branchName,
             isWorktree: context.isWorktree,
             baseCommitSha: context.baseCommitSha,
-            persistence,
+            baseBranch: artifact.baseBranch,
+            alreadyPrepared,
+            persistence: { saved: true },
           },
           opts.pretty,
         );
 
         printPhaseGuidance({
           currentPhase: "WORKSPACE_PREPARED",
-          runId,
+          runId: effectiveRunId,
           status: "SUCCESS",
           humanCheckpoint: "Checkpoint 1 (Sandbox Isolated & Ready)",
           nextCommand: `opencontrib evidence --cwd "${context.workspacePath}" --test-cmd "<test_command>"`,

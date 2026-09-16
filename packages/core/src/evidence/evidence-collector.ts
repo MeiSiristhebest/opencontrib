@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { execSync } from "child_process";
-import { readdirSync, statSync, readFileSync } from "fs";
+import { readdirSync, statSync, readFileSync, existsSync } from "fs";
 import { join, relative, resolve, sep } from "path";
 import {
   defaultSandboxRuntime,
@@ -770,6 +770,25 @@ export function resolveTestFiles(
   // receive a deterministic repository test-file set rather than an empty
   // identity. If no set can be resolved, the phase gate remains unavailable.
   if (files.size === 0) discoverTestFiles(cwd, files);
+
+  // Security: bind execution harness / test runner configuration files into execution identity
+  // so agents cannot bypass tests by mutating npm scripts (e.g. "test": "echo PASS") or runner configs
+  const harnessFiles = [
+    "package.json",
+    "vitest.config.ts",
+    "vitest.config.js",
+    "jest.config.js",
+    "jest.config.ts",
+    "pytest.ini",
+    "pyproject.toml",
+    "Cargo.toml",
+  ];
+  for (const hf of harnessFiles) {
+    const full = resolve(cwd, hf);
+    if (isWithinDirectory(cwd, full) && existsSync(full)) {
+      addFileIdentity(cwd, hf, files);
+    }
+  }
 
   return [...files.values()].sort((a, b) =>
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,

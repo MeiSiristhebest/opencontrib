@@ -34,6 +34,7 @@ import { GitHubSubmissionService } from "../../github/submission-service.js";
 import { ApprovalService } from "../../governance/approval-service.js";
 import { defaultRunManager } from "../../run/run-manager.js";
 import { saveCanonicalArtifact } from "../../run/canonical-writer.js";
+import { WorkspaceService } from "../../workspace/workspace-service.js";
 import { buildTurnPrompt } from "../agent-orchestrator.js";
 import type {
   PipelineContext,
@@ -157,26 +158,17 @@ export class WorkspaceAllocationStep implements PipelineStep {
       "ONBOARDING",
       `Preparing clean-room worktree for ${selectedOpp.repoFullName}`,
     );
-    const workspace = deps.worktreeManager.createIsolatedWorkspace({
-      repoFullName: selectedOpp.repoFullName,
+    const workspaceService = new WorkspaceService(runManager, deps.worktreeManager);
+    const { context } = workspaceService.prepare({
+      runId: ctx.runId,
       issueOrTaskId: selectedOpp.issueNumber,
+      repoFullName: selectedOpp.repoFullName,
     });
-    deps.stateMachine.setWorkspace(workspace.workspacePath);
+    deps.stateMachine.setWorkspace(context.workspacePath);
     ctx.workspace = {
-      workspacePath: workspace.workspacePath,
-      branchName: workspace.branchName,
+      workspacePath: context.workspacePath,
+      branchName: context.branchName,
     };
-    saveCanonicalArtifact(
-      runManager,
-      ctx.runId,
-      "workspace",
-      {
-        workspacePath: workspace.workspacePath,
-        branchName: workspace.branchName,
-        baseCommitSha: (workspace as any).baseCommitSha,
-      },
-      "WORKSPACE_PREPARED",
-    );
     return continuePipeline();
   }
 }

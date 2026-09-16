@@ -9,4 +9,11 @@ export * from './markdown-validator.js';
 export * from './community-gate.js';
 export * from './approval-service.js';
 export * from './governance-service.js';
-export * from './approval-authority.js';
+export type {
+  ApprovalAuthorityRequest,
+  ApprovalAuthorityDecision,
+  HostApprovalPort,
+  TrustedApprovalAuthority,
+  ApprovalAuthorityArtifact,
+} from './approval-authority.js';
+export { isTrustedApprovalAuthority } from './approval-authority.js';

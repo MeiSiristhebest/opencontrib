@@ -2,13 +2,15 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as path from 'path';
 import * as os from 'os';
-import { ContributionRunManager, WorktreeManager, saveCanonicalArtifact } from '@opencontrib/core';
+import { ContributionRunManager, WorktreeManager, WorkspaceService } from '@opencontrib/core';
 
 export function registerWorkspaceTools(
   server: McpServer,
   worktreeManager: WorktreeManager,
   runManager: ContributionRunManager,
 ): void {
+  const workspaceService = new WorkspaceService(runManager, worktreeManager);
+
   // -------------------------------------------------------------
   // Tool: contrib_prepare_workspace (本地沙箱：Git Worktree)
   // -------------------------------------------------------------
@@ -23,35 +25,42 @@ export function registerWorkspaceTools(
     },
     async (args) => {
       try {
+        if (args.runId) {
+          const { context, artifact, alreadyPrepared } = workspaceService.prepare({
+            runId: args.runId,
+            issueOrTaskId: args.issueOrTaskId,
+            localRepoPath: args.localRepoPath,
+            repoFullName: args.repoFullName,
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    status: 'success',
+                    workspacePath: context.workspacePath,
+                    branchName: context.branchName,
+                    isWorktree: context.isWorktree,
+                    baseCommitSha: context.baseCommitSha,
+                    baseBranch: artifact.baseBranch,
+                    alreadyPrepared,
+                    persistence: { saved: true },
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
+        }
+
         const context = worktreeManager.createIsolatedWorkspace({
           repoFullName: args.repoFullName,
           issueOrTaskId: args.issueOrTaskId,
           localRepoPath: args.localRepoPath,
-          runId: args.runId,
         });
-
-        let persistence: { saved: boolean; error?: string } = { saved: false };
-        if (args.runId) {
-          try {
-            saveCanonicalArtifact(
-              runManager,
-              args.runId,
-              'workspace',
-              {
-                workspacePath: context.workspacePath,
-                branchName: context.branchName,
-                isWorktree: context.isWorktree,
-                baseRepoPath: context.baseRepoPath,
-                baseCommitSha: context.baseCommitSha,
-                repoFullName: args.repoFullName,
-              },
-              'WORKSPACE_PREPARED',
-            );
-            persistence = { saved: true };
-          } catch (err: any) {
-            persistence = { saved: false, error: err.message };
-          }
-        }
 
         return {
           content: [
@@ -59,12 +68,11 @@ export function registerWorkspaceTools(
               type: 'text',
               text: JSON.stringify(
                 {
-                  status: persistence.error ? 'PARTIAL_SUCCESS' : 'success',
+                  status: 'success',
                   workspacePath: context.workspacePath,
                   branchName: context.branchName,
                   isWorktree: context.isWorktree,
                   baseCommitSha: context.baseCommitSha,
-                  persistence: args.runId ? persistence : undefined,
                 },
                 null,
                 2,
@@ -80,6 +88,7 @@ export function registerWorkspaceTools(
       }
     },
   );
+
 
   // -------------------------------------------------------------
   // Tool: contrib_purge_sandbox (沙箱与临时测试工作区一键清理)
