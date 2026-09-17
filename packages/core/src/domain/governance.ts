@@ -516,6 +516,10 @@ export interface MasterPrTemplateInput {
   aiDisclosureRequired?: boolean;
   conditionalAiRequired?: boolean;
   nativeTemplateContent?: string;
+  evidence?: {
+    baselineFlakyTests?: Array<unknown>;
+    [key: string]: unknown;
+  };
 }
 
 export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
@@ -610,9 +614,15 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     ? `- **Verification**: \`${data.verificationCommand}\` ${verificationDetail}`
     : `- **Verification**: ${verificationDetail}`;
 
-  const regressionLine = data.verificationCommand
-    ? `- **Regression Isolation**: Verified 0 flaky baseline regressions across sandbox runs.`
-    : `- **Regression Isolation**: Not recorded.`;
+  let regressionLine = "- **Regression Isolation**: Not recorded.";
+  if (data.evidence?.baselineFlakyTests !== undefined) {
+    if (data.evidence.baselineFlakyTests.length === 0) {
+      regressionLine =
+        "- **Regression Isolation**: Verified 0 flaky baseline regressions across sandbox runs.";
+    } else {
+      regressionLine = `- **Regression Isolation**: ${data.evidence.baselineFlakyTests.length} baseline flaky test(s) observed.`;
+    }
+  }
 
   const aiDisclosureSection = data.aiDisclosureRequired
     ? `\n\n### Automated Assistance Disclosure\nIn accordance with repository policies, this contribution was developed with AI-assisted tooling (OpenContrib autonomous engine) with deterministic local reproduction and human verification.`

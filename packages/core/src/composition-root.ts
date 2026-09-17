@@ -21,23 +21,23 @@ import { ContributionRunManager } from "./run/run-manager.js";
 import { TrustedRunMaterializer } from "./run/trusted-run-host.js";
 import { WorktreeManager } from "./workspace/worktree-manager.js";
 import {
- ContributionPrService,
- GitHubSubmissionService,
- RemoteSubmissionBrokerClient,
- TrustedSubmissionBroker,
- type SubmissionPort,
+  ContributionPrService,
+  GitHubSubmissionService,
+  RemoteSubmissionBrokerClient,
+  TrustedSubmissionBroker,
+  type SubmissionPort,
 } from "./github/index.js";
 import type { GitHubClientOptions } from "./github/types.js";
 import type {
- ApprovalArtifactVerifier,
- TrustedApprovalAuthority,
+  ApprovalArtifactVerifier,
+  TrustedApprovalAuthority,
 } from "./governance/approval-authority.js";
 
 /** Production GitHub client with env-based credentials, file cache, and retry. */
 export function buildProductionGitHubClient(
- options: GitHubClientOptions = {},
+  options: GitHubClientOptions = {},
 ): GitHubClient {
- return new GitHubClient(options);
+  return new GitHubClient(options);
 }
 
 /**
@@ -47,7 +47,7 @@ export function buildProductionGitHubClient(
  * correctly. Tests inject fakes via the constructor directly.
  */
 export function buildContributionRunManager(): ContributionRunManager {
- return new ContributionRunManager();
+  return new ContributionRunManager();
 }
 
 /**
@@ -57,18 +57,18 @@ export function buildContributionRunManager(): ContributionRunManager {
  * via `deps` for tests or alternative environments.
  */
 class DeferredRemoteSubmissionPort implements SubmissionPort {
- private client?: RemoteSubmissionBrokerClient;
- constructor(
-  private readonly runManager: ContributionRunManager,
-  private readonly endpoint?: string,
- ) {}
- async submit(runId: string, expectedIntentSha256?: string) {
-  this.client ??= new RemoteSubmissionBrokerClient({
-   endpoint: this.endpoint,
-   runManager: this.runManager,
-  });
-  return this.client.submit(runId, expectedIntentSha256);
- }
+  private client?: RemoteSubmissionBrokerClient;
+  constructor(
+    private readonly runManager: ContributionRunManager,
+    private readonly endpoint?: string,
+  ) {}
+  async submit(runId: string, expectedIntentSha256?: string) {
+    this.client ??= new RemoteSubmissionBrokerClient({
+      endpoint: this.endpoint,
+      runManager: this.runManager,
+    });
+    return this.client.submit(runId, expectedIntentSha256);
+  }
 }
 
 /**
@@ -76,49 +76,49 @@ class DeferredRemoteSubmissionPort implements SubmissionPort {
  * Binds the runManager so proposals can be transferred to the trusted host.
  */
 export function buildAgentSubmissionPort(
- runManager: ContributionRunManager,
- endpoint?: string,
+  runManager: ContributionRunManager,
+  endpoint?: string,
 ): SubmissionPort {
- return new DeferredRemoteSubmissionPort(runManager, endpoint);
+  return new DeferredRemoteSubmissionPort(runManager, endpoint);
 }
 
 export function buildContributionPipeline(
- options: {
-  /** Read-only GitHub credential for discovery; never used for provider writes. */
-  githubReadToken?: string;
-  /** @deprecated Use githubReadToken; this alias is read-only by construction. */
-  githubToken?: string;
-  githubHost?: string;
-  submissionBrokerEndpoint?: string;
-  llmService?: LLMService;
-  approvalAuthority?: TrustedApprovalAuthority;
- } = {},
+  options: {
+    /** Read-only GitHub credential for discovery; never used for provider writes. */
+    githubReadToken?: string;
+    /** @deprecated Use githubReadToken; this alias is read-only by construction. */
+    githubToken?: string;
+    githubHost?: string;
+    submissionBrokerEndpoint?: string;
+    llmService?: LLMService;
+    approvalAuthority?: TrustedApprovalAuthority;
+  } = {},
 ): ContributionPipeline {
- const client = buildProductionGitHubClient({
-  token: options.githubReadToken ?? options.githubToken,
-  host: options.githubHost,
- });
- const runManager = buildContributionRunManager();
- return new ContributionPipeline({
-  githubReadToken: options.githubReadToken ?? options.githubToken,
-  llmService: options.llmService,
-  deps: {
-   client,
-   clock: new SystemClock(),
-   runManager,
-   submissionPort: buildAgentSubmissionPort(
-    runManager,
-    options.submissionBrokerEndpoint,
-   ),
-   approvalAuthority: options.approvalAuthority,
-  },
- });
+  const client = buildProductionGitHubClient({
+    token: options.githubReadToken ?? options.githubToken,
+    host: options.githubHost,
+  });
+  const runManager = buildContributionRunManager();
+  return new ContributionPipeline({
+    githubReadToken: options.githubReadToken ?? options.githubToken,
+    llmService: options.llmService,
+    deps: {
+      client,
+      clock: new SystemClock(),
+      runManager,
+      submissionPort: buildAgentSubmissionPort(
+        runManager,
+        options.submissionBrokerEndpoint,
+      ),
+      approvalAuthority: options.approvalAuthority,
+    },
+  });
 }
 
 export interface ProductionCompositionRoot {
- githubClient: GitHubClient;
- contributionPipeline: ContributionPipeline;
- approvalAuthority?: TrustedApprovalAuthority;
+  githubClient: GitHubClient;
+  contributionPipeline: ContributionPipeline;
+  approvalAuthority?: TrustedApprovalAuthority;
 }
 
 /**
@@ -127,75 +127,77 @@ export interface ProductionCompositionRoot {
  * RemoteSubmissionBrokerClient instead and must not receive its token.
  */
 export function buildTrustedSubmissionBroker(options: {
- githubToken: string;
- githubHost?: string;
- approvalVerifier: ApprovalArtifactVerifier;
+  githubToken: string;
+  githubHost?: string;
+  approvalVerifier: ApprovalArtifactVerifier;
+  executionPort?: import("./run/trusted-execution.port.js").TrustedExecutionPort;
 }): {
- githubClient: GitHubClient;
- runManager: ContributionRunManager;
- broker: TrustedSubmissionBroker;
+  githubClient: GitHubClient;
+  runManager: ContributionRunManager;
+  broker: TrustedSubmissionBroker;
 } {
- const githubClient = buildProductionGitHubClient({
-  token: options.githubToken,
-  host: options.githubHost,
- });
- const runManager = buildContributionRunManager();
- const submissionService = new GitHubSubmissionService(
-  new ContributionPrService(githubClient),
-  githubClient,
-  runManager,
-  options.approvalVerifier,
- );
- const materializer = new TrustedRunMaterializer(
-  runManager,
-  new WorktreeManager(),
- );
- return {
-  githubClient,
-  runManager,
-  broker: new TrustedSubmissionBroker(
-   runManager,
-   submissionService,
-   materializer,
-  ),
- };
+  const githubClient = buildProductionGitHubClient({
+    token: options.githubToken,
+    host: options.githubHost,
+  });
+  const runManager = buildContributionRunManager();
+  const submissionService = new GitHubSubmissionService(
+    new ContributionPrService(githubClient),
+    githubClient,
+    runManager,
+    options.approvalVerifier,
+  );
+  const materializer = new TrustedRunMaterializer(
+    runManager,
+    new WorktreeManager(),
+    options.executionPort,
+  );
+  return {
+    githubClient,
+    runManager,
+    broker: new TrustedSubmissionBroker(
+      runManager,
+      submissionService,
+      materializer,
+    ),
+  };
 }
 
 /** Build the entire production object graph in one call. */
 export function buildProductionCompositionRoot(
- options: {
-  /** Read-only GitHub credential used by discovery adapters. */
-  githubReadToken?: string;
-  /** @deprecated read-only compatibility alias. */
-  githubToken?: string;
-  githubHost?: string;
-  submissionBrokerEndpoint?: string;
-  llmService?: LLMService;
-  approvalAuthority?: TrustedApprovalAuthority;
- } = {},
+  options: {
+    /** Read-only GitHub credential used by discovery adapters. */
+    githubReadToken?: string;
+    /** @deprecated read-only compatibility alias. */
+    githubToken?: string;
+    githubHost?: string;
+    submissionBrokerEndpoint?: string;
+    llmService?: LLMService;
+    approvalAuthority?: TrustedApprovalAuthority;
+  } = {},
 ): ProductionCompositionRoot {
- const githubClient = buildProductionGitHubClient({
-  token: options.githubReadToken ?? options.githubToken,
-  host: options.githubHost,
- });
- const runManager = buildContributionRunManager();
- const contributionPipeline = new ContributionPipeline({
-  githubReadToken: options.githubReadToken ?? options.githubToken,
-  llmService: options.llmService,
-  deps: {
-   client: githubClient,
-   clock: new SystemClock(),
-   runManager,
-   submissionPort: buildAgentSubmissionPort(
-    runManager,
-    options.submissionBrokerEndpoint,
-   ),
-   approvalAuthority: options.approvalAuthority,
-  },
- });
- return {
-  githubClient,
-  contributionPipeline,
-  approvalAuthority: options.approvalAuthority,
- };
+  const githubClient = buildProductionGitHubClient({
+    token: options.githubReadToken ?? options.githubToken,
+    host: options.githubHost,
+  });
+  const runManager = buildContributionRunManager();
+  const contributionPipeline = new ContributionPipeline({
+    githubReadToken: options.githubReadToken ?? options.githubToken,
+    llmService: options.llmService,
+    deps: {
+      client: githubClient,
+      clock: new SystemClock(),
+      runManager,
+      submissionPort: buildAgentSubmissionPort(
+        runManager,
+        options.submissionBrokerEndpoint,
+      ),
+      approvalAuthority: options.approvalAuthority,
+    },
+  });
+  return {
+    githubClient,
+    contributionPipeline,
+    approvalAuthority: options.approvalAuthority,
+  };
 }

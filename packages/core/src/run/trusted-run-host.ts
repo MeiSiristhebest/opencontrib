@@ -5,6 +5,7 @@ import { EvidenceService } from "../evidence/evidence-service.js";
 import { WorktreeManager } from "../workspace/worktree-manager.js";
 import type { ContributionRunManager } from "./run-manager.js";
 import { hydrateCanonicalRun } from "./canonical-writer.js";
+import type { TrustedExecutionPort } from "./trusted-execution.port.js";
 import {
   RunTransferBundleSchema,
   transferManifestToRunManifest,
@@ -19,6 +20,37 @@ export class TrustedRunMaterializationError extends Error {
 }
 
 /**
+ * In-process fallback execution adapter implementing TrustedExecutionPort.
+ * In low-trust/development mode, delegates to EvidenceService. In production,
+ * an out-of-process containerized execution worker should be injected instead.
+ */
+class LocalEvidenceServiceExecutionAdapter implements TrustedExecutionPort {
+  constructor(private readonly runManager: ContributionRunManager) {}
+
+  async captureRed(job: import("./trusted-execution.port.js").RedExecutionJob) {
+    return new EvidenceService(this.runManager).captureRed({
+      runId: job.runId,
+      cwd: job.cwd,
+      testCommand: job.testCommand,
+      expectedAssertion: job.expectedAssertion,
+      testFile: job.testFiles,
+    });
+  }
+
+  async verifyGreen(
+    job: import("./trusted-execution.port.js").GreenExecutionJob,
+  ) {
+    return new EvidenceService(this.runManager).verifyGreen({
+      runId: job.runId,
+      cwd: job.cwd,
+      testCommand: job.testCommand,
+      stressLoopCount: job.stressLoopCount ?? 1,
+      concurrencyWorkers: job.concurrencyWorkers ?? 1,
+    });
+  }
+}
+
+/**
  * Materializes an agent proposal into a host-owned run.
  *
  * The incoming bundle deliberately contains only a patch, PR draft, and RED
@@ -27,11 +59,17 @@ export class TrustedRunMaterializationError extends Error {
  * artifacts to its protected RunManager.
  */
 export class TrustedRunMaterializer {
+  private readonly executionPort: TrustedExecutionPort;
+
   constructor(
     private readonly runManager: ContributionRunManager,
     private readonly worktreeManager: WorktreeManager = new WorktreeManager(),
-    private readonly _sandboxProvider?: import("../sandbox/sandbox-runtime.js").SandboxProvider,
-  ) {}
+    executionPort?: TrustedExecutionPort,
+  ) {
+    this.executionPort =
+      executionPort ??
+      new LocalEvidenceServiceExecutionAdapter(this.runManager);
+  }
 
   async materialize(input: RunTransferBundle) {
     const bundle = RunTransferBundleSchema.parse(input);
@@ -80,13 +118,12 @@ export class TrustedRunMaterializer {
       JSON.stringify(patch),
     );
 
-    const evidenceService = new EvidenceService(this.runManager);
-    await evidenceService.captureRed({
+    await this.executionPort.captureRed({
       runId: bundle.manifest.runId,
       cwd: workspace.context.workspacePath,
       testCommand: bundle.redRecipe.command,
       expectedAssertion: bundle.redRecipe.expectedAssertion,
-      testFile: bundle.redRecipe.testFiles,
+      testFiles: bundle.redRecipe.testFiles,
     });
 
     this.runManager.saveArtifact(
@@ -111,7 +148,7 @@ export class TrustedRunMaterializer {
       );
     }
 
-    await evidenceService.verifyGreen({
+    await this.executionPort.verifyGreen({
       runId: bundle.manifest.runId,
       cwd: workspace.context.workspacePath,
       testCommand: bundle.redRecipe.command,
