@@ -309,12 +309,8 @@ export function registerGovernanceTools(
 
       let savedArtifact = false;
       if (args.runId) {
-        try {
-          runManager.saveArtifact(args.runId, "pr_draft", prBody);
-          savedArtifact = true;
-        } catch {
-          // Best-effort saving
-        }
+        runManager.saveArtifact(args.runId, "pr_draft", prBody);
+        savedArtifact = true;
       }
 
       return {

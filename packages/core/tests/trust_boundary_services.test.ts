@@ -59,6 +59,7 @@ function seedGovernanceReadyRun(
       regressionTestPlan: ["bun test"],
       estimatedDiffLines: 1,
     }),
+    "PATCH_DRAFTED",
   );
   const testIdentity = {
     normalizedCommand: "bun test regression.test.ts",
@@ -204,12 +205,20 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       expect(check1.valid).toBe(true);
 
       // Now mutate the patch (TOCTOU attack)
-      manager.saveArtifact(manifest.runId, "patch", "diff mutated maliciously");
+      manager.saveArtifact(manifest.runId, "patch", JSON.stringify({ files: [] }));
 
       // Verification must fail!
       const check2 = approvalService.verifyApprovalIntegrity(manifest.runId);
       expect(check2.valid).toBe(false);
       expect(check2.reason).toContain("TOCTOU violation");
+
+      // If an attacker tampers with the patch file directly on disk, verifyApprovalIntegrity also detects TOCTOU!
+      const patchPath = join(baseDir, manifest.runId, "patch.diff");
+      writeFileSync(patchPath, JSON.stringify({ mutated: true }));
+
+      const check3 = approvalService.verifyApprovalIntegrity(manifest.runId);
+      expect(check3.valid).toBe(false);
+      expect(check3.reason).toContain("TOCTOU violation");
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }
@@ -593,4 +602,317 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       rmSync(baseDir, { recursive: true, force: true });
     }
   });
+
+  it("EvidenceService.verifyGreen rejects verification when workspace contains unlisted modified/untracked files", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ev-delta-"));
+    const wsDir = join(baseDir, "workspace");
+    mkdirSync(wsDir, { recursive: true });
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/repo" });
+
+      const { saveCanonicalArtifact } = require("../src/run/canonical-writer.js");
+      saveCanonicalArtifact(manager, manifest.runId, "workspace", {
+        workspacePath: wsDir,
+        branchName: "opencontrib/run-test",
+        isWorktree: true,
+        baseRepoPath: wsDir,
+        baseCommitSha: "abc",
+      }, "WORKSPACE_PREPARED");
+
+      const stateFile = join(wsDir, "test.txt");
+      writeFileSync(stateFile, "FAIL\n");
+
+      const testCmd = process.platform === "win32"
+        ? `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERR; exit 1 } else { Write-Output PASS; exit 0 }"`
+        : `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERR; exit 1; else echo PASS; exit 0; fi"`;
+
+      const evidenceService = new EvidenceService(manager);
+      evidenceService.captureRed({
+        runId: manifest.runId,
+        testCommand: testCmd,
+        expectedAssertion: "ASSERTION_ERR",
+        testFile: "test.txt",
+      });
+
+      // Patch only declares src/fix.ts
+      mkdirSync(join(wsDir, "src"), { recursive: true });
+      writeFileSync(join(wsDir, "src", "fix.ts"), "fixed code");
+      manager.saveArtifact(manifest.runId, "patch", JSON.stringify({
+        title: "fix",
+        summary: "fix",
+        rationale: "fix",
+        targetFiles: [{ path: "src/fix.ts", reason: "fix" }],
+        files: [{ path: "src/fix.ts", operation: "MODIFY", content: "fixed code", explanation: "fix" }],
+        implementationSteps: [],
+        regressionTestPlan: [],
+        estimatedDiffLines: 1,
+      }), "PATCH_DRAFTED");
+
+      writeFileSync(stateFile, "PASS\n");
+
+      // Now introduce an unlisted extra file in workspace (e.g. stealth untracked code)
+      writeFileSync(join(wsDir, "sneaky.txt"), "sneaky untracked content");
+
+      // Initialize git repo in wsDir to simulate real git repo with status
+      const { execSync } = require("child_process");
+      execSync("git init", { cwd: wsDir, stdio: "ignore" });
+
+      // verifyGreen must fail because sneaky.txt is not in patch.files!
+      await expect(
+        evidenceService.verifyGreen({
+          runId: manifest.runId,
+          testCommand: testCmd,
+        }),
+      ).rejects.toThrow(/EvidencePatchProvenanceError: workspace contains uncommitted\/untracked file 'sneaky.txt'/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("SubmissionIntentService strictly verifies pr_draft sha256 against audited governance", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-intent-toctou-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/repo" });
+
+      seedGovernanceReadyRun(manager, manifest.runId, "audited body");
+
+      // Tamper with pr_draft on disk
+      const prDraftPath = join(baseDir, manifest.runId, "pr_draft.md");
+      writeFileSync(prDraftPath, "tampered un-audited body");
+
+      const intentService = new SubmissionIntentService(manager);
+      expect(() => {
+        intentService.createIntent({
+          runId: manifest.runId,
+          upstreamOwner: "owner",
+          upstreamRepo: "repo",
+          body: "tampered un-audited body",
+        });
+      }).toThrow(/SubmissionIntentProvenanceError: audited governance prDraftSha256 does not match stored pr_draft/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("SubmissionIntentService rejects baseBranch override that differs from canonical workspace baseBranch", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-intent-basebranch-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/repo" });
+
+      seedGovernanceReadyRun(manager, manifest.runId, "pr body");
+
+      const intentService = new SubmissionIntentService(manager);
+      // seedGovernanceReadyRun has no baseBranch in workspace, so default is used
+      // Let's create a workspace with explicit baseBranch 'develop'
+      const { saveCanonicalArtifact } = require("../src/run/canonical-writer.js");
+      const manifest2 = manager.createRun({ repoFullName: "owner/repo2" });
+      saveCanonicalArtifact(manager, manifest2.runId, "workspace", {
+        workspacePath: "/tmp",
+        branchName: "branch2",
+        baseBranch: "develop",
+        baseCommitSha: "sha123",
+      }, "WORKSPACE_PREPARED");
+      manager.saveArtifact(manifest2.runId, "patch", JSON.stringify({
+        title: "fix",
+        summary: "fix",
+        rationale: "fix",
+        targetFiles: [{ path: "src/fix.ts", reason: "fix" }],
+        files: [{ path: "src/fix.ts", operation: "MODIFY", content: "fixed", explanation: "fix" }],
+        implementationSteps: [],
+        regressionTestPlan: [],
+        estimatedDiffLines: 1,
+      }), "PATCH_DRAFTED");
+      const testIdentity = {
+        normalizedCommand: "bun test regression.test.ts",
+        testFiles: [{ path: "regression.test.ts", sha256: "same" }],
+        identitySha256: "identity-same",
+      };
+      saveCanonicalArtifact(
+        manager,
+        manifest2.runId,
+        "evidence",
+        {
+          baselineTestedAt: "2026-01-01T00:00:00.000Z",
+          baselineFlakyTests: [],
+          stressLoopRuns: 1,
+          stressLoopPassed: true,
+          handleLeakCheckPassed: true,
+          passedUnitTestsCount: 1,
+          failedUnitTestsCount: 0,
+          reproductionVerified: true,
+          allTestsPassing: true,
+          redEvidence: {
+            command: "bun test regression.test.ts",
+            observedOutputSnippet: "failed",
+            exitCode: 1,
+            sourceTreeSha256: "before",
+            capturedAt: "2026-01-01T00:00:00.000Z",
+            assertionMatched: true,
+            assertionMatchedFingerprint: "fp",
+            testIdentity,
+          },
+          greenEvidence: {
+            command: "bun test regression.test.ts",
+            exitCode: 0,
+            outputSnippet: "passed",
+            passed: true,
+            sourceTreeSha256: "after",
+            capturedAt: "2026-01-01T00:01:00.000Z",
+            treeChangedComparedToRed: true,
+            treeHashMatchesRed: false,
+            stressLoopPassed: true,
+            allTestsPassing: true,
+            assertionMatchedFingerprint: "fp",
+            testIdentity,
+          },
+        },
+        "EVIDENCE_COLLECTED",
+      );
+      manager.saveArtifact(manifest2.runId, "pr_draft", "body2");
+      new GovernanceService(manager).audit(manifest2.runId, {
+        prTitle: "fix: bug",
+        prBody: "body2",
+        subagentScore: 100,
+      });
+
+      // Calling createIntent with baseBranch 'main' must fail because workspace was prepared on 'develop'
+      expect(() => {
+        intentService.createIntent({
+          runId: manifest2.runId,
+          upstreamOwner: "owner",
+          upstreamRepo: "repo2",
+          baseBranch: "main",
+        });
+      }).toThrow(/SubmissionBaseBranchMismatchError: requested baseBranch 'main' does not match canonical workspace baseBranch 'develop'/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("GitHubSubmissionService throws BaseBranchAdvancedError if upstream base ref advanced beyond baseCommitSha", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-sub-base-sha-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+
+      const { saveCanonicalArtifact } = require("../src/run/canonical-writer.js");
+      saveCanonicalArtifact(manager, manifest.runId, "workspace", {
+        workspacePath: "/tmp",
+        branchName: "opencontrib/run-1",
+        baseBranch: "main",
+        baseCommitSha: "initial_sha_12345",
+      }, "WORKSPACE_PREPARED");
+
+      manager.saveArtifact(manifest.runId, "patch", JSON.stringify({
+        title: "fix",
+        summary: "fix",
+        rationale: "fix",
+        targetFiles: [{ path: "src/fix.ts", reason: "fix" }],
+        files: [{ path: "src/fix.ts", operation: "MODIFY", content: "fixed", explanation: "fix" }],
+        implementationSteps: [],
+        regressionTestPlan: [],
+        estimatedDiffLines: 1,
+      }), "PATCH_DRAFTED");
+
+      const testIdentity = {
+        normalizedCommand: "bun test",
+        testFiles: [{ path: "test.ts", sha256: "same" }],
+        identitySha256: "identity-same",
+      };
+      saveCanonicalArtifact(manager, manifest.runId, "evidence", {
+        baselineTestedAt: "2026-01-01T00:00:00.000Z",
+        reproductionVerified: true,
+        allTestsPassing: true,
+        redEvidence: {
+          command: "test",
+          observedOutputSnippet: "",
+          exitCode: 1,
+          sourceTreeSha256: "before",
+          capturedAt: "2026-01-01T00:00:00.000Z",
+          assertionMatched: true,
+          assertionMatchedFingerprint: "fp",
+          testIdentity,
+        },
+        greenEvidence: {
+          command: "test",
+          exitCode: 0,
+          outputSnippet: "",
+          passed: true,
+          sourceTreeSha256: "after",
+          capturedAt: "2026-01-01T00:01:00.000Z",
+          treeChangedComparedToRed: true,
+          treeHashMatchesRed: false,
+          stressLoopPassed: true,
+          allTestsPassing: true,
+          assertionMatchedFingerprint: "fp",
+          testIdentity,
+        },
+      }, "EVIDENCE_COLLECTED");
+
+      manager.saveArtifact(manifest.runId, "pr_draft", "pr body");
+      new GovernanceService(manager).audit(manifest.runId, {
+        prTitle: "fix: bug",
+        prBody: "pr body",
+        subagentScore: 100,
+      });
+
+      const intentService = new SubmissionIntentService(manager);
+      const intent = intentService.createIntent({
+        runId: manifest.runId,
+        upstreamOwner: "org",
+        upstreamRepo: "repo",
+        title: "fix: bug",
+        body: "pr body",
+      });
+
+      const approvalService = new ApprovalService(manager, testApprovalAuthority());
+      approvalService.recordApproval({
+        runId: manifest.runId,
+        expectedIntentSha256: intent.intentSha256,
+      });
+
+      // Mock GitHubClient where upstream main has advanced to 'new_remote_head_67890'
+      const mockOctokit = {
+        rest: {
+          git: {
+            getRef: async () => ({
+              data: {
+                object: {
+                  sha: "new_remote_head_67890",
+                },
+              },
+            }),
+          },
+          pulls: {
+            get: async () => ({
+              data: { head: { sha: "commit_sha" } },
+            }),
+          },
+        },
+      };
+
+      const mockClient = { octokit: mockOctokit } as unknown as GitHubClient;
+      const mockPrService = {
+        submitPullRequest: async () => {
+          throw new Error("Should not be reached");
+        },
+      } as unknown as ContributionPrService;
+
+      const submissionService = new GitHubSubmissionService(
+        mockPrService,
+        mockClient,
+        manager,
+      );
+
+      await expect(
+        submissionService.submit(manifest.runId),
+      ).rejects.toThrow(/BaseBranchAdvancedError: Upstream base branch "main" has advanced/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
 });
+

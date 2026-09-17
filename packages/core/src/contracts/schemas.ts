@@ -216,6 +216,7 @@ export const SubmissionIntentArtifactSchema = z.object({
   upstreamOwner: z.string(),
   upstreamRepo: z.string(),
   baseBranch: z.string().default("main"),
+  baseCommitSha: z.string().optional(),
   branchName: z.string(),
   title: z.string(),
   body: z.string(),

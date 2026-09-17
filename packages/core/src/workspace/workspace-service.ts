@@ -77,14 +77,15 @@ export class WorkspaceService {
       );
     }
 
-    // If localRepoPath is supplied, verify its origin remote matches the manifest repository
+    // If localRepoPath is supplied, verify its origin remote matches the manifest repository strictly if origin exists
     if (input.localRepoPath && existsSync(input.localRepoPath)) {
       const originRes = this.worktreeManager.runGit(['-C', input.localRepoPath, 'remote', 'get-url', 'origin']);
       if (originRes.success && originRes.stdout.trim()) {
         const originUrl = originRes.stdout.trim().toLowerCase().replace(/\\/g, '/');
-        const expected = manifestRepo.toLowerCase();
-        // Match either https://github.com/owner/repo(.git) or git@github.com:owner/repo(.git)
-        if (!originUrl.includes(expected)) {
+        const expected = manifestRepo.toLowerCase().trim();
+        // Strict regex matching: either https://github.com/owner/repo(.git) or git@github.com:owner/repo(.git)
+        const originRegex = new RegExp(`^(https?://github\\.com/|git@github\\.com:)${expected.replace('/', '\\/')}(\\.git)?$`, 'i');
+        if (!originRegex.test(originUrl)) {
           throw new Error(
             `WorkspaceOriginMismatchError: localRepoPath "${input.localRepoPath}" origin remote "${originRes.stdout.trim()}" does not match manifest repository "${manifestRepo}".`,
           );

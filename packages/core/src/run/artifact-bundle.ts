@@ -24,6 +24,7 @@ import { getOpenContribHome } from "../kernel/home.js";
 const WRITE_ONCE_ARTIFACT_TYPES = new Set<ArtifactType>([
   "workspace",
   "evidence_red",
+  "evidence",
   "governance",
   "submission_intent",
   "approval",
@@ -150,16 +151,15 @@ export class ArtifactBundleManager {
       const existingRaw = readFileSync(filePath, "utf-8");
       let existingValue: unknown;
       let nextValue: unknown;
+      let isJson = true;
       try {
         existingValue = JSON.parse(existingRaw);
         nextValue = JSON.parse(stringContent);
       } catch {
-        throw new Error(
-          `ImmutableArtifactViolationError: Authoritative artifact '${type}' cannot be overwritten with non-JSON content.`,
-        );
+        isJson = false;
       }
 
-      if (type === "evidence") {
+      if (type === "evidence" && isJson) {
         const existingRed = (existingValue as any)?.redEvidence;
         const nextRed = (nextValue as any)?.redEvidence;
         if (
@@ -170,13 +170,15 @@ export class ArtifactBundleManager {
             `ImmutableArtifactViolationError: RED baseline in evidence is write-once and cannot be mutated or deleted.`,
           );
         }
-      } else if (
-        WRITE_ONCE_ARTIFACT_TYPES.has(type) &&
-        JSON.stringify(existingValue) !== JSON.stringify(nextValue)
-      ) {
-        throw new Error(
-          `ImmutableArtifactViolationError: Authoritative artifact '${type}' is write-once and cannot be mutated.`,
-        );
+      } else if (WRITE_ONCE_ARTIFACT_TYPES.has(type)) {
+        const hasMutated = isJson
+          ? JSON.stringify(existingValue) !== JSON.stringify(nextValue)
+          : existingRaw !== stringContent;
+        if (hasMutated) {
+          throw new Error(
+            `ImmutableArtifactViolationError: Authoritative artifact '${type}' is write-once and cannot be mutated.`,
+          );
+        }
       }
     }
 

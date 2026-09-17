@@ -35,9 +35,9 @@ const auditCommand = new Command("audit")
   .description(
     "Audit patch for anti-AI patterns, diff size, markdown integrity, and quality confidence rubric",
   )
-  .requiredOption(
+  .option(
     "--patch <file-or-text>",
-    "Git unified diff content or path to .diff/.patch file",
+    "Git unified diff content or path to .diff/.patch file (optional if --run-id is provided)",
   )
   .requiredOption("--pr-title <text>", "Proposed PR title")
   .option("--pr-body <text>", "Proposed PR body text")
@@ -71,7 +71,7 @@ const auditCommand = new Command("audit")
   .option("--pretty", "Pretty-print", false)
   .action(
     async (opts: {
-      patch: string;
+      patch?: string;
       prTitle: string;
       prBody?: string;
       prBodyFile?: string;
@@ -85,8 +85,10 @@ const auditCommand = new Command("audit")
       pretty?: boolean;
     }) => {
       try {
-        let patchContent = opts.patch;
-        if (fs.existsSync(opts.patch)) {
+        const runId = getRunManager().resolveRunId(opts.runId);
+
+        let patchContent = opts.patch || "";
+        if (opts.patch && fs.existsSync(opts.patch)) {
           try {
             patchContent = fs.readFileSync(opts.patch, "utf-8");
           } catch (err: any) {
@@ -95,9 +97,22 @@ const auditCommand = new Command("audit")
             );
             throw new CliExitError(1);
           }
+        } else if (!patchContent && runId) {
+          const run = getRunManager().getRun(runId);
+          if (run?.artifacts?.patch) {
+            patchContent =
+              typeof run.artifacts.patch === "string"
+                ? run.artifacts.patch
+                : JSON.stringify(run.artifacts.patch);
+          }
         }
 
-        let prBodyContent = opts.prBody || "";
+        if (!patchContent && !runId) {
+          console.error("❌ --patch is required when no active runId is provided.");
+          throw new CliExitError(1);
+        }
+
+        let prBodyContent = opts.prBody;
         if (opts.prBodyFile && fs.existsSync(opts.prBodyFile)) {
           try {
             prBodyContent = fs.readFileSync(opts.prBodyFile, "utf-8");
@@ -108,8 +123,6 @@ const auditCommand = new Command("audit")
             throw new CliExitError(1);
           }
         }
-
-        const runId = getRunManager().resolveRunId(opts.runId);
 
         let evidence: any;
         if (opts.evidenceFile && fs.existsSync(opts.evidenceFile)) {
@@ -140,7 +153,7 @@ const auditCommand = new Command("audit")
         const audit = auditGovernance({
           patchContent,
           prTitle: opts.prTitle,
-          prBody: prBodyContent,
+          prBody: prBodyContent || "",
           evidence,
           subagentQualityScore: opts.subagentScore,
           isAutonomousPrSubmission: opts.isAutonomous ?? false,
@@ -155,7 +168,7 @@ const auditCommand = new Command("audit")
           const govService = new GovernanceService(getRunManager());
           canonicalDecision = govService.audit(runId, {
             prTitle: opts.prTitle,
-            prBody: prBodyContent,
+            prBody: prBodyContent, // undefined unless explicitly provided by caller
             subagentScore: opts.subagentScore,
             isAutonomous: opts.isAutonomous,
             allowUnverified: opts.allowUnverified,
@@ -371,16 +384,12 @@ const prTemplateCommand = new Command("pr-template")
         });
 
         const runId = getRunManager().resolveRunId(opts.runId);
-        if (runId) {
-          try {
-            getRunManager().saveArtifact(
-              runId,
-              "pr_draft",
-              prBody,
-            );
-          } catch {
-            // PR draft persistence is best-effort; template content still output to stdout
-          }
+        if (runId && getRunManager().getRun(runId)) {
+          getRunManager().saveArtifact(
+            runId,
+            "pr_draft",
+            prBody,
+          );
         }
 
         printJSON({ status: "success", prBody }, opts.pretty);
@@ -587,6 +596,102 @@ const approveCommand = new Command("request-approval")
     },
   );
 
+// ─── governance approve (Human/Maintainer Host Approval) ──────────────────────
+const humanApproveCommand = new Command("approve")
+  .description(
+    "Interactive human reviewer approval: verifies intent hash and mints canonical approval artifact",
+  )
+  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
+  .option("--reviewer <name>", "Reviewer identifier", "human_reviewer")
+  .option(
+    "--mode <mode>",
+    "Approval mode: explicit_human or policy_waived",
+    "explicit_human",
+  )
+  .option("--yes", "Confirm approval non-interactively", false)
+  .option("--pretty", "Pretty-print", false)
+  .action(
+    async (opts: {
+      runId?: string;
+      reviewer: string;
+      mode: string;
+      yes?: boolean;
+      pretty?: boolean;
+    }) => {
+      try {
+        const runId = getRunManager().resolveRunId(opts.runId);
+        if (!runId) {
+          console.error("❌ No runId found in active session or --run-id option.");
+          throw new CliExitError(1);
+        }
+
+        const runManager = getRunManager();
+        const run = runManager.getRun(runId);
+        if (!run) {
+          throw new Error(`Run "${runId}" does not exist.`);
+        }
+
+        const [owner, repo] = (run.manifest.repoFullName || "").split("/");
+        if (!owner || !repo) {
+          throw new Error(
+            `Cannot determine upstream repository from manifest "${run.manifest.repoFullName}".`,
+          );
+        }
+
+        // Ensure SubmissionIntent exists
+        let intent = run.artifacts?.submissionIntent as any;
+        if (!intent) {
+          const { SubmissionIntentService } = await import("@opencontrib/core");
+          intent = new SubmissionIntentService(runManager).createIntent({
+            runId,
+            upstreamOwner: owner,
+            upstreamRepo: repo,
+          });
+        }
+
+        const approvalMode = opts.mode === "policy_waived" ? "policy_waived" : "explicit_human";
+
+        const { buildHostApprovalAuthority, ApprovalService } = await import("@opencontrib/core");
+
+        const authority = buildHostApprovalAuthority({
+          approvedBy: opts.reviewer,
+          approvalMode,
+        });
+
+        const approvalService = new ApprovalService(runManager, authority);
+        const approvalArtifact = approvalService.recordApproval({
+          runId,
+          expectedIntentSha256: intent.intentSha256,
+        });
+
+        printJSON(
+          {
+            status: "APPROVED",
+            approval: approvalArtifact,
+            message: `Contribution run ${runId} approved by ${opts.reviewer} (${approvalMode}).`,
+          },
+          opts.pretty,
+        );
+
+        printPhaseGuidance({
+          currentPhase: "GOVERNANCE_AUDITED",
+          runId,
+          status: "SUCCESS",
+          humanCheckpoint: "Checkpoint 4 (Approved - Ready for PR Submission)",
+          nextCommand: `opencontrib submission submit --run-id ${runId}`,
+          invariants: [
+            `Approval minted with intent hash ${approvalArtifact.intentSha256}.`,
+            "Run is authorized for provider pull request creation.",
+          ],
+        });
+      } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
+        printJSON({ status: "error", message: err.message }, opts.pretty);
+        throw new CliExitError(1);
+      }
+    },
+  );
+
 // ─── Top-level command ────────────────────────────────────────────────────────
 
 export const governanceCommand = new Command("governance")
@@ -594,6 +699,7 @@ export const governanceCommand = new Command("governance")
     "Governance audit, impact analysis, CI diagnosis, PR template rendering, Issue Claim generation, community gate detection, and Markdown linting",
   )
   .addCommand(auditCommand)
+  .addCommand(humanApproveCommand)
   .addCommand(approveCommand)
   .addCommand(gateCommand)
   .addCommand(impactCommand)

@@ -130,6 +130,15 @@ export class SubmissionIntentService {
         "Cannot create submission intent: the exact PR body must be stored as pr_draft and audited before approval.",
       );
     }
+    const bodySha256 = sha256(storedBody);
+    if (
+      governanceResult.data.prDraftSha256 &&
+      governanceResult.data.prDraftSha256 !== bodySha256
+    ) {
+      throw new Error(
+        "SubmissionIntentProvenanceError: audited governance prDraftSha256 does not match stored pr_draft.",
+      );
+    }
     if (input.body !== undefined && input.body !== storedBody) {
       throw new Error(
         "SubmissionIntentProvenanceError: requested PR body differs from the audited pr_draft artifact.",
@@ -138,6 +147,14 @@ export class SubmissionIntentService {
     const body = storedBody;
 
     const title = governanceResult.data.prTitle;
+    if (
+      governanceResult.data.prTitleSha256 &&
+      governanceResult.data.prTitleSha256 !== sha256(title)
+    ) {
+      throw new Error(
+        "SubmissionIntentProvenanceError: audited governance prTitleSha256 does not match governance title.",
+      );
+    }
     if (input.title !== undefined && input.title !== title) {
       throw new Error(
         "SubmissionIntentProvenanceError: requested PR title differs from the audited governance title.",
@@ -152,10 +169,14 @@ export class SubmissionIntentService {
     }
 
     const wsArtifact = run.artifacts.workspace as Record<string, unknown> | undefined;
-    const baseBranch =
-      input.baseBranch ||
-      (typeof wsArtifact?.baseBranch === "string" ? wsArtifact.baseBranch : undefined) ||
-      "main";
+    const wsBaseBranch = typeof wsArtifact?.baseBranch === "string" ? wsArtifact.baseBranch : undefined;
+    if (input.baseBranch && wsBaseBranch && input.baseBranch !== wsBaseBranch) {
+      throw new Error(
+        `SubmissionBaseBranchMismatchError: requested baseBranch '${input.baseBranch}' does not match canonical workspace baseBranch '${wsBaseBranch}'.`,
+      );
+    }
+    const baseBranch = input.baseBranch || wsBaseBranch || "main";
+    const baseCommitSha = typeof wsArtifact?.baseCommitSha === "string" ? wsArtifact.baseCommitSha : undefined;
     const commitMessage = input.commitMessage || title;
     const isDraft = input.isDraft ?? true;
 
@@ -204,12 +225,12 @@ export class SubmissionIntentService {
     }
     files.sort((a, b) => a.path.localeCompare(b.path));
 
-    const bodySha256 = sha256(body);
     const intentPayload = JSON.stringify({
       runId: input.runId,
       upstreamOwner: input.upstreamOwner,
       upstreamRepo: input.upstreamRepo,
       baseBranch,
+      baseCommitSha,
       branchName,
       title,
       bodySha256,
@@ -231,6 +252,7 @@ export class SubmissionIntentService {
       upstreamOwner: input.upstreamOwner,
       upstreamRepo: input.upstreamRepo,
       baseBranch,
+      baseCommitSha,
       branchName,
       title,
       body,

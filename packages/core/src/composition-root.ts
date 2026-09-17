@@ -21,6 +21,7 @@ import { ContributionRunManager } from './run/run-manager.js';
 import type { GitHubClientOptions } from './github/types.js';
 import {
   type TrustedApprovalAuthority,
+  createTrustedApprovalAuthority,
 } from './governance/approval-authority.js';
 
 /** Production GitHub client with env-based credentials, file cache, and retry. */
@@ -85,4 +86,27 @@ export function buildProductionCompositionRoot(options: {
   });
   return { githubClient, contributionPipeline, approvalAuthority: options.approvalAuthority };
 }
+
+export interface HostApprovalOptions {
+  approvedBy?: string;
+  approvalMode?: "explicit_human" | "policy_waived";
+}
+
+/**
+ * Trusted host factory: creates a TrustedApprovalAuthority for local CLI or
+ * host daemon approval. Never exported through agent-facing barrels or MCP tools.
+ */
+export function buildHostApprovalAuthority(
+  options: HostApprovalOptions = {},
+): TrustedApprovalAuthority {
+  const approvedBy = options.approvedBy || "human_reviewer";
+  const approvalMode = options.approvalMode === "policy_waived" ? "policy_waived" : "explicit_human";
+  return createTrustedApprovalAuthority({
+    issueApproval: () => ({
+      approvedBy,
+      approvalMode,
+    }),
+  });
+}
+
 

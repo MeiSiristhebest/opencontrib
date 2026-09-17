@@ -24,21 +24,7 @@ import {
 // active session; it is only used as a *constructor default*, never bypassed
 // at runtime (transition/updatePhase go through `this.activeSession`).
 
-/** Phase → next suggested CLI/MCP action. Replaces the 10-branch switch (OCP). */
-const PHASE_TRANSITIONS: Record<ContributionRunPhase, string> = {
-  INITIALIZED: "scout_opportunity",
-  OPPORTUNITY_SCOUTED: "assemble_context",
-  PROBE_COMPLETED: "assemble_context",
-  CONTEXT_ASSEMBLED: "prepare_workspace",
-  WORKSPACE_PREPARED: "draft_patch",
-  POC_GENERATED: "draft_patch",
-  PATCH_DRAFTED: "collect_evidence",
-  EVIDENCE_COLLECTED: "audit_governance",
-  GOVERNANCE_AUDITED: "render_pr_and_submit",
-  PR_SUBMITTED: "sync_flywheel",
-  COMPLETED: "none (run completed)",
-  FAILED: "inspect_failure_and_replan",
-};
+import { PROTOCOL_CONTRACT_PHASES } from "../workflow/protocol-contract.js";
 
 export type { CreateRunInput };
 
@@ -356,7 +342,8 @@ export class ContributionRunManager {
     };
 
     const suggestedNextAction =
-      PHASE_TRANSITIONS[summary.manifest.currentPhase];
+      PROTOCOL_CONTRACT_PHASES[summary.manifest.currentPhase]?.suggestedNextAction ||
+      "none";
 
     return {
       runId,

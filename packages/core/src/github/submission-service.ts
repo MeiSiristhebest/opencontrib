@@ -22,12 +22,20 @@ export class SubmissionVerificationError extends Error {
   }
 }
 
+export class BaseBranchAdvancedError extends SubmissionVerificationError {
+  constructor(message: string) {
+    super(`BaseBranchAdvancedError: ${message}`);
+    this.name = "BaseBranchAdvancedError";
+  }
+}
+
 export interface SubmissionPermit {
   runId: string;
   issuedAt: string;
   owner: string;
   repo: string;
   baseBranch: string;
+  baseCommitSha?: string;
   branchName: string;
   title: string;
   body: string;
@@ -170,8 +178,30 @@ export class GitHubSubmissionService {
         }
       }
     }
-
     const effectiveOptions = this.optionsFromPermit(permit);
+    const octokit = (this.client as any).octokit;
+
+    // Upstream base branch freshness check: if baseCommitSha was bound at workspace preparation,
+    // verify the upstream base branch HEAD has not advanced, preventing PRs based on stale code.
+    if (permit.baseCommitSha && octokit?.rest?.git?.getRef) {
+      try {
+        const refResp = await octokit.rest.git.getRef({
+          owner: effectiveOptions.upstreamOwner,
+          repo: effectiveOptions.upstreamRepo,
+          ref: `heads/${effectiveOptions.baseBranch || "main"}`,
+        });
+        const upstreamBaseSha = String(refResp?.data?.object?.sha || "");
+        if (upstreamBaseSha && upstreamBaseSha !== permit.baseCommitSha) {
+          throw new BaseBranchAdvancedError(
+            `Upstream base branch "${effectiveOptions.baseBranch || "main"}" has advanced (HEAD is ${upstreamBaseSha}, workspace prepared against ${permit.baseCommitSha}). Rebase and re-verify before submitting.`,
+          );
+        }
+      } catch (err: any) {
+        if (err instanceof BaseBranchAdvancedError) throw err;
+        // If the ref query fails due to network/mock/missing permissions, log or proceed to submit
+      }
+    }
+
     let result: PrSubmissionResult;
     try {
       result = await this.prService.submitPullRequest(effectiveOptions);
@@ -179,7 +209,6 @@ export class GitHubSubmissionService {
       throw new SubmissionVerificationError(`Provider submission failed: ${err.message}`);
     }
 
-    const octokit = (this.client as any).octokit;
     if (!octokit?.rest?.pulls?.get) {
       throw new SubmissionVerificationError(
         "GitHub octokit client is unavailable; cannot verify submitted PR with provider.",
@@ -260,6 +289,7 @@ export class GitHubSubmissionService {
       owner: intent.upstreamOwner,
       repo: intent.upstreamRepo,
       baseBranch: intent.baseBranch,
+      baseCommitSha: intent.baseCommitSha,
       branchName: intent.branchName,
       title: intent.title,
       body: intent.body,

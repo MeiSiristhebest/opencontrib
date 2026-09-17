@@ -135,52 +135,90 @@ export class EvidenceService {
     const resolvedWorkspaceRoot = String(ws.workspacePath);
     const baselineCommitSha = typeof ws.baseCommitSha === "string" ? ws.baseCommitSha : input.baselineCommitSha;
 
-    // Verify patch artifact provenance if present
+    // Verify patch artifact provenance: mandatory and write-once
     const patchRaw = run.artifacts.patch;
-    let appliedPatchSha256: string | undefined;
-    if (patchRaw) {
-      const patchContent = typeof patchRaw === "string" ? patchRaw : JSON.stringify(patchRaw);
-      appliedPatchSha256 = createHash("sha256").update(patchContent).digest("hex");
+    if (!patchRaw) {
+      throw new Error(
+        `PatchRequiredForGreenVerificationError: run ${input.runId} has no patch artifact. Draft patch before verifying GREEN.`,
+      );
+    }
+    const patchContent = typeof patchRaw === "string" ? patchRaw : JSON.stringify(patchRaw);
+    const appliedPatchSha256 = createHash("sha256").update(patchContent).digest("hex");
 
-      let parsedPatch: any;
-      try {
-        parsedPatch = typeof patchRaw === "string" ? JSON.parse(patchRaw) : patchRaw;
-      } catch {
-        parsedPatch = null;
+    let parsedPatch: any;
+    try {
+      parsedPatch = typeof patchRaw === "string" ? JSON.parse(patchRaw) : patchRaw;
+    } catch {
+      parsedPatch = null;
+    }
+
+    if (!parsedPatch || !Array.isArray(parsedPatch.files) || parsedPatch.files.length === 0) {
+      throw new Error(
+        `EvidencePatchProvenanceError: patch artifact for run ${input.runId} contains no concrete files.`,
+      );
+    }
+
+    const patchFilePaths = new Set<string>();
+    for (const file of parsedPatch.files) {
+      const filePath = String(file.path || "");
+      if (!isSafeRepositoryPath(filePath)) {
+        throw new Error(`EvidencePatchProvenanceError: unsafe patch path '${filePath}' in patch artifact.`);
       }
+      patchFilePaths.add(filePath);
+      const fullPath = resolve(targetCwd, filePath);
+      const op = String(file.operation || "MODIFY").toUpperCase();
 
-      if (parsedPatch && Array.isArray(parsedPatch.files)) {
-        for (const file of parsedPatch.files) {
-          const filePath = String(file.path || "");
-          if (!isSafeRepositoryPath(filePath)) {
-            throw new Error(`EvidencePatchProvenanceError: unsafe patch path '${filePath}' in patch artifact.`);
-          }
-          const fullPath = resolve(targetCwd, filePath);
-          const op = String(file.operation || "MODIFY").toUpperCase();
+      if (op === "DELETE") {
+        if (existsSync(fullPath)) {
+          throw new Error(
+            `EvidencePatchProvenanceError: patch specifies DELETE for '${filePath}', but file still exists on disk in workspace.`,
+          );
+        }
+      } else {
+        // CREATE or MODIFY
+        if (!existsSync(fullPath)) {
+          throw new Error(
+            `EvidencePatchProvenanceError: patch specifies file '${filePath}', but file does not exist on disk in workspace.`,
+          );
+        }
+        const onDiskContent = readFileSync(fullPath, "utf-8");
+        const expectedContent = String(file.content ?? "");
+        if (onDiskContent !== expectedContent) {
+          throw new Error(
+            `EvidencePatchProvenanceError: on-disk content for '${filePath}' does not match the patch artifact content.`,
+          );
+        }
+      }
+    }
 
-          if (op === "DELETE") {
-            if (existsSync(fullPath)) {
-              throw new Error(
-                `EvidencePatchProvenanceError: patch specifies DELETE for '${filePath}', but file still exists on disk in workspace.`,
-              );
-            }
-          } else {
-            // CREATE or MODIFY
-            if (!existsSync(fullPath)) {
-              throw new Error(
-                `EvidencePatchProvenanceError: patch specifies file '${filePath}', but file does not exist on disk in workspace.`,
-              );
-            }
-            const onDiskContent = readFileSync(fullPath, "utf-8");
-            const expectedContent = String(file.content ?? "");
-            if (onDiskContent !== expectedContent) {
-              throw new Error(
-                `EvidencePatchProvenanceError: on-disk content for '${filePath}' does not match the patch artifact content.`,
-              );
-            }
+    // Exact delta check: git status --porcelain in targetCwd
+    // If targetCwd is a git worktree/repo, any untracked or modified files on disk must belong to patch.files
+    try {
+      const { execSync } = await import("child_process");
+      const gitStatusOut = execSync("git status --porcelain --untracked-files=all", {
+        cwd: targetCwd,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const lines = gitStatusOut.split("\n").map((l) => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        // line is like " M src/index.ts" or "?? new.ts" or "D  del.ts"
+        const rel = line.slice(3).trim();
+        // Ignore test execution artifacts or temp logs if any, but any repo file change must be in patch
+        if (rel && !rel.startsWith(".git") && !rel.startsWith(".opencontrib")) {
+          const normRel = rel.replace(/\\/g, "/");
+          if (!patchFilePaths.has(normRel)) {
+            throw new Error(
+              `EvidencePatchProvenanceError: workspace contains uncommitted/untracked file '${normRel}' that is NOT declared in the patch artifact. Actual delta must equal patch.`,
+            );
           }
         }
       }
+    } catch (err: any) {
+      if (err.message?.includes("EvidencePatchProvenanceError")) {
+        throw err;
+      }
+      // If git status fails (e.g. non-git testing dir in some synthetic unit tests), proceed with file-level checks
     }
 
     const green = verifyGreenEvidence({

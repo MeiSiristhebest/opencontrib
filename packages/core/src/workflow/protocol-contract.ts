@@ -42,7 +42,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Every contribution cycle must originate from a tracked contribution run session.",
     ],
-    suggestedNextAction: "opencontrib scout <target> or opencontrib probe run",
+    suggestedNextAction: "scout_opportunity",
   },
   OPPORTUNITY_SCOUTED: {
     phase: "OPPORTUNITY_SCOUTED",
@@ -63,7 +63,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Target issues must meet feasibility scoring threshold before workspace isolation.",
     ],
-    suggestedNextAction: "opencontrib discovery context --input <json>",
+    suggestedNextAction: "assemble_context",
   },
   PROBE_COMPLETED: {
     phase: "PROBE_COMPLETED",
@@ -85,7 +85,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Pinpoint symbols and defect context strictly via Smart Pointer slices (ptr://...).",
     ],
-    suggestedNextAction: "opencontrib pointer resolve <uri> --view slice",
+    suggestedNextAction: "assemble_context",
   },
   CONTEXT_ASSEMBLED: {
     phase: "CONTEXT_ASSEMBLED",
@@ -112,8 +112,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Context bundle must be minimal, structured, and contain exploration guidance.",
     ],
-    suggestedNextAction:
-      "opencontrib workspace prepare --repo <owner/repo> --issue <id>",
+    suggestedNextAction: "prepare_workspace",
   },
   WORKSPACE_PREPARED: {
     phase: "WORKSPACE_PREPARED",
@@ -142,8 +141,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "All development must take place inside isolated worktree sandbox.",
     ],
-    suggestedNextAction:
-      "opencontrib evidence capture-red --test-cmd '<test_cmd>' --assertion '<pattern>'",
+    suggestedNextAction: "draft_patch",
   },
   POC_GENERATED: {
     phase: "POC_GENERATED",
@@ -163,8 +161,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "DO NOT modify production code while authoring reproduction PoC.",
     ],
     invariants: ["PoC must reliably fail against baseline code."],
-    suggestedNextAction:
-      "opencontrib evidence capture-red --test-cmd '<test_cmd>' --assertion '<pattern>' && opencontrib evidence verify-green --test-cmd '<test_cmd>'",
+    suggestedNextAction: "draft_patch",
   },
   PATCH_DRAFTED: {
     phase: "PATCH_DRAFTED",
@@ -188,8 +185,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Diff must be minimal, surgical, and preserve existing architecture idioms.",
     ],
-    suggestedNextAction:
-      "opencontrib evidence capture-red --test-cmd '<test_cmd>' --assertion '<pattern>' && opencontrib evidence verify-green --test-cmd '<test_cmd>'",
+    suggestedNextAction: "collect_evidence",
   },
   EVIDENCE_COLLECTED: {
     phase: "EVIDENCE_COLLECTED",
@@ -216,8 +212,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "The source tree must have changed between the RED capture and the GREEN run.",
       "Ensure unit test passed cleanly with 0 regressions before proceeding.",
     ],
-    suggestedNextAction:
-      'opencontrib governance audit --patch <file> --pr-title "<title>"',
+    suggestedNextAction: "audit_governance",
   },
   GOVERNANCE_AUDITED: {
     phase: "GOVERNANCE_AUDITED",
@@ -230,7 +225,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       command: "governance",
       subcommand: "audit",
       example:
-        'opencontrib governance audit --patch <file> --pr-title "<title>"',
+        'opencontrib governance audit --run-id <run_id> --pr-title "<title>"',
     },
     mcp: {
       tool: "contrib_audit_governance",
@@ -241,8 +236,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Present patch diff and audit report to human reviewer before PR submission.",
     ],
-    suggestedNextAction:
-      "opencontrib governance request-approval --run-id <run_id>",
+    suggestedNextAction: "governance_audit_and_submit",
   },
   PR_SUBMITTED: {
     phase: "PR_SUBMITTED",
@@ -273,7 +267,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "PR must record actual reproduction command and verification result.",
     ],
-    suggestedNextAction: "opencontrib flywheel sync --repo <owner/repo>",
+    suggestedNextAction: "sync_flywheel",
   },
   COMPLETED: {
     phase: "COMPLETED",
@@ -323,8 +317,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     },
     forbiddenActions: [],
     invariants: [],
-    suggestedNextAction:
-      "Inspect error logs and resume run with opencontrib run resume [run_id]",
+    suggestedNextAction: "inspect_failure_and_replan",
   },
 } satisfies Record<ContributionRunPhase, ProtocolContractPhase>;
 
