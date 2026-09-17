@@ -116,6 +116,7 @@ export class GovernanceService {
       prTitle,
       prBody: prDraftRaw,
       evidence: evidenceArtifact as any,
+      lineCount: validatedPatch.changedLines,
       // Governance is deliberately technical-only. Approval is minted later
       // by an external trusted authority and is not inferred from this audit.
       subagentQualityScore: options.subagentScore,

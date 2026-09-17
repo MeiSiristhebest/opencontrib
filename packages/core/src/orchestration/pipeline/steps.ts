@@ -284,12 +284,49 @@ export class ReproductionDesignStep implements PipelineStep {
       });
     }
 
+    // If reproduction design provides newly generated regression test files,
+    // apply them to the workspace BEFORE capturing the RED baseline!
+    const wsPath = ctx.workspace?.workspacePath;
+    if (!wsPath) {
+      deps.stateMachine.transition("BLOCKED", "Workspace is not allocated");
+      return halt({
+        status: "BLOCKED",
+        stage: "PATCH_DESIGN",
+        selectedOpportunity: ctx.selectedOpp,
+        reportSummary: "Pipeline halted: workspace path unavailable.",
+      });
+    }
+
+    if (design.reproductionFiles && design.reproductionFiles.length > 0) {
+      const applyResult = deps.worktreeManager.applySurgicalFilesSafely(
+        wsPath,
+        design.reproductionFiles.map((f) => ({
+          path: f.path,
+          operation: f.operation,
+          content: f.content,
+        })),
+      );
+      if (applyResult.errors.length > 0) {
+        deps.stateMachine.transition(
+          "BLOCKED",
+          "Applying reproduction test files failed",
+        );
+        return halt({
+          status: "BLOCKED",
+          stage: "PATCH_DESIGN",
+          selectedOpportunity: ctx.selectedOpp,
+          workspacePath: wsPath,
+          reportSummary: `Pipeline halted: could not apply regression test files: ${applyResult.errors.join("; ")}`,
+        });
+      }
+    }
+
     try {
       const red = new EvidenceService(
         deps.runManager ?? defaultRunManager,
       ).captureRed({
         runId: ctx.runId,
-        cwd: ctx.workspace!.workspacePath,
+        cwd: wsPath,
         testCommand: ctx.testCmd,
         expectedAssertion: design.expectedAssertion,
         testFile: design.testFiles,
@@ -915,9 +952,8 @@ export class PrSubmissionStep implements PipelineStep {
       }
       runManager.saveArtifact(runId, "pr_draft", prDraftText);
 
-      const { GovernanceService } = await import(
-        "../../governance/governance-service.js"
-      );
+      const { GovernanceService } =
+        await import("../../governance/governance-service.js");
       const governanceService = new GovernanceService(runManager);
       governanceService.audit(runId, {
         prTitle: `fix: ${selectedOpp.title}`,
@@ -925,9 +961,8 @@ export class PrSubmissionStep implements PipelineStep {
         subagentScore: qualityRubric.overallScore,
       });
 
-      const { SubmissionIntentService } = await import(
-        "../../submission/submission-intent-service.js"
-      );
+      const { SubmissionIntentService } =
+        await import("../../submission/submission-intent-service.js");
       const intentService = new SubmissionIntentService(runManager);
       intentService.createIntent({
         runId,
@@ -967,8 +1002,7 @@ export class PrSubmissionStep implements PipelineStep {
             riskAssessment,
             telemetry: ctx.telemetry,
             approvalChallenge: err.approvalChallenge as
-              | ApprovalChallenge
-              | undefined,
+              ApprovalChallenge | undefined,
             reportSummary: `Trusted broker requires approval before submitting #${selectedOpp.issueNumber}.`,
           });
         }

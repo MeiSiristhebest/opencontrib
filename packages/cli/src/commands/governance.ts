@@ -120,10 +120,13 @@ const auditCommand = new Command("audit")
           }
         }
 
-        let evidence: any;
+        let evidence: import("@opencontrib/core").EvidenceReport | undefined;
         if (opts.evidenceFile && fs.existsSync(opts.evidenceFile)) {
           try {
-            evidence = JSON.parse(fs.readFileSync(opts.evidenceFile, "utf-8"));
+            const raw = JSON.parse(fs.readFileSync(opts.evidenceFile, "utf-8"));
+            const { EvidenceReportSchema } = await import("@opencontrib/core");
+            const parsed = EvidenceReportSchema.safeParse(raw);
+            evidence = parsed.success ? parsed.data : undefined;
           } catch (err: any) {
             console.error(
               `Failed to read evidence file "${opts.evidenceFile}": ${err.message}`,
@@ -131,13 +134,20 @@ const auditCommand = new Command("audit")
             throw new CliExitError(1);
           }
         } else if (opts.evidence) {
-          evidence =
-            (parseJSON(opts.evidence, "--evidence") as any) || undefined;
+          const raw = parseJSON(opts.evidence, "--evidence");
+          const { EvidenceReportSchema } = await import("@opencontrib/core");
+          const parsed = EvidenceReportSchema.safeParse(raw);
+          evidence = parsed.success ? parsed.data : undefined;
         } else if (runId) {
           try {
             const run = getRunManager().getRun(runId);
             if (run?.artifacts?.evidence) {
-              evidence = run.artifacts.evidence;
+              const { EvidenceReportSchema } =
+                await import("@opencontrib/core");
+              const parsed = EvidenceReportSchema.safeParse(
+                run.artifacts.evidence,
+              );
+              evidence = parsed.success ? parsed.data : undefined;
             }
           } catch (err: any) {
             console.warn(
@@ -363,9 +373,7 @@ const prTemplateCommand = new Command("pr-template")
     }) => {
       try {
         const prBody = renderMasterPrTemplate({
-          keyChanges: opts.keyChanges || [
-            "Defensive boundary and logic correction",
-          ],
+          keyChanges: opts.keyChanges || [],
           nativeTemplateContent: opts.nativeTemplate,
           issueNumber: parseInt(opts.issue, 10) || 1,
           issueTitle: opts.issueTitle,

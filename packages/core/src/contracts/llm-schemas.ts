@@ -46,6 +46,11 @@ export const ReproductionDesignSchema = z.object({
   expectedAssertion: z.string().min(1),
   testFiles: z.array(z.string().min(1)).min(1),
   rationale: z.string().min(1),
+  /**
+   * Optional reproduction code modifications (e.g. newly created or edited regression test files)
+   * that must be applied to the baseline workspace BEFORE capturing RED.
+   */
+  reproductionFiles: z.array(CodeChangeFileSchema).optional(),
 });
 export type ReproductionDesign = z.infer<typeof ReproductionDesignSchema>;
 

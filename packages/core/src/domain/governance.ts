@@ -158,6 +158,8 @@ export const calculate7DQualityRubric = calculateConfidenceScore;
 export function deriveEvidenceBackedQualityRubric(input: {
   hasReproductionAssertion?: boolean;
   testsPassed?: boolean;
+  passedUnitTestsCount?: number;
+  /** @deprecated Use passedUnitTestsCount */
   passedTestsCount?: number;
   testCoveragePercent?: number;
   diffLines?: number;
@@ -168,10 +170,11 @@ export function deriveEvidenceBackedQualityRubric(input: {
   breakdown: ConfidenceBreakdown;
   rubricResult: ReturnType<typeof calculate7DQualityRubric>;
 } {
+  const passedUnitTests =
+    input.passedUnitTestsCount ?? input.passedTestsCount ?? 0;
   const {
     hasReproductionAssertion = false,
     testsPassed = false,
-    passedTestsCount = 0,
     testCoveragePercent,
     diffLines = 15,
     styleScore,
@@ -190,9 +193,9 @@ export function deriveEvidenceBackedQualityRubric(input: {
   const regression = testsPassed ? 93 : 50;
   // Defensive and test coverage: based on real passed unit tests count and test coverage percentage (>=85% required)
   const defensiveCoverage =
-    passedTestsCount > 0 ? 91 : subagentReviewAvailable ? 86 : 75;
+    passedUnitTests > 0 ? 91 : subagentReviewAvailable ? 86 : 75;
   let testCoverage =
-    passedTestsCount > 0 ? 92 : subagentReviewAvailable ? 85 : 70;
+    passedUnitTests > 0 ? 92 : subagentReviewAvailable ? 85 : 70;
   if (typeof testCoveragePercent === "number") {
     if (testCoveragePercent >= 85) {
       testCoverage = Math.min(
@@ -323,16 +326,16 @@ export function auditGovernance(
 
   let breakdown = input.confidenceBreakdown;
   if (!breakdown) {
-    const passedTestsCount =
+    const passedUnitTestsCount =
       input.evidence?.passedUnitTestsCount ??
       (input.evidence?.allTestsPassing ? 1 : 0);
 
     const calibrated = deriveEvidenceBackedQualityRubric({
       hasReproductionAssertion: Boolean(input.evidence?.reproductionVerified),
       testsPassed: Boolean(
-        input.evidence?.allTestsPassing ?? passedTestsCount > 0,
+        input.evidence?.allTestsPassing ?? passedUnitTestsCount > 0,
       ),
-      passedTestsCount,
+      passedUnitTestsCount,
       testCoveragePercent: input.evidence?.testCoveragePercent,
       diffLines: lines,
       styleScore: input.subagentQualityScore,
