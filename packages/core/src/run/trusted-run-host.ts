@@ -21,32 +21,73 @@ export class TrustedRunMaterializationError extends Error {
 
 /**
  * In-process fallback execution adapter implementing TrustedExecutionPort.
- * In low-trust/development mode, delegates to EvidenceService. In production,
- * an out-of-process containerized execution worker should be injected instead.
+ * In low-trust/development mode, executes tests and returns raw metrics to the Host.
  */
 class LocalEvidenceServiceExecutionAdapter implements TrustedExecutionPort {
-  constructor(private readonly runManager: ContributionRunManager) {}
-
-  async captureRed(job: import("./trusted-execution.port.js").RedExecutionJob) {
-    return new EvidenceService(this.runManager).captureRed({
-      runId: job.runId,
-      cwd: job.cwd,
+  async captureRed(
+    job: import("./trusted-execution.port.js").RedExecutionJob,
+  ): Promise<import("./trusted-execution.port.js").RawRedExecutionResult> {
+    const { captureRedEvidence } =
+      await import("../evidence/evidence-collector.js");
+    const red = captureRedEvidence({
+      cwd: job.workspace.workspacePath,
       testCommand: job.testCommand,
       expectedAssertion: job.expectedAssertion,
       testFile: job.testFiles,
     });
+    return {
+      command: red.command,
+      exitCode: red.exitCode,
+      stdout: red.observedOutputSnippet,
+      stderr: "",
+      outputSnippet: red.observedOutputSnippet,
+      assertionMatched: red.assertionMatched,
+      capturedAt: red.capturedAt,
+      sourceTreeSha256: red.sourceTreeSha256,
+      testIdentity: red.testIdentity,
+    };
   }
 
   async verifyGreen(
     job: import("./trusted-execution.port.js").GreenExecutionJob,
-  ) {
-    return new EvidenceService(this.runManager).verifyGreen({
-      runId: job.runId,
-      cwd: job.cwd,
+  ): Promise<import("./trusted-execution.port.js").RawGreenExecutionResult> {
+    const { verifyGreenEvidence, getProcessHandleCount } =
+      await import("../evidence/evidence-collector.js");
+    const initialHandles = getProcessHandleCount();
+    const green = await verifyGreenEvidence({
+      cwd: job.workspace.workspacePath,
       testCommand: job.testCommand,
+      redEvidence: job.redEvidence,
       stressLoopCount: job.stressLoopCount ?? 1,
       concurrencyWorkers: job.concurrencyWorkers ?? 1,
     });
+    const finalHandles = getProcessHandleCount();
+    let handleLeakCheckPassed: "PASS" | "FAIL" | "UNAVAILABLE" = "UNAVAILABLE";
+    if (initialHandles !== null && finalHandles !== null) {
+      handleLeakCheckPassed =
+        finalHandles - initialHandles < 15 ? "PASS" : "FAIL";
+    }
+
+    return {
+      command: green.greenEvidence.command,
+      exitCode: green.greenEvidence.exitCode,
+      outputSnippet: green.greenEvidence.outputSnippet,
+      passed: green.greenEvidence.passed,
+      sourceTreeSha256: green.greenEvidence.sourceTreeSha256,
+      capturedAt: green.greenEvidence.capturedAt,
+      executionCount: green.stressResult.executionCount,
+      maxConcurrentObserved: green.stressResult.maxConcurrentObserved,
+      concurrencyWorkers: green.stressResult.concurrencyWorkers,
+      concurrencyStampedePassed: green.stressResult.concurrencyStampedePassed,
+      raceCollisionsDetected: green.stressResult.raceCollisionsDetected,
+      latencyJitterMs: green.stressResult.latencyJitterMs,
+      testIdentity: green.greenEvidence.testIdentity,
+      passedUnitTestsCount: green.greenEvidence.passed ? 1 : 0,
+      failedUnitTestsCount: green.greenEvidence.passed ? 0 : 1,
+      handleLeakCheckPassed,
+      initialDescriptorCount: initialHandles ?? undefined,
+      finalDescriptorCount: finalHandles ?? undefined,
+    };
   }
 }
 
@@ -67,8 +108,7 @@ export class TrustedRunMaterializer {
     executionPort?: TrustedExecutionPort,
   ) {
     this.executionPort =
-      executionPort ??
-      new LocalEvidenceServiceExecutionAdapter(this.runManager);
+      executionPort ?? new LocalEvidenceServiceExecutionAdapter();
   }
 
   async materialize(input: RunTransferBundle) {
@@ -118,13 +158,23 @@ export class TrustedRunMaterializer {
       JSON.stringify(patch),
     );
 
-    await this.executionPort.captureRed({
+    const rawRed = await this.executionPort.captureRed({
       runId: bundle.manifest.runId,
-      cwd: workspace.context.workspacePath,
+      workspace: {
+        repoFullName: bundle.manifest.repoFullName,
+        baseCommitSha: workspace.artifact.baseCommitSha,
+        workspacePath: workspace.context.workspacePath,
+      },
       testCommand: bundle.redRecipe.command,
       expectedAssertion: bundle.redRecipe.expectedAssertion,
       testFiles: bundle.redRecipe.testFiles,
     });
+    const evidenceService = new EvidenceService(this.runManager);
+    const red = evidenceService.recordRedExecution(
+      bundle.manifest.runId,
+      rawRed,
+      bundle.redRecipe.expectedAssertion,
+    );
 
     this.runManager.saveArtifact(
       bundle.manifest.runId,
@@ -148,13 +198,19 @@ export class TrustedRunMaterializer {
       );
     }
 
-    await this.executionPort.verifyGreen({
+    const rawGreen = await this.executionPort.verifyGreen({
       runId: bundle.manifest.runId,
-      cwd: workspace.context.workspacePath,
+      workspace: {
+        repoFullName: bundle.manifest.repoFullName,
+        baseCommitSha: workspace.artifact.baseCommitSha,
+        workspacePath: workspace.context.workspacePath,
+      },
       testCommand: bundle.redRecipe.command,
+      redEvidence: red,
       stressLoopCount: 1,
       concurrencyWorkers: 1,
     });
+    await evidenceService.recordGreenExecution(bundle.manifest.runId, rawGreen);
 
     this.runManager.saveArtifact(
       bundle.manifest.runId,

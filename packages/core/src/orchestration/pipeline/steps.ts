@@ -915,8 +915,9 @@ export class PrSubmissionStep implements PipelineStep {
       }
       runManager.saveArtifact(runId, "pr_draft", prDraftText);
 
-      const { GovernanceService } =
-        await import("../../governance/governance-service.js");
+      const { GovernanceService } = await import(
+        "../../governance/governance-service.js"
+      );
       const governanceService = new GovernanceService(runManager);
       governanceService.audit(runId, {
         prTitle: `fix: ${selectedOpp.title}`,
@@ -924,8 +925,9 @@ export class PrSubmissionStep implements PipelineStep {
         subagentScore: qualityRubric.overallScore,
       });
 
-      const { SubmissionIntentService } =
-        await import("../../submission/submission-intent-service.js");
+      const { SubmissionIntentService } = await import(
+        "../../submission/submission-intent-service.js"
+      );
       const intentService = new SubmissionIntentService(runManager);
       intentService.createIntent({
         runId,
@@ -965,7 +967,8 @@ export class PrSubmissionStep implements PipelineStep {
             riskAssessment,
             telemetry: ctx.telemetry,
             approvalChallenge: err.approvalChallenge as
-              ApprovalChallenge | undefined,
+              | ApprovalChallenge
+              | undefined,
             reportSummary: `Trusted broker requires approval before submitting #${selectedOpp.issueNumber}.`,
           });
         }

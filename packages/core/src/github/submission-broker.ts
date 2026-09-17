@@ -5,6 +5,8 @@ import {
 } from "../contracts/schemas.js";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { ApprovalService } from "../governance/approval-service.js";
+import { ProfileFlywheel } from "../flywheel/profile-sync.js";
+import type { RemoteCompletionAttestation } from "../run/completion-attestation.js";
 import { TrustedRunMaterializer } from "../run/trusted-run-host.js";
 import {
   RunTransferBundleSchema,
@@ -83,10 +85,17 @@ export class TrustedSubmissionBroker {
             : undefined,
         runBundle,
       });
-      return new Response(JSON.stringify({ submissionArtifact: artifact }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      const completion = this.completeRun(payload.runId, artifact);
+      return new Response(
+        JSON.stringify({
+          submissionArtifact: artifact,
+          completionAttestation: completion,
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Broker request rejected.";
@@ -150,5 +159,31 @@ export class TrustedSubmissionBroker {
       );
     }
     return result.submissionArtifact;
+  }
+
+  /**
+   * Host-side canonical completion: seals ResultArtifact, syncs host Flywheel,
+   * advances to COMPLETED, and issues a RemoteCompletionAttestation.
+   */
+  completeRun(
+    runId: string,
+    submission: SubmissionArtifact,
+  ): RemoteCompletionAttestation {
+    const flywheel = new ProfileFlywheel();
+    const synced = flywheel.syncFromRun(this.runManager, runId);
+    const run = this.runManager.getRun(runId);
+    const resultArtifact = run?.artifacts.result;
+    return {
+      runId,
+      hostIntentSha256: submission.intentSha256,
+      prNumber: submission.prNumber,
+      prUrl: submission.prUrl,
+      headSha: submission.headSha,
+      resultSha256: synced.record.id,
+      verified: true,
+      completedAt: submission.submittedAt,
+      submissionArtifact: submission,
+      resultArtifact: resultArtifact as any,
+    };
   }
 }

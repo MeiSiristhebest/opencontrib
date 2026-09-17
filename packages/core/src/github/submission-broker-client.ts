@@ -25,6 +25,11 @@ export interface RemoteSubmissionBrokerOptions {
   bundleProvider?: (runId: string) => RunTransferBundle;
 }
 
+export interface RemoteSubmissionBrokerResult {
+  submissionArtifact: SubmissionArtifact;
+  completionAttestation?: import("../run/completion-attestation.js").RemoteCompletionAttestation;
+}
+
 export class SubmissionBrokerApprovalRequiredError extends Error {
   readonly approvalChallenge?: ApprovalChallenge;
 

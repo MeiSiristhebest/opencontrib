@@ -606,14 +606,12 @@ export class EvidenceService {
         redTreeSha256: redEvidence.sourceTreeSha256,
         greenTreeSha256: finalGreenTreeSha256,
         artifactSha256: "",
-        files: exactDelta.files.map(
-          (file): ValidatedPatchFile => ({
-            path: file.path,
-            operation: file.operation,
-            mode: file.mode,
-            contentSha256: file.contentSha256,
-          }),
-        ),
+        files: exactDelta.files.map((file): ValidatedPatchFile => ({
+          path: file.path,
+          operation: file.operation,
+          mode: file.mode,
+          contentSha256: file.contentSha256,
+        })),
         validatedAt: new Date().toISOString(),
       };
       validatedPatch.artifactSha256 =
@@ -647,6 +645,263 @@ export class EvidenceService {
         "evidence",
         report as any,
       );
+    }
+
+    return report;
+  }
+
+  /**
+   * Authoritatively record raw RED execution result emitted by a worker.
+   * Host validates the execution result, matches assertions, seals evidence_red,
+   * and advances to RED_CAPTURED.
+   */
+  recordRedExecution(
+    runId: string,
+    rawResult: import("../run/trusted-execution.port.js").RawRedExecutionResult,
+    expectedAssertion?: string,
+  ): RedEvidence {
+    const run = this.runManager.getRun(runId);
+    if (!run) {
+      throw new Error(`Contribution run ${runId} does not exist`);
+    }
+    const ws = run.artifacts.workspace;
+    if (!ws?.workspacePath) {
+      throw new Error(
+        `EvidenceWorkspaceRequiredError: run ${runId} has no canonical workspace artifact. Prepare workspace first.`,
+      );
+    }
+
+    if (rawResult.exitCode === 0) {
+      throw new Error(
+        `RedReproductionFailedError: test command exited with code 0 (expected failure). Evidence_red not saved. Output snippet: ${rawResult.outputSnippet.slice(0, 200)}`,
+      );
+    }
+    if (expectedAssertion && !rawResult.assertionMatched) {
+      throw new Error(
+        `RedAssertionMismatchError: expected assertion "${expectedAssertion}" was not observed in test output. Evidence_red not saved. Output snippet: ${rawResult.outputSnippet.slice(0, 200)}`,
+      );
+    }
+
+    const red: RedEvidence = {
+      command: rawResult.command,
+      expectedAssertion,
+      observedOutputSnippet: rawResult.outputSnippet.slice(0, 500),
+      exitCode: rawResult.exitCode,
+      sourceTreeSha256: rawResult.sourceTreeSha256,
+      capturedAt: rawResult.capturedAt || new Date().toISOString(),
+      assertionMatched: rawResult.assertionMatched,
+      testIdentity: rawResult.testIdentity,
+      baselineCommitSha: ws.baseCommitSha
+        ? String(ws.baseCommitSha)
+        : undefined,
+    };
+
+    saveCanonicalArtifact(
+      this.runManager,
+      runId,
+      "evidence_red",
+      red as any,
+      "RED_CAPTURED",
+    );
+
+    saveCanonicalArtifact(this.runManager, runId, "evidence", {
+      baselineTestedAt: red.capturedAt,
+      baselineFlakyTests: [],
+      stressLoopRuns: 0,
+      stressLoopPassed: false,
+      executionCount: 0,
+      maxConcurrentObserved: 0,
+      concurrencyWorkers: 0,
+      concurrencyStampedePassed: false,
+      handleLeakCheckPassed: "UNAVAILABLE",
+      passedUnitTestsCount: 0,
+      testCoverageStatus: "UNAVAILABLE",
+      changedCodeCoverageStatus: "UNAVAILABLE",
+      redEvidence: red,
+      reproductionVerified: false,
+      allTestsPassing: false,
+    });
+
+    return red;
+  }
+
+  /**
+   * Authoritatively record raw GREEN execution result emitted by a worker.
+   * Host validates workspace delta, binds ValidatedPatchArtifact, seals EvidenceReport,
+   * and advances to EVIDENCE_COLLECTED.
+   */
+  async recordGreenExecution(
+    runId: string,
+    rawResult: import("../run/trusted-execution.port.js").RawGreenExecutionResult,
+  ): Promise<EvidenceReport> {
+    const run = this.runManager.getRun(runId);
+    if (!run) {
+      throw new Error(`Contribution run ${runId} does not exist`);
+    }
+    const redEvidence = (run.artifacts?.evidenceRed ||
+      run.artifacts?.evidence?.redEvidence) as RedEvidence | undefined;
+
+    if (!redEvidence || !redEvidence.sourceTreeSha256) {
+      throw new Error(
+        `No authoritative RED baseline found for run ${runId}. Capture RED first.`,
+      );
+    }
+    const ws = run.artifacts.workspace;
+    if (!ws?.workspacePath) {
+      throw new Error(
+        `EvidenceWorkspaceRequiredError: run ${runId} has no canonical workspace artifact. Prepare workspace first.`,
+      );
+    }
+    const targetCwd = String(ws.workspacePath);
+    const baselineCommitSha = requireBaseCommitSha(ws.baseCommitSha, runId);
+    requireWorkspaceHead(targetCwd, baselineCommitSha);
+
+    const patchRaw = run.artifacts.patch;
+    if (!patchRaw) {
+      throw new Error(
+        `PatchRequiredForGreenVerificationError: run ${runId} has no patch artifact. Draft patch before verifying GREEN.`,
+      );
+    }
+    const parsedPatch = readPatchDelta(patchRaw, runId);
+
+    let rawPatch: any;
+    try {
+      rawPatch = typeof patchRaw === "string" ? JSON.parse(patchRaw) : patchRaw;
+    } catch {
+      throw new Error(
+        `EvidencePatchProvenanceError: patch artifact for run ${runId} is not valid JSON.`,
+      );
+    }
+    const patchFilesWithContent = parsedPatch.files.map((file) => {
+      const declared = rawPatch.files.find(
+        (candidate: any) => candidate.path === file.path,
+      );
+      const fullPath = resolve(targetCwd, file.path);
+      if (file.operation === "DELETE") {
+        if (pathExists(fullPath)) {
+          throw new Error(
+            `EvidencePatchProvenanceError: patch specifies DELETE for '${file.path}', but file still exists on disk in workspace.`,
+          );
+        }
+        return file;
+      }
+      try {
+        const diskMode = modeFromStat(fullPath);
+        const onDiskContent = contentAtWorkspace(fullPath, diskMode);
+        if (diskMode !== file.mode) {
+          throw new Error(
+            `EvidencePatchProvenanceError: workspace mode for '${file.path}' is ${diskMode}, patch declares ${file.mode}.`,
+          );
+        }
+        if (onDiskContent !== declared.content) {
+          throw new Error(
+            `EvidencePatchProvenanceError: on-disk content for '${file.path}' does not match the patch artifact content.`,
+          );
+        }
+      } catch (err: any) {
+        if (err?.code === "ENOENT") {
+          throw new Error(
+            `EvidencePatchProvenanceError: patch specifies file '${file.path}', but file does not exist on disk in workspace.`,
+          );
+        }
+        throw err;
+      }
+      return file;
+    });
+
+    const exactDelta = verifyGitWorkspaceDelta(
+      targetCwd,
+      baselineCommitSha,
+      patchFilesWithContent,
+    );
+    const finalGreenTreeSha256 = computeFinalTreeHash(targetCwd);
+    const appliedPatchSha256 = parsedPatch.patchSha256;
+    const treeChanged = finalGreenTreeSha256 !== redEvidence.sourceTreeSha256;
+    const reproductionVerified =
+      redEvidence.assertionMatched === true && rawResult.passed && treeChanged;
+
+    const greenEvidenceBase = {
+      command: rawResult.command,
+      exitCode: rawResult.exitCode,
+      outputSnippet: rawResult.outputSnippet,
+      passed: rawResult.passed,
+      sourceTreeSha256: finalGreenTreeSha256,
+      capturedAt: rawResult.capturedAt,
+      treeChangedComparedToRed: treeChanged,
+      treeHashMatchesRed: !treeChanged,
+      stressLoopPassed: rawResult.passed,
+      allTestsPassing: rawResult.passed,
+      testIdentity: rawResult.testIdentity,
+      appliedPatchSha256,
+    };
+
+    let report: EvidenceReport = {
+      baselineTestedAt: rawResult.capturedAt,
+      baselineFlakyTests: [],
+      stressLoopRuns: rawResult.executionCount,
+      stressLoopPassed: rawResult.passed,
+      executionCount: rawResult.executionCount,
+      maxConcurrentObserved: rawResult.maxConcurrentObserved,
+      concurrencyWorkers: rawResult.concurrencyWorkers,
+      concurrencyStampedePassed: rawResult.concurrencyStampedePassed,
+      raceCollisionsDetected: rawResult.raceCollisionsDetected,
+      latencyJitterMs: rawResult.latencyJitterMs,
+      handleLeakCheckPassed: rawResult.handleLeakCheckPassed,
+      initialDescriptorCount: rawResult.initialDescriptorCount,
+      finalDescriptorCount: rawResult.finalDescriptorCount,
+      passedUnitTestsCount: rawResult.passedUnitTestsCount,
+      failedUnitTestsCount: rawResult.failedUnitTestsCount,
+      testCoverageStatus: "UNAVAILABLE",
+      changedCodeCoverageStatus: "UNAVAILABLE",
+      allTestsPassing: rawResult.passed,
+      redEvidence,
+      greenEvidence: greenEvidenceBase,
+      reproductionVerified,
+    };
+
+    if (report.reproductionVerified === true) {
+      const validatedPatch: ValidatedPatchArtifact = {
+        runId,
+        patchSha256: appliedPatchSha256,
+        actualDeltaSha256: exactDelta.actualDeltaSha256,
+        baseCommitSha: baselineCommitSha,
+        redTreeSha256: redEvidence.sourceTreeSha256,
+        greenTreeSha256: finalGreenTreeSha256,
+        artifactSha256: "",
+        files: exactDelta.files.map((file): ValidatedPatchFile => ({
+          path: file.path,
+          operation: file.operation,
+          mode: file.mode,
+          contentSha256: file.contentSha256,
+        })),
+        validatedAt: new Date().toISOString(),
+      };
+      validatedPatch.artifactSha256 =
+        hashValidatedPatchArtifact(validatedPatch);
+      ValidatedPatchArtifactSchema.parse(validatedPatch);
+      const greenEvidenceWithPatch = {
+        ...greenEvidenceBase,
+        validatedPatchArtifactSha256: validatedPatch.artifactSha256,
+      };
+      report = {
+        ...report,
+        greenEvidence: greenEvidenceWithPatch,
+      };
+      saveCanonicalArtifact(
+        this.runManager,
+        runId,
+        "validated_patch",
+        validatedPatch as any,
+      );
+      saveCanonicalArtifact(
+        this.runManager,
+        runId,
+        "evidence",
+        report as any,
+        "EVIDENCE_COLLECTED",
+      );
+    } else {
+      saveCanonicalArtifact(this.runManager, runId, "evidence", report as any);
     }
 
     return report;
