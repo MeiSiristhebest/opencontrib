@@ -18,6 +18,7 @@ import type {
 } from "../../contracts/schemas.js";
 import type {
  PatchDraft,
+ ReproductionDesign,
  SubagentReviewEvaluation,
 } from "../../contracts/llm-schemas.js";
 import type {
@@ -35,6 +36,7 @@ import type { ContextAssembler } from "../../discovery/context-assembler.js";
 import type { RepoMemoryLedger } from "../../memory/repo-memory.js";
 import type { ProfileFlywheel } from "../../flywheel/profile-sync.js";
 import type { ContributionPrService } from "../../github/contribution-pr-service.js";
+import type { SubmissionPort } from "../../github/submission-port.js";
 import type { ContributionRunManager } from "../../run/run-manager.js";
 import type {
  ApprovalArtifactVerifier,
@@ -66,6 +68,8 @@ export interface PipelineDeps {
  flywheel: ProfileFlywheel;
  worktreeManager: WorktreeManager;
  prService: ContributionPrService;
+ /** Agent-facing submission port; implementations must not expose provider credentials. */
+ submissionPort?: SubmissionPort;
  contextAssembler: ContextAssembler;
  stateMachine: ContributionStateMachine;
  clock: Clock;
@@ -100,6 +104,7 @@ export interface PipelineContext {
  testCmd?: string;
  preFixReproductionCaptured?: boolean;
  preFixOutput?: string;
+ reproductionDesign?: ReproductionDesign;
  patchDraft?: PatchDraft | null;
  activePatch?: PatchDraft;
  implementationAttempts?: number;

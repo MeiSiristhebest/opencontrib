@@ -13,7 +13,6 @@ import {
 } from "../contracts/schemas.js";
 import {
   captureRedEvidence,
-  verifyGreenEvidence,
   collectEvidence,
   computeSourceTreeHash,
 } from "./evidence-collector.js";
@@ -25,7 +24,7 @@ export interface CaptureRedInput {
   cwd?: string;
   testCommand: string;
   expectedAssertion?: string;
-  testFile?: string;
+  testFile?: string | string[];
   testFileSha256?: string;
   workspaceRoot?: string;
   baselineCommitSha?: string;
@@ -432,8 +431,14 @@ export class EvidenceService {
       baselineFlakyTests: [],
       stressLoopRuns: 0,
       stressLoopPassed: false,
-      handleLeakCheckPassed: true,
+      executionCount: 0,
+      maxConcurrentObserved: 0,
+      concurrencyWorkers: 0,
+      concurrencyStampedePassed: false,
+      handleLeakCheckPassed: "UNAVAILABLE",
       passedUnitTestsCount: 0,
+      testCoverageStatus: "UNAVAILABLE",
+      changedCodeCoverageStatus: "UNAVAILABLE",
       redEvidence: red,
       reproductionVerified: false,
       allTestsPassing: false,
@@ -543,16 +548,6 @@ export class EvidenceService {
       patchFilesWithContent,
     );
 
-    const green = verifyGreenEvidence({
-      cwd: targetCwd,
-      testCommand: input.testCommand,
-      workspaceRoot: resolvedWorkspaceRoot,
-      redEvidence,
-      stressLoopCount: input.stressLoopCount ?? 1,
-      concurrencyWorkers: input.concurrencyWorkers ?? 1,
-    });
-    requireWorkspaceHead(targetCwd, baselineCommitSha);
-
     const full = await collectEvidence({
       cwd: targetCwd,
       workspaceRoot: resolvedWorkspaceRoot,
@@ -560,6 +555,7 @@ export class EvidenceService {
       testCommand: input.testCommand,
       stressLoopCount: input.stressLoopCount ?? 1,
       concurrencyWorkers: input.concurrencyWorkers ?? 1,
+      redEvidence,
     });
     requireWorkspaceHead(targetCwd, baselineCommitSha);
 
@@ -573,8 +569,18 @@ export class EvidenceService {
     );
     const finalGreenTreeSha256 = computeFinalTreeHash(targetCwd);
     const appliedPatchSha256 = parsedPatch.patchSha256;
+    if (!full.greenEvidence || full.reproductionVerified !== true) {
+      const report = { ...full, redEvidence };
+      saveCanonicalArtifact(
+        this.runManager,
+        input.runId,
+        "evidence",
+        report as any,
+      );
+      return report;
+    }
     const greenEvidenceBase = {
-      ...green.greenEvidence,
+      ...full.greenEvidence,
       sourceTreeSha256: finalGreenTreeSha256,
       treeChangedComparedToRed:
         finalGreenTreeSha256 !== redEvidence.sourceTreeSha256,
@@ -586,9 +592,8 @@ export class EvidenceService {
       ...full,
       redEvidence,
       greenEvidence: greenEvidenceBase,
-      reproductionVerified:
-        green.reproductionVerified && Boolean(full.allTestsPassing),
-      allTestsPassing: Boolean(full.allTestsPassing),
+      reproductionVerified: true,
+      allTestsPassing: true,
     };
 
     if (report.reproductionVerified === true) {

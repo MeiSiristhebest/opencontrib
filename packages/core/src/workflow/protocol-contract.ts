@@ -141,6 +141,32 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "All development must take place inside isolated worktree sandbox.",
     ],
+    suggestedNextAction: "capture_red",
+  },
+  RED_CAPTURED: {
+    phase: "RED_CAPTURED",
+    name: "RED Baseline Captured",
+    description:
+      "A trusted host execution recorded the target assertion failing on the immutable workspace baseline.",
+    allowedFromPhases: ["WORKSPACE_PREPARED", "POC_GENERATED"],
+    requiredArtifacts: ["workspace", "evidence_red"],
+    cli: {
+      command: "evidence",
+      subcommand: "capture-red",
+      example:
+        "opencontrib evidence capture-red --test-cmd '<cmd>' --assertion '<pattern>'",
+    },
+    mcp: {
+      tool: "contrib_capture_red",
+    },
+    forbiddenActions: [
+      "DO NOT edit production code before the target RED assertion is captured.",
+      "DO NOT accept an unrelated failing suite as the target reproduction.",
+    ],
+    invariants: [
+      "The RED command, assertion, test identity, baseline commit, and source tree hash are recorded by EvidenceService.",
+      "RED must exit non-zero and match the expected assertion before patch drafting.",
+    ],
     suggestedNextAction: "draft_patch",
   },
   POC_GENERATED: {
@@ -168,7 +194,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "Patch Drafted",
     description:
       "Targeted code fix implemented in worktree, awaiting verification.",
-    allowedFromPhases: ["WORKSPACE_PREPARED", "POC_GENERATED"],
+    allowedFromPhases: ["WORKSPACE_PREPARED", "RED_CAPTURED", "POC_GENERATED"],
     requiredArtifacts: ["workspace"],
     cli: {
       command: "run",
@@ -308,6 +334,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "PROBE_COMPLETED",
       "CONTEXT_ASSEMBLED",
       "WORKSPACE_PREPARED",
+      "RED_CAPTURED",
       "POC_GENERATED",
       "PATCH_DRAFTED",
       "EVIDENCE_COLLECTED",

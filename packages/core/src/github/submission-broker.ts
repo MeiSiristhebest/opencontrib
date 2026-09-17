@@ -1,13 +1,34 @@
 import {
+  ApprovalArtifactSchema,
   SubmissionIntentArtifactSchema,
   type SubmissionArtifact,
 } from "../contracts/schemas.js";
 import type { ContributionRunManager } from "../run/run-manager.js";
+import { ApprovalService } from "../governance/approval-service.js";
+import { TrustedRunMaterializer } from "../run/trusted-run-host.js";
+import {
+  RunTransferBundleSchema,
+  type RunTransferBundle,
+} from "../run/run-transfer.js";
 import { GitHubSubmissionService } from "./submission-service.js";
 
 export interface TrustedSubmissionRequest {
   runId: string;
   expectedIntentSha256?: string;
+  /** Optional untrusted proposal; the host re-materializes it in its own store. */
+  runBundle?: RunTransferBundle;
+}
+
+export class SubmissionApprovalRequiredError extends Error {
+  readonly approvalChallenge: ReturnType<ApprovalService["requestApproval"]>;
+
+  constructor(challenge: ReturnType<ApprovalService["requestApproval"]>) {
+    super(
+      `ApprovalRequiredError: trusted host has prepared the run and is awaiting approval for intent ${challenge.intentSha256}.`,
+    );
+    this.name = "SubmissionApprovalRequiredError";
+    this.approvalChallenge = challenge;
+  }
 }
 
 /**
@@ -22,6 +43,7 @@ export class TrustedSubmissionBroker {
   constructor(
     private readonly runManager: ContributionRunManager,
     private readonly submissionService: GitHubSubmissionService,
+    private readonly materializer?: TrustedRunMaterializer,
   ) {}
 
   async handle(request: Request): Promise<Response> {
@@ -36,24 +58,51 @@ export class TrustedSubmissionBroker {
       if (typeof payload.runId !== "string") {
         throw new Error("SubmissionBrokerRequestError: runId is required.");
       }
+      let runBundle: RunTransferBundle | undefined;
+      if (payload.runBundle !== undefined) {
+        const parsedBundle = RunTransferBundleSchema.safeParse(
+          payload.runBundle,
+        );
+        if (!parsedBundle.success) {
+          throw new Error(
+            "SubmissionBrokerRequestError: runBundle failed the trusted transfer schema.",
+          );
+        }
+        if (parsedBundle.data.manifest.runId !== payload.runId) {
+          throw new Error(
+            "SubmissionBrokerRequestError: runBundle runId does not match request runId.",
+          );
+        }
+        runBundle = parsedBundle.data;
+      }
       const artifact = await this.submit({
         runId: payload.runId,
         expectedIntentSha256:
           typeof payload.expectedIntentSha256 === "string"
             ? payload.expectedIntentSha256
             : undefined,
+        runBundle,
       });
       return new Response(JSON.stringify({ submissionArtifact: artifact }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Broker request rejected.";
+      const message =
+        error instanceof Error ? error.message : "Broker request rejected.";
+      const approval =
+        error instanceof SubmissionApprovalRequiredError
+          ? error.approvalChallenge
+          : undefined;
+      const code = approval ? "APPROVAL_REQUIRED" : undefined;
       const status = message.includes("RequestError") ? 400 : 409;
-      return new Response(JSON.stringify({ message }), {
-        status,
-        headers: { "content-type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ message, code, approvalChallenge: approval }),
+        {
+          status,
+          headers: { "content-type": "application/json" },
+        },
+      );
     }
   }
 
@@ -61,7 +110,15 @@ export class TrustedSubmissionBroker {
     if (!request.runId.trim()) {
       throw new Error("SubmissionBrokerRequestError: runId is required.");
     }
-    const run = this.runManager.getRun(request.runId);
+    let run = this.runManager.getRun(request.runId);
+    if (!run && request.runBundle) {
+      if (!this.materializer) {
+        throw new Error(
+          "SubmissionBrokerConfigurationError: trusted run materializer is not configured.",
+        );
+      }
+      run = await this.materializer.materialize(request.runBundle);
+    }
     const intent = SubmissionIntentArtifactSchema.safeParse(
       run?.artifacts.submissionIntent,
     );
@@ -77,6 +134,13 @@ export class TrustedSubmissionBroker {
       throw new Error(
         "SubmissionIntentMismatchError: requested intent does not match the canonical run.",
       );
+    }
+    const approval = ApprovalArtifactSchema.safeParse(run?.artifacts.approval);
+    if (!approval.success) {
+      const challenge = new ApprovalService(this.runManager).requestApproval(
+        request.runId,
+      );
+      throw new SubmissionApprovalRequiredError(challenge);
     }
 
     const result = await this.submissionService.submit(request.runId);

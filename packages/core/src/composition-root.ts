@@ -18,10 +18,14 @@ import { ContributionPipeline } from "./application/index.js";
 import { SystemClock } from "./ports/clock.port.js";
 import { LLMService } from "./llm/llm-service.js";
 import { ContributionRunManager } from "./run/run-manager.js";
+import { TrustedRunMaterializer } from "./run/trusted-run-host.js";
+import { WorktreeManager } from "./workspace/worktree-manager.js";
 import {
  ContributionPrService,
  GitHubSubmissionService,
+ RemoteSubmissionBrokerClient,
  TrustedSubmissionBroker,
+ type SubmissionPort,
 } from "./github/index.js";
 import type { GitHubClientOptions } from "./github/types.js";
 import type {
@@ -52,24 +56,49 @@ export function buildContributionRunManager(): ContributionRunManager {
  * dependency-injection seam (`PipelineDeps`). Callers may override any piece
  * via `deps` for tests or alternative environments.
  */
+class DeferredRemoteSubmissionPort implements SubmissionPort {
+ private client?: RemoteSubmissionBrokerClient;
+ constructor(
+  private readonly runManager: ContributionRunManager,
+  private readonly endpoint?: string,
+ ) {}
+ async submit(runId: string, expectedIntentSha256?: string) {
+  this.client ??= new RemoteSubmissionBrokerClient({
+   endpoint: this.endpoint,
+   runManager: this.runManager,
+  });
+  return this.client.submit(runId, expectedIntentSha256);
+ }
+}
+
 export function buildContributionPipeline(
  options: {
+  /** Read-only GitHub credential for discovery; never used for provider writes. */
+  githubReadToken?: string;
+  /** @deprecated Use githubReadToken; this alias is read-only by construction. */
   githubToken?: string;
   githubHost?: string;
+  submissionBrokerEndpoint?: string;
   llmService?: LLMService;
   approvalAuthority?: TrustedApprovalAuthority;
  } = {},
 ): ContributionPipeline {
  const client = buildProductionGitHubClient({
-  token: options.githubToken,
+  token: options.githubReadToken ?? options.githubToken,
   host: options.githubHost,
  });
+ const runManager = buildContributionRunManager();
  return new ContributionPipeline({
-  githubToken: options.githubToken,
+  githubReadToken: options.githubReadToken ?? options.githubToken,
   llmService: options.llmService,
   deps: {
    client,
    clock: new SystemClock(),
+   runManager,
+   submissionPort: new DeferredRemoteSubmissionPort(
+    runManager,
+    options.submissionBrokerEndpoint,
+   ),
    approvalAuthority: options.approvalAuthority,
   },
  });
@@ -106,32 +135,50 @@ export function buildTrustedSubmissionBroker(options: {
   runManager,
   options.approvalVerifier,
  );
+ const materializer = new TrustedRunMaterializer(
+  runManager,
+  new WorktreeManager(),
+ );
  return {
   githubClient,
   runManager,
-  broker: new TrustedSubmissionBroker(runManager, submissionService),
+  broker: new TrustedSubmissionBroker(
+   runManager,
+   submissionService,
+   materializer,
+  ),
  };
 }
 
 /** Build the entire production object graph in one call. */
 export function buildProductionCompositionRoot(
  options: {
+  /** Read-only GitHub credential used by discovery adapters. */
+  githubReadToken?: string;
+  /** @deprecated read-only compatibility alias. */
   githubToken?: string;
   githubHost?: string;
+  submissionBrokerEndpoint?: string;
   llmService?: LLMService;
   approvalAuthority?: TrustedApprovalAuthority;
  } = {},
 ): ProductionCompositionRoot {
  const githubClient = buildProductionGitHubClient({
-  token: options.githubToken,
+  token: options.githubReadToken ?? options.githubToken,
   host: options.githubHost,
  });
+ const runManager = buildContributionRunManager();
  const contributionPipeline = new ContributionPipeline({
-  githubToken: options.githubToken,
+  githubReadToken: options.githubReadToken ?? options.githubToken,
   llmService: options.llmService,
   deps: {
    client: githubClient,
    clock: new SystemClock(),
+   runManager,
+   submissionPort: new DeferredRemoteSubmissionPort(
+    runManager,
+    options.submissionBrokerEndpoint,
+   ),
    approvalAuthority: options.approvalAuthority,
   },
  });

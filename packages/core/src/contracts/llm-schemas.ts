@@ -40,6 +40,15 @@ export const PatchDraftSchema = z.object({
 
 export type PatchDraft = z.infer<typeof PatchDraftSchema>;
 
+/** Strict autonomous RED design; this is a plan, not evidence. */
+export const ReproductionDesignSchema = z.object({
+  command: z.string().min(1),
+  expectedAssertion: z.string().min(1),
+  testFiles: z.array(z.string().min(1)).min(1),
+  rationale: z.string().min(1),
+});
+export type ReproductionDesign = z.infer<typeof ReproductionDesignSchema>;
+
 export const SubagentReviewEvaluationSchema = z.object({
   maintainerPerspective: z.object({
     acceptanceLikelihood: z.enum(["HIGH", "MEDIUM", "LOW"]),

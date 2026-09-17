@@ -26,6 +26,9 @@ export interface EvidenceCollectionOptions {
   stressLoopCount?: number;
   concurrencyWorkers?: number;
   runFlakyBaseline?: boolean;
+  /** Trusted coverage adapter result; absence is explicitly UNAVAILABLE. */
+  changedCodeCoveragePercent?: number;
+  redEvidence?: RedEvidence;
 }
 
 export interface DualStageReproductionResult {
@@ -131,6 +134,8 @@ export function recordFlakyBaseline(
 export interface StressLoopResult {
   passed: boolean;
   completedRuns: number;
+  executionCount: number;
+  maxConcurrentObserved: number;
   lastOutput: string;
   concurrencyWorkers: number;
   concurrencyStampedePassed: boolean;
@@ -138,6 +143,10 @@ export interface StressLoopResult {
   latencyJitterMs: number;
 }
 
+/**
+ * The only canonical stress runner. Every execution is asynchronous and the
+ * worker batch is released through a barrier before Promise.all awaits it.
+ */
 export async function runStressLoopAsync(
   cwd: string,
   testCommand: string,
@@ -146,6 +155,9 @@ export async function runStressLoopAsync(
   concurrencyWorkers: number = 1,
 ): Promise<StressLoopResult> {
   let completedRuns = 0;
+  let executionCount = 0;
+  let maxConcurrentObserved = 0;
+  let inFlight = 0;
   let lastOutput = "";
   let raceCollisions = 0;
   const latencies: number[] = [];
@@ -156,237 +168,86 @@ export async function runStressLoopAsync(
     testCommand.includes("bun test") ||
     testCommand.trim() === "pytest" ||
     testCommand.trim() === "cargo test";
-
   const targetCount = count ?? (isBroadSuite ? 1 : 3);
   const spec = parseCommandSpec(testCommand);
 
-  // If multi-worker concurrency requested (>1), spawn simultaneous worker processes via Promise.all
-  if (concurrencyWorkers > 1) {
-    const workerPromises = Array.from({ length: concurrencyWorkers }).map(
-      async () => {
-        const start = Date.now();
-        const res = await defaultSandboxRuntime.executeAsync({
-          cwd,
-          workspaceRoot,
-          commandSpec: spec,
-          timeoutMs: 30000,
-        });
-        return {
-          passed: res.passed,
-          output: res.output,
-          elapsed: Date.now() - start,
-        };
-      },
-    );
-
-    const workerResults = await Promise.all(workerPromises);
-
-    let allPassed = true;
-    for (const r of workerResults) {
-      latencies.push(r.elapsed);
-      lastOutput = r.output;
-      if (r.passed) {
-        completedRuns++;
-      } else {
-        allPassed = false;
-        if (
-          /data race|race detected|concurrent map|deadlock|collision/i.test(
-            r.output,
-          )
-        ) {
-          raceCollisions++;
-        }
-      }
-    }
-
-    const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
-    const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
-
-    return {
-      passed: allPassed,
-      completedRuns,
-      lastOutput,
-      concurrencyWorkers,
-      concurrencyStampedePassed: allPassed && raceCollisions === 0,
-      raceCollisionsDetected: raceCollisions,
-      latencyJitterMs: maxLatency - minLatency,
-    };
-  }
-
-  for (let i = 0; i < targetCount; i++) {
-    const startTime = Date.now();
-    const res = await defaultSandboxRuntime.executeAsync({
-      cwd,
-      workspaceRoot,
-      commandSpec: spec,
-      timeoutMs: 30000,
-    });
-    const elapsed = Date.now() - startTime;
-    latencies.push(elapsed);
-
-    lastOutput = res.output;
-    if (res.passed) {
-      completedRuns++;
-    } else {
-      if (
-        /data race|race detected|concurrent map|deadlock|collision/i.test(
-          res.output,
-        )
-      ) {
-        raceCollisions++;
-      }
-      const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
-      const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
-      return {
-        passed: false,
-        completedRuns,
-        lastOutput,
-        concurrencyWorkers,
-        concurrencyStampedePassed: false,
-        raceCollisionsDetected: raceCollisions,
-        latencyJitterMs: maxLatency - minLatency,
-      };
-    }
-  }
-
-  const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
-  const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
-
-  return {
-    passed: true,
-    completedRuns,
-    lastOutput,
-    concurrencyWorkers,
-    concurrencyStampedePassed: raceCollisions === 0,
-    raceCollisionsDetected: raceCollisions,
-    latencyJitterMs: maxLatency - minLatency,
-  };
-}
-
-export function runStressLoop(
-  cwd: string,
-  testCommand: string,
-  count?: number,
-  workspaceRoot?: string,
-  concurrencyWorkers: number = 1,
-): StressLoopResult {
-  let completedRuns = 0;
-  let lastOutput = "";
-  let raceCollisions = 0;
-  const latencies: number[] = [];
-
-  const isBroadSuite =
-    testCommand.includes("./...") ||
-    testCommand.includes("npm test") ||
-    testCommand.includes("bun test") ||
-    testCommand.trim() === "pytest" ||
-    testCommand.trim() === "cargo test";
-
-  const targetCount = count ?? (isBroadSuite ? 1 : 3);
-  const spec = parseCommandSpec(testCommand);
-
-  // If multi-worker concurrency requested (>1), spawn parallel worker processes
-  if (concurrencyWorkers > 1) {
-    const workerResults: Array<{
-      passed: boolean;
-      output: string;
-      elapsed: number;
-    }> = [];
-
-    // Use sandboxed execution across parallel worker batch
-    for (let w = 0; w < concurrencyWorkers; w++) {
-      const start = Date.now();
-      const res = defaultSandboxRuntime.executeInSandbox({
+  const executeOne = async () => {
+    executionCount++;
+    inFlight++;
+    maxConcurrentObserved = Math.max(maxConcurrentObserved, inFlight);
+    const start = Date.now();
+    try {
+      const res = await defaultSandboxRuntime.executeAsync({
         cwd,
         workspaceRoot,
         commandSpec: spec,
         timeoutMs: 30000,
       });
-      workerResults.push({
+      return {
         passed: res.passed,
         output: res.output,
         elapsed: Date.now() - start,
-      });
+      };
+    } finally {
+      inFlight--;
     }
+  };
 
-    let allPassed = true;
-    for (const r of workerResults) {
-      latencies.push(r.elapsed);
-      lastOutput = r.output;
-      if (r.passed) {
-        completedRuns++;
-      } else {
-        allPassed = false;
-        if (
-          /data race|race detected|concurrent map|deadlock|collision/i.test(
-            r.output,
-          )
-        ) {
-          raceCollisions++;
-        }
-      }
+  const workerCount = Math.max(1, concurrencyWorkers);
+  let results: Array<{ passed: boolean; output: string; elapsed: number }>;
+  if (workerCount > 1) {
+    let releaseBarrier!: () => void;
+    const startBarrier = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
+    const workers = Array.from({ length: workerCount }, async () => {
+      await startBarrier;
+      return executeOne();
+    });
+    // All workers have been created and are waiting before the barrier opens.
+    releaseBarrier();
+    results = await Promise.all(workers);
+  } else {
+    results = [];
+    for (let index = 0; index < targetCount; index++) {
+      const result = await executeOne();
+      results.push(result);
+      if (!result.passed) break;
     }
-
-    const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
-    const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
-
-    return {
-      passed: allPassed,
-      completedRuns,
-      lastOutput,
-      concurrencyWorkers,
-      concurrencyStampedePassed: allPassed && raceCollisions === 0,
-      raceCollisionsDetected: raceCollisions,
-      latencyJitterMs: maxLatency - minLatency,
-    };
   }
 
-  for (let i = 0; i < targetCount; i++) {
-    const startTime = Date.now();
-    const res = defaultSandboxRuntime.executeInSandbox({
-      cwd,
-      workspaceRoot,
-      commandSpec: spec,
-      timeoutMs: 30000,
-    });
-    const elapsed = Date.now() - startTime;
-    latencies.push(elapsed);
-
-    lastOutput = res.output;
-    if (res.passed) {
-      completedRuns++;
-    } else {
-      // Check if failure is concurrency/race collision related
+  let allPassed = true;
+  for (const result of results) {
+    latencies.push(result.elapsed);
+    lastOutput = result.output;
+    if (result.passed) completedRuns++;
+    else {
+      allPassed = false;
       if (
         /data race|race detected|concurrent map|deadlock|collision/i.test(
-          res.output,
+          result.output,
         )
       ) {
         raceCollisions++;
       }
-      const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
-      const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
-      return {
-        passed: false,
-        completedRuns,
-        lastOutput,
-        concurrencyWorkers,
-        concurrencyStampedePassed: false,
-        raceCollisionsDetected: raceCollisions,
-        latencyJitterMs: maxLatency - minLatency,
-      };
     }
   }
 
   const minLatency = latencies.length > 0 ? Math.min(...latencies) : 0;
   const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 0;
+  const concurrencyStampedePassed =
+    allPassed &&
+    raceCollisions === 0 &&
+    (workerCount === 1 || maxConcurrentObserved >= workerCount);
 
   return {
-    passed: true,
+    passed: allPassed,
     completedRuns,
+    executionCount,
+    maxConcurrentObserved,
     lastOutput,
-    concurrencyWorkers,
-    concurrencyStampedePassed: raceCollisions === 0,
+    concurrencyWorkers: workerCount,
+    concurrencyStampedePassed,
     raceCollisionsDetected: raceCollisions,
     latencyJitterMs: maxLatency - minLatency,
   };
@@ -450,8 +311,8 @@ export function verifyEmpiricalReproduction(input: {
   const hasFailureFlag =
     !res.passed || (isRealFailurePattern && !isFalsePositiveZeroError);
 
-  const exitCode =
-    res.exitCode === null ? (hasFailureFlag ? 1 : 0) : res.exitCode;
+  let exitCode = res.exitCode;
+  if (exitCode === null) exitCode = hasFailureFlag ? 1 : 0;
   return {
     isFailingOnBaseline: hasFailureFlag,
     baselineOutput: full,
@@ -796,11 +657,9 @@ export function resolveTestFiles(
 ): TestIdentityFile[] {
   const spec = parseCommandSpec(testCommand);
   const candidates = new Set<string>();
-  const explicit = Array.isArray(explicitTestFile)
-    ? explicitTestFile
-    : explicitTestFile
-      ? [explicitTestFile]
-      : [];
+  let explicit: string[] = [];
+  if (Array.isArray(explicitTestFile)) explicit = explicitTestFile;
+  else if (explicitTestFile) explicit = [explicitTestFile];
   for (const candidate of explicit)
     if (candidate.trim()) candidates.add(candidate.trim());
 
@@ -844,9 +703,11 @@ export function resolveTestFiles(
     }
   }
 
-  return [...files.values()].sort((a, b) =>
-    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
-  );
+  return [...files.values()].sort((a, b) => {
+    if (a.path < b.path) return -1;
+    if (a.path > b.path) return 1;
+    return 0;
+  });
 }
 
 /** Compute the stable TestIdentity for a test command at `cwd`. */
@@ -915,12 +776,8 @@ export function captureRedEvidence(input: {
   );
   const assertionMatched = Boolean(preFix.assertionCaptured);
   const observedExitCode = (preFix as { exitCode?: number }).exitCode;
-  const exitCode =
-    typeof observedExitCode === "number"
-      ? observedExitCode
-      : assertionMatched
-        ? 1
-        : 0;
+  let exitCode = observedExitCode;
+  if (typeof exitCode !== "number") exitCode = assertionMatched ? 1 : 0;
   // Bind the concrete test-file CONTENT identity so GREEN must prove the same
   // test body went fail -> pass, not merely that the same command now passes.
   const testIdentity = computeTestIdentity(
@@ -964,63 +821,46 @@ export function captureRedEvidence(input: {
   };
 }
 
-/**
- * Evidence V2 — verify GREEN and bind it to a previously captured RedEvidence.
- * `reproductionVerified` is only true when the RED baseline assertion matched AND
- * the current run passes AND the source tree actually changed since the RED capture.
- */
-export function verifyGreenEvidence(input: {
+/** Build GREEN evidence from one already-completed asynchronous stress run. */
+function buildGreenEvidenceFromStress(input: {
   cwd: string;
   testCommand: string;
-  workspaceRoot?: string;
   redEvidence: RedEvidence;
-  stressLoopCount?: number;
-  concurrencyWorkers?: number;
+  stressResult: StressLoopResult;
 }): {
   greenEvidence: GreenEvidence;
   reproductionVerified: boolean;
   allTestsPassing: boolean;
 } {
-  const { redEvidence } = input;
-  const stressResult = runStressLoop(
-    input.cwd,
-    input.testCommand,
-    input.stressLoopCount ?? 1,
-    input.workspaceRoot,
-    input.concurrencyWorkers ?? 1,
-  );
+  const { cwd, testCommand, redEvidence, stressResult } = input;
   const passed = stressResult.passed;
-  const greenTreeHash = computeSourceTreeHash(input.cwd);
+  const greenTreeHash = computeSourceTreeHash(cwd);
   const treeChanged = greenTreeHash !== redEvidence.sourceTreeSha256;
   const greenFingerprint = computeTestIdentityFingerprint({
-    testCommand: input.testCommand,
+    testCommand,
     expectedAssertion: redEvidence.expectedAssertion,
   });
-
-  const redTestIdentity = redEvidence.testIdentity;
   const explicitTestFiles =
-    redTestIdentity?.testFiles.map((file) => file.path) || [];
-
-  // Recompute the GREEN test-file CONTENT identity from the current on-disk
-  // test files. Never copy RED's fingerprint — a mutated test file changes
-  // the content sha256 and therefore the identity.
+    redEvidence.testIdentity?.testFiles.map((file) => file.path) || [];
   const greenTestIdentity = computeTestIdentity(
-    input.cwd,
-    input.testCommand,
-    redTestIdentity?.expectedAssertion ?? redEvidence.expectedAssertion,
+    cwd,
+    testCommand,
+    redEvidence.testIdentity?.expectedAssertion ??
+      redEvidence.expectedAssertion,
     explicitTestFiles,
   );
 
   let testIdentityValid = false;
   let actualTestDiffSha256: string | undefined;
-  if (redTestIdentity) {
-    const redFiles = redTestIdentity.testFiles || [];
+  if (redEvidence.testIdentity) {
+    const redFiles = redEvidence.testIdentity.testFiles || [];
     const greenFiles = greenTestIdentity.testFiles || [];
     actualTestDiffSha256 = computeTestFileDiffSha256(redFiles, greenFiles);
     testIdentityValid =
       redFiles.length > 0 &&
       greenFiles.length > 0 &&
-      greenTestIdentity.identitySha256 === redTestIdentity.identitySha256;
+      greenTestIdentity.identitySha256 ===
+        redEvidence.testIdentity.identitySha256;
     if (
       !testIdentityValid &&
       redEvidence.testMutationPolicy?.allowed === true &&
@@ -1029,12 +869,10 @@ export function verifyGreenEvidence(input: {
     ) {
       testIdentityValid = true;
     }
-    // A bare testMutationAllowed flag is intentionally ignored. Only the
-    // content-derived diff hash can authorize an audited test mutation.
   }
 
   const greenEvidence: GreenEvidence = {
-    command: input.testCommand,
+    command: testCommand,
     exitCode: passed ? 0 : 1,
     outputSnippet: stressResult.lastOutput.slice(0, 500),
     passed,
@@ -1047,17 +885,52 @@ export function verifyGreenEvidence(input: {
     assertionMatchedFingerprint: greenFingerprint,
     testIdentity: greenTestIdentity,
     actualTestDiffSha256,
-    // EvidenceService replaces this with the canonical PatchArtifact hash;
-    // direct collector callers receive an explicitly unbound value that phase
-    // gates will reject rather than an optional/missing provenance field.
     appliedPatchSha256: "",
   };
-  const reproductionVerified =
-    redEvidence.assertionMatched === true &&
-    passed &&
-    treeChanged &&
-    testIdentityValid;
-  return { greenEvidence, reproductionVerified, allTestsPassing: passed };
+  return {
+    greenEvidence,
+    reproductionVerified:
+      redEvidence.assertionMatched === true &&
+      passed &&
+      treeChanged &&
+      testIdentityValid,
+    allTestsPassing: passed,
+  };
+}
+
+/**
+ * Evidence V2 — verify GREEN and bind it to a previously captured RedEvidence.
+ * `reproductionVerified` is only true when the RED baseline assertion matched AND
+ * the current run passes AND the source tree actually changed since the RED capture.
+ */
+export async function verifyGreenEvidence(input: {
+  cwd: string;
+  testCommand: string;
+  workspaceRoot?: string;
+  redEvidence: RedEvidence;
+  stressLoopCount?: number;
+  concurrencyWorkers?: number;
+}): Promise<{
+  greenEvidence: GreenEvidence;
+  reproductionVerified: boolean;
+  allTestsPassing: boolean;
+  stressResult: StressLoopResult;
+}> {
+  const { redEvidence } = input;
+  const stressResult = await runStressLoopAsync(
+    input.cwd,
+    input.testCommand,
+    input.stressLoopCount ?? 1,
+    input.workspaceRoot,
+    input.concurrencyWorkers ?? 1,
+  );
+  const result = buildGreenEvidenceFromStress({
+    cwd: input.cwd,
+    testCommand: input.testCommand,
+    redEvidence,
+    stressResult,
+  });
+  return { ...result, stressResult };
 }
 
 /**
@@ -1082,7 +955,7 @@ export async function verifyDualStageReproduction(input: {
     stressLoopCount = 5,
   } = input;
 
-  const stressResult = runStressLoop(
+  const stressResult = await runStressLoopAsync(
     cwd,
     testCommand,
     stressLoopCount,
@@ -1155,6 +1028,8 @@ export async function collectEvidence(
     stressLoopCount = 1,
     concurrencyWorkers = 1,
     runFlakyBaseline = true,
+    changedCodeCoveragePercent,
+    redEvidence,
   } = options;
 
   // 1. Initial System Handle & FD Sampling
@@ -1190,19 +1065,42 @@ export async function collectEvidence(
     parsedCounts.total === 0 &&
     !/PASS|pass/i.test(stressResult.lastOutput);
 
-  // Handle leak detection:
-  // If system handles cannot be measured (null), mark handleLeakCheckPassed as true with a warning flag,
-  // but if both measurements succeeded, strictly require leak delta < 15.
-  const handleLeakCheckPassed =
-    initialHandles === null || finalHandles === null
-      ? true
-      : finalHandles - initialHandles < 15;
+  let handleLeakCheckPassed: "PASS" | "FAIL" | "UNAVAILABLE";
+  if (initialHandles === null || finalHandles === null) {
+    handleLeakCheckPassed = "UNAVAILABLE";
+  } else if (finalHandles - initialHandles < 15) {
+    handleLeakCheckPassed = "PASS";
+  } else {
+    handleLeakCheckPassed = "FAIL";
+  }
+  let testCoverageStatus: "PASS" | "FAIL" | "UNAVAILABLE";
+  if (typeof changedCodeCoveragePercent !== "number") {
+    testCoverageStatus = "UNAVAILABLE";
+  } else if (changedCodeCoveragePercent >= 85) {
+    testCoverageStatus = "PASS";
+  } else {
+    testCoverageStatus = "FAIL";
+  }
+  const greenVerification = redEvidence
+    ? buildGreenEvidenceFromStress({
+        cwd,
+        testCommand,
+        redEvidence,
+        stressResult,
+      })
+    : undefined;
+  const allTestsPassing =
+    stressResult.passed &&
+    parsedCounts.failed === 0 &&
+    (greenVerification?.allTestsPassing ?? true);
 
   return {
     baselineTestedAt: new Date().toISOString(),
     baselineFlakyTests,
-    stressLoopRuns: stressLoopCount,
+    stressLoopRuns: stressResult.executionCount,
     stressLoopPassed: stressResult.passed,
+    executionCount: stressResult.executionCount,
+    maxConcurrentObserved: stressResult.maxConcurrentObserved,
     concurrencyWorkers,
     concurrencyStampedePassed: stressResult.concurrencyStampedePassed,
     raceCollisionsDetected: stressResult.raceCollisionsDetected,
@@ -1214,6 +1112,13 @@ export async function collectEvidence(
     passedUnitTestsCount: parsedCounts.passed,
     failedUnitTestsCount: parsedCounts.failed,
     addedUnitTestsCount,
-    allTestsPassing: stressResult.passed && parsedCounts.failed === 0,
+    testCoverageStatus,
+    changedCodeCoveragePercent,
+    changedCodeCoverageStatus: testCoverageStatus,
+    allTestsPassing,
+    greenEvidence: greenVerification?.greenEvidence,
+    reproductionVerified: greenVerification
+      ? greenVerification.reproductionVerified && allTestsPassing
+      : undefined,
   };
 }

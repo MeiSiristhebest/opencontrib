@@ -75,7 +75,9 @@ export class JsonApprovalBrokerStore implements ApprovalBrokerStore {
     const filePath = join(this.directory, `${requestId}.json`);
     if (!existsSync(filePath)) return undefined;
     try {
-      return JSON.parse(readFileSync(filePath, "utf8")) as ApprovalRequestRecord;
+      return JSON.parse(
+        readFileSync(filePath, "utf8"),
+      ) as ApprovalRequestRecord;
     } catch {
       throw new Error(
         `ApprovalBrokerStorageError: approval request '${requestId}' is unreadable.`,
@@ -116,7 +118,9 @@ export class TrustedApprovalBroker {
   }
 
   request(runId: string): ApprovalRequestRecord {
-    const challenge = new ApprovalService(this.runManager).requestApproval(runId);
+    const challenge = new ApprovalService(this.runManager).requestApproval(
+      runId,
+    );
     const requestId = requestIdForChallenge(challenge);
     const existing = this.store.get(requestId);
     if (existing) {

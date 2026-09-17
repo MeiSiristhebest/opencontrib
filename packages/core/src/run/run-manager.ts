@@ -105,6 +105,7 @@ export class ContributionRunManager {
       saveArtifact: (runId, type, content, autoAdvancePhase) =>
         this._saveArtifactInternal(runId, type, content, autoAdvancePhase),
       transition: (runId, targetPhase) => this.transition(runId, targetPhase),
+      hydrateRun: (manifest) => this._hydrateRunInternal(manifest),
     });
   }
 
@@ -281,6 +282,44 @@ export class ContributionRunManager {
     }
 
     return saved;
+  }
+
+  /**
+   * Host-only run hydration. It copies metadata only; a trusted host must
+   * regenerate workspace, RED/GREEN evidence, governance, intent, approval,
+   * and submission artifacts before any provider side effect.
+   */
+  private _hydrateRunInternal(
+    manifest: ContributionRunManifest,
+  ): ContributionRunManifest {
+    const existing = this.bundleManager.readManifest(manifest.runId);
+    if (existing) {
+      if (
+        existing.repoFullName.toLowerCase() !==
+          manifest.repoFullName.toLowerCase() ||
+        existing.issueNumber !== manifest.issueNumber
+      ) {
+        throw new Error(
+          `RunHydrationConflictError: run ${manifest.runId} is already bound to a different repository or issue.`,
+        );
+      }
+      return existing;
+    }
+    const hydrated: ContributionRunManifest = {
+      ...manifest,
+      currentPhase: "INITIALIZED",
+      updatedAt: this.clock.nowIso(),
+    };
+    this.bundleManager.saveManifest(hydrated);
+    this.bundleManager.appendEvent(hydrated.runId, {
+      phase: "INITIALIZED",
+      eventType: "RUN_HYDRATED_BY_TRUSTED_HOST",
+      payload: {
+        source: "agent_transfer",
+        repoFullName: hydrated.repoFullName,
+      },
+    });
+    return hydrated;
   }
 
   getRun(runId: string): ContributionRunSummary | null {

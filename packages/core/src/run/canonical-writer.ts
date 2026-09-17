@@ -23,6 +23,8 @@ export interface CanonicalRunWriter {
     runId: string,
     targetPhase: ContributionRunPhase,
   ): ContributionRunManifest;
+  /** Host-only hydration used by TrustedRunMaterializer before re-verification. */
+  hydrateRun(manifest: ContributionRunManifest): ContributionRunManifest;
 }
 
 const writers = new WeakMap<object, CanonicalRunWriter>();
@@ -81,4 +83,16 @@ export function transitionCanonicalRun(
   targetPhase: ContributionRunPhase,
 ): ContributionRunManifest {
   return getWriter(manager).transition(runId, targetPhase);
+}
+
+/**
+ * Internal trusted-host entry point. Agent-facing adapters must not call this;
+ * the host hydrates only run metadata and then regenerates all authoritative
+ * artifacts from the transferred patch/RED recipe.
+ */
+export function hydrateCanonicalRun(
+  manager: ContributionRunManager,
+  manifest: ContributionRunManifest,
+): ContributionRunManifest {
+  return getWriter(manager).hydrateRun(manifest);
 }

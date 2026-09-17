@@ -158,6 +158,9 @@ function resolveLlmService(injected?: LLMService): LLMService | undefined {
 
 export interface AgentOrchestratorOptions {
   policy?: Partial<import("./state-machine.js").ExecutionPolicy>;
+  /** Read-only GitHub credential for discovery; provider writes use SubmissionPort. */
+  githubReadToken?: string;
+  /** @deprecated read-only compatibility alias. */
   githubToken?: string;
   llmService?: LLMService;
   /** Full or partial dependency injection for testing / composition root. */
@@ -180,7 +183,9 @@ export class AgentOrchestrator {
   constructor(options: AgentOrchestratorOptions = {}) {
     const client =
       options.deps?.client ??
-      buildProductionGitHubClient({ token: options.githubToken });
+      buildProductionGitHubClient({
+        token: options.githubReadToken ?? options.githubToken,
+      });
     const memory = options.deps?.memory ?? new RepoMemoryLedger();
     const flywheel = options.deps?.flywheel ?? new ProfileFlywheel();
     const worktreeManager =
@@ -208,6 +213,7 @@ export class AgentOrchestrator {
       clock,
       llmService,
       runManager,
+      submissionPort: options.deps?.submissionPort,
       approvalAuthority: options.deps?.approvalAuthority,
       approvalVerifier: options.deps?.approvalVerifier,
     };

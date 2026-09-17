@@ -36,7 +36,10 @@ describe("Agent-facing submission broker client", () => {
       },
     });
 
-    const artifact = await client.submit("run_1234567890abcdef", "b".repeat(64));
+    const artifact = await client.submit(
+      "run_1234567890abcdef",
+      "b".repeat(64),
+    );
     expect(artifact.prNumber).toBe(7);
     expect(JSON.parse(requestBody)).toEqual({
       runId: "run_1234567890abcdef",

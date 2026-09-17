@@ -1,4 +1,14 @@
-import { SubmissionArtifactSchema, type SubmissionArtifact } from "../contracts/schemas.js";
+import {
+  SubmissionArtifactSchema,
+  type SubmissionArtifact,
+} from "../contracts/schemas.js";
+import type { ContributionRunManager } from "../run/run-manager.js";
+import type { ApprovalChallenge } from "../governance/approval-service.js";
+import {
+  buildRunTransferBundle,
+  type RunTransferBundle,
+} from "../run/run-transfer.js";
+import type { SubmissionPort } from "./submission-port.js";
 
 type FetchLike = (
   input: RequestInfo | URL,
@@ -9,15 +19,32 @@ export interface RemoteSubmissionBrokerOptions {
   /** Exact broker endpoint; no GitHub credential is accepted or stored here. */
   endpoint?: string;
   fetchImpl?: FetchLike;
+  /** Local proposal source used only to let the trusted host re-materialize a run. */
+  runManager?: ContributionRunManager;
+  /** Explicit bundle provider for transports that do not use a local manager. */
+  bundleProvider?: (runId: string) => RunTransferBundle;
+}
+
+export class SubmissionBrokerApprovalRequiredError extends Error {
+  readonly approvalChallenge?: ApprovalChallenge;
+
+  constructor(message: string, approvalChallenge?: ApprovalChallenge) {
+    super(message);
+    this.name = "SubmissionBrokerApprovalRequiredError";
+    this.approvalChallenge = approvalChallenge;
+  }
 }
 
 /** The only submission surface exposed to an agent-facing CLI/MCP client. */
-export class RemoteSubmissionBrokerClient {
+export class RemoteSubmissionBrokerClient implements SubmissionPort {
   private readonly endpoint: string;
   private readonly fetchImpl: FetchLike;
+  private readonly runManager?: ContributionRunManager;
+  private readonly bundleProvider?: (runId: string) => RunTransferBundle;
 
   constructor(options: RemoteSubmissionBrokerOptions = {}) {
-    const endpoint = options.endpoint || process.env.OPENCONTRIB_SUBMISSION_BROKER_URL;
+    const endpoint =
+      options.endpoint || process.env.OPENCONTRIB_SUBMISSION_BROKER_URL;
     if (!endpoint) {
       throw new Error(
         "SubmissionBrokerRequiredError: agent-facing submission requires an external trusted submission broker. Set OPENCONTRIB_SUBMISSION_BROKER_URL.",
@@ -27,25 +54,48 @@ export class RemoteSubmissionBrokerClient {
     try {
       parsed = new URL(endpoint);
     } catch {
-      throw new Error("SubmissionBrokerConfigurationError: broker endpoint must be a valid URL.");
+      throw new Error(
+        "SubmissionBrokerConfigurationError: broker endpoint must be a valid URL.",
+      );
     }
-    if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+    if (
+      parsed.protocol !== "https:" &&
+      parsed.hostname !== "localhost" &&
+      parsed.hostname !== "127.0.0.1"
+    ) {
       throw new Error(
         "SubmissionBrokerConfigurationError: broker endpoint must use HTTPS except for loopback development.",
       );
     }
     this.endpoint = parsed.toString();
     this.fetchImpl = options.fetchImpl || fetch;
+    this.runManager = options.runManager;
+    this.bundleProvider = options.bundleProvider;
   }
 
-  async submit(runId: string, expectedIntentSha256?: string): Promise<SubmissionArtifact> {
+  async submit(
+    runId: string,
+    expectedIntentSha256?: string,
+  ): Promise<SubmissionArtifact> {
     if (!runId.trim()) {
       throw new Error("SubmissionBrokerRequestError: runId is required.");
     }
+    let runBundle: RunTransferBundle | undefined;
+    if (this.bundleProvider) runBundle = this.bundleProvider(runId);
+    else if (this.runManager)
+      runBundle = buildRunTransferBundle(this.runManager, runId);
+
     const response = await this.fetchImpl(this.endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ runId, expectedIntentSha256 }),
+      // A local expected intent belongs to the agent proposal and must not be
+      // used to bind a separately materialized host run. The host returns its
+      // own intent hash in the approval challenge.
+      body: JSON.stringify({
+        runId,
+        expectedIntentSha256: runBundle ? undefined : expectedIntentSha256,
+        runBundle,
+      }),
     });
 
     let payload: unknown;
@@ -61,11 +111,27 @@ export class RemoteSubmissionBrokerClient {
         typeof payload === "object" && payload !== null && "message" in payload
           ? String((payload as { message?: unknown }).message)
           : `HTTP ${response.status}`;
+      const code =
+        typeof payload === "object" && payload !== null && "code" in payload
+          ? String((payload as { code?: unknown }).code)
+          : "";
+      if (code === "APPROVAL_REQUIRED") {
+        const challenge =
+          typeof payload === "object" &&
+          payload !== null &&
+          "approvalChallenge" in payload
+            ? ((payload as { approvalChallenge?: unknown })
+                .approvalChallenge as ApprovalChallenge)
+            : undefined;
+        throw new SubmissionBrokerApprovalRequiredError(message, challenge);
+      }
       throw new Error(`SubmissionBrokerRejectedError: ${message}`);
     }
 
     const result = SubmissionArtifactSchema.safeParse(
-      typeof payload === "object" && payload !== null && "submissionArtifact" in payload
+      typeof payload === "object" &&
+        payload !== null &&
+        "submissionArtifact" in payload
         ? (payload as { submissionArtifact?: unknown }).submissionArtifact
         : payload,
     );

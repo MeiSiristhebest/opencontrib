@@ -614,7 +614,9 @@ export function registerGovernanceTools(
       // MCP is agent-facing: it has no GitHub credential and cannot invoke a
       // provider write. The separately deployed trusted broker owns approval,
       // credentials, and canonical submission state.
-      const { RemoteSubmissionBrokerClient } = await import("@opencontrib/core");
+      const { RemoteSubmissionBrokerClient } = await import(
+        "@opencontrib/core"
+      );
 
       // Guard against concurrent mutations if expectedIntentSha256 is supplied
       if (args.expectedIntentSha256) {
@@ -629,10 +631,11 @@ export function registerGovernanceTools(
       }
 
       // Submit only through the separately deployed trusted broker.
-      const submissionArtifact = await new RemoteSubmissionBrokerClient().submit(
-        args.runId,
-        args.expectedIntentSha256,
-      );
+      const submissionArtifact =
+        await new RemoteSubmissionBrokerClient().submit(
+          args.runId,
+          args.expectedIntentSha256,
+        );
 
       return {
         content: [

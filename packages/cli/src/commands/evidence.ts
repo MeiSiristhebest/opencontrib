@@ -371,7 +371,7 @@ export const verifyGreenCommand = evidenceCommand
           });
           persistence = { saved: report.reproductionVerified === true };
         } else {
-          const green = verifyGreenEvidence({
+          const green = await verifyGreenEvidence({
             cwd: targetCwd,
             testCommand: opts.testCmd,
             workspaceRoot,
@@ -413,7 +413,9 @@ export const verifyGreenCommand = evidenceCommand
             ? "Checkpoint 2 (RED→GREEN Reproduction Verified)"
             : "Checkpoint 2 (GREEN Not Verified Against RED)",
           nextCommand: verified
-            ? (runId ? `opencontrib governance pr-template --run-id ${runId} --issue <id> --issue-title "<title>" --summary "<summary>"` : 'opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"')
+            ? runId
+              ? `opencontrib governance pr-template --run-id ${runId} --issue <id> --issue-title "<title>" --summary "<summary>"`
+              : 'opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"'
             : "Re-run: opencontrib evidence verify-green --test-cmd '<cmd>' (verify the tree changed and tests pass)",
           invariants: [
             verified

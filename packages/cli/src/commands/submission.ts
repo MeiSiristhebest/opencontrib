@@ -43,7 +43,9 @@ export const submissionCommand = new Command("submission")
         const runManager = getRunManager();
         const runId = runManager.resolveRunId(opts.runId);
         if (!runId) {
-          console.error("❌ No runId found in active session or --run-id option.");
+          console.error(
+            "❌ No runId found in active session or --run-id option.",
+          );
           throw new CliExitError(1);
         }
 
@@ -74,10 +76,11 @@ export const submissionCommand = new Command("submission")
 
         // Agent-facing CLI code never receives a GitHub credential and never
         // performs a provider write. The trusted host/broker owns both.
-        const submissionArtifact = await new RemoteSubmissionBrokerClient().submit(
-          runId,
-          intent.intentSha256,
-        );
+        const submissionArtifact =
+          await new RemoteSubmissionBrokerClient().submit(
+            runId,
+            intent.intentSha256,
+          );
 
         printJSON(
           {

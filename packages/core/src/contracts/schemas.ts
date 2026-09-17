@@ -300,23 +300,31 @@ export const FlakyTestRecordSchema = z.object({
 });
 export type FlakyTestRecord = z.infer<typeof FlakyTestRecordSchema>;
 
+export const MeasurementStatusSchema = z.enum(["PASS", "FAIL", "UNAVAILABLE"]);
+export type MeasurementStatus = z.infer<typeof MeasurementStatusSchema>;
+
 export const EvidenceReportSchema = z.object({
   baselineTestedAt: z.string(),
   baselineFlakyTests: z.array(FlakyTestRecordSchema),
   stressLoopRuns: z.number().default(1),
   stressLoopPassed: z.boolean(),
+  executionCount: z.number().default(1),
+  maxConcurrentObserved: z.number().default(1),
   concurrencyWorkers: z.number().default(1).optional(),
   concurrencyStampedePassed: z.boolean().default(true).optional(),
   raceCollisionsDetected: z.number().default(0).optional(),
   latencyJitterMs: z.number().optional(),
   zeroAssertionWarning: z.boolean().default(false).optional(),
-  handleLeakCheckPassed: z.boolean(),
+  handleLeakCheckPassed: MeasurementStatusSchema,
   initialDescriptorCount: z.number().optional(),
   finalDescriptorCount: z.number().optional(),
   passedUnitTestsCount: z.number(),
   failedUnitTestsCount: z.number().default(0).optional(),
   addedUnitTestsCount: z.number().optional(),
   testCoveragePercent: z.number().min(0).max(100).optional(),
+  testCoverageStatus: MeasurementStatusSchema,
+  changedCodeCoveragePercent: z.number().min(0).max(100).optional(),
+  changedCodeCoverageStatus: MeasurementStatusSchema,
   reproductionVerified: z.boolean().optional(),
   allTestsPassing: z.boolean().optional(),
   redEvidence: RedEvidenceSchema.optional(),

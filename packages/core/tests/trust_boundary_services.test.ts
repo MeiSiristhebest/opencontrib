@@ -304,9 +304,11 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       expect(verifier.verifyApproval(approval)).toBe(true);
       expect(broker.get(request.requestId)?.status).toBe("APPROVED");
       expect(
-        new ApprovalService(manager, undefined, verifier).verifyApprovalIntegrity(
-          manifest.runId,
-        ).valid,
+        new ApprovalService(
+          manager,
+          undefined,
+          verifier,
+        ).verifyApprovalIntegrity(manifest.runId).valid,
       ).toBe(true);
 
       await expect(

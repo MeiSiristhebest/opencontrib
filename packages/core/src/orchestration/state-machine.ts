@@ -144,5 +144,4 @@ export class ContributionStateMachine {
   setOutcome(outcome: ExecutionOutcome): void {
     this.state.outcome = outcome;
   }
-
 }

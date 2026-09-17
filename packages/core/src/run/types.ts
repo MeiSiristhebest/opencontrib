@@ -4,6 +4,7 @@ export type ContributionRunPhase =
   | "PROBE_COMPLETED"
   | "CONTEXT_ASSEMBLED"
   | "WORKSPACE_PREPARED"
+  | "RED_CAPTURED"
   | "POC_GENERATED"
   | "PATCH_DRAFTED"
   | "EVIDENCE_COLLECTED"

@@ -67,9 +67,11 @@ export class Ed25519ApprovalSigner implements ApprovalSigner {
   }
 
   signApproval(payload: string): string {
-    return signMessage(null, Buffer.from(payload, "utf8"), this.privateKey).toString(
-      "base64",
-    );
+    return signMessage(
+      null,
+      Buffer.from(payload, "utf8"),
+      this.privateKey,
+    ).toString("base64");
   }
 }
 

@@ -10,19 +10,18 @@
  * phase from the original method; no behavioral change is intended.
  */
 
-import {
-  ApprovalArtifactSchema,
-  type Opportunity,
-} from "../../contracts/schemas.js";
+import { type Opportunity } from "../../contracts/schemas.js";
+import type { ApprovalChallenge } from "../../governance/approval-service.js";
 import {
   PatchDraftSchema,
+  ReproductionDesignSchema,
   SubagentReviewEvaluationSchema,
   type PatchDraft,
+  type ReproductionDesign,
 } from "../../contracts/llm-schemas.js";
 import { scoutOpportunities } from "../../discovery/scout.js";
 import { MultiSignalHeuristicRanker } from "../../discovery/ranking.js";
 import { detectSystemCapabilities } from "../../discovery/feasibility.js";
-import {} from "../../evidence/evidence-collector.js";
 import { EvidenceService } from "../../evidence/evidence-service.js";
 import { generateSubagentReviewPrompt } from "../../governance/subagent-reviewer.js";
 import { deriveEvidenceBackedQualityRubric } from "../../governance/governance-auditor.js";
@@ -32,8 +31,10 @@ import {
   type RiskAssessment,
   type ValidationStatus,
 } from "../../risk/risk-engine.js";
-import { GitHubSubmissionService } from "../../github/submission-service.js";
-import { ApprovalService } from "../../governance/approval-service.js";
+import {
+  RemoteSubmissionBrokerClient,
+  SubmissionBrokerApprovalRequiredError,
+} from "../../github/submission-broker-client.js";
 import { defaultRunManager } from "../../run/run-manager.js";
 import { saveCanonicalArtifact } from "../../run/canonical-writer.js";
 import { WorkspaceService } from "../../workspace/workspace-service.js";
@@ -204,27 +205,12 @@ export class ContextAssemblyStep implements PipelineStep {
       assembledContext.repoContext.runnableCommands.testCommand ||
       assembledContext.repoContext.testCommandHint;
 
-    let preFixReproductionCaptured = false;
-    let preFixOutput = "";
-    let redEvidence: any;
-    if (testCmd && ctx.runId) {
-      const runManager = deps.runManager ?? defaultRunManager;
-      const red = new EvidenceService(runManager).captureRed({
-        runId: ctx.runId,
-        cwd: ctx.workspace!.workspacePath,
-        testCommand: testCmd,
-      });
-      preFixReproductionCaptured = red.assertionMatched;
-      preFixOutput = red.observedOutputSnippet;
-      redEvidence = red;
-    }
-
     ctx.assembledContext = assembledContext;
     ctx.prompt = prompt;
     ctx.testCmd = testCmd;
-    ctx.preFixReproductionCaptured = preFixReproductionCaptured;
-    ctx.preFixOutput = preFixOutput;
-    ctx.evidenceReport = { redEvidence };
+    ctx.preFixReproductionCaptured = false;
+    ctx.preFixOutput = "";
+    ctx.evidenceReport = undefined;
     if (ctx.runId) {
       (deps.runManager ?? defaultRunManager).saveArtifact(
         ctx.runId,
@@ -233,6 +219,101 @@ export class ContextAssemblyStep implements PipelineStep {
       );
     }
     return continuePipeline();
+  }
+}
+
+// ── Phase 2.5: Explicit RED Reproduction Design & Capture ───────────────────
+
+export class ReproductionDesignStep implements PipelineStep {
+  readonly name = "ReproductionDesign";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
+    if (!ctx.testCmd) {
+      // Documentation-only or testless runs remain eligible for dry-run output,
+      // but cannot advance their canonical run into PATCH_DRAFTED.
+      return continuePipeline();
+    }
+    if (!ctx.runId || !deps.llmService) {
+      deps.stateMachine.transition(
+        "BLOCKED",
+        "A target test command requires an LLM-produced reproduction design",
+      );
+      return halt({
+        status: "BLOCKED",
+        stage: "PATCH_DESIGN",
+        selectedOpportunity: ctx.selectedOpp,
+        workspacePath: ctx.workspace?.workspacePath,
+        reportSummary:
+          "Pipeline halted: no trusted reproduction design was available for the target test command.",
+      });
+    }
+
+    let design: ReproductionDesign;
+    try {
+      const result = await deps.llmService.generateStructured({
+        prompt: `${ctx.prompt}\n\nDesign the target RED reproduction only. Return JSON conforming to ReproductionDesignSchema with the exact test command, a non-empty expected failure assertion, at least one concrete test file, and a short rationale. Do not describe the patch.`,
+        schema: ReproductionDesignSchema,
+      });
+      design = result.data as ReproductionDesign;
+    } catch {
+      deps.stateMachine.transition("BLOCKED", "RED reproduction design failed");
+      return halt({
+        status: "BLOCKED",
+        stage: "PATCH_DESIGN",
+        selectedOpportunity: ctx.selectedOpp,
+        workspacePath: ctx.workspace?.workspacePath,
+        reportSummary:
+          "Pipeline halted: reproduction design was invalid or unavailable; no unrelated failing suite may be used as RED.",
+      });
+    }
+
+    if (design.command.trim() !== ctx.testCmd.trim()) {
+      deps.stateMachine.transition(
+        "BLOCKED",
+        "RED command changed by reproduction design",
+      );
+      return halt({
+        status: "BLOCKED",
+        stage: "PATCH_DESIGN",
+        selectedOpportunity: ctx.selectedOpp,
+        workspacePath: ctx.workspace?.workspacePath,
+        reportSummary:
+          "Pipeline halted: reproduction design must use the repository-derived test command exactly.",
+      });
+    }
+
+    try {
+      const red = new EvidenceService(
+        deps.runManager ?? defaultRunManager,
+      ).captureRed({
+        runId: ctx.runId,
+        cwd: ctx.workspace!.workspacePath,
+        testCommand: ctx.testCmd,
+        expectedAssertion: design.expectedAssertion,
+        testFile: design.testFiles,
+      });
+      ctx.reproductionDesign = design;
+      ctx.preFixReproductionCaptured = red.assertionMatched;
+      ctx.preFixOutput = red.observedOutputSnippet;
+      ctx.evidenceReport = { redEvidence: red };
+      (deps.runManager ?? defaultRunManager).saveArtifact(
+        ctx.runId,
+        "context",
+        ctx.assembledContext as any,
+      );
+      return continuePipeline();
+    } catch (err: any) {
+      deps.stateMachine.transition("BLOCKED", "RED assertion was not captured");
+      return halt({
+        status: "BLOCKED",
+        stage: "PATCH_DESIGN",
+        selectedOpportunity: ctx.selectedOpp,
+        workspacePath: ctx.workspace?.workspacePath,
+        reportSummary: `Pipeline halted: target RED reproduction failed: ${err.message}`,
+      });
+    }
   }
 }
 
@@ -285,7 +366,7 @@ export class PatchGenerationStep implements PipelineStep {
         ctx.runId,
         "patch",
         patchDraft as any,
-        "PATCH_DRAFTED",
+        ctx.preFixReproductionCaptured ? "PATCH_DRAFTED" : undefined,
       );
     }
     return continuePipeline();
@@ -851,45 +932,43 @@ export class PrSubmissionStep implements PipelineStep {
         isDraft: true,
       });
 
-      // Approval is an asynchronous host decision. The agent-facing pipeline
-      // may issue a challenge, but it can never mint approval or continue to a
-      // provider side effect on the basis of an injected boolean/callback.
-      const approvedRun = runManager.getRun(runId);
-      if (!ApprovalArtifactSchema.safeParse(approvedRun?.artifacts.approval).success) {
-        const challenge = new ApprovalService(runManager).requestApproval(runId);
-        deps.stateMachine.transition(
-          "HUMAN_GATE",
-          "Approval challenge issued; waiting for trusted host",
-        );
-        return halt({
-          status: "HUMAN_APPROVAL_REQUIRED",
-          stage: "HUMAN_GATE",
-          selectedOpportunity: selectedOpp,
-          workspacePath: ctx.workspace?.workspacePath,
-          patchDraft: ctx.patchDraft || activePatch,
-          appliedFiles: ctx.appliedFiles,
-          implementationAttempts: ctx.implementationAttempts,
-          validationStatus,
-          confidenceScore: qualityRubric.overallScore,
-          subagentReview: ctx.subagentReview,
-          riskAssessment,
-          telemetry: ctx.telemetry,
-          approvalChallenge: challenge,
-          reportSummary:
-            `Approval challenge ${challenge.intentSha256} issued for #${selectedOpp.issueNumber}. A separate trusted host must approve it before submission can resume.`,
-        });
+      // The agent can only call the SubmissionPort. A remote trusted broker
+      // validates the host-owned run, requests approval, and performs writes.
+      const submissionPort =
+        deps.submissionPort ?? new RemoteSubmissionBrokerClient({ runManager });
+      let submission;
+      try {
+        submission = await submissionPort.submit(runId);
+      } catch (err) {
+        if (err instanceof SubmissionBrokerApprovalRequiredError) {
+          deps.stateMachine.transition(
+            "HUMAN_GATE",
+            "Trusted broker issued an approval challenge",
+          );
+          return halt({
+            status: "HUMAN_APPROVAL_REQUIRED",
+            stage: "HUMAN_GATE",
+            selectedOpportunity: selectedOpp,
+            workspacePath: ctx.workspace?.workspacePath,
+            patchDraft: ctx.patchDraft || activePatch,
+            appliedFiles: ctx.appliedFiles,
+            implementationAttempts: ctx.implementationAttempts,
+            validationStatus,
+            confidenceScore: qualityRubric.overallScore,
+            subagentReview: ctx.subagentReview,
+            riskAssessment,
+            telemetry: ctx.telemetry,
+            approvalChallenge: err.approvalChallenge as
+              | ApprovalChallenge
+              | undefined,
+            reportSummary: `Trusted broker requires approval before submitting #${selectedOpp.issueNumber}.`,
+          });
+        }
+        throw err;
       }
 
-      const submissionService = new GitHubSubmissionService(
-        deps.prService,
-        deps.client,
-        runManager,
-        deps.approvalVerifier ?? deps.approvalAuthority,
-      );
-      const submission = await submissionService.submit(runId);
-
-      prUrl = submission.submissionResult.prUrl;
-      prNumber = submission.submissionResult.prNumber;
+      prUrl = submission.prUrl;
+      prNumber = submission.prNumber;
       if (ctx.telemetry) ctx.telemetry.prUrl = prUrl;
     } catch (err: any) {
       deps.stateMachine.transition(
@@ -986,6 +1065,7 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   new RankingStep(),
   new WorkspaceAllocationStep(),
   new ContextAssemblyStep(),
+  new ReproductionDesignStep(),
   new PatchGenerationStep(),
   new ImplementValidateLoopStep(),
   new SubagentReviewStep(),
