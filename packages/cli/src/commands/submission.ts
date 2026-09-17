@@ -76,11 +76,9 @@ export const submissionCommand = new Command("submission")
 
         // Agent-facing CLI code never receives a GitHub credential and never
         // performs a provider write. The trusted host/broker owns both.
-        const submissionArtifact =
-          await buildAgentSubmissionPort(runManager).submit(
-            runId,
-            intent.intentSha256,
-          );
+        const submissionArtifact = await buildAgentSubmissionPort(
+          runManager,
+        ).submit(runId, intent.intentSha256);
 
         printJSON(
           {

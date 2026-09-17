@@ -307,8 +307,16 @@ export function auditGovernance(
       // Calculate true added/removed line changes from unified diff hunks
       const diffHunkLines = patch
         .split("\n")
-        .filter((l) => (l.startsWith("+") || l.startsWith("-")) && !l.startsWith("+++") && !l.startsWith("---"));
-      lines = diffHunkLines.length > 0 ? diffHunkLines.length : patch.split("\n").length;
+        .filter(
+          (l) =>
+            (l.startsWith("+") || l.startsWith("-")) &&
+            !l.startsWith("+++") &&
+            !l.startsWith("---"),
+        );
+      lines =
+        diffHunkLines.length > 0
+          ? diffHunkLines.length
+          : patch.split("\n").length;
     }
   }
   const maxDiffAllowed = input.maxDiffLines ?? 100;
@@ -519,15 +527,13 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     "Unavailable (issue description not recorded)";
   const rootCause =
     data.rootCause || "Unavailable (root cause rationale not recorded)";
-  const keyChanges = data.keyChanges && data.keyChanges.length > 0 ? data.keyChanges : [
-    "Unavailable (key implementation steps not recorded)",
-  ];
-  const reproductionCommand =
-    data.reproductionCommand || undefined;
+  const keyChanges =
+    data.keyChanges && data.keyChanges.length > 0
+      ? data.keyChanges
+      : ["Unavailable (key implementation steps not recorded)"];
+  const reproductionCommand = data.reproductionCommand || undefined;
   const verificationCommand =
-    data.verificationCommand ||
-    data.validationCommand ||
-    undefined;
+    data.verificationCommand || data.validationCommand || undefined;
   const testCountText =
     data.testCount === undefined
       ? "all assertions passed"
