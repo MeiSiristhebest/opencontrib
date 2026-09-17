@@ -42,7 +42,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Every contribution cycle must originate from a tracked contribution run session.",
     ],
-    suggestedNextAction: "scout_opportunity",
+    suggestedNextAction: "scout",
   },
   OPPORTUNITY_SCOUTED: {
     phase: "OPPORTUNITY_SCOUTED",
@@ -192,8 +192,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "Evidence Collected",
     description:
       "Dual-stage RED->GREEN reproduction and stress loop evidence captured.",
-    allowedFromPhases: ["WORKSPACE_PREPARED", "POC_GENERATED", "PATCH_DRAFTED"],
-    requiredArtifacts: ["workspace", "evidence"],
+    allowedFromPhases: ["PATCH_DRAFTED"],
+    requiredArtifacts: ["workspace", "patch", "evidence", "validated_patch"],
     cli: {
       command: "evidence",
       example:
@@ -212,7 +212,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "The source tree must have changed between the RED capture and the GREEN run.",
       "Ensure unit test passed cleanly with 0 regressions before proceeding.",
     ],
-    suggestedNextAction: "audit_governance",
+    suggestedNextAction: "prepare_pr_draft",
   },
   GOVERNANCE_AUDITED: {
     phase: "GOVERNANCE_AUDITED",
@@ -220,7 +220,14 @@ export const PROTOCOL_CONTRACT_PHASES = {
     description:
       "RFC-100 line limit, anti-AI rubric, and quality confidence score verified.",
     allowedFromPhases: ["EVIDENCE_COLLECTED"],
-    requiredArtifacts: ["workspace", "evidence", "governance"],
+    requiredArtifacts: [
+      "workspace",
+      "patch",
+      "validated_patch",
+      "evidence",
+      "pr_draft",
+      "governance",
+    ],
     cli: {
       command: "governance",
       subcommand: "audit",
@@ -236,7 +243,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Present patch diff and audit report to human reviewer before PR submission.",
     ],
-    suggestedNextAction: "governance_audit_and_submit",
+    suggestedNextAction: "request_approval",
   },
   PR_SUBMITTED: {
     phase: "PR_SUBMITTED",
@@ -246,6 +253,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
     allowedFromPhases: ["GOVERNANCE_AUDITED"],
     requiredArtifacts: [
       "workspace",
+      "patch",
+      "validated_patch",
       "evidence",
       "governance",
       "submission_intent",
@@ -255,8 +264,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     cli: {
       command: "submission",
       subcommand: "submit",
-      example:
-        'opencontrib submission submit --run-id <id>',
+      example: "opencontrib submission submit --run-id <id>",
     },
     mcp: {
       tool: "contrib_submit_pr",

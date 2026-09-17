@@ -53,6 +53,7 @@ export function saveCanonicalArtifact(
 ): SavedArtifactResult {
   const authoritativeTypes = new Set<ArtifactType>([
     "workspace",
+    "validated_patch",
     "evidence_red",
     "evidence",
     "governance",

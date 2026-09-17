@@ -1,10 +1,10 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 export const IssueEvaluationSchema = z.object({
   issueNumber: z.number(),
   title: z.string(),
   isReproducible: z.boolean(),
-  estimatedDifficulty: z.enum(['trivial', 'easy', 'medium', 'hard']),
+  estimatedDifficulty: z.enum(["trivial", "easy", "medium", "hard"]),
   rootCauseHypothesis: z.string(),
   recommendedAction: z.string(),
   confidenceScore: z.number().min(0).max(100),
@@ -14,8 +14,9 @@ export type IssueEvaluation = z.infer<typeof IssueEvaluationSchema>;
 
 export const CodeChangeFileSchema = z.object({
   path: z.string(),
-  operation: z.enum(['CREATE', 'MODIFY', 'DELETE']),
+  operation: z.enum(["CREATE", "MODIFY", "DELETE"]),
   content: z.string(),
+  mode: z.enum(["100644", "100755", "120000"]).default("100644"),
   explanation: z.string(),
 });
 
@@ -41,7 +42,7 @@ export type PatchDraft = z.infer<typeof PatchDraftSchema>;
 
 export const SubagentReviewEvaluationSchema = z.object({
   maintainerPerspective: z.object({
-    acceptanceLikelihood: z.enum(['HIGH', 'MEDIUM', 'LOW']),
+    acceptanceLikelihood: z.enum(["HIGH", "MEDIUM", "LOW"]),
     styleConformance: z.string(),
     concerns: z.array(z.string()),
   }),
@@ -64,7 +65,9 @@ export const SubagentReviewEvaluationSchema = z.object({
   }),
 });
 
-export type SubagentReviewEvaluation = z.infer<typeof SubagentReviewEvaluationSchema>;
+export type SubagentReviewEvaluation = z.infer<
+  typeof SubagentReviewEvaluationSchema
+>;
 
 export const PullRequestDraftSchema = z.object({
   title: z.string(),

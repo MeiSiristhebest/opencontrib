@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,7 @@ import {
 } from "../src/index.js";
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
+import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 
 const testApprovalAuthority = () =>
   createTrustedApprovalAuthority({
@@ -26,11 +28,72 @@ const testApprovalAuthority = () =>
     }),
   });
 
+function makeValidatedPatch(
+  runId: string,
+  patchSha256: string,
+  redTreeSha256: string,
+  greenTreeSha256: string,
+) {
+  const artifact = {
+    runId,
+    patchSha256,
+    actualDeltaSha256: "0".repeat(64),
+    baseCommitSha: "a".repeat(40),
+    redTreeSha256,
+    greenTreeSha256,
+    artifactSha256: "",
+    files: [],
+    validatedAt: "2026-01-01T00:01:00Z",
+  };
+  artifact.artifactSha256 = hashValidatedPatchArtifact(artifact);
+  return artifact;
+}
+
 function seedGovernanceReadyRun(
   manager: ContributionRunManager,
   runId: string,
   body = "pr body",
 ): void {
+  const baseCommitSha = "a".repeat(40);
+  const patch = {
+    title: "fix: bug",
+    summary: "fix",
+    rationale: "reproduce and correct the defect",
+    targetFiles: [{ path: "src/fix.ts", reason: "correct defect" }],
+    files: [
+      {
+        path: "src/fix.ts",
+        operation: "MODIFY",
+        mode: "100644",
+        content: "fixed",
+        explanation: "correct defect",
+      },
+    ],
+    implementationSteps: ["apply fix"],
+    regressionTestPlan: ["bun test"],
+    estimatedDiffLines: 1,
+  };
+  const patchContent = JSON.stringify(patch);
+  const patchSha256 = createHash("sha256").update(patchContent).digest("hex");
+  const validatedPatch = {
+    runId,
+    patchSha256,
+    actualDeltaSha256: "b".repeat(64),
+    baseCommitSha,
+    redTreeSha256: "c".repeat(64),
+    greenTreeSha256: "d".repeat(64),
+    artifactSha256: "",
+    files: [
+      {
+        path: "src/fix.ts",
+        operation: "MODIFY" as const,
+        mode: "100644" as const,
+        contentSha256: createHash("sha256").update("fixed").digest("hex"),
+      },
+    ],
+    validatedAt: "2026-01-01T00:01:00.000Z",
+  };
+  validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
   saveCanonicalArtifact(
     manager,
     runId,
@@ -38,30 +101,16 @@ function seedGovernanceReadyRun(
     {
       workspacePath: "/tmp",
       branchName: "fixture-branch",
+      baseRepoPath: "/tmp",
+      baseBranch: "main",
+      baseCommitSha,
+      isWorktree: false,
+      repoFullName: "org/repo",
     },
     "WORKSPACE_PREPARED",
   );
-  manager.saveArtifact(
-    runId,
-    "patch",
-    JSON.stringify({
-      title: "fix: bug",
-      summary: "fix",
-      rationale: "reproduce and correct the defect",
-      targetFiles: [{ path: "src/fix.ts", reason: "correct defect" }],
-      files: [
-        {
-          path: "src/fix.ts",
-          operation: "MODIFY",
-          content: "fixed",
-          explanation: "correct defect",
-        },
-      ],
-      implementationSteps: ["apply fix"],
-      regressionTestPlan: ["bun test"],
-      estimatedDiffLines: 1,
-    }),
-  );
+  manager.saveArtifact(runId, "patch", patchContent, "PATCH_DRAFTED");
+  saveCanonicalArtifact(manager, runId, "validated_patch", validatedPatch);
   const testIdentity = {
     normalizedCommand: "bun test regression.test.ts",
     testFiles: [{ path: "regression.test.ts", sha256: "same" }],
@@ -85,7 +134,7 @@ function seedGovernanceReadyRun(
         command: "bun test regression.test.ts",
         observedOutputSnippet: "failed",
         exitCode: 1,
-        sourceTreeSha256: "before",
+        sourceTreeSha256: "c".repeat(64),
         capturedAt: "2026-01-01T00:00:00.000Z",
         assertionMatched: true,
         assertionMatchedFingerprint: "fp",
@@ -96,10 +145,12 @@ function seedGovernanceReadyRun(
         exitCode: 0,
         outputSnippet: "passed",
         passed: true,
-        sourceTreeSha256: "after",
+        sourceTreeSha256: "d".repeat(64),
         capturedAt: "2026-01-01T00:01:00.000Z",
         treeChangedComparedToRed: true,
         treeHashMatchesRed: false,
+        appliedPatchSha256: patchSha256,
+        validatedPatchArtifactSha256: validatedPatch.artifactSha256,
         stressLoopPassed: true,
         allTestsPassing: true,
         assertionMatchedFingerprint: "fp",
@@ -160,10 +211,33 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         allTestsPassing: true,
       };
 
+      const forgedPatch = "{}";
+      const forgedPatchSha256 = createHash("sha256")
+        .update(forgedPatch)
+        .digest("hex");
+      const forgedValidatedPatch = {
+        runId: manifest.runId,
+        patchSha256: forgedPatchSha256,
+        actualDeltaSha256: "0".repeat(64),
+        baseCommitSha: "a".repeat(40),
+        redTreeSha256: "sha-before-fix",
+        greenTreeSha256: "sha-after-fix",
+        artifactSha256: "",
+        files: [],
+        validatedAt: "2026-01-01T00:01:00Z",
+      };
+      forgedValidatedPatch.artifactSha256 =
+        hashValidatedPatchArtifact(forgedValidatedPatch);
+      (forgedBundle.greenEvidence as any).appliedPatchSha256 =
+        forgedPatchSha256;
+      (forgedBundle.greenEvidence as any).validatedPatchArtifactSha256 =
+        forgedValidatedPatch.artifactSha256;
       const prospectiveSummary = {
-        manifest: { ...manifest, currentPhase: "WORKSPACE_PREPARED" as const },
+        manifest: { ...manifest, currentPhase: "PATCH_DRAFTED" as const },
         artifacts: {
-          workspace: { workspacePath: baseDir },
+          workspace: { workspacePath: baseDir, baseCommitSha: "a".repeat(40) },
+          patch: forgedPatch,
+          validatedPatch: forgedValidatedPatch,
           evidence: forgedBundle,
         },
         availableArtifactFiles: [],
@@ -243,7 +317,10 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         body: "pr body",
       });
 
-      const approvalService = new ApprovalService(manager, testApprovalAuthority());
+      const approvalService = new ApprovalService(
+        manager,
+        testApprovalAuthority(),
+      );
       approvalService.recordApproval({
         runId: manifest.runId,
         expectedIntentSha256: intent.intentSha256,
@@ -368,7 +445,10 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       });
 
       // Record approval on original PR body
-      const approvalService = new ApprovalService(manager, testApprovalAuthority());
+      const approvalService = new ApprovalService(
+        manager,
+        testApprovalAuthority(),
+      );
       approvalService.recordApproval({
         runId: manifest.runId,
         expectedIntentSha256: intent.intentSha256,
@@ -470,18 +550,36 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         allTestsPassing: true,
       };
 
+      const patch = "{}";
+      const patchSha256 = createHash("sha256").update(patch).digest("hex");
+      const validatedPatch = makeValidatedPatch(
+        "r1",
+        patchSha256,
+        "sha-before-fix",
+        "sha-after-fix",
+      );
+      const evidenceWithPatchBinding = {
+        ...forgedBundle,
+        greenEvidence: {
+          ...forgedBundle.greenEvidence,
+          appliedPatchSha256: patchSha256,
+          validatedPatchArtifactSha256: validatedPatch.artifactSha256,
+        },
+      };
       const prospectiveSummary = {
         manifest: {
           runId: "r1",
           schemaVersion: "1.0.0",
           repoFullName: "org/repo",
-          currentPhase: "WORKSPACE_PREPARED" as const,
+          currentPhase: "PATCH_DRAFTED" as const,
           createdAt: "now",
           updatedAt: "now",
         },
         artifacts: {
-          workspace: { workspacePath: baseDir },
-          evidence: forgedBundle,
+          workspace: { workspacePath: baseDir, baseCommitSha: "a".repeat(40) },
+          patch,
+          validatedPatch,
+          evidence: evidenceWithPatchBinding,
         },
         availableArtifactFiles: [],
       };
@@ -559,27 +657,52 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
 
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const patch = "{}";
+      const patchSha256 = createHash("sha256").update(patch).digest("hex");
+      const validatedPatch = makeValidatedPatch(
+        manifest.runId,
+        patchSha256,
+        "sha-before",
+        "sha-after",
+      );
+      const evidenceWithPatchBinding = {
+        ...okBundle,
+        greenEvidence: {
+          ...okBundle.greenEvidence,
+          appliedPatchSha256: patchSha256,
+          validatedPatchArtifactSha256: validatedPatch.artifactSha256,
+        },
+      };
       const prospectiveSummary = {
-        manifest: { ...manifest, currentPhase: "WORKSPACE_PREPARED" as const },
+        manifest: { ...manifest, currentPhase: "PATCH_DRAFTED" as const },
         artifacts: {
-          workspace: { workspacePath: baseDir },
-          evidence: okBundle,
+          workspace: { workspacePath: baseDir, baseCommitSha: "a".repeat(40) },
+          patch,
+          validatedPatch,
+          evidence: evidenceWithPatchBinding,
         },
         availableArtifactFiles: [],
       };
       // Audited test mutation with matching diff hash is allowed through the gate.
-      expect(
-        validatePhaseGate(prospectiveSummary, "EVIDENCE_COLLECTED").ok,
-      ).toBe(true);
+      const mutationGate = validatePhaseGate(
+        prospectiveSummary,
+        "EVIDENCE_COLLECTED",
+      );
+      expect(mutationGate.ok).toBe(true);
 
       // ...but the SAME mutation with mismatched diff hash must be rejected.
       const mismatchedAudit = JSON.parse(JSON.stringify(okBundle)) as any;
       mismatchedAudit.greenEvidence.actualTestDiffSha256 =
         "different-diff-hash";
+      mismatchedAudit.greenEvidence.appliedPatchSha256 = patchSha256;
+      mismatchedAudit.greenEvidence.validatedPatchArtifactSha256 =
+        validatedPatch.artifactSha256;
       const blockedSummary = {
-        manifest: { ...manifest, currentPhase: "WORKSPACE_PREPARED" as const },
+        manifest: { ...manifest, currentPhase: "PATCH_DRAFTED" as const },
         artifacts: {
-          workspace: { workspacePath: baseDir },
+          workspace: { workspacePath: baseDir, baseCommitSha: "a".repeat(40) },
+          patch,
+          validatedPatch,
           evidence: mismatchedAudit,
         },
         availableArtifactFiles: [],

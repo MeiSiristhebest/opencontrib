@@ -29,13 +29,20 @@ export class BaseBranchAdvancedError extends SubmissionVerificationError {
   }
 }
 
+export class BaseCommitVerificationUnavailableError extends SubmissionVerificationError {
+  constructor(message: string) {
+    super(`BaseCommitVerificationUnavailableError: ${message}`);
+    this.name = "BaseCommitVerificationUnavailableError";
+  }
+}
+
 export interface SubmissionPermit {
   runId: string;
   issuedAt: string;
   owner: string;
   repo: string;
   baseBranch: string;
-  baseCommitSha?: string;
+  baseCommitSha: string;
   branchName: string;
   title: string;
   body: string;
@@ -77,7 +84,9 @@ export class GitHubSubmissionService {
   ): SubmissionPermit {
     const run = this.runManager.getRun(runId);
     if (!run) {
-      throw new SubmissionVerificationError(`Contribution run ${runId} does not exist`);
+      throw new SubmissionVerificationError(
+        `Contribution run ${runId} does not exist`,
+      );
     }
     if (run.manifest.currentPhase !== "GOVERNANCE_AUDITED") {
       throw new SubmissionVerificationError(
@@ -88,7 +97,9 @@ export class GitHubSubmissionService {
     const intentResult = SubmissionIntentArtifactSchema.safeParse(
       run.artifacts.submissionIntent,
     );
-    const approvalResult = ApprovalArtifactSchema.safeParse(run.artifacts.approval);
+    const approvalResult = ApprovalArtifactSchema.safeParse(
+      run.artifacts.approval,
+    );
     if (!intentResult.success) {
       throw new SubmissionVerificationError(
         "Cannot authorize submission: missing or invalid SubmissionIntentArtifact.",
@@ -171,7 +182,10 @@ export class GitHubSubmissionService {
         "isDraft",
         "files",
       ]) {
-        if (supplied[key] !== undefined && !sameJson(supplied[key], (approved as any)[key])) {
+        if (
+          supplied[key] !== undefined &&
+          !sameJson(supplied[key], (approved as any)[key])
+        ) {
           throw new SubmissionVerificationError(
             `SubmissionIntentMismatchError: caller-supplied '${key}' differs from the approved intent.`,
           );
@@ -181,32 +195,49 @@ export class GitHubSubmissionService {
     const effectiveOptions = this.optionsFromPermit(permit);
     const octokit = (this.client as any).octokit;
 
-    // Upstream base branch freshness check: if baseCommitSha was bound at workspace preparation,
-    // verify the upstream base branch HEAD has not advanced, preventing PRs based on stale code.
-    if (permit.baseCommitSha && octokit?.rest?.git?.getRef) {
-      try {
-        const refResp = await octokit.rest.git.getRef({
-          owner: effectiveOptions.upstreamOwner,
-          repo: effectiveOptions.upstreamRepo,
-          ref: `heads/${effectiveOptions.baseBranch || "main"}`,
-        });
-        const upstreamBaseSha = String(refResp?.data?.object?.sha || "");
-        if (upstreamBaseSha && upstreamBaseSha !== permit.baseCommitSha) {
-          throw new BaseBranchAdvancedError(
-            `Upstream base branch "${effectiveOptions.baseBranch || "main"}" has advanced (HEAD is ${upstreamBaseSha}, workspace prepared against ${permit.baseCommitSha}). Rebase and re-verify before submitting.`,
-          );
-        }
-      } catch (err: any) {
-        if (err instanceof BaseBranchAdvancedError) throw err;
-        // If the ref query fails due to network/mock/missing permissions, log or proceed to submit
+    // Freshness is a mandatory fail-closed gate. A missing provider read or
+    // an unreadable SHA is not evidence that the approved base is still current.
+    if (!permit.baseCommitSha) {
+      throw new BaseCommitVerificationUnavailableError(
+        "approved intent has no baseCommitSha.",
+      );
+    }
+    if (!octokit?.rest?.git?.getRef) {
+      throw new BaseCommitVerificationUnavailableError(
+        "GitHub ref API is unavailable; refusing to submit against an unverified base.",
+      );
+    }
+    try {
+      const refResp = await octokit.rest.git.getRef({
+        owner: effectiveOptions.upstreamOwner,
+        repo: effectiveOptions.upstreamRepo,
+        ref: `heads/${effectiveOptions.baseBranch || "main"}`,
+      });
+      const upstreamBaseSha = String(refResp?.data?.object?.sha || "");
+      if (!upstreamBaseSha) {
+        throw new BaseCommitVerificationUnavailableError(
+          "GitHub ref API returned no base commit SHA.",
+        );
       }
+      if (upstreamBaseSha !== permit.baseCommitSha) {
+        throw new BaseBranchAdvancedError(
+          `Upstream base branch "${effectiveOptions.baseBranch || "main"}" has advanced (HEAD is ${upstreamBaseSha}, workspace prepared against ${permit.baseCommitSha}). Rebase and re-verify before submitting.`,
+        );
+      }
+    } catch (err: any) {
+      if (err instanceof SubmissionVerificationError) throw err;
+      throw new BaseCommitVerificationUnavailableError(
+        `unable to verify upstream base commit: ${err?.message || String(err)}`,
+      );
     }
 
     let result: PrSubmissionResult;
     try {
       result = await this.prService.submitPullRequest(effectiveOptions);
     } catch (err: any) {
-      throw new SubmissionVerificationError(`Provider submission failed: ${err.message}`);
+      throw new SubmissionVerificationError(
+        `Provider submission failed: ${err.message}`,
+      );
     }
 
     if (!octokit?.rest?.pulls?.get) {
@@ -223,6 +254,12 @@ export class GitHubSubmissionService {
         pull_number: result.prNumber,
       });
       headSha = String(pr?.data?.head?.sha || "");
+      const returnedBaseSha = String(pr?.data?.base?.sha || "");
+      if (returnedBaseSha !== permit.baseCommitSha) {
+        throw new SubmissionVerificationError(
+          `Provider base SHA "${returnedBaseSha}" does not match approved base SHA "${permit.baseCommitSha}".`,
+        );
+      }
       if (!headSha) {
         throw new SubmissionVerificationError(
           `Provider did not return head.sha for PR #${result.prNumber}`,
@@ -256,6 +293,7 @@ export class GitHubSubmissionService {
       owner: effectiveOptions.upstreamOwner,
       repo: effectiveOptions.upstreamRepo,
       baseBranch: effectiveOptions.baseBranch || "main",
+      baseCommitSha: permit.baseCommitSha,
       branchName: effectiveOptions.branchName,
       intentSha256: permit.intentSha256,
       patchSha256: permit.patchSha256,
@@ -310,6 +348,7 @@ export class GitHubSubmissionService {
       upstreamOwner: permit.owner,
       upstreamRepo: permit.repo,
       baseBranch: permit.baseBranch,
+      expectedBaseCommitSha: permit.baseCommitSha,
       title: permit.title,
       body: permit.body,
       branchName: permit.branchName,

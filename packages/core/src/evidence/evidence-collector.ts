@@ -450,7 +450,8 @@ export function verifyEmpiricalReproduction(input: {
   const hasFailureFlag =
     !res.passed || (isRealFailurePattern && !isFalsePositiveZeroError);
 
-  const exitCode = res.exitCode === null ? (hasFailureFlag ? 1 : 0) : res.exitCode;
+  const exitCode =
+    res.exitCode === null ? (hasFailureFlag ? 1 : 0) : res.exitCode;
   return {
     isFailingOnBaseline: hasFailureFlag,
     baselineOutput: full,
@@ -535,6 +536,28 @@ function byAsciiOrder(a: string, b: string): number {
   return 0;
 }
 
+function parsePorcelainV1ZForHash(
+  output: string,
+): Array<{ status: string; path: string }> {
+  const tokens = output.split("\0");
+  const records: Array<{ status: string; path: string }> = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token) continue;
+    if (token.length < 4 || token[2] !== " ") continue;
+    const status = token.slice(0, 2);
+    const firstPath = token.slice(3);
+    if (!firstPath) continue;
+    if (status.includes("R") || status.includes("C")) {
+      const nextPath = tokens[++index];
+      if (nextPath) records.push({ status, path: nextPath });
+    } else {
+      records.push({ status, path: firstPath });
+    }
+  }
+  return records;
+}
+
 /**
  * Compute a stable content fingerprint of the source tree at `cwd`.
  * In git repositories, hashes HEAD commit, index staging, unstaged tracked diff,
@@ -548,11 +571,14 @@ export function computeSourceTreeHash(cwd: string): string {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    const gitStatus = execSync("git status --porcelain --untracked-files=all", {
-      cwd,
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    const gitStatus = execSync(
+      "git status --porcelain=v1 -z --untracked-files=all",
+      {
+        cwd,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    );
     const gitDiff = execSync("git diff --binary HEAD", {
       cwd,
       encoding: "utf-8",
@@ -561,13 +587,11 @@ export function computeSourceTreeHash(cwd: string): string {
 
     // Content hashes of untracked files for true content immutability
     const untrackedHashes: string[] = [];
-    const untrackedLines = gitStatus
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith("?? "));
+    const untrackedLines = parsePorcelainV1ZForHash(gitStatus)
+      .filter((record) => record.status === "??")
+      .map((record) => record.path);
 
-    for (const l of untrackedLines) {
-      const rel = l.slice(3).trim();
+    for (const rel of untrackedLines) {
       const full = join(cwd, rel);
       try {
         const st = statSync(full);
@@ -680,7 +704,11 @@ function isLikelyTestFile(pathName: string): boolean {
   );
 }
 
-function addFileIdentity(cwd: string, candidate: string, files: Map<string, TestIdentityFile>): void {
+function addFileIdentity(
+  cwd: string,
+  candidate: string,
+  files: Map<string, TestIdentityFile>,
+): void {
   const full = resolve(cwd, candidate);
   if (!isWithinDirectory(cwd, full)) return;
   const normalizedPath = relative(cwd, full).replace(/\\/g, "/");
@@ -689,7 +717,18 @@ function addFileIdentity(cwd: string, candidate: string, files: Map<string, Test
     if (st.isDirectory()) {
       const entries = readdirSync(full, { withFileTypes: true });
       for (const entry of entries) {
-        if (["node_modules", ".git", ".opencontrib", "dist", "build", "coverage", "target"].includes(entry.name)) continue;
+        if (
+          [
+            "node_modules",
+            ".git",
+            ".opencontrib",
+            "dist",
+            "build",
+            "coverage",
+            "target",
+          ].includes(entry.name)
+        )
+          continue;
         addFileIdentity(cwd, join(full, entry.name), files);
       }
       return;
@@ -707,7 +746,10 @@ function addFileIdentity(cwd: string, candidate: string, files: Map<string, Test
   }
 }
 
-function discoverTestFiles(cwd: string, files: Map<string, TestIdentityFile>): void {
+function discoverTestFiles(
+  cwd: string,
+  files: Map<string, TestIdentityFile>,
+): void {
   // Walk once and retain only deterministic test candidates for broad commands.
   // only deterministic test candidates for broad commands.
   const discovered = new Map<string, TestIdentityFile>();
@@ -723,7 +765,18 @@ function discoverTestFiles(cwd: string, files: Map<string, TestIdentityFile>): v
       return;
     }
     for (const entry of entries) {
-      if (["node_modules", ".git", ".opencontrib", "dist", "build", "coverage", "target"].includes(entry.name)) continue;
+      if (
+        [
+          "node_modules",
+          ".git",
+          ".opencontrib",
+          "dist",
+          "build",
+          "coverage",
+          "target",
+        ].includes(entry.name)
+      )
+        continue;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (entry.isFile()) {
@@ -748,7 +801,8 @@ export function resolveTestFiles(
     : explicitTestFile
       ? [explicitTestFile]
       : [];
-  for (const candidate of explicit) if (candidate.trim()) candidates.add(candidate.trim());
+  for (const candidate of explicit)
+    if (candidate.trim()) candidates.add(candidate.trim());
 
   const testFileToken =
     /\.(test|spec)\.[cm]?[jt]sx?$|\.(test|spec)\.py$|_test\.(?:go|rs)$|^test_[a-z0-9_.]+\.py$|\.test$|\.spec$/i;
@@ -807,7 +861,9 @@ export function computeTestIdentity(
   const normAssert = (expectedAssertion || "").trim();
   const filePart = testFiles.map((f) => `${f.path}:${f.sha256}`);
   const identitySha256 = createHash("sha256")
-    .update(`testIdentity:${normalizedCommand}:${normAssert}:${filePart.join("|")}`)
+    .update(
+      `testIdentity:${normalizedCommand}:${normAssert}:${filePart.join("|")}`,
+    )
     .digest("hex");
   return {
     normalizedCommand,
@@ -831,7 +887,9 @@ export function computeTestFileDiffSha256(
     return before === after ? [] : [`${path}:${before}->${after}`];
   });
   if (changes.length === 0) return undefined;
-  return createHash("sha256").update(`testDiff:${changes.join("|")}`).digest("hex");
+  return createHash("sha256")
+    .update(`testDiff:${changes.join("|")}`)
+    .digest("hex");
 }
 
 /**
@@ -858,7 +916,11 @@ export function captureRedEvidence(input: {
   const assertionMatched = Boolean(preFix.assertionCaptured);
   const observedExitCode = (preFix as { exitCode?: number }).exitCode;
   const exitCode =
-    typeof observedExitCode === "number" ? observedExitCode : assertionMatched ? 1 : 0;
+    typeof observedExitCode === "number"
+      ? observedExitCode
+      : assertionMatched
+        ? 1
+        : 0;
   // Bind the concrete test-file CONTENT identity so GREEN must prove the same
   // test body went fail -> pass, not merely that the same command now passes.
   const testIdentity = computeTestIdentity(
@@ -936,7 +998,8 @@ export function verifyGreenEvidence(input: {
   });
 
   const redTestIdentity = redEvidence.testIdentity;
-  const explicitTestFiles = redTestIdentity?.testFiles.map((file) => file.path) || [];
+  const explicitTestFiles =
+    redTestIdentity?.testFiles.map((file) => file.path) || [];
 
   // Recompute the GREEN test-file CONTENT identity from the current on-disk
   // test files. Never copy RED's fingerprint — a mutated test file changes
@@ -984,6 +1047,10 @@ export function verifyGreenEvidence(input: {
     assertionMatchedFingerprint: greenFingerprint,
     testIdentity: greenTestIdentity,
     actualTestDiffSha256,
+    // EvidenceService replaces this with the canonical PatchArtifact hash;
+    // direct collector callers receive an explicitly unbound value that phase
+    // gates will reject rather than an optional/missing provenance field.
+    appliedPatchSha256: "",
   };
   const reproductionVerified =
     redEvidence.assertionMatched === true &&

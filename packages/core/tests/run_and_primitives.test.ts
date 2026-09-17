@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -8,6 +9,7 @@ import {
   ContributionRunManager,
   rankOpportunitySignals,
 } from "../src/index.js";
+import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 
 describe("Contribution Run & Artifact Bundle Primitives", () => {
   const tempDirs: string[] = [];
@@ -77,15 +79,34 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       manager,
       manifest.runId,
       "workspace",
-      { workspacePath: "/tmp/workspaces/kitex" },
+      {
+        workspacePath: "/tmp/workspaces/kitex",
+        branchName: "fixture-branch",
+        isWorktree: false,
+        baseRepoPath: "/tmp/workspaces/kitex",
+        baseCommitSha: "a".repeat(40),
+        repoFullName: "cloudwego/kitex",
+        createdAt: "2026-07-01T00:00:00.000Z",
+      },
       "WORKSPACE_PREPARED",
     );
 
-    // 3. Save patch diff (raw string)
+    // 3. Save a concrete patch artifact and its later immutable validation.
+    const patchContent = JSON.stringify({
+      files: [
+        {
+          path: "pool.go",
+          operation: "MODIFY",
+          mode: "100644",
+          content: "new",
+        },
+      ],
+    });
+    const patchSha256 = createHash("sha256").update(patchContent).digest("hex");
     manager.saveArtifact(
       manifest.runId,
       "patch",
-      "--- a/pool.go\n+++ b/pool.go\n@@ -1 +1 @@\n-old\n+new",
+      patchContent,
       "PATCH_DRAFTED",
     );
 
@@ -95,6 +116,25 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       testFiles: [{ path: "pool_test.go", sha256: "hash-test" }],
       identitySha256: "id-sha-12345",
     };
+    const validatedPatch = {
+      runId: manifest.runId,
+      patchSha256,
+      actualDeltaSha256: "b".repeat(64),
+      baseCommitSha: "a".repeat(40),
+      redTreeSha256: "aaaaaaaa",
+      greenTreeSha256: "bbbbbbbb",
+      artifactSha256: "",
+      files: [
+        {
+          path: "pool.go",
+          operation: "MODIFY" as const,
+          mode: "100644" as const,
+          contentSha256: createHash("sha256").update("new").digest("hex"),
+        },
+      ],
+      validatedAt: "2026-07-01T00:01:00.000Z",
+    };
+    validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
     const evidenceReport = {
       passed: true,
       stressLoopSuccessRate: 1.0,
@@ -122,10 +162,18 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
         treeHashMatchesRed: false,
         stressLoopPassed: true,
         allTestsPassing: true,
+        appliedPatchSha256: patchSha256,
+        validatedPatchArtifactSha256: validatedPatch.artifactSha256,
         assertionMatchedFingerprint: "fp-1",
         testIdentity,
       },
     };
+    saveCanonicalArtifact(
+      manager,
+      manifest.runId,
+      "validated_patch",
+      validatedPatch,
+    );
     saveCanonicalArtifact(
       manager,
       manifest.runId,
@@ -140,7 +188,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       score: 92,
       signals: { skillMatch: 0.95 },
     });
-    expect(summary?.artifacts.patch).toContain("+new");
+    expect(summary?.artifacts.patch).toContain("pool.go");
     expect(summary?.artifacts.evidence).toEqual(evidenceReport);
     expect(summary?.availableArtifactFiles).toContain("opportunity.json");
     expect(summary?.availableArtifactFiles).toContain("patch.diff");

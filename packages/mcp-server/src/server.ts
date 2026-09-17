@@ -17,7 +17,12 @@ import { registerCapabilityTools } from "./tools/capability-tools.js";
 import { registerResources } from "./resources/index.js";
 import { registerPrompts } from "./prompts/index.js";
 
-export function createOpenContribMcpServer(): McpServer {
+export function createOpenContribMcpServer(
+  options: {
+    worktreeManager?: WorktreeManager;
+    runManager?: ReturnType<typeof buildContributionRunManager>;
+  } = {},
+): McpServer {
   const server = new McpServer({
     name: "opencontrib-engine",
     version: "1.0.0",
@@ -26,8 +31,8 @@ export function createOpenContribMcpServer(): McpServer {
   // Domain state singletons
   const memory = new RepoMemoryLedger();
   const flywheel = new ProfileFlywheel();
-  const worktreeManager = new WorktreeManager();
-  const runManager = buildContributionRunManager();
+  const worktreeManager = options.worktreeManager ?? new WorktreeManager();
+  const runManager = options.runManager ?? buildContributionRunManager();
 
   // Register modular tools across domains
   registerDiscoveryTools(server);

@@ -74,12 +74,15 @@ describe("Governance & Anti-AI Audit Engine", () => {
         securityAudit: 95,
       },
       lineCount: 45, // <= 100 lines
-      humanApproved: true,
     });
 
     expect(auditPass.isGatedPassed).toBe(true);
     expect(auditPass.rfcGatePassed).toBe(true);
-    expect(auditPass.requiresHumanApproval).toBe(false);
+    expect(auditPass.requiresHumanApproval).toBe(true);
+    expect(auditPass.approvalGate).toEqual({
+      status: "PENDING",
+      approved: false,
+    });
 
     // Test that unapproved draft is gated
     const auditUnapproved = auditGovernance({
@@ -95,9 +98,9 @@ describe("Governance & Anti-AI Audit Engine", () => {
         securityAudit: 95,
       },
       lineCount: 45,
-      humanApproved: false,
     });
-    expect(auditUnapproved.isGatedPassed).toBe(false);
+    expect(auditUnapproved.isGatedPassed).toBe(true);
+    expect(auditUnapproved.submissionDecision?.allowed).toBe(false);
     expect(auditUnapproved.requiresHumanApproval).toBe(true);
 
     const auditFailRfc = auditGovernance({
@@ -113,7 +116,6 @@ describe("Governance & Anti-AI Audit Engine", () => {
         securityAudit: 95,
       },
       lineCount: 150, // > 100 lines
-      humanApproved: true,
     });
 
     expect(auditFailRfc.isGatedPassed).toBe(false);
@@ -183,7 +185,6 @@ Fixes #1106
         securityAudit: 95,
       },
       lineCount: 20,
-      humanApproved: true,
     });
 
     expect(auditCorrupted.isGatedPassed).toBe(false);
@@ -211,7 +212,6 @@ Fixes #1106
         testCoveragePercent: 70, // Below 85% threshold
       },
       lineCount: 15,
-      humanApproved: true,
     });
 
     expect(failAudit.isGatedPassed).toBe(false);
@@ -236,7 +236,6 @@ Fixes #1106
         testCoveragePercent: 95, // Above 85% threshold
       },
       lineCount: 15,
-      humanApproved: true,
     });
 
     expect(passAudit.isGatedPassed).toBe(true);

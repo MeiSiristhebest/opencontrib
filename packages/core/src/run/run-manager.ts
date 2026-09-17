@@ -66,6 +66,7 @@ export const PRIVILEGED_PHASES = new Set<ContributionRunPhase>([
  */
 export const AUTHORITATIVE_ARTIFACT_TYPES = new Set<ArtifactType>([
   "workspace",
+  "validated_patch",
   "evidence_red",
   "evidence",
   "governance",
@@ -323,8 +324,13 @@ export class ContributionRunManager {
     if (artifacts.workspace) availableArtifacts.push("workspace");
     if (artifacts.poc) availableArtifacts.push("poc");
     if (artifacts.patch) availableArtifacts.push("patch");
+    if (artifacts.validatedPatch) availableArtifacts.push("validated_patch");
     if (artifacts.evidence) availableArtifacts.push("evidence");
     if (artifacts.governance) availableArtifacts.push("governance");
+    if (artifacts.submissionIntent)
+      availableArtifacts.push("submission_intent");
+    if (artifacts.approval) availableArtifacts.push("approval");
+    if (artifacts.submission) availableArtifacts.push("submission");
     if (artifacts.prDraft) availableArtifacts.push("pr_draft");
     if (artifacts.result) availableArtifacts.push("result");
 
@@ -342,8 +348,8 @@ export class ContributionRunManager {
     };
 
     const suggestedNextAction =
-      PROTOCOL_CONTRACT_PHASES[summary.manifest.currentPhase]?.suggestedNextAction ||
-      "none";
+      PROTOCOL_CONTRACT_PHASES[summary.manifest.currentPhase]
+        ?.suggestedNextAction || "none";
 
     return {
       runId,

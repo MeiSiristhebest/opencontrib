@@ -233,12 +233,6 @@ export function registerRunTools(
       repoFullName: z
         .string()
         .describe('Target repository full name, e.g. "owner/repo"'),
-      humanApproved: z
-        .boolean()
-        .default(false)
-        .describe(
-          "Whether human approval has been pre-granted for PR creation in interactive mode",
-        ),
       stressLoopRuns: z
         .number()
         .default(1)
@@ -271,7 +265,6 @@ export function registerRunTools(
             minMatchScore: 60,
           },
           targetRepo: args.repoFullName,
-          humanApproved: args.humanApproved,
           stressLoopRuns: args.stressLoopRuns,
         });
 

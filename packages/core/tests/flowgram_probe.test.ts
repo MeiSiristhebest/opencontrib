@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from "bun:test";
 import {
   auditGovernance,
   detectSystemCapabilities,
@@ -6,19 +6,19 @@ import {
   renderMasterPrTemplate,
   RepoMemoryLedger,
   ProfileFlywheel,
-} from '../src/index.js';
+} from "../src/index.js";
 
-describe('Proactive Probe End-to-End Test for bytedance/flowgram.ai', () => {
-  it('performs full proactive workflow on real flowgram.ai manifests', () => {
+describe("Proactive Probe End-to-End Test for bytedance/flowgram.ai", () => {
+  it("performs full proactive workflow on real flowgram.ai manifests", () => {
     // 1. Feasibility Assessment
     const capabilities = detectSystemCapabilities();
     const feasibility = assessFeasibility(
-      'ci: upgrade actions/checkout and actions/setup-node to v4',
-      'Upgrade deprecated GitHub Actions in CI workflows to v4 for Node 20 LTS compatibility',
-      ['ci', 'dx', 'tooling'],
-      capabilities
+      "ci: upgrade actions/checkout and actions/setup-node to v4",
+      "Upgrade deprecated GitHub Actions in CI workflows to v4 for Node 20 LTS compatibility",
+      ["ci", "dx", "tooling"],
+      capabilities,
     );
-    expect(feasibility.level).toBe('fully_feasible');
+    expect(feasibility.level).toBe("fully_feasible");
     expect(feasibility.scorePenalty).toBeLessThanOrEqual(5);
 
     // 2. Diff Construction & Governance Audit
@@ -71,7 +71,6 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
         styleMatch: 95,
         securityAudit: 95,
       },
-      humanApproved: true,
     });
 
     expect(audit.isGatedPassed).toBe(true);
@@ -82,68 +81,70 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
     // 3. Render Master PR Template with ByteDance / CloudWeGo formatting & DCO
     const renderedPr = renderMasterPrTemplate({
       issueNumber: 0,
-      problemSummary: 'Upgrade deprecated actions/checkout and actions/setup-node to v4 across CI workflows',
-      rootCause: 'Workflows were using deprecated v3 GitHub Actions which are transitioning to Node 20 runtime runners.',
+      problemSummary:
+        "Upgrade deprecated actions/checkout and actions/setup-node to v4 across CI workflows",
+      rootCause:
+        "Workflows were using deprecated v3 GitHub Actions which are transitioning to Node 20 runtime runners.",
       keyChanges: [
-        'Upgrade actions/checkout from v3 to v4 in .github/workflows/ci.yml and common-pr-checks.yml',
-        'Upgrade actions/setup-node from v3 to v4',
+        "Upgrade actions/checkout from v3 to v4 in .github/workflows/ci.yml and common-pr-checks.yml",
+        "Upgrade actions/setup-node from v3 to v4",
       ],
-      reproductionCommand: 'act -j build (or push to branch for CI)',
-      verificationCommand: 'rush check && rush lint',
+      reproductionCommand: "act -j build (or push to branch for CI)",
+      verificationCommand: "rush check && rush lint",
       testCount: 48,
-      dcoAuthorName: 'Contributor',
-      dcoAuthorEmail: 'contributor@example.com',
+      dcoAuthorName: "Contributor",
+      dcoAuthorEmail: "contributor@example.com",
       aiDisclosureRequired: false,
     });
 
-    expect(renderedPr).toContain('Contributor <contributor@example.com>');
-    expect(renderedPr).toContain('Motivation');
-    expect(renderedPr).not.toContain('I have carefully analyzed');
+    expect(renderedPr).toContain("Contributor <contributor@example.com>");
+    expect(renderedPr).toContain("Motivation");
+    expect(renderedPr).not.toContain("I have carefully analyzed");
 
     // 4. Memory & Flywheel Sync
     const memory = new RepoMemoryLedger();
-    memory.recordSuccess('bytedance/flowgram.ai', {
-      title: 'ci: upgrade checkout and setup-node to v4',
-      prUrl: 'https://github.com/bytedance/flowgram.ai/pull/999',
+    memory.recordSuccess("bytedance/flowgram.ai", {
+      title: "ci: upgrade checkout and setup-node to v4",
+      prUrl: "https://github.com/bytedance/flowgram.ai/pull/999",
     });
 
     const flywheel = new ProfileFlywheel();
     flywheel.saveRecord({
-      id: 'bytedance/flowgram.ai#999',
-      repoFullName: 'bytedance/flowgram.ai',
-      issueTitle: 'ci: upgrade checkout and setup-node to v4',
-      prUrl: 'https://github.com/bytedance/flowgram.ai/pull/999',
-      status: 'submitted',
+      id: "bytedance/flowgram.ai#999",
+      repoFullName: "bytedance/flowgram.ai",
+      issueTitle: "ci: upgrade checkout and setup-node to v4",
+      prUrl: "https://github.com/bytedance/flowgram.ai/pull/999",
+      status: "submitted",
       submittedAt: new Date().toISOString(),
-      diffStat: '+14 -14 (2 files)',
-      evidenceSummary: 'Passed all CI schema checks, 0 AI smell',
+      diffStat: "+14 -14 (2 files)",
+      evidenceSummary: "Passed all CI schema checks, 0 AI smell",
       provenance: {
-        source: 'system_recorded',
+        source: "system_recorded",
         verified: true,
       },
     });
 
     // Unmerged/submitted PRs must NOT pollute the public profile
     const submittedMarkdown = flywheel.renderProfileMarkdown();
-    expect(submittedMarkdown).not.toContain('bytedance/flowgram.ai');
+    expect(submittedMarkdown).not.toContain("bytedance/flowgram.ai");
 
     // Merged PRs are displayed in the profile
     flywheel.saveRecord({
-      id: 'bytedance/flowgram.ai#999',
-      repoFullName: 'bytedance/flowgram.ai',
-      issueTitle: 'ci: upgrade checkout and setup-node to v4',
-      prUrl: 'https://github.com/bytedance/flowgram.ai/pull/999',
-      status: 'merged',
+      id: "bytedance/flowgram.ai#999",
+      repoFullName: "bytedance/flowgram.ai",
+      issueTitle: "ci: upgrade checkout and setup-node to v4",
+      prUrl: "https://github.com/bytedance/flowgram.ai/pull/999",
+      status: "merged",
       submittedAt: new Date().toISOString(),
-      diffStat: '+14 -14 (2 files)',
-      evidenceSummary: 'Passed all CI schema checks, 0 AI smell',
+      diffStat: "+14 -14 (2 files)",
+      evidenceSummary: "Passed all CI schema checks, 0 AI smell",
       provenance: {
-        source: 'system_recorded',
+        source: "system_recorded",
         verified: true,
       },
     });
 
     const mergedMarkdown = flywheel.renderProfileMarkdown();
-    expect(mergedMarkdown).toContain('bytedance/flowgram.ai');
+    expect(mergedMarkdown).toContain("bytedance/flowgram.ai");
   }, 60000);
 });

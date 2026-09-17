@@ -1,7 +1,7 @@
-import { existsSync } from 'fs';
-import type { ContributionRunManager } from '../run/run-manager.js';
-import { saveCanonicalArtifact } from '../run/canonical-writer.js';
-import { WorktreeManager, type WorkspaceContext } from './worktree-manager.js';
+import { existsSync } from "fs";
+import type { ContributionRunManager } from "../run/run-manager.js";
+import { saveCanonicalArtifact } from "../run/canonical-writer.js";
+import { WorktreeManager, type WorkspaceContext } from "./worktree-manager.js";
 
 export interface PrepareWorkspaceInput {
   runId: string;
@@ -15,7 +15,7 @@ export interface WorkspaceArtifactData {
   branchName: string;
   isWorktree: boolean;
   baseRepoPath: string;
-  baseCommitSha?: string;
+  baseCommitSha: string;
   repoFullName: string;
   baseBranch?: string;
   createdAt: string;
@@ -49,7 +49,8 @@ export class WorkspaceService {
     const manifestRepo = run.manifest.repoFullName;
     if (
       input.repoFullName &&
-      input.repoFullName.trim().toLowerCase() !== manifestRepo.trim().toLowerCase()
+      input.repoFullName.trim().toLowerCase() !==
+        manifestRepo.trim().toLowerCase()
     ) {
       throw new Error(
         `WorkspaceRepoMismatchError: requested repo "${input.repoFullName}" does not match run manifest repo "${manifestRepo}".`,
@@ -57,9 +58,36 @@ export class WorkspaceService {
     }
 
     // Enforce strict WORM on workspace artifact: if already set on this run, reject any attempt to recreate
-    const existingWs = run.artifacts.workspace as unknown as WorkspaceArtifactData | undefined;
+    // SAFETY: canonical workspace artifacts are produced by WorkspaceService;
+    // the assertion narrows the persisted JSON shape for the WORM read path.
+    const existingWs = run.artifacts.workspace as unknown as
+      | WorkspaceArtifactData
+      | undefined;
     if (existingWs) {
-      if (existingWs.workspacePath && existsSync(existingWs.workspacePath)) {
+      if (
+        existingWs.workspacePath &&
+        existsSync(existingWs.workspacePath) &&
+        existingWs.baseCommitSha &&
+        existingWs.baseRepoPath
+      ) {
+        // Revalidate origin, upstream freshness, and workspace HEAD on every
+        // reuse. A canonical artifact must not turn a stale workspace into a
+        // trusted one merely because it was persisted earlier.
+        const verified = this.worktreeManager.createIsolatedWorkspace({
+          repoFullName: manifestRepo,
+          issueOrTaskId: input.issueOrTaskId,
+          localRepoPath: existingWs.baseRepoPath,
+          runId: input.runId,
+          workspacePath: existingWs.workspacePath,
+        });
+        if (
+          verified.workspacePath !== existingWs.workspacePath ||
+          verified.baseCommitSha !== existingWs.baseCommitSha
+        ) {
+          throw new Error(
+            `WorkspaceBaseFreshnessError: existing workspace for run ${input.runId} no longer matches its canonical upstream base commit.`,
+          );
+        }
         return {
           context: {
             workspacePath: existingWs.workspacePath,
@@ -67,6 +95,7 @@ export class WorkspaceService {
             isWorktree: existingWs.isWorktree,
             baseRepoPath: existingWs.baseRepoPath,
             baseCommitSha: existingWs.baseCommitSha,
+            baseBranch: existingWs.baseBranch,
           },
           artifact: existingWs,
           alreadyPrepared: true,
@@ -77,19 +106,41 @@ export class WorkspaceService {
       );
     }
 
-    // If localRepoPath is supplied, verify its origin remote matches the manifest repository strictly if origin exists
+    // If localRepoPath is supplied, origin verification is mandatory. A
+    // missing/unreadable remote must never silently downgrade to a local HEAD.
     if (input.localRepoPath && existsSync(input.localRepoPath)) {
-      const originRes = this.worktreeManager.runGit(['-C', input.localRepoPath, 'remote', 'get-url', 'origin']);
-      if (originRes.success && originRes.stdout.trim()) {
-        const originUrl = originRes.stdout.trim().toLowerCase().replace(/\\/g, '/');
-        const expected = manifestRepo.toLowerCase().trim();
-        // Strict regex matching: either https://github.com/owner/repo(.git) or git@github.com:owner/repo(.git)
-        const originRegex = new RegExp(`^(https?://github\\.com/|git@github\\.com:)${expected.replace('/', '\\/')}(\\.git)?$`, 'i');
-        if (!originRegex.test(originUrl)) {
-          throw new Error(
-            `WorkspaceOriginMismatchError: localRepoPath "${input.localRepoPath}" origin remote "${originRes.stdout.trim()}" does not match manifest repository "${manifestRepo}".`,
-          );
-        }
+      const originRes = this.worktreeManager.runGit([
+        "-C",
+        input.localRepoPath,
+        "remote",
+        "get-url",
+        "origin",
+      ]);
+      if (!originRes.success || !originRes.stdout.trim()) {
+        throw new Error(
+          `WorkspaceOriginVerificationError: cannot verify origin for localRepoPath "${input.localRepoPath}".`,
+        );
+      }
+      const originUrl = originRes.stdout
+        .trim()
+        .toLowerCase()
+        .replace(/\\/g, "/");
+      const prefixes = [
+        "https://github.com/",
+        "http://github.com/",
+        "git@github.com:",
+        "ssh://git@github.com/",
+      ];
+      const prefix = prefixes.find((candidate) =>
+        originUrl.startsWith(candidate),
+      );
+      const originRepo = prefix
+        ? originUrl.slice(prefix.length).replace(/\.git$/, "")
+        : undefined;
+      if (originRepo !== manifestRepo.toLowerCase().trim()) {
+        throw new Error(
+          `WorkspaceOriginMismatchError: localRepoPath "${input.localRepoPath}" origin remote "${originRes.stdout.trim()}" does not match manifest repository "${manifestRepo}".`,
+        );
       }
     }
 
@@ -102,9 +153,16 @@ export class WorkspaceService {
     });
 
     const baseBranch =
-      (typeof this.worktreeManager.detectDefaultBranch === "function" && context.baseRepoPath)
+      context.baseBranch ||
+      (typeof this.worktreeManager.detectDefaultBranch === "function" &&
+      context.baseRepoPath
         ? this.worktreeManager.detectDefaultBranch(context.baseRepoPath)
-        : "main";
+        : "main");
+    if (!context.baseCommitSha) {
+      throw new Error(
+        `WorkspaceBaseCommitUnavailableError: isolated workspace for run ${input.runId} has no verified upstream base commit.`,
+      );
+    }
 
     const artifact: WorkspaceArtifactData = {
       workspacePath: context.workspacePath,
@@ -120,9 +178,9 @@ export class WorkspaceService {
     saveCanonicalArtifact(
       this.runManager,
       input.runId,
-      'workspace',
+      "workspace",
       artifact as any,
-      'WORKSPACE_PREPARED',
+      "WORKSPACE_PREPARED",
     );
 
     return {

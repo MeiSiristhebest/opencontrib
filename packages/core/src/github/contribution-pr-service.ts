@@ -16,6 +16,8 @@ export interface PrSubmissionOptions {
   title: string;
   body: string;
   branchName: string;
+  /** Exact upstream base commit approved by the canonical SubmissionIntent. */
+  expectedBaseCommitSha: string;
   files: Array<GitTreeEntry | { path: string; content: string }>;
   commitMessage: string;
   isDraft?: boolean;
@@ -34,7 +36,9 @@ export interface PrSubmissionResult {
 function isSafeGitPath(path: string): boolean {
   if (!path || path.includes("\0") || path.includes("\\")) return false;
   if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return false;
-  return path.split("/").every((part) => part.length > 0 && part !== "." && part !== "..");
+  return path
+    .split("/")
+    .every((part) => part.length > 0 && part !== "." && part !== "..");
 }
 
 export class ContributionPrService {
@@ -124,29 +128,45 @@ export class ContributionPrService {
       seenPaths.add(file.path);
     }
     if (files.length === 0) {
-      throw new Error("Security error: refusing to create an empty contribution commit.");
+      throw new Error(
+        "Security error: refusing to create an empty contribution commit.",
+      );
     }
 
-    const forkOwner = await this.ensureFork(upstreamOwner, upstreamRepo);
-
-    // Resolve the exact base branch bound by the submission intent. The
-    // provider default is used only when the intent did not specify one.
+    // Resolve the branch name for provider operations, but never derive the
+    // commit parent from the provider's moving HEAD. The approved SHA is the
+    // only acceptable parent for this contribution commit.
     const repoDetails = await this.client.getRepoDetails(
       upstreamOwner,
       upstreamRepo,
     );
-    const baseBranch = options.baseBranch || repoDetails.data?.defaultBranch || "main";
+    const baseBranch =
+      options.baseBranch || repoDetails.data?.defaultBranch || "main";
+    const expectedBaseCommitSha = options.expectedBaseCommitSha;
+    if (!/^[0-9a-f]{7,64}$/i.test(expectedBaseCommitSha)) {
+      throw new Error(
+        "ExpectedBaseCommitRequiredError: provider submission requires the approved upstream base commit SHA.",
+      );
+    }
     const baseRef = await this.octokit.rest.git.getRef({
       owner: upstreamOwner,
       repo: upstreamRepo,
       ref: `heads/${baseBranch}`,
     });
-    const baseCommitSha = baseRef.data.object.sha;
+    const providerBaseSha = String(baseRef.data?.object?.sha || "");
+    if (providerBaseSha !== expectedBaseCommitSha) {
+      throw new Error(
+        `BaseBranchAdvancedError: upstream base branch ${baseBranch} is ${providerBaseSha}, expected approved commit ${expectedBaseCommitSha}.`,
+      );
+    }
+    const baseCommitSha = expectedBaseCommitSha;
     const baseCommit = await this.octokit.rest.git.getCommit({
       owner: upstreamOwner,
       repo: upstreamRepo,
-      commit_sha: baseCommitSha,
+      commit_sha: expectedBaseCommitSha,
     });
+
+    const forkOwner = await this.ensureFork(upstreamOwner, upstreamRepo);
     const baseTreeSha = baseCommit.data.tree.sha;
 
     // Create the exact tree, preserving executable/symlink modes and DELETE
@@ -186,7 +206,8 @@ export class ContributionPrService {
     let finalCommitMessage = commitMessage;
     if (dcoSignOff && !finalCommitMessage.includes("Signed-off-by:")) {
       const user = await this.octokit.rest.users.getAuthenticated();
-      const email = user.data.email || `${user.data.login}@users.noreply.github.com`;
+      const email =
+        user.data.email || `${user.data.login}@users.noreply.github.com`;
       finalCommitMessage += `\n\nSigned-off-by: ${user.data.name || user.data.login} <${email}>`;
     }
 
@@ -211,7 +232,9 @@ export class ContributionPrService {
       });
     } catch (err: any) {
       if (err?.status !== 409) {
-        throw new Error(`Failed to create branch "${branchName}": ${err?.message || String(err)}`);
+        throw new Error(
+          `Failed to create branch "${branchName}": ${err?.message || String(err)}`,
+        );
       }
       const existingRef = await this.octokit.rest.git.getRef({
         owner: forkOwner,
@@ -284,7 +307,9 @@ export class ContributionPrService {
         });
       }
     } catch (err: any) {
-      throw new Error(`Failed to create or reconcile pull request: ${err.message}`);
+      throw new Error(
+        `Failed to create or reconcile pull request: ${err.message}`,
+      );
     }
 
     return {

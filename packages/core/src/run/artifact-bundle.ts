@@ -23,6 +23,7 @@ import { getOpenContribHome } from "../kernel/home.js";
 
 const WRITE_ONCE_ARTIFACT_TYPES = new Set<ArtifactType>([
   "workspace",
+  "validated_patch",
   "evidence_red",
   "evidence",
   "governance",
@@ -110,6 +111,8 @@ export class ArtifactBundleManager {
         return "workspace.json";
       case "patch":
         return "patch.diff";
+      case "validated_patch":
+        return "validated_patch.json";
       case "evidence_red":
         return "evidence_red.json";
       case "evidence":
@@ -145,9 +148,12 @@ export class ArtifactBundleManager {
 
     // Authoritative artifacts are write-once. Evidence is the one exception:
     // its RED portion is immutable while the canonical service may attach the
-    // later GREEN/report fields. Non-authoritative artifacts (like pr_draft or patch)
-    // can be written/overwritten, allowing detection of TOCTOU by subsequent verification.
-    if (existsSync(filePath) && (type === "evidence" || WRITE_ONCE_ARTIFACT_TYPES.has(type))) {
+    // later GREEN/report fields. Raw patch and PR draft artifacts remain drafts;
+    // the immutable validated_patch artifact seals what GREEN actually verified.
+    if (
+      existsSync(filePath) &&
+      (type === "evidence" || WRITE_ONCE_ARTIFACT_TYPES.has(type))
+    ) {
       const existingRaw = readFileSync(filePath, "utf-8");
       let existingValue: unknown;
       let nextValue: unknown;
@@ -346,6 +352,8 @@ export class ArtifactBundleManager {
         workspace: this.readArtifact(runId, "workspace") ?? undefined,
         poc: this.readArtifact(runId, "poc") ?? undefined,
         patch: this.readArtifact(runId, "patch") ?? undefined,
+        validatedPatch:
+          this.readArtifact(runId, "validated_patch") ?? undefined,
         evidenceRed: this.readArtifact(runId, "evidence_red") ?? undefined,
         evidence: this.readArtifact(runId, "evidence") ?? undefined,
         governance: this.readArtifact(runId, "governance") ?? undefined,

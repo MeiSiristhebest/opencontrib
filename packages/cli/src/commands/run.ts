@@ -230,11 +230,6 @@ const runExecute = new Command("execute")
   .requiredOption("--repo <name>", 'Repository full name, e.g. "owner/repo"')
   .option("--token <token>", "GitHub token (or set GITHUB_TOKEN env)")
   .option(
-    "--approved",
-    "Pre-approve PR creation (skip human gate in interactive mode)",
-    false,
-  )
-  .option(
     "--stress-runs <n>",
     "Number of stress loop iterations",
     (v) => Number(v),
@@ -245,7 +240,6 @@ const runExecute = new Command("execute")
     async (opts: {
       repo: string;
       token?: string;
-      approved?: boolean;
       stressRuns?: number;
       pretty?: boolean;
     }) => {
@@ -261,7 +255,6 @@ const runExecute = new Command("execute")
             minMatchScore: 60,
           },
           targetRepo: opts.repo,
-          humanApproved: opts.approved,
           stressLoopRuns: opts.stressRuns,
         });
 

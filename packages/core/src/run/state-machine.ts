@@ -5,6 +5,7 @@ import {
   ContributionRunSummary,
 } from "./types.js";
 import { DERIVED_PHASE_REQUIREMENTS } from "../workflow/protocol-contract.js";
+import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 import {
   EvidenceBundleV2Schema,
   GovernanceDecisionArtifactSchema,
@@ -13,6 +14,7 @@ import {
   SubmissionArtifactSchema,
   ApprovalArtifactSchema,
   ResultArtifactSchema,
+  ValidatedPatchArtifactSchema,
   type EvidenceBundleV2,
 } from "../contracts/schemas.js";
 
@@ -61,6 +63,8 @@ export function validatePhaseGate(
         return "evidenceRed";
       case "submission_intent":
         return "submissionIntent";
+      case "validated_patch":
+        return "validatedPatch";
       default:
         return type;
     }
@@ -68,7 +72,8 @@ export function validatePhaseGate(
 
   const missingArtifacts = req.requiredArtifacts.filter((art) => {
     const key = toSummaryKey(art);
-    const value = (runSummary.artifacts as any)[key] ?? (runSummary.artifacts as any)[art];
+    const value =
+      (runSummary.artifacts as any)[key] ?? (runSummary.artifacts as any)[art];
     return value === undefined;
   });
 
@@ -118,6 +123,42 @@ export function validatePhaseGate(
           targetPhase,
           [invalid],
           "Re-run the canonical Evidence V2 flow: capture-red, apply the fix, verify-green.",
+        ),
+      };
+    }
+
+    const validatedResult = ValidatedPatchArtifactSchema.safeParse(
+      runSummary.artifacts.validatedPatch,
+    );
+    const workspaceBase = (runSummary.artifacts.workspace as any)
+      ?.baseCommitSha;
+    const patchSha256 = hashArtifact(runSummary.artifacts.patch);
+    if (
+      !validatedResult.success ||
+      validatedResult.data.runId !== runSummary.manifest.runId ||
+      validatedResult.data.patchSha256 !== patchSha256 ||
+      validatedResult.data.baseCommitSha !== workspaceBase ||
+      validatedResult.data.redTreeSha256 !==
+        evidence.data.redEvidence.sourceTreeSha256 ||
+      validatedResult.data.greenTreeSha256 !==
+        evidence.data.greenEvidence.sourceTreeSha256 ||
+      evidence.data.greenEvidence.appliedPatchSha256 !==
+        validatedResult.data.patchSha256 ||
+      validatedResult.data.artifactSha256 !==
+        hashValidatedPatchArtifact(validatedResult.data) ||
+      evidence.data.greenEvidence.validatedPatchArtifactSha256 !==
+        validatedResult.data.artifactSha256
+    ) {
+      return {
+        ok: false,
+        error: new PhaseGateViolationError(
+          runSummary.manifest.runId,
+          currentPhase,
+          targetPhase,
+          [
+            "ValidatedPatchArtifact must be immutable and bind the current patch, workspace baseCommitSha, RED tree, GREEN tree, and applied patch hash.",
+          ],
+          "Re-run the canonical EvidenceService GREEN verification; do not edit patch or evidence artifacts afterward.",
         ),
       };
     }
@@ -188,12 +229,18 @@ export function validatePhaseGate(
       };
     }
 
-    const patchSha256 = hashArtifact(runSummary.artifacts.patch);
+    const validatedPatch = ValidatedPatchArtifactSchema.safeParse(
+      runSummary.artifacts.validatedPatch,
+    );
+    const patchSha256 = validatedPatch.success
+      ? validatedPatch.data.patchSha256
+      : hashArtifact(runSummary.artifacts.patch);
     const evidenceSha256 = hashArtifact(runSummary.artifacts.evidence);
     const prDraftSha256 = runSummary.artifacts.prDraft
       ? hashArtifact(runSummary.artifacts.prDraft)
       : undefined;
     if (
+      !validatedPatch.success ||
       audit.patchSha256 !== patchSha256 ||
       audit.evidenceSha256 !== evidenceSha256 ||
       audit.prDraftSha256 !== prDraftSha256
@@ -267,6 +314,7 @@ export function validatePhaseGate(
       submission.patchSha256 === approval.patchSha256 &&
       submission.evidenceSha256 === approval.evidenceSha256 &&
       submission.governanceSha256 === approval.governanceSha256 &&
+      submission.baseCommitSha === intent.baseCommitSha &&
       submission.owner.toLowerCase() === intent.upstreamOwner.toLowerCase() &&
       submission.repo.toLowerCase() === intent.upstreamRepo.toLowerCase() &&
       submission.baseBranch === intent.baseBranch &&
@@ -381,8 +429,13 @@ function currentRunHashes(runSummary: ContributionRunSummary): {
   evidenceSha256: string;
   governanceSha256: string;
 } {
+  const validatedPatch = ValidatedPatchArtifactSchema.safeParse(
+    runSummary.artifacts.validatedPatch,
+  );
   return {
-    patchSha256: hashArtifact(runSummary.artifacts.patch),
+    patchSha256: validatedPatch.success
+      ? validatedPatch.data.patchSha256
+      : hashArtifact(runSummary.artifacts.patch),
     evidenceSha256: hashArtifact(runSummary.artifacts.evidence),
     governanceSha256: hashArtifact(runSummary.artifacts.governance),
   };

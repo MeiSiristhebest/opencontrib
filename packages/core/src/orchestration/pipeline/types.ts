@@ -11,25 +11,38 @@
  * real implementations, which makes the pipeline fully injectable for tests.
  */
 
-import type { UserProfile, Opportunity, ConfidenceBreakdown } from '../../contracts/schemas.js';
-import type { PatchDraft, SubagentReviewEvaluation } from '../../contracts/llm-schemas.js';
-import type { RiskAssessment, ValidationStatus } from '../../risk/risk-engine.js';
-import type { ExecutionPolicy, ContributionStateMachine } from '../state-machine.js';
-import type { GitHubClient } from '../../discovery/github-client.js';
-import type { LLMService } from '../../llm/llm-service.js';
-import type { WorktreeManager } from '../../workspace/worktree-manager.js';
-import type { ContextAssembler } from '../../discovery/context-assembler.js';
-import type { RepoMemoryLedger } from '../../memory/repo-memory.js';
-import type { ProfileFlywheel } from '../../flywheel/profile-sync.js';
-import type { ContributionPrService } from '../../github/contribution-pr-service.js';
-import type { ContributionRunManager } from '../../run/run-manager.js';
-import type { TrustedApprovalAuthority } from '../../governance/approval-authority.js';
-import type { Clock } from '../../ports/clock.port.js';
 import type {
-  OrchestratorRunResult,
-  ToolFeedbackEntry,
-  TelemetryRecord,
-} from '../agent-orchestrator.js';
+ UserProfile,
+ Opportunity,
+ ConfidenceBreakdown,
+} from "../../contracts/schemas.js";
+import type {
+ PatchDraft,
+ SubagentReviewEvaluation,
+} from "../../contracts/llm-schemas.js";
+import type {
+ RiskAssessment,
+ ValidationStatus,
+} from "../../risk/risk-engine.js";
+import type {
+ ExecutionPolicy,
+ ContributionStateMachine,
+} from "../state-machine.js";
+import type { GitHubClient } from "../../discovery/github-client.js";
+import type { LLMService } from "../../llm/llm-service.js";
+import type { WorktreeManager } from "../../workspace/worktree-manager.js";
+import type { ContextAssembler } from "../../discovery/context-assembler.js";
+import type { RepoMemoryLedger } from "../../memory/repo-memory.js";
+import type { ProfileFlywheel } from "../../flywheel/profile-sync.js";
+import type { ContributionPrService } from "../../github/contribution-pr-service.js";
+import type { ContributionRunManager } from "../../run/run-manager.js";
+import type { TrustedApprovalAuthority } from "../../governance/approval-authority.js";
+import type { Clock } from "../../ports/clock.port.js";
+import type {
+ OrchestratorRunResult,
+ ToolFeedbackEntry,
+ TelemetryRecord,
+} from "../agent-orchestrator.js";
 
 /**
  * Internal subagent-review state used by the pipeline. The wire type
@@ -38,25 +51,25 @@ import type {
  * control flow, so we add that layer here without polluting the schema type.
  */
 export type OrchestratorSubagentReview =
-  | { status: 'UNAVAILABLE' }
-  | { status: 'FAILED'; failureReason: string }
-  | ({ status: 'SUCCESS' } & SubagentReviewEvaluation);
+ | { status: "UNAVAILABLE" }
+ | { status: "FAILED"; failureReason: string }
+ | ({ status: "SUCCESS" } & SubagentReviewEvaluation);
 
 /** Injected collaborators. The orchestrator supplies real impls; tests supply doubles. */
 export interface PipelineDeps {
-  client: GitHubClient;
-  llmService?: LLMService;
-  memory: RepoMemoryLedger;
-  flywheel: ProfileFlywheel;
-  worktreeManager: WorktreeManager;
-  prService: ContributionPrService;
-  contextAssembler: ContextAssembler;
-  stateMachine: ContributionStateMachine;
-  clock: Clock;
-  /** Canonical run/artifact authority; defaults only for legacy test wiring. */
-  runManager?: ContributionRunManager;
-  /** Optional host-issued capability; agent input can never mint approval. */
-  approvalAuthority?: TrustedApprovalAuthority;
+ client: GitHubClient;
+ llmService?: LLMService;
+ memory: RepoMemoryLedger;
+ flywheel: ProfileFlywheel;
+ worktreeManager: WorktreeManager;
+ prService: ContributionPrService;
+ contextAssembler: ContextAssembler;
+ stateMachine: ContributionStateMachine;
+ clock: Clock;
+ /** Canonical run/artifact authority; defaults only for legacy test wiring. */
+ runManager?: ContributionRunManager;
+ /** Optional host-issued capability; agent input can never mint approval. */
+ approvalAuthority?: TrustedApprovalAuthority;
 }
 
 /**
@@ -65,54 +78,59 @@ export interface PipelineDeps {
  * of the original monolithic method.
  */
 export interface PipelineContext {
-  profile: UserProfile;
-  targetRepo?: string;
-  humanApproved?: boolean;
-  stressLoopRuns?: number;
-  startTime: number;
-  policy: ExecutionPolicy;
+ profile: UserProfile;
+ targetRepo?: string;
+ stressLoopRuns?: number;
+ startTime: number;
+ policy: ExecutionPolicy;
 
-  opportunities?: Opportunity[];
-  ranked?: unknown[];
-  selectedOpp?: Opportunity;
-  owner?: string;
-  repo?: string;
-  workspace?: { workspacePath: string; branchName: string };
-  assembledContext?: any;
-  prompt?: string;
-  testCmd?: string;
-  preFixReproductionCaptured?: boolean;
-  preFixOutput?: string;
-  patchDraft?: PatchDraft | null;
-  activePatch?: PatchDraft;
-  implementationAttempts?: number;
-  validationStatus?: ValidationStatus;
-  appliedFiles?: Array<{ path: string; operation: string }>;
-  evidenceReport?: any;
-  toolFeedback?: ToolFeedbackEntry[];
-  subagentReview?: OrchestratorSubagentReview;
-  qualityRubric?: { overallScore: number; isPassed: boolean; [k: string]: unknown };
-  riskAssessment?: RiskAssessment;
-  telemetry?: TelemetryRecord;
-  runId?: string;
-  requiresHumanGate?: boolean;
+ opportunities?: Opportunity[];
+ ranked?: unknown[];
+ selectedOpp?: Opportunity;
+ owner?: string;
+ repo?: string;
+ workspace?: { workspacePath: string; branchName: string };
+ assembledContext?: any;
+ prompt?: string;
+ testCmd?: string;
+ preFixReproductionCaptured?: boolean;
+ preFixOutput?: string;
+ patchDraft?: PatchDraft | null;
+ activePatch?: PatchDraft;
+ implementationAttempts?: number;
+ validationStatus?: ValidationStatus;
+ appliedFiles?: Array<{ path: string; operation: string }>;
+ evidenceReport?: any;
+ toolFeedback?: ToolFeedbackEntry[];
+ subagentReview?: OrchestratorSubagentReview;
+ qualityRubric?: {
+  overallScore: number;
+  isPassed: boolean;
+  [k: string]: unknown;
+ };
+ riskAssessment?: RiskAssessment;
+ telemetry?: TelemetryRecord;
+ runId?: string;
+ requiresHumanGate?: boolean;
 }
 
 /** A step either advances the pipeline or halts it with a final result. */
-export type StepOutcome = { kind: 'continue' } | { kind: 'halt'; result: OrchestratorRunResult };
+export type StepOutcome =
+ | { kind: "continue" }
+ | { kind: "halt"; result: OrchestratorRunResult };
 
 export interface PipelineStep {
-  readonly name: string;
-  execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome>;
+ readonly name: string;
+ execute(ctx: PipelineContext, deps: PipelineDeps): Promise<StepOutcome>;
 }
 
 /** Convenience helper used by every step that needs to halt the pipeline. */
 export function halt(result: OrchestratorRunResult): StepOutcome {
-  return { kind: 'halt', result };
+ return { kind: "halt", result };
 }
 
 export function continuePipeline(): StepOutcome {
-  return { kind: 'continue' };
+ return { kind: "continue" };
 }
 
 export type { ConfidenceBreakdown };

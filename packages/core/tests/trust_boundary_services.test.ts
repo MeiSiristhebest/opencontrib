@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
@@ -15,6 +16,7 @@ import {
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
 import { EvidenceService } from "../src/evidence/evidence-service.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
+import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 
 const testApprovalAuthority = () =>
   createTrustedApprovalAuthority({
@@ -29,6 +31,46 @@ function seedGovernanceReadyRun(
   runId: string,
   body = "pr body",
 ): void {
+  const baseCommitSha = "a".repeat(40);
+  const patch = {
+    title: "fix: bug",
+    summary: "fix",
+    rationale: "reproduce and correct the defect",
+    targetFiles: [{ path: "src/fix.ts", reason: "correct defect" }],
+    files: [
+      {
+        path: "src/fix.ts",
+        operation: "MODIFY",
+        mode: "100644",
+        content: "fixed",
+        explanation: "correct defect",
+      },
+    ],
+    implementationSteps: ["apply fix"],
+    regressionTestPlan: ["bun test"],
+    estimatedDiffLines: 1,
+  };
+  const patchContent = JSON.stringify(patch);
+  const patchSha256 = createHash("sha256").update(patchContent).digest("hex");
+  const validatedPatch = {
+    runId,
+    patchSha256,
+    actualDeltaSha256: "b".repeat(64),
+    baseCommitSha,
+    redTreeSha256: "c".repeat(64),
+    greenTreeSha256: "d".repeat(64),
+    artifactSha256: "",
+    files: [
+      {
+        path: "src/fix.ts",
+        operation: "MODIFY" as const,
+        mode: "100644" as const,
+        contentSha256: createHash("sha256").update("fixed").digest("hex"),
+      },
+    ],
+    validatedAt: "2026-01-01T00:01:00.000Z",
+  };
+  validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
   saveCanonicalArtifact(
     manager,
     runId,
@@ -36,31 +78,16 @@ function seedGovernanceReadyRun(
     {
       workspacePath: "/tmp",
       branchName: "fixture-branch",
+      baseRepoPath: "/tmp",
+      baseBranch: "main",
+      baseCommitSha,
+      isWorktree: false,
+      repoFullName: "org/repo",
     },
     "WORKSPACE_PREPARED",
   );
-  manager.saveArtifact(
-    runId,
-    "patch",
-    JSON.stringify({
-      title: "fix: bug",
-      summary: "fix",
-      rationale: "reproduce and correct the defect",
-      targetFiles: [{ path: "src/fix.ts", reason: "correct defect" }],
-      files: [
-        {
-          path: "src/fix.ts",
-          operation: "MODIFY",
-          content: "fixed",
-          explanation: "correct defect",
-        },
-      ],
-      implementationSteps: ["apply fix"],
-      regressionTestPlan: ["bun test"],
-      estimatedDiffLines: 1,
-    }),
-    "PATCH_DRAFTED",
-  );
+  manager.saveArtifact(runId, "patch", patchContent, "PATCH_DRAFTED");
+  saveCanonicalArtifact(manager, runId, "validated_patch", validatedPatch);
   const testIdentity = {
     normalizedCommand: "bun test regression.test.ts",
     testFiles: [{ path: "regression.test.ts", sha256: "same" }],
@@ -84,7 +111,7 @@ function seedGovernanceReadyRun(
         command: "bun test regression.test.ts",
         observedOutputSnippet: "failed",
         exitCode: 1,
-        sourceTreeSha256: "before",
+        sourceTreeSha256: "c".repeat(64),
         capturedAt: "2026-01-01T00:00:00.000Z",
         assertionMatched: true,
         assertionMatchedFingerprint: "fp",
@@ -95,10 +122,12 @@ function seedGovernanceReadyRun(
         exitCode: 0,
         outputSnippet: "passed",
         passed: true,
-        sourceTreeSha256: "after",
+        sourceTreeSha256: "d".repeat(64),
         capturedAt: "2026-01-01T00:01:00.000Z",
         treeChangedComparedToRed: true,
         treeHashMatchesRed: false,
+        appliedPatchSha256: patchSha256,
+        validatedPatchArtifactSha256: validatedPatch.artifactSha256,
         stressLoopPassed: true,
         allTestsPassing: true,
         assertionMatchedFingerprint: "fp",
@@ -107,6 +136,7 @@ function seedGovernanceReadyRun(
     },
     "EVIDENCE_COLLECTED",
   );
+
   manager.saveArtifact(runId, "pr_draft", body);
   new GovernanceService(manager).audit(runId, {
     prTitle: "fix: bug",
@@ -188,10 +218,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         body: "body",
       });
 
-      const approvalService = new ApprovalService(manager, testApprovalAuthority());
+      const approvalService = new ApprovalService(
+        manager,
+        testApprovalAuthority(),
+      );
       const approval = approvalService.recordApproval({
         runId: manifest.runId,
-        approvedBy: "alice",
         expectedIntentSha256: intent.intentSha256,
       });
 
@@ -205,7 +237,11 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       expect(check1.valid).toBe(true);
 
       // Now mutate the patch (TOCTOU attack)
-      manager.saveArtifact(manifest.runId, "patch", JSON.stringify({ files: [] }));
+      manager.saveArtifact(
+        manifest.runId,
+        "patch",
+        JSON.stringify({ files: [] }),
+      );
 
       // Verification must fail!
       const check2 = approvalService.verifyApprovalIntegrity(manifest.runId);
@@ -249,11 +285,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       });
 
       // Record valid ApprovalArtifact prior to submission authorization
-      const approvalService = new ApprovalService(manager, testApprovalAuthority());
+      const approvalService = new ApprovalService(
+        manager,
+        testApprovalAuthority(),
+      );
       approvalService.recordApproval({
         runId: manifest.runId,
-        approvedBy: "reviewer",
-        approvalMode: "explicit_human",
         expectedIntentSha256: intent.intentSha256,
       });
 
@@ -272,9 +309,17 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const mockClient = {
         octokit: {
           rest: {
+            git: {
+              getRef: async () => ({
+                data: { object: { sha: "a".repeat(40) } },
+              }),
+            },
             pulls: {
               get: async () => ({
-                data: { head: { sha: "real_head_sha" } },
+                data: {
+                  head: { sha: "real_head_sha" },
+                  base: { sha: "a".repeat(40) },
+                },
               }),
             },
           },
@@ -355,13 +400,16 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
               owner: { login: "fork-user" },
               default_branch: "main",
               fork: true,
-              parent: { full_name: "upstream-owner/repo", owner: { login: "upstream-owner" } },
+              parent: {
+                full_name: "upstream-owner/repo",
+                owner: { login: "upstream-owner" },
+              },
             },
           }),
           getBranch: async () => ({
             data: {
               name: "main",
-              commit: { sha: "base-commit-sha-1234" },
+              commit: { sha: "0123456789abcdef0123456789abcdef01234567" },
             },
           }),
         },
@@ -382,7 +430,9 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
             data: { tree: { sha: "base-tree-sha" } },
           }),
           getRef: async () => ({
-            data: { object: { sha: "base-commit-sha-1234" } },
+            data: {
+              object: { sha: "0123456789abcdef0123456789abcdef01234567" },
+            },
           }),
           createRef: async (args: any) => {
             createdRefName = args.ref;
@@ -417,6 +467,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       title: "fix: sample bug",
       body: "fixes #1",
       branchName: "opencontrib/run-123",
+      expectedBaseCommitSha: "0123456789abcdef0123456789abcdef01234567",
       files: [{ path: "fix.ts", content: "export const x = 1;" }],
       commitMessage: "fix: sample bug",
     });
@@ -456,7 +507,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const fakeWorktreeManager = {
         runGit: (args: string[]) => {
           if (args.includes("remote") && args.includes("get-url")) {
-            return { success: true, stdout: "https://github.com/attacker/malicious-spoofed-repo.git\n", stderr: "" };
+            return {
+              success: true,
+              stdout:
+                "https://github.com/attacker/malicious-spoofed-repo.git\n",
+              stderr: "",
+            };
           }
           return { success: true, stdout: "", stderr: "" };
         },
@@ -468,7 +524,9 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         }),
       } as any;
 
-      const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+      const {
+        WorkspaceService,
+      } = require("../src/workspace/workspace-service.js");
       const service = new WorkspaceService(manager, fakeWorktreeManager);
 
       expect(() => {
@@ -498,11 +556,15 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           branchName: "opencontrib/run-test",
           isWorktree: true,
           baseRepoPath: wsPath,
+          baseCommitSha: "a".repeat(40),
+          baseBranch: "main",
         }),
         detectDefaultBranch: () => "main",
       } as any;
 
-      const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+      const {
+        WorkspaceService,
+      } = require("../src/workspace/workspace-service.js");
       const service = new WorkspaceService(manager, fakeWorktreeManager);
 
       // First preparation creates workspace artifact
@@ -540,21 +602,43 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "owner/repo" });
 
-      const { saveCanonicalArtifact } = require("../src/run/canonical-writer.js");
-      saveCanonicalArtifact(manager, manifest.runId, "workspace", {
-        workspacePath: wsDir,
-        branchName: "opencontrib/run-test",
-        isWorktree: true,
-        baseRepoPath: wsDir,
-        baseCommitSha: "abc",
-      }, "WORKSPACE_PREPARED");
-
+      const {
+        saveCanonicalArtifact,
+      } = require("../src/run/canonical-writer.js");
       const stateFile = join(wsDir, "test.txt");
       writeFileSync(stateFile, "FAIL\n");
+      const { execSync } = require("child_process");
+      execSync("git init -b main", { cwd: wsDir, stdio: "ignore" });
+      execSync(
+        "git config user.name Tester && git config user.email test@example.com",
+        { cwd: wsDir, stdio: "ignore" },
+      );
+      execSync("git add test.txt && git commit -m baseline", {
+        cwd: wsDir,
+        stdio: "ignore",
+      });
+      const baseCommitSha = execSync("git rev-parse HEAD", {
+        cwd: wsDir,
+        encoding: "utf8",
+      }).trim();
+      saveCanonicalArtifact(
+        manager,
+        manifest.runId,
+        "workspace",
+        {
+          workspacePath: wsDir,
+          branchName: "opencontrib/run-test",
+          isWorktree: true,
+          baseRepoPath: wsDir,
+          baseCommitSha,
+        },
+        "WORKSPACE_PREPARED",
+      );
 
-      const testCmd = process.platform === "win32"
-        ? `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERR; exit 1 } else { Write-Output PASS; exit 0 }"`
-        : `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERR; exit 1; else echo PASS; exit 0; fi"`;
+      const testCmd =
+        process.platform === "win32"
+          ? `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERR; exit 1 } else { Write-Output PASS; exit 0 }"`
+          : `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERR; exit 1; else echo PASS; exit 0; fi"`;
 
       const evidenceService = new EvidenceService(manager);
       evidenceService.captureRed({
@@ -565,16 +649,34 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       });
 
       // Save a patch artifact that claims to have fixed src/fix.ts with content "fixed code"
-      manager.saveArtifact(manifest.runId, "patch", JSON.stringify({
-        title: "fix",
-        summary: "fix",
-        rationale: "fix",
-        targetFiles: [{ path: "src/fix.ts", reason: "fix" }],
-        files: [{ path: "src/fix.ts", operation: "MODIFY", content: "fixed code", explanation: "fix" }],
-        implementationSteps: [],
-        regressionTestPlan: [],
-        estimatedDiffLines: 1,
-      }), "PATCH_DRAFTED");
+      manager.saveArtifact(
+        manifest.runId,
+        "patch",
+        JSON.stringify({
+          title: "fix",
+          summary: "fix",
+          rationale: "fix",
+          targetFiles: [{ path: "src/fix.ts", reason: "fix" }],
+          files: [
+            {
+              path: "src/fix.ts",
+              operation: "CREATE",
+              content: "fixed code",
+              explanation: "fix",
+            },
+            {
+              path: "test.txt",
+              operation: "MODIFY",
+              content: "PASS\n",
+              explanation: "update regression fixture",
+            },
+          ],
+          implementationSteps: [],
+          regressionTestPlan: [],
+          estimatedDiffLines: 1,
+        }),
+        "PATCH_DRAFTED",
+      );
 
       // Now mutate test.txt to PASS, but WITHOUT writing src/fix.ts
       writeFileSync(stateFile, "PASS\n");
@@ -611,21 +713,43 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "owner/repo" });
 
-      const { saveCanonicalArtifact } = require("../src/run/canonical-writer.js");
-      saveCanonicalArtifact(manager, manifest.runId, "workspace", {
-        workspacePath: wsDir,
-        branchName: "opencontrib/run-test",
-        isWorktree: true,
-        baseRepoPath: wsDir,
-        baseCommitSha: "abc",
-      }, "WORKSPACE_PREPARED");
-
+      const {
+        saveCanonicalArtifact,
+      } = require("../src/run/canonical-writer.js");
       const stateFile = join(wsDir, "test.txt");
       writeFileSync(stateFile, "FAIL\n");
+      const { execSync } = require("child_process");
+      execSync("git init -b main", { cwd: wsDir, stdio: "ignore" });
+      execSync(
+        "git config user.name Tester && git config user.email test@example.com",
+        { cwd: wsDir, stdio: "ignore" },
+      );
+      execSync("git add test.txt && git commit -m baseline", {
+        cwd: wsDir,
+        stdio: "ignore",
+      });
+      const baseCommitSha = execSync("git rev-parse HEAD", {
+        cwd: wsDir,
+        encoding: "utf8",
+      }).trim();
+      saveCanonicalArtifact(
+        manager,
+        manifest.runId,
+        "workspace",
+        {
+          workspacePath: wsDir,
+          branchName: "opencontrib/run-test",
+          isWorktree: true,
+          baseRepoPath: wsDir,
+          baseCommitSha,
+        },
+        "WORKSPACE_PREPARED",
+      );
 
-      const testCmd = process.platform === "win32"
-        ? `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERR; exit 1 } else { Write-Output PASS; exit 0 }"`
-        : `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERR; exit 1; else echo PASS; exit 0; fi"`;
+      const testCmd =
+        process.platform === "win32"
+          ? `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERR; exit 1 } else { Write-Output PASS; exit 0 }"`
+          : `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERR; exit 1; else echo PASS; exit 0; fi"`;
 
       const evidenceService = new EvidenceService(manager);
       evidenceService.captureRed({
@@ -635,28 +759,44 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         testFile: "test.txt",
       });
 
-      // Patch only declares src/fix.ts
+      // Patch declares the intended source and regression-fixture changes, but not sneaky.txt.
       mkdirSync(join(wsDir, "src"), { recursive: true });
       writeFileSync(join(wsDir, "src", "fix.ts"), "fixed code");
-      manager.saveArtifact(manifest.runId, "patch", JSON.stringify({
-        title: "fix",
-        summary: "fix",
-        rationale: "fix",
-        targetFiles: [{ path: "src/fix.ts", reason: "fix" }],
-        files: [{ path: "src/fix.ts", operation: "MODIFY", content: "fixed code", explanation: "fix" }],
-        implementationSteps: [],
-        regressionTestPlan: [],
-        estimatedDiffLines: 1,
-      }), "PATCH_DRAFTED");
+      manager.saveArtifact(
+        manifest.runId,
+        "patch",
+        JSON.stringify({
+          title: "fix",
+          summary: "fix",
+          rationale: "fix",
+          targetFiles: [{ path: "src/fix.ts", reason: "fix" }],
+          files: [
+            {
+              path: "src/fix.ts",
+              operation: "CREATE",
+              content: "fixed code",
+              explanation: "fix",
+            },
+            {
+              path: "test.txt",
+              operation: "MODIFY",
+              content: "PASS\n",
+              explanation: "update regression fixture",
+            },
+          ],
+          implementationSteps: [],
+          regressionTestPlan: [],
+          estimatedDiffLines: 1,
+        }),
+        "PATCH_DRAFTED",
+      );
 
       writeFileSync(stateFile, "PASS\n");
 
       // Now introduce an unlisted extra file in workspace (e.g. stealth untracked code)
       writeFileSync(join(wsDir, "sneaky.txt"), "sneaky untracked content");
 
-      // Initialize git repo in wsDir to simulate real git repo with status
-      const { execSync } = require("child_process");
-      execSync("git init", { cwd: wsDir, stdio: "ignore" });
+      // The workspace is already an initialized Git repository with a committed baseline.
 
       // verifyGreen must fail because sneaky.txt is not in patch.files!
       await expect(
@@ -664,7 +804,9 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           runId: manifest.runId,
           testCommand: testCmd,
         }),
-      ).rejects.toThrow(/EvidencePatchProvenanceError: workspace contains uncommitted\/untracked file 'sneaky.txt'/);
+      ).rejects.toThrow(
+        /EvidencePatchProvenanceError: workspace contains unlisted modified\/untracked file\(s\): sneaky\.txt/,
+      );
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }
@@ -690,7 +832,9 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           upstreamRepo: "repo",
           body: "tampered un-audited body",
         });
-      }).toThrow(/SubmissionIntentProvenanceError: audited governance prDraftSha256 does not match stored pr_draft/);
+      }).toThrow(
+        /SubmissionIntentProvenanceError: audited governance prDraftSha256 does not match stored pr_draft/,
+      );
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }
@@ -707,24 +851,77 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const intentService = new SubmissionIntentService(manager);
       // seedGovernanceReadyRun has no baseBranch in workspace, so default is used
       // Let's create a workspace with explicit baseBranch 'develop'
-      const { saveCanonicalArtifact } = require("../src/run/canonical-writer.js");
+      const {
+        saveCanonicalArtifact,
+      } = require("../src/run/canonical-writer.js");
       const manifest2 = manager.createRun({ repoFullName: "owner/repo2" });
-      saveCanonicalArtifact(manager, manifest2.runId, "workspace", {
-        workspacePath: "/tmp",
-        branchName: "branch2",
-        baseBranch: "develop",
-        baseCommitSha: "sha123",
-      }, "WORKSPACE_PREPARED");
-      manager.saveArtifact(manifest2.runId, "patch", JSON.stringify({
+      const baseCommitSha = "e".repeat(40);
+      const patch = {
         title: "fix",
         summary: "fix",
         rationale: "fix",
         targetFiles: [{ path: "src/fix.ts", reason: "fix" }],
-        files: [{ path: "src/fix.ts", operation: "MODIFY", content: "fixed", explanation: "fix" }],
+        files: [
+          {
+            path: "src/fix.ts",
+            operation: "MODIFY",
+            mode: "100644",
+            content: "fixed",
+            explanation: "fix",
+          },
+        ],
         implementationSteps: [],
         regressionTestPlan: [],
         estimatedDiffLines: 1,
-      }), "PATCH_DRAFTED");
+      };
+      const patchContent = JSON.stringify(patch);
+      const patchSha256 = createHash("sha256")
+        .update(patchContent)
+        .digest("hex");
+      const validatedPatch = {
+        runId: manifest2.runId,
+        patchSha256,
+        actualDeltaSha256: "f".repeat(64),
+        baseCommitSha,
+        redTreeSha256: "1".repeat(64),
+        greenTreeSha256: "2".repeat(64),
+        artifactSha256: "",
+        files: [
+          {
+            path: "src/fix.ts",
+            operation: "MODIFY" as const,
+            mode: "100644" as const,
+            contentSha256: createHash("sha256").update("fixed").digest("hex"),
+          },
+        ],
+        validatedAt: "2026-01-01T00:01:00.000Z",
+      };
+      validatedPatch.artifactSha256 =
+        hashValidatedPatchArtifact(validatedPatch);
+      saveCanonicalArtifact(
+        manager,
+        manifest2.runId,
+        "workspace",
+        {
+          workspacePath: "/tmp",
+          branchName: "branch2",
+          baseBranch: "develop",
+          baseCommitSha,
+        },
+        "WORKSPACE_PREPARED",
+      );
+      manager.saveArtifact(
+        manifest2.runId,
+        "patch",
+        patchContent,
+        "PATCH_DRAFTED",
+      );
+      saveCanonicalArtifact(
+        manager,
+        manifest2.runId,
+        "validated_patch",
+        validatedPatch,
+      );
       const testIdentity = {
         normalizedCommand: "bun test regression.test.ts",
         testFiles: [{ path: "regression.test.ts", sha256: "same" }],
@@ -748,7 +945,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
             command: "bun test regression.test.ts",
             observedOutputSnippet: "failed",
             exitCode: 1,
-            sourceTreeSha256: "before",
+            sourceTreeSha256: "1".repeat(64),
             capturedAt: "2026-01-01T00:00:00.000Z",
             assertionMatched: true,
             assertionMatchedFingerprint: "fp",
@@ -759,10 +956,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
             exitCode: 0,
             outputSnippet: "passed",
             passed: true,
-            sourceTreeSha256: "after",
+            sourceTreeSha256: "2".repeat(64),
             capturedAt: "2026-01-01T00:01:00.000Z",
             treeChangedComparedToRed: true,
             treeHashMatchesRed: false,
+            appliedPatchSha256: patchSha256,
+            validatedPatchArtifactSha256: validatedPatch.artifactSha256,
             stressLoopPassed: true,
             allTestsPassing: true,
             assertionMatchedFingerprint: "fp",
@@ -786,7 +985,9 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           upstreamRepo: "repo2",
           baseBranch: "main",
         });
-      }).toThrow(/SubmissionBaseBranchMismatchError: requested baseBranch 'main' does not match canonical workspace baseBranch 'develop'/);
+      }).toThrow(
+        /SubmissionBaseBranchMismatchError: requested baseBranch 'main' does not match canonical workspace baseBranch 'develop'/,
+      );
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }
@@ -798,59 +999,119 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
-      const { saveCanonicalArtifact } = require("../src/run/canonical-writer.js");
-      saveCanonicalArtifact(manager, manifest.runId, "workspace", {
-        workspacePath: "/tmp",
-        branchName: "opencontrib/run-1",
-        baseBranch: "main",
-        baseCommitSha: "initial_sha_12345",
-      }, "WORKSPACE_PREPARED");
-
-      manager.saveArtifact(manifest.runId, "patch", JSON.stringify({
+      const {
+        saveCanonicalArtifact,
+      } = require("../src/run/canonical-writer.js");
+      const baseCommitSha = "a".repeat(40);
+      const patch = {
         title: "fix",
         summary: "fix",
         rationale: "fix",
         targetFiles: [{ path: "src/fix.ts", reason: "fix" }],
-        files: [{ path: "src/fix.ts", operation: "MODIFY", content: "fixed", explanation: "fix" }],
+        files: [
+          {
+            path: "src/fix.ts",
+            operation: "MODIFY",
+            mode: "100644",
+            content: "fixed",
+            explanation: "fix",
+          },
+        ],
         implementationSteps: [],
         regressionTestPlan: [],
         estimatedDiffLines: 1,
-      }), "PATCH_DRAFTED");
+      };
+      const patchContent = JSON.stringify(patch);
+      const patchSha256 = createHash("sha256")
+        .update(patchContent)
+        .digest("hex");
+      const validatedPatch = {
+        runId: manifest.runId,
+        patchSha256,
+        actualDeltaSha256: "b".repeat(64),
+        baseCommitSha,
+        redTreeSha256: "c".repeat(64),
+        greenTreeSha256: "d".repeat(64),
+        artifactSha256: "",
+        files: [
+          {
+            path: "src/fix.ts",
+            operation: "MODIFY" as const,
+            mode: "100644" as const,
+            contentSha256: createHash("sha256").update("fixed").digest("hex"),
+          },
+        ],
+        validatedAt: "2026-01-01T00:01:00.000Z",
+      };
+      validatedPatch.artifactSha256 =
+        hashValidatedPatchArtifact(validatedPatch);
+      saveCanonicalArtifact(
+        manager,
+        manifest.runId,
+        "workspace",
+        {
+          workspacePath: "/tmp",
+          branchName: "opencontrib/run-1",
+          baseBranch: "main",
+          baseCommitSha,
+        },
+        "WORKSPACE_PREPARED",
+      );
+      manager.saveArtifact(
+        manifest.runId,
+        "patch",
+        patchContent,
+        "PATCH_DRAFTED",
+      );
+      saveCanonicalArtifact(
+        manager,
+        manifest.runId,
+        "validated_patch",
+        validatedPatch,
+      );
 
       const testIdentity = {
         normalizedCommand: "bun test",
         testFiles: [{ path: "test.ts", sha256: "same" }],
         identitySha256: "identity-same",
       };
-      saveCanonicalArtifact(manager, manifest.runId, "evidence", {
-        baselineTestedAt: "2026-01-01T00:00:00.000Z",
-        reproductionVerified: true,
-        allTestsPassing: true,
-        redEvidence: {
-          command: "test",
-          observedOutputSnippet: "",
-          exitCode: 1,
-          sourceTreeSha256: "before",
-          capturedAt: "2026-01-01T00:00:00.000Z",
-          assertionMatched: true,
-          assertionMatchedFingerprint: "fp",
-          testIdentity,
-        },
-        greenEvidence: {
-          command: "test",
-          exitCode: 0,
-          outputSnippet: "",
-          passed: true,
-          sourceTreeSha256: "after",
-          capturedAt: "2026-01-01T00:01:00.000Z",
-          treeChangedComparedToRed: true,
-          treeHashMatchesRed: false,
-          stressLoopPassed: true,
+      saveCanonicalArtifact(
+        manager,
+        manifest.runId,
+        "evidence",
+        {
+          baselineTestedAt: "2026-01-01T00:00:00.000Z",
+          reproductionVerified: true,
           allTestsPassing: true,
-          assertionMatchedFingerprint: "fp",
-          testIdentity,
+          redEvidence: {
+            command: "test",
+            observedOutputSnippet: "",
+            exitCode: 1,
+            sourceTreeSha256: "c".repeat(64),
+            capturedAt: "2026-01-01T00:00:00.000Z",
+            assertionMatched: true,
+            assertionMatchedFingerprint: "fp",
+            testIdentity,
+          },
+          greenEvidence: {
+            command: "test",
+            exitCode: 0,
+            outputSnippet: "",
+            passed: true,
+            sourceTreeSha256: "d".repeat(64),
+            capturedAt: "2026-01-01T00:01:00.000Z",
+            treeChangedComparedToRed: true,
+            treeHashMatchesRed: false,
+            appliedPatchSha256: patchSha256,
+            validatedPatchArtifactSha256: validatedPatch.artifactSha256,
+            stressLoopPassed: true,
+            allTestsPassing: true,
+            assertionMatchedFingerprint: "fp",
+            testIdentity,
+          },
         },
-      }, "EVIDENCE_COLLECTED");
+        "EVIDENCE_COLLECTED",
+      );
 
       manager.saveArtifact(manifest.runId, "pr_draft", "pr body");
       new GovernanceService(manager).audit(manifest.runId, {
@@ -868,7 +1129,10 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         body: "pr body",
       });
 
-      const approvalService = new ApprovalService(manager, testApprovalAuthority());
+      const approvalService = new ApprovalService(
+        manager,
+        testApprovalAuthority(),
+      );
       approvalService.recordApproval({
         runId: manifest.runId,
         expectedIntentSha256: intent.intentSha256,
@@ -881,7 +1145,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
             getRef: async () => ({
               data: {
                 object: {
-                  sha: "new_remote_head_67890",
+                  sha: "b".repeat(40),
                 },
               },
             }),
@@ -907,12 +1171,11 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         manager,
       );
 
-      await expect(
-        submissionService.submit(manifest.runId),
-      ).rejects.toThrow(/BaseBranchAdvancedError: Upstream base branch "main" has advanced/);
+      await expect(submissionService.submit(manifest.runId)).rejects.toThrow(
+        /BaseBranchAdvancedError: Upstream base branch "main" has advanced/,
+      );
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }
   });
 });
-

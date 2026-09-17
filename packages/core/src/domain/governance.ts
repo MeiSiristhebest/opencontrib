@@ -287,7 +287,6 @@ export interface AuditGovernanceInput {
   confidenceBreakdown?: ConfidenceBreakdown;
   lineCount?: number;
   maxDiffLines?: number;
-  humanApproved?: boolean;
   evidence?: Partial<EvidenceReport>;
   subagentQualityScore?: number;
   isAutonomousPrSubmission?: boolean;
@@ -306,8 +305,6 @@ export function auditGovernance(
     typeof input.lineCount === "number"
       ? input.lineCount
       : patch.split("\n").length;
-  // Explicit human approval only: no silent implicit approval when isAutonomousPrSubmission is undefined/false
-  const humanApproved = input.humanApproved === true;
   const maxDiffAllowed = input.maxDiffLines ?? 100;
 
   let breakdown = input.confidenceBreakdown;
@@ -358,8 +355,9 @@ export function auditGovernance(
   // 4. Mathematical Quality Rubric Calculation
   const confidence = calculateConfidenceScore(breakdown!);
 
-  // 5. Human-in-the-Loop Pre-flight Gate
-  const requiresHumanApproval = !humanApproved;
+  // 5. Human approval is a separate trusted-host capability. This technical
+  // audit never accepts a caller-supplied approval boolean.
+  const requiresHumanApproval = true;
 
   const isTechnicalGatePassed =
     antiAiCheckPassed &&
@@ -367,7 +365,7 @@ export function auditGovernance(
     rfcGatePassed &&
     confidence.isPassed;
 
-  const isGatedPassed = isTechnicalGatePassed && humanApproved;
+  const isGatedPassed = isTechnicalGatePassed;
 
   const technicalGate = {
     status: isTechnicalGatePassed ? ("PASS" as const) : ("FAIL" as const),
@@ -375,24 +373,23 @@ export function auditGovernance(
   };
 
   const approvalGate = {
-    status: humanApproved ? ("APPROVED" as const) : ("PENDING" as const),
-    approved: Boolean(humanApproved),
+    status: "PENDING" as const,
+    approved: false,
   };
 
   let submissionStatus: "ALLOWED" | "BLOCKED" | "WAIVED";
   let submissionReason: string | undefined;
   if (isGatedPassed) {
-    submissionStatus = "ALLOWED";
-    submissionReason = undefined;
+    submissionStatus = "BLOCKED";
+    submissionReason =
+      "Pending external approval from a trusted human/policy authority";
   } else {
     submissionStatus = "BLOCKED";
-    submissionReason = !isTechnicalGatePassed
-      ? "Technical quality gate criteria not met"
-      : "Pending explicit human approval";
+    submissionReason = "Technical quality gate criteria not met";
   }
 
   const submissionDecision = {
-    allowed: isGatedPassed,
+    allowed: false,
     status: submissionStatus,
     reason: submissionReason,
   };
@@ -459,7 +456,7 @@ export function auditGovernance(
     corruptedMarkdownIssues,
     remediationSuggestions,
     overallConfidence: {
-      isPassed: isGatedPassed,
+      isPassed: isTechnicalGatePassed,
       overallScore: confidence.overallScore,
     },
     guidance: {

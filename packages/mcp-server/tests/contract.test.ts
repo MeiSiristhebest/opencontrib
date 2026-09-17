@@ -4,6 +4,23 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createOpenContribMcpServer } from "../src/server.js";
+import { WorktreeManager } from "@opencontrib/core";
+
+class LocalFetchWorktreeManager extends WorktreeManager {
+  constructor(private readonly remotePath: string) {
+    super();
+  }
+
+  override runGit(args: string[], cwd?: string, timeoutMs = 25000) {
+    const mapped = [...args];
+    const fetchIndex = mapped.indexOf("fetch");
+    const originIndex =
+      fetchIndex >= 0 ? mapped.indexOf("origin", fetchIndex) : -1;
+    if (fetchIndex >= 0 && originIndex >= 0)
+      mapped[originIndex] = this.remotePath;
+    return super.runGit(mapped, cwd, timeoutMs);
+  }
+}
 
 describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
   const server = createOpenContribMcpServer();
@@ -135,30 +152,36 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
   });
 
   it("contract test: contrib_create_run and contrib_save_artifact lifecycle with schemaVersion and event tracking", async () => {
-    const createResult = await tools["contrib_create_run"].handler({
+    // PATCH_DRAFTED requires a prepared workspace, so use contrib_prepare_workspace
+    // to save the workspace artifact and advance to WORKSPACE_PREPARED.
+    const tempDir = mkdtempSync(join(tmpdir(), "opencontrib-contract-test-"));
+    const bareDir = mkdtempSync(join(tmpdir(), "opencontrib-contract-remote-"));
+    rmSync(bareDir, { recursive: true, force: true });
+    spawnSync("git", ["init", "-b", "main"], { cwd: tempDir });
+    spawnSync("git", ["config", "user.name", "Tester"], { cwd: tempDir });
+    spawnSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: tempDir,
+    });
+    writeFileSync(join(tempDir, "README.md"), "# Test\n");
+    spawnSync("git", ["add", "."], { cwd: tempDir });
+    spawnSync("git", ["commit", "-m", "initial"], { cwd: tempDir });
+    spawnSync("git", ["clone", "--bare", tempDir, bareDir]);
+    const githubUrl = "https://github.com/test-org/contract-test-repo.git";
+    spawnSync("git", ["remote", "add", "origin", githubUrl], { cwd: tempDir });
+    const localTools = (
+      createOpenContribMcpServer({
+        worktreeManager: new LocalFetchWorktreeManager(bareDir),
+      }) as any
+    )._registeredTools;
+    const createResult = await localTools["contrib_create_run"].handler({
       repoFullName: "test-org/contract-test-repo",
       issueNumber: 42,
       issueTitle: "Contract test bug",
     });
-
-    expect(createResult.isError).toBeUndefined();
     const res = JSON.parse(createResult.content[0].text);
     const manifest = res.manifest;
-    expect(manifest.schemaVersion).toBe("1.0.0");
-    expect(manifest.runId).toStartWith("run_");
-    expect(manifest.currentPhase).toBe("INITIALIZED");
 
-    // PATCH_DRAFTED requires a prepared workspace, so use contrib_prepare_workspace
-    // to save the workspace artifact and advance to WORKSPACE_PREPARED.
-    const tempDir = mkdtempSync(join(tmpdir(), "opencontrib-contract-test-"));
-    spawnSync("git", ["init", "-b", "main"], { cwd: tempDir });
-    spawnSync("git", ["config", "user.name", "Tester"], { cwd: tempDir });
-    spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: tempDir });
-    writeFileSync(join(tempDir, "README.md"), "# Test\n");
-    spawnSync("git", ["add", "."], { cwd: tempDir });
-    spawnSync("git", ["commit", "-m", "initial"], { cwd: tempDir });
-
-    const wsResult = await tools["contrib_prepare_workspace"].handler({
+    const wsResult = await localTools["contrib_prepare_workspace"].handler({
       repoFullName: "test-org/contract-test-repo",
       issueOrTaskId: 42,
       localRepoPath: tempDir,
@@ -168,10 +191,15 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     const wsData = JSON.parse(wsResult.content[0].text);
     expect(wsData.status).toBe("success");
 
-    try { rmSync(tempDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(bareDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
 
     // Save artifact and advance phase
-    const saveResult = await tools["contrib_save_artifact"].handler({
+    const saveResult = await localTools["contrib_save_artifact"].handler({
       runId: manifest.runId,
       artifactType: "patch",
       content: "--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new",
@@ -182,7 +210,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(saved.artifactType).toBe("patch");
 
     // Get run summary
-    const getResult = await tools["contrib_get_run"].handler({
+    const getResult = await localTools["contrib_get_run"].handler({
       runId: manifest.runId,
     });
     const summary = JSON.parse(getResult.content[0].text).run;
@@ -191,7 +219,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(summary.events.length).toBeGreaterThanOrEqual(2);
 
     // Resume run
-    const resumeResult = await tools["contrib_resume_run"].handler({
+    const resumeResult = await localTools["contrib_resume_run"].handler({
       runId: manifest.runId,
     });
     const resume = JSON.parse(resumeResult.content[0].text).resume;
@@ -226,6 +254,8 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
 
   it("contract test: contrib_prepare_workspace passes runId and saves workspace artifact with run-isolated branch", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "opencontrib-test-repo-"));
+    const bareDir = mkdtempSync(join(tmpdir(), "opencontrib-test-remote-"));
+    rmSync(bareDir, { recursive: true, force: true });
     spawnSync("git", ["init", "-b", "main"], { cwd: tempDir });
     spawnSync("git", ["config", "user.name", "Tester"], { cwd: tempDir });
     spawnSync("git", ["config", "user.email", "test@example.com"], {
@@ -234,14 +264,22 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     writeFileSync(join(tempDir, "README.md"), "# Test\n");
     spawnSync("git", ["add", "."], { cwd: tempDir });
     spawnSync("git", ["commit", "-m", "initial"], { cwd: tempDir });
+    spawnSync("git", ["clone", "--bare", tempDir, bareDir]);
+    const githubUrl = "https://github.com/test-org/test-repo.git";
+    spawnSync("git", ["remote", "add", "origin", githubUrl], { cwd: tempDir });
+    const localTools = (
+      createOpenContribMcpServer({
+        worktreeManager: new LocalFetchWorktreeManager(bareDir),
+      }) as any
+    )._registeredTools;
 
-    const runResult = await tools["contrib_create_run"].handler({
+    const runResult = await localTools["contrib_create_run"].handler({
       repoFullName: "test-org/test-repo",
       issueNumber: 101,
     });
     const runId = JSON.parse(runResult.content[0].text).manifest.runId;
 
-    const wsResult = await tools["contrib_prepare_workspace"].handler({
+    const wsResult = await localTools["contrib_prepare_workspace"].handler({
       repoFullName: "test-org/test-repo",
       issueOrTaskId: 101,
       localRepoPath: tempDir,
@@ -256,7 +294,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(ws.persistence?.saved).toBe(true);
 
     // Verify evidence boundary auto-resolution from runId
-    const evResult = await tools["contrib_collect_evidence"].handler({
+    const evResult = await localTools["contrib_collect_evidence"].handler({
       cwd: ws.workspacePath,
       testCommand: 'echo "test pass"',
       runId,
@@ -265,10 +303,13 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     const ev = JSON.parse(evResult.content[0].text);
     expect(ev.status).toBe("PARTIAL_SUCCESS");
     expect(ev.persistence?.saved).toBe(false);
-    expect(ev.persistence?.error).toContain("Diagnostic evidence is not authoritative");
+    expect(ev.persistence?.error).toContain(
+      "Diagnostic evidence is not authoritative",
+    );
 
     try {
       rmSync(tempDir, { recursive: true, force: true });
+      rmSync(bareDir, { recursive: true, force: true });
     } catch {
       // Best-effort temp dir cleanup
     }

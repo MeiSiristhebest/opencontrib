@@ -13,20 +13,19 @@
  * together; everything else depends on the abstract ports.
  */
 
-import { GitHubClient } from './discovery/github-client.js';
-import { ContributionPipeline } from './application/index.js';
-import { SystemClock } from './ports/clock.port.js';
-import { LLMService } from './llm/llm-service.js';
-import { ContributionRunManager } from './run/run-manager.js';
-import type { GitHubClientOptions } from './github/types.js';
-import {
-  type TrustedApprovalAuthority,
-  createTrustedApprovalAuthority,
-} from './governance/approval-authority.js';
+import { GitHubClient } from "./discovery/github-client.js";
+import { ContributionPipeline } from "./application/index.js";
+import { SystemClock } from "./ports/clock.port.js";
+import { LLMService } from "./llm/llm-service.js";
+import { ContributionRunManager } from "./run/run-manager.js";
+import type { GitHubClientOptions } from "./github/types.js";
+import type { TrustedApprovalAuthority } from "./governance/approval-authority.js";
 
 /** Production GitHub client with env-based credentials, file cache, and retry. */
-export function buildProductionGitHubClient(options: GitHubClientOptions = {}): GitHubClient {
-  return new GitHubClient(options);
+export function buildProductionGitHubClient(
+ options: GitHubClientOptions = {},
+): GitHubClient {
+ return new GitHubClient(options);
 }
 
 /**
@@ -36,7 +35,7 @@ export function buildProductionGitHubClient(options: GitHubClientOptions = {}): 
  * correctly. Tests inject fakes via the constructor directly.
  */
 export function buildContributionRunManager(): ContributionRunManager {
-  return new ContributionRunManager();
+ return new ContributionRunManager();
 }
 
 /**
@@ -45,68 +44,60 @@ export function buildContributionRunManager(): ContributionRunManager {
  * dependency-injection seam (`PipelineDeps`). Callers may override any piece
  * via `deps` for tests or alternative environments.
  */
-export function buildContributionPipeline(options: {
+export function buildContributionPipeline(
+ options: {
   githubToken?: string;
   githubHost?: string;
   llmService?: LLMService;
   approvalAuthority?: TrustedApprovalAuthority;
-} = {}): ContributionPipeline {
-  const client = buildProductionGitHubClient({
-    token: options.githubToken,
-    host: options.githubHost,
-  });
-  return new ContributionPipeline({
-    githubToken: options.githubToken,
-    llmService: options.llmService,
-    deps: { client, clock: new SystemClock(), approvalAuthority: options.approvalAuthority },
-  });
+ } = {},
+): ContributionPipeline {
+ const client = buildProductionGitHubClient({
+  token: options.githubToken,
+  host: options.githubHost,
+ });
+ return new ContributionPipeline({
+  githubToken: options.githubToken,
+  llmService: options.llmService,
+  deps: {
+   client,
+   clock: new SystemClock(),
+   approvalAuthority: options.approvalAuthority,
+  },
+ });
 }
 
 export interface ProductionCompositionRoot {
-  githubClient: GitHubClient;
-  contributionPipeline: ContributionPipeline;
-  approvalAuthority?: TrustedApprovalAuthority;
+ githubClient: GitHubClient;
+ contributionPipeline: ContributionPipeline;
+ approvalAuthority?: TrustedApprovalAuthority;
 }
 
 /** Build the entire production object graph in one call. */
-export function buildProductionCompositionRoot(options: {
+export function buildProductionCompositionRoot(
+ options: {
   githubToken?: string;
   githubHost?: string;
   llmService?: LLMService;
   approvalAuthority?: TrustedApprovalAuthority;
-} = {}): ProductionCompositionRoot {
-  const githubClient = buildProductionGitHubClient({
-    token: options.githubToken,
-    host: options.githubHost,
-  });
-  const contributionPipeline = new ContributionPipeline({
-    githubToken: options.githubToken,
-    llmService: options.llmService,
-    deps: { client: githubClient, clock: new SystemClock(), approvalAuthority: options.approvalAuthority },
-  });
-  return { githubClient, contributionPipeline, approvalAuthority: options.approvalAuthority };
+ } = {},
+): ProductionCompositionRoot {
+ const githubClient = buildProductionGitHubClient({
+  token: options.githubToken,
+  host: options.githubHost,
+ });
+ const contributionPipeline = new ContributionPipeline({
+  githubToken: options.githubToken,
+  llmService: options.llmService,
+  deps: {
+   client: githubClient,
+   clock: new SystemClock(),
+   approvalAuthority: options.approvalAuthority,
+  },
+ });
+ return {
+  githubClient,
+  contributionPipeline,
+  approvalAuthority: options.approvalAuthority,
+ };
 }
-
-export interface HostApprovalOptions {
-  approvedBy?: string;
-  approvalMode?: "explicit_human" | "policy_waived";
-}
-
-/**
- * Trusted host factory: creates a TrustedApprovalAuthority for local CLI or
- * host daemon approval. Never exported through agent-facing barrels or MCP tools.
- */
-export function buildHostApprovalAuthority(
-  options: HostApprovalOptions = {},
-): TrustedApprovalAuthority {
-  const approvedBy = options.approvedBy || "human_reviewer";
-  const approvalMode = options.approvalMode === "policy_waived" ? "policy_waived" : "explicit_human";
-  return createTrustedApprovalAuthority({
-    issueApproval: () => ({
-      approvedBy,
-      approvalMode,
-    }),
-  });
-}
-
-

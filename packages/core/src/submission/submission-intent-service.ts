@@ -5,9 +5,11 @@ import { runBranchName } from "../run/run-branch.js";
 import {
   GovernanceDecisionArtifactSchema,
   SubmissionIntentArtifactSchema,
+  ValidatedPatchArtifactSchema,
   type SubmissionIntentArtifact,
   type SubmissionIntentFile,
 } from "../contracts/schemas.js";
+import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 
 export interface CreateSubmissionIntentInput {
   runId: string;
@@ -26,17 +28,19 @@ function sha256(value: string): string {
 }
 
 function artifactHash(value: unknown): string {
-  return sha256(typeof value === "string" ? value : JSON.stringify(value ?? ""));
+  return sha256(
+    typeof value === "string" ? value : JSON.stringify(value ?? ""),
+  );
 }
 
 export function isSafeRepositoryPath(path: string): boolean {
   if (!path || path.includes("\0") || path.includes("\\")) return false;
   if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return false;
-  return path.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
-}
-
-function runOwnedBranch(runId: string): string {
-  return `opencontrib/run-${runId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  return path
+    .split("/")
+    .every(
+      (segment) => segment.length > 0 && segment !== "." && segment !== "..",
+    );
 }
 
 export class SubmissionIntentService {
@@ -68,13 +72,16 @@ export class SubmissionIntentService {
         );
       }
       if (
-        input.upstreamOwner.toLowerCase() !== existing.data.upstreamOwner.toLowerCase() ||
-        input.upstreamRepo.toLowerCase() !== existing.data.upstreamRepo.toLowerCase() ||
+        input.upstreamOwner.toLowerCase() !==
+          existing.data.upstreamOwner.toLowerCase() ||
+        input.upstreamRepo.toLowerCase() !==
+          existing.data.upstreamRepo.toLowerCase() ||
         (input.baseBranch && input.baseBranch !== existing.data.baseBranch) ||
         (input.branchName && input.branchName !== existing.data.branchName) ||
         (input.title && input.title !== existing.data.title) ||
         (input.body !== undefined && input.body !== existing.data.body) ||
-        (input.commitMessage && input.commitMessage !== existing.data.commitMessage) ||
+        (input.commitMessage &&
+          input.commitMessage !== existing.data.commitMessage) ||
         (input.isDraft !== undefined && input.isDraft !== existing.data.isDraft)
       ) {
         throw new Error(
@@ -85,7 +92,10 @@ export class SubmissionIntentService {
     }
 
     const expectedRepo = run.manifest.repoFullName.toLowerCase();
-    if (`${input.upstreamOwner}/${input.upstreamRepo}`.toLowerCase() !== expectedRepo) {
+    if (
+      `${input.upstreamOwner}/${input.upstreamRepo}`.toLowerCase() !==
+      expectedRepo
+    ) {
       throw new Error(
         `SubmissionTargetMismatchError: target ${input.upstreamOwner}/${input.upstreamRepo} does not match run repository ${run.manifest.repoFullName}.`,
       );
@@ -97,6 +107,24 @@ export class SubmissionIntentService {
         `Cannot create submission intent: missing required patch artifact for run ${input.runId}.`,
       );
     }
+    const validatedPatchResult = ValidatedPatchArtifactSchema.safeParse(
+      run.artifacts.validatedPatch,
+    );
+    if (!validatedPatchResult.success) {
+      throw new Error(
+        `Cannot create submission intent: run ${input.runId} has no immutable ValidatedPatchArtifact. Complete canonical GREEN verification first.`,
+      );
+    }
+    const validatedPatch = validatedPatchResult.data;
+    if (
+      validatedPatch.artifactSha256 !==
+      hashValidatedPatchArtifact(validatedPatch)
+    ) {
+      throw new Error(
+        "SubmissionIntentProvenanceError: ValidatedPatchArtifact integrity check failed.",
+      );
+    }
+
     const evidenceArtifact = run.artifacts.evidence;
     if (!evidenceArtifact) {
       throw new Error(
@@ -104,16 +132,23 @@ export class SubmissionIntentService {
       );
     }
     const governanceRaw = run.artifacts.governance;
-    const governanceResult = GovernanceDecisionArtifactSchema.safeParse(governanceRaw);
+    const governanceResult =
+      GovernanceDecisionArtifactSchema.safeParse(governanceRaw);
     if (!governanceResult.success || !governanceResult.data.passed) {
       throw new Error(
         `Cannot create submission intent: run ${input.runId} has no passing canonical governance decision.`,
       );
     }
 
-    const patchContent = typeof patchRaw === "string" ? patchRaw : JSON.stringify(patchRaw);
+    const patchContent =
+      typeof patchRaw === "string" ? patchRaw : JSON.stringify(patchRaw);
     const patchSha256 = sha256(patchContent);
     const evidenceSha256 = artifactHash(evidenceArtifact);
+    if (validatedPatch.patchSha256 !== patchSha256) {
+      throw new Error(
+        "SubmissionIntentProvenanceError: current patch does not match the immutable ValidatedPatchArtifact.",
+      );
+    }
     const governanceSha256 = artifactHash(governanceRaw);
     if (
       governanceResult.data.patchSha256 !== patchSha256 ||
@@ -168,21 +203,35 @@ export class SubmissionIntentService {
       );
     }
 
-    const wsArtifact = run.artifacts.workspace as Record<string, unknown> | undefined;
-    const wsBaseBranch = typeof wsArtifact?.baseBranch === "string" ? wsArtifact.baseBranch : undefined;
+    const wsArtifact = run.artifacts.workspace as
+      | Record<string, unknown>
+      | undefined;
+    const wsBaseBranch =
+      typeof wsArtifact?.baseBranch === "string"
+        ? wsArtifact.baseBranch
+        : undefined;
     if (input.baseBranch && wsBaseBranch && input.baseBranch !== wsBaseBranch) {
       throw new Error(
         `SubmissionBaseBranchMismatchError: requested baseBranch '${input.baseBranch}' does not match canonical workspace baseBranch '${wsBaseBranch}'.`,
       );
     }
     const baseBranch = input.baseBranch || wsBaseBranch || "main";
-    const baseCommitSha = typeof wsArtifact?.baseCommitSha === "string" ? wsArtifact.baseCommitSha : undefined;
+    const baseCommitSha =
+      typeof wsArtifact?.baseCommitSha === "string"
+        ? wsArtifact.baseCommitSha
+        : undefined;
+    if (!baseCommitSha || baseCommitSha !== validatedPatch.baseCommitSha) {
+      throw new Error(
+        `SubmissionIntentProvenanceError: canonical workspace baseCommitSha is missing or differs from ValidatedPatchArtifact.`,
+      );
+    }
     const commitMessage = input.commitMessage || title;
     const isDraft = input.isDraft ?? true;
 
     let parsedPatch: any;
     try {
-      parsedPatch = typeof patchRaw === "string" ? JSON.parse(patchRaw) : patchRaw;
+      parsedPatch =
+        typeof patchRaw === "string" ? JSON.parse(patchRaw) : patchRaw;
     } catch {
       throw new Error(
         "Cannot create submission intent: trusted patch must be a PatchDraft JSON object with concrete files.",
@@ -204,11 +253,18 @@ export class SubmissionIntentService {
         throw new Error(`SubmissionPathError: duplicate patch path '${path}'.`);
       }
       seenPaths.add(path);
-      const operation = file.operation === "DELETE" || file.operation === "CREATE" || file.operation === "MODIFY"
-        ? file.operation
-        : "MODIFY";
-      const content = operation === "DELETE" ? String(file.content ?? "") : String(file.content ?? "");
-      const mode = file.mode === "100755" || file.mode === "120000" ? file.mode : "100644";
+      const operation =
+        file.operation === "DELETE" ||
+        file.operation === "CREATE" ||
+        file.operation === "MODIFY"
+          ? file.operation
+          : "MODIFY";
+      const content =
+        operation === "DELETE"
+          ? String(file.content ?? "")
+          : String(file.content ?? "");
+      const mode =
+        file.mode === "100755" || file.mode === "120000" ? file.mode : "100644";
       return {
         path,
         content,
@@ -268,7 +324,12 @@ export class SubmissionIntentService {
     };
 
     SubmissionIntentArtifactSchema.parse(intent);
-    saveCanonicalArtifact(this.runManager, input.runId, "submission_intent", intent as any);
+    saveCanonicalArtifact(
+      this.runManager,
+      input.runId,
+      "submission_intent",
+      intent as any,
+    );
     return intent;
   }
 }

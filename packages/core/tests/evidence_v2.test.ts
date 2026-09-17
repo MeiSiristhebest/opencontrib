@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -7,14 +8,13 @@ import {
   computeSourceTreeHash,
   captureRedEvidence,
   verifyGreenEvidence,
-  computeTestIdentity,
-  computeTestFileDiffSha256,
 } from "../src/evidence/evidence-collector.js";
 import {
   validatePhaseGate,
   type ContributionRunSummary,
 } from "../src/index.js";
 import type { RedEvidence } from "../src/contracts/schemas.js";
+import { EvidenceService } from "../src/evidence/evidence-service.js";
 
 function makeSummary(
   currentPhase: ContributionRunSummary["manifest"]["currentPhase"],
@@ -129,6 +129,8 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
   test("gate: EVIDENCE_COLLECTED is blocked when reproductionVerified is false", () => {
     const summary = makeSummary("PATCH_DRAFTED", {
       workspace: { workspacePath: "/tmp/ws" },
+      patch: "{}",
+      validatedPatch: {},
       evidence: { allTestsPassing: true, reproductionVerified: false },
     });
     const res = validatePhaseGate(summary, "EVIDENCE_COLLECTED");
@@ -141,26 +143,37 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-real-e2e-runs-"));
     try {
       const stateFile = join(wsDir, "status.txt");
-      // Initially failing state (RED)
+      // Initially failing state (RED). Keep the test file itself unchanged;
+      // the patch changes only the fixture input inspected by the command.
       writeFileSync(stateFile, "FAIL\n");
+      writeFileSync(
+        join(wsDir, "regression.test.ts"),
+        "// immutable test fixture\n",
+      );
+      execFileSync("git", ["init"], { cwd: wsDir, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], {
+        cwd: wsDir,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "OpenContrib Test"], {
+        cwd: wsDir,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["add", "."], { cwd: wsDir, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "baseline"], {
+        cwd: wsDir,
+        stdio: "ignore",
+      });
+      const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: wsDir,
+        encoding: "utf8",
+      }).trim();
 
       // Test command that inspects status.txt
       const testCmd = pickCmd(
         `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERROR_SAMPLE; exit 1 } else { Write-Output PASS; exit 0 }"`,
         `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERROR_SAMPLE; exit 1; else echo PASS; exit 0; fi"`,
       );
-
-      // 1. Capture real RED baseline
-      const red = captureRedEvidence({
-        cwd: wsDir,
-        testCommand: testCmd,
-        expectedAssertion: "ASSERTION_ERROR_SAMPLE",
-        testFile: "status.txt",
-      });
-
-      expect(red.assertionMatched).toBe(true);
-      expect(red.exitCode).toBe(1);
-      expect(red.assertionMatchedFingerprint).toBeDefined();
 
       const { ContributionRunManager } = await import(
         "../src/run/run-manager.js"
@@ -171,74 +184,76 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
         issueNumber: 1,
       });
 
-      // Advance to PATCH_DRAFTED
       saveCanonicalArtifact(
         manager,
         manifest.runId,
         "workspace",
-        { workspacePath: wsDir },
+        {
+          workspacePath: wsDir,
+          branchName: "fixture-branch",
+          isWorktree: false,
+          baseRepoPath: wsDir,
+          baseCommitSha,
+          baseBranch: "main",
+          repoFullName: "test/repo",
+          createdAt: new Date().toISOString(),
+        },
         "WORKSPACE_PREPARED",
       );
-      manager.saveArtifact(manifest.runId, "patch", "diff...", "PATCH_DRAFTED");
-
-      // 2. Mutate source to fix bug (GREEN)
-      writeFileSync(stateFile, "PASS LONGER MUTATION STRING\n");
-
-      // 3. Verify real GREEN evidence. The fixture mutates an explicit file,
-      // so it must provide the content-derived audited mutation proof.
-      const greenIdentity = computeTestIdentity(
-        wsDir,
-        testCmd,
-        "ASSERTION_ERROR_SAMPLE",
-        "status.txt",
+      const greenContent = "PASS LONGER MUTATION STRING\n";
+      const patchContent = JSON.stringify({
+        files: [
+          {
+            path: "status.txt",
+            operation: "MODIFY",
+            mode: "100644",
+            content: greenContent,
+          },
+        ],
+      });
+      manager.saveArtifact(
+        manifest.runId,
+        "patch",
+        patchContent,
+        "PATCH_DRAFTED",
       );
-      const expectedTestDiffSha256 = computeTestFileDiffSha256(
-        red.testIdentity!.testFiles,
-        greenIdentity.testFiles,
-      );
-      const redWithPolicy = {
-        ...red,
-        testMutationPolicy: {
-          allowed: true,
-          expectedDiffSha256: expectedTestDiffSha256!,
-        },
-      };
-      const green = verifyGreenEvidence({
-        cwd: wsDir,
+
+      // 1. Capture and seal the real RED baseline through EvidenceService.
+      const evidenceService = new EvidenceService(manager);
+      const red = evidenceService.captureRed({
+        runId: manifest.runId,
         testCommand: testCmd,
-        redEvidence: redWithPolicy,
+        expectedAssertion: "ASSERTION_ERROR_SAMPLE",
+        testFile: "regression.test.ts",
       });
 
-      expect(green.greenEvidence.passed).toBe(true);
-      expect(green.greenEvidence.treeChangedComparedToRed).toBe(true);
-      expect(green.greenEvidence.treeHashMatchesRed).toBe(false);
-      expect(green.greenEvidence.stressLoopPassed).toBe(true);
-      expect(green.greenEvidence.assertionMatchedFingerprint).toBe(
+      expect(red.assertionMatched).toBe(true);
+      expect(red.exitCode).toBe(1);
+      expect(red.assertionMatchedFingerprint).toBeDefined();
+
+      // 2. Mutate source to fix bug (GREEN)
+      writeFileSync(stateFile, greenContent);
+
+      // 3. Verify real GREEN evidence through the trusted service. This
+      // validates the exact base-to-workspace delta and seals the immutable
+      // ValidatedPatchArtifact before advancing the phase.
+      const report = await evidenceService.verifyGreen({
+        runId: manifest.runId,
+        testCommand: testCmd,
+        stressLoopCount: 1,
+      });
+
+      const greenEvidence = report.greenEvidence!;
+      expect(greenEvidence.passed).toBe(true);
+      expect(greenEvidence.treeChangedComparedToRed).toBe(true);
+      expect(greenEvidence.treeHashMatchesRed).toBe(false);
+      expect(greenEvidence.stressLoopPassed).toBe(true);
+      expect(greenEvidence.assertionMatchedFingerprint).toBe(
         red.assertionMatchedFingerprint,
       );
-      expect(green.reproductionVerified).toBe(true);
-      expect(green.allTestsPassing).toBe(true);
-
-      const report = {
-        baselineTestedAt: red.capturedAt,
-        baselineFlakyTests: [],
-        stressLoopRuns: 1,
-        stressLoopPassed: true,
-        handleLeakCheckPassed: true,
-        passedUnitTestsCount: 1,
-        allTestsPassing: true,
-        reproductionVerified: true,
-        redEvidence: redWithPolicy,
-        greenEvidence: green.greenEvidence,
-      };
-
-      // 4. Save artifact via trusted canonical flow and advance to EVIDENCE_COLLECTED
-      saveCanonicalArtifact(manager, 
-        manifest.runId,
-        "evidence",
-        report,
-        "EVIDENCE_COLLECTED",
-      );
+      expect(report.reproductionVerified).toBe(true);
+      expect(report.allTestsPassing).toBe(true);
+      expect((greenEvidence as any).validatedPatchArtifactSha256).toBeDefined();
 
       const updated = manager.getRun(manifest.runId);
       expect(updated?.manifest.currentPhase).toBe("EVIDENCE_COLLECTED");

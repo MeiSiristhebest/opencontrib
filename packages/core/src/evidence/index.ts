@@ -12,3 +12,4 @@ export * from './parsers/dotnet-parser.js';
 export * from './parsers/rspec-parser.js';
 export * from './parsers/phpunit-parser.js';
 export * from './vcs-delta.port.js';
+export * from './validated-patch.js';

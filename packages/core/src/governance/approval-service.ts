@@ -5,6 +5,7 @@ import {
   ApprovalArtifactSchema,
   GovernanceDecisionArtifactSchema,
   SubmissionIntentArtifactSchema,
+  ValidatedPatchArtifactSchema,
   type ApprovalArtifact,
   type SubmissionIntentArtifact,
 } from "../contracts/schemas.js";
@@ -12,14 +13,12 @@ import {
   isTrustedApprovalAuthority,
   type TrustedApprovalAuthority,
 } from "./approval-authority.js";
+import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 
 export interface CreateApprovalInput {
   runId: string;
   /** Hash returned by requestApproval; mandatory challenge binding. */
   expectedIntentSha256: string;
-  /** Deprecated agent-facing fields. The trusted authority, not these fields, decides them. */
-  approvedBy?: string;
-  approvalMode?: "explicit_human" | "policy_waived";
 }
 
 export interface ApprovalChallenge {
@@ -34,7 +33,8 @@ export interface ApprovalChallenge {
 }
 
 function hash(value: unknown): string {
-  const content = typeof value === "string" ? value : JSON.stringify(value ?? "");
+  const content =
+    typeof value === "string" ? value : JSON.stringify(value ?? "");
   return createHash("sha256").update(content).digest("hex");
 }
 
@@ -67,11 +67,7 @@ export class ApprovalService {
     };
   }
 
-  /**
-   * Mint an ApprovalArtifact only when an opaque host capability is present.
-   * `approvedBy` and `approvalMode` supplied by an agent are intentionally not
-   * trusted; the injected host authority returns both values.
-   */
+  /** Mint an ApprovalArtifact only when an opaque host capability is present. */
   recordApproval(input: CreateApprovalInput): ApprovalArtifact {
     if (!this.authority) {
       throw new Error(
@@ -153,7 +149,16 @@ export class ApprovalService {
       };
     }
     const intent = intentResult.data;
-    const hashes = this.currentHashes(summary);
+    let hashes: ReturnType<ApprovalService["currentHashes"]>;
+    try {
+      hashes = this.currentHashes(summary);
+    } catch {
+      return {
+        valid: false,
+        reason:
+          "TOCTOU violation: current patch or ValidatedPatchArtifact is invalid.",
+      };
+    }
     if (intent.intentSha256 !== approval.intentSha256) {
       return {
         valid: false,
@@ -183,7 +188,10 @@ export class ApprovalService {
           "TOCTOU violation: governance audit has changed since approval was recorded.",
       };
     }
-    if (summary.artifacts.prDraft && hash(summary.artifacts.prDraft) !== approval.prBodySha256) {
+    if (
+      summary.artifacts.prDraft &&
+      hash(summary.artifacts.prDraft) !== approval.prBodySha256
+    ) {
       return {
         valid: false,
         reason:
@@ -250,11 +258,31 @@ export class ApprovalService {
     evidenceSha256: string;
     governanceSha256: string;
   } {
-    if (!summary.artifacts.patch || !summary.artifacts.evidence || !summary.artifacts.governance) {
-      throw new Error("ApprovalNotReadyError: patch, evidence, and governance artifacts are required.");
+    if (
+      !summary.artifacts.patch ||
+      !summary.artifacts.validatedPatch ||
+      !summary.artifacts.evidence ||
+      !summary.artifacts.governance
+    ) {
+      throw new Error(
+        "ApprovalNotReadyError: patch, validated patch, evidence, and governance artifacts are required.",
+      );
+    }
+    const validatedPatch = ValidatedPatchArtifactSchema.safeParse(
+      summary.artifacts.validatedPatch,
+    );
+    if (
+      !validatedPatch.success ||
+      validatedPatch.data.patchSha256 !== hash(summary.artifacts.patch) ||
+      validatedPatch.data.artifactSha256 !==
+        hashValidatedPatchArtifact(validatedPatch.data)
+    ) {
+      throw new Error(
+        "ApprovalNotReadyError: the current patch or ValidatedPatchArtifact integrity does not match the canonical GREEN result.",
+      );
     }
     return {
-      patchSha256: hash(summary.artifacts.patch),
+      patchSha256: validatedPatch.data.patchSha256,
       evidenceSha256: hash(summary.artifacts.evidence),
       governanceSha256: hash(summary.artifacts.governance),
     };

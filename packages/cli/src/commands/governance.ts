@@ -48,11 +48,6 @@ const auditCommand = new Command("audit")
   .option("--evidence <json>", "Evidence JSON from collect_evidence")
   .option("--evidence-file <path>", "Path to evidence.json file")
   .option(
-    "--human-approved",
-    "Explicit human approval for contribution submission",
-    false,
-  )
-  .option(
     "--subagent-score <n>",
     "External subagent quality score (0-100)",
     (v) => Number(v),
@@ -77,7 +72,6 @@ const auditCommand = new Command("audit")
       prBodyFile?: string;
       evidence?: string;
       evidenceFile?: string;
-      humanApproved?: boolean;
       subagentScore?: number;
       isAutonomous?: boolean;
       runId?: string;
@@ -108,7 +102,9 @@ const auditCommand = new Command("audit")
         }
 
         if (!patchContent && !runId) {
-          console.error("❌ --patch is required when no active runId is provided.");
+          console.error(
+            "❌ --patch is required when no active runId is provided.",
+          );
           throw new CliExitError(1);
         }
 
@@ -157,10 +153,9 @@ const auditCommand = new Command("audit")
           evidence,
           subagentQualityScore: opts.subagentScore,
           isAutonomousPrSubmission: opts.isAutonomous ?? false,
-          humanApproved: opts.humanApproved,
         });
 
-        let canonicalDecision: any = undefined;
+        let canonicalDecision: any;
         let isPassed = audit.overallConfidence.isPassed;
 
         if (runId) {
@@ -385,11 +380,7 @@ const prTemplateCommand = new Command("pr-template")
 
         const runId = getRunManager().resolveRunId(opts.runId);
         if (runId && getRunManager().getRun(runId)) {
-          getRunManager().saveArtifact(
-            runId,
-            "pr_draft",
-            prBody,
-          );
+          getRunManager().saveArtifact(runId, "pr_draft", prBody);
         }
 
         printJSON({ status: "success", prBody }, opts.pretty);
@@ -398,13 +389,14 @@ const prTemplateCommand = new Command("pr-template")
           currentPhase: "PATCH_DRAFTED",
           runId,
           status: "SUCCESS",
-          humanCheckpoint: "Checkpoint 3 (PR Drafted & Ready for Governance Audit)",
+          humanCheckpoint:
+            "Checkpoint 3 (PR Drafted & Ready for Governance Audit)",
           nextCommand: runId
             ? `opencontrib governance audit --run-id ${runId} --pr-title "${opts.issueTitle}"`
             : `opencontrib governance audit --patch <file> --pr-title "${opts.issueTitle}"`,
           invariants: [
             'Ensure the PR description includes "Fixes #<issue_number>".',
-            'Audit governance before requesting approval.',
+            "Audit governance before requesting approval.",
           ],
         });
       } catch (err: any) {
@@ -532,165 +524,67 @@ const approveCommand = new Command("request-approval")
   )
   .option("--run-id <id>", "Contribution run ID (defaults to active session)")
   .option("--pretty", "Pretty-print", false)
-  .action(
-    async (opts: { runId?: string; pretty?: boolean }) => {
-      try {
-        const runId = getRunManager().resolveRunId(opts.runId);
-        if (!runId) {
-          console.error(
-            "❌ No runId found in active session or --run-id option.",
-          );
-          throw new CliExitError(1);
-        }
-
-        const runManager = getRunManager();
-        const run = runManager.getRun(runId);
-        if (!run) {
-          throw new Error(`Run "${runId}" does not exist.`);
-        }
-
-        const [owner, repo] = (run.manifest.repoFullName || "").split("/");
-        if (!owner || !repo) {
-          throw new Error(
-            `Cannot determine upstream repository from manifest "${run.manifest.repoFullName}".`,
-          );
-        }
-
-        // Ensure SubmissionIntent exists before challenging approval
-        if (!run.artifacts?.submissionIntent) {
-          const { SubmissionIntentService } = await import("@opencontrib/core");
-          new SubmissionIntentService(runManager).createIntent({
-            runId,
-            upstreamOwner: owner,
-            upstreamRepo: repo,
-          });
-        }
-
-        const { ApprovalService } = await import("@opencontrib/core");
-        const challenge = new ApprovalService(runManager).requestApproval(runId);
-        printJSON(
-          {
-            status: "APPROVAL_REQUESTED",
-            challenge,
-            message:
-              "SubmissionIntent created & Challenge issued. A trusted human/policy host must mint the approval; this CLI command never self-approves.",
-          },
-          opts.pretty,
+  .action(async (opts: { runId?: string; pretty?: boolean }) => {
+    try {
+      const runId = getRunManager().resolveRunId(opts.runId);
+      if (!runId) {
+        console.error(
+          "❌ No runId found in active session or --run-id option.",
         );
-        printPhaseGuidance({
-          currentPhase: "GOVERNANCE_AUDITED",
-          runId,
-          status: "SUCCESS",
-          humanCheckpoint: "Checkpoint 3 (Awaiting Trusted Approval Authority)",
-          nextCommand: `opencontrib submission submit --run-id ${runId}`,
-          invariants: [
-            "No approval artifact was minted by the agent-facing CLI.",
-            "Submission remains blocked until a trusted authority records the exact challenge hash.",
-          ],
-        });
-      } catch (err: any) {
-        if (err instanceof CliExitError) throw err;
-        printJSON({ status: "error", message: err.message }, opts.pretty);
         throw new CliExitError(1);
       }
-    },
-  );
 
-// ─── governance approve (Human/Maintainer Host Approval) ──────────────────────
-const humanApproveCommand = new Command("approve")
-  .description(
-    "Interactive human reviewer approval: verifies intent hash and mints canonical approval artifact",
-  )
-  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
-  .option("--reviewer <name>", "Reviewer identifier", "human_reviewer")
-  .option(
-    "--mode <mode>",
-    "Approval mode: explicit_human or policy_waived",
-    "explicit_human",
-  )
-  .option("--yes", "Confirm approval non-interactively", false)
-  .option("--pretty", "Pretty-print", false)
-  .action(
-    async (opts: {
-      runId?: string;
-      reviewer: string;
-      mode: string;
-      yes?: boolean;
-      pretty?: boolean;
-    }) => {
-      try {
-        const runId = getRunManager().resolveRunId(opts.runId);
-        if (!runId) {
-          console.error("❌ No runId found in active session or --run-id option.");
-          throw new CliExitError(1);
-        }
-
-        const runManager = getRunManager();
-        const run = runManager.getRun(runId);
-        if (!run) {
-          throw new Error(`Run "${runId}" does not exist.`);
-        }
-
-        const [owner, repo] = (run.manifest.repoFullName || "").split("/");
-        if (!owner || !repo) {
-          throw new Error(
-            `Cannot determine upstream repository from manifest "${run.manifest.repoFullName}".`,
-          );
-        }
-
-        // Ensure SubmissionIntent exists
-        let intent = run.artifacts?.submissionIntent as any;
-        if (!intent) {
-          const { SubmissionIntentService } = await import("@opencontrib/core");
-          intent = new SubmissionIntentService(runManager).createIntent({
-            runId,
-            upstreamOwner: owner,
-            upstreamRepo: repo,
-          });
-        }
-
-        const approvalMode = opts.mode === "policy_waived" ? "policy_waived" : "explicit_human";
-
-        const { buildHostApprovalAuthority, ApprovalService } = await import("@opencontrib/core");
-
-        const authority = buildHostApprovalAuthority({
-          approvedBy: opts.reviewer,
-          approvalMode,
-        });
-
-        const approvalService = new ApprovalService(runManager, authority);
-        const approvalArtifact = approvalService.recordApproval({
-          runId,
-          expectedIntentSha256: intent.intentSha256,
-        });
-
-        printJSON(
-          {
-            status: "APPROVED",
-            approval: approvalArtifact,
-            message: `Contribution run ${runId} approved by ${opts.reviewer} (${approvalMode}).`,
-          },
-          opts.pretty,
-        );
-
-        printPhaseGuidance({
-          currentPhase: "GOVERNANCE_AUDITED",
-          runId,
-          status: "SUCCESS",
-          humanCheckpoint: "Checkpoint 4 (Approved - Ready for PR Submission)",
-          nextCommand: `opencontrib submission submit --run-id ${runId}`,
-          invariants: [
-            `Approval minted with intent hash ${approvalArtifact.intentSha256}.`,
-            "Run is authorized for provider pull request creation.",
-          ],
-        });
-      } catch (err: any) {
-        if (err instanceof CliExitError) throw err;
-        printJSON({ status: "error", message: err.message }, opts.pretty);
-        throw new CliExitError(1);
+      const runManager = getRunManager();
+      const run = runManager.getRun(runId);
+      if (!run) {
+        throw new Error(`Run "${runId}" does not exist.`);
       }
-    },
-  );
+
+      const [owner, repo] = (run.manifest.repoFullName || "").split("/");
+      if (!owner || !repo) {
+        throw new Error(
+          `Cannot determine upstream repository from manifest "${run.manifest.repoFullName}".`,
+        );
+      }
+
+      // Ensure SubmissionIntent exists before challenging approval
+      if (!run.artifacts?.submissionIntent) {
+        const { SubmissionIntentService } = await import("@opencontrib/core");
+        new SubmissionIntentService(runManager).createIntent({
+          runId,
+          upstreamOwner: owner,
+          upstreamRepo: repo,
+        });
+      }
+
+      const { ApprovalService } = await import("@opencontrib/core");
+      const challenge = new ApprovalService(runManager).requestApproval(runId);
+      printJSON(
+        {
+          status: "APPROVAL_REQUESTED",
+          challenge,
+          message:
+            "SubmissionIntent created & Challenge issued. A trusted human/policy host must mint the approval; this CLI command never self-approves.",
+        },
+        opts.pretty,
+      );
+      printPhaseGuidance({
+        currentPhase: "GOVERNANCE_AUDITED",
+        runId,
+        status: "SUCCESS",
+        humanCheckpoint: "Checkpoint 3 (Awaiting Trusted Approval Authority)",
+        nextCommand: `opencontrib submission submit --run-id ${runId}`,
+        invariants: [
+          "No approval artifact was minted by the agent-facing CLI.",
+          "Submission remains blocked until a trusted authority records the exact challenge hash.",
+        ],
+      });
+    } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
+      printJSON({ status: "error", message: err.message }, opts.pretty);
+      throw new CliExitError(1);
+    }
+  });
 
 // ─── Top-level command ────────────────────────────────────────────────────────
 
@@ -699,7 +593,6 @@ export const governanceCommand = new Command("governance")
     "Governance audit, impact analysis, CI diagnosis, PR template rendering, Issue Claim generation, community gate detection, and Markdown linting",
   )
   .addCommand(auditCommand)
-  .addCommand(humanApproveCommand)
   .addCommand(approveCommand)
   .addCommand(gateCommand)
   .addCommand(impactCommand)

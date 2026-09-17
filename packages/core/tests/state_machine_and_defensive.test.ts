@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test";
+import { createHash } from "crypto";
+import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import {
   analyzePatchImpactAndConsistency,
   parseCiRawLogs,
@@ -32,21 +34,61 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
     expect(res.error?.missingPrerequisites).toContain(
       "Missing artifact: evidence",
     );
-    expect(res.error?.suggestedAction).toMatch(/governance/);
+    expect(res.error?.suggestedAction).toMatch(/approval|pr_draft/);
   });
 
   it("allows advancing to GOVERNANCE_AUDITED when workspace, patch, and evidence are present", () => {
+    const runId = "run_test_002";
+    const baseCommitSha = "a".repeat(40);
+    const patch = {
+      files: [
+        {
+          path: "src/fix.ts",
+          operation: "MODIFY",
+          mode: "100644",
+          content: "fixed",
+        },
+      ],
+    };
+    const patchSha256 = createHash("sha256")
+      .update(JSON.stringify(patch))
+      .digest("hex");
+    const validatedPatch = {
+      runId,
+      patchSha256,
+      actualDeltaSha256: "b".repeat(64),
+      baseCommitSha,
+      redTreeSha256: "a".repeat(8),
+      greenTreeSha256: "b".repeat(8),
+      artifactSha256: "",
+      files: [
+        {
+          path: "src/fix.ts",
+          operation: "MODIFY" as const,
+          mode: "100644" as const,
+          contentSha256: createHash("sha256").update("fixed").digest("hex"),
+        },
+      ],
+      validatedAt: "2026-07-01T00:01:00.000Z",
+    };
+    validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
     const summary: ContributionRunSummary = {
       manifest: {
         schemaVersion: "1.0.0",
-        runId: "run_test_002",
+        runId,
         repoFullName: "alibaba/open-code-review",
         currentPhase: "EVIDENCE_COLLECTED",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
       artifacts: {
-        workspace: { worktreePath: "/tmp/worktree" },
+        workspace: {
+          worktreePath: "/tmp/worktree",
+          baseCommitSha,
+          baseBranch: "main",
+        },
+        patch: JSON.stringify(patch),
+        validatedPatch,
         evidence: {
           redEvidence: {
             command: "bun test",
@@ -67,12 +109,15 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
             capturedAt: "2026-07-01T00:01:00.000Z",
             treeChangedComparedToRed: true,
             treeHashMatchesRed: false,
+            appliedPatchSha256: patchSha256,
+            validatedPatchArtifactSha256: validatedPatch.artifactSha256,
             stressLoopPassed: true,
             assertionMatchedFingerprint: "fp-1",
           },
           reproductionVerified: true,
           allTestsPassing: true,
         },
+        prDraft: "# fix: bug",
         governance: {
           overallScore: 95,
           weakestDimension: { dimension: "implementation", score: 90 },
@@ -95,7 +140,10 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
       },
       availableArtifactFiles: [
         "workspace.json",
+        "patch.diff",
+        "validated_patch.json",
         "evidence.json",
+        "pr_draft.md",
         "governance.json",
       ],
     };

@@ -198,9 +198,32 @@ export const GreenEvidenceSchema = z.object({
   testIdentity: TestIdentitySchema.optional(),
   testDiffSha256: z.string().optional(),
   actualTestDiffSha256: z.string().optional(),
-  appliedPatchSha256: z.string().optional(),
+  appliedPatchSha256: z.string(),
 });
 export type GreenEvidence = z.infer<typeof GreenEvidenceSchema>;
+
+export const ValidatedPatchFileSchema = z.object({
+  path: z.string(),
+  mode: z.enum(["100644", "100755", "120000"]),
+  operation: z.enum(["CREATE", "MODIFY", "DELETE"]),
+  contentSha256: z.string(),
+});
+export type ValidatedPatchFile = z.infer<typeof ValidatedPatchFileSchema>;
+
+export const ValidatedPatchArtifactSchema = z.object({
+  runId: z.string(),
+  patchSha256: z.string(),
+  actualDeltaSha256: z.string(),
+  baseCommitSha: z.string(),
+  redTreeSha256: z.string(),
+  greenTreeSha256: z.string(),
+  artifactSha256: z.string(),
+  files: z.array(ValidatedPatchFileSchema),
+  validatedAt: z.string(),
+});
+export type ValidatedPatchArtifact = z.infer<
+  typeof ValidatedPatchArtifactSchema
+>;
 
 export const SubmissionIntentFileSchema = z.object({
   path: z.string(),
@@ -216,7 +239,7 @@ export const SubmissionIntentArtifactSchema = z.object({
   upstreamOwner: z.string(),
   upstreamRepo: z.string(),
   baseBranch: z.string().default("main"),
-  baseCommitSha: z.string().optional(),
+  baseCommitSha: z.string(),
   branchName: z.string(),
   title: z.string(),
   body: z.string(),
@@ -253,6 +276,7 @@ export const SubmissionArtifactSchema = z.object({
   owner: z.string(),
   repo: z.string(),
   baseBranch: z.string(),
+  baseCommitSha: z.string(),
   branchName: z.string(),
   intentSha256: z.string(),
   patchSha256: z.string(),
@@ -318,6 +342,7 @@ export const EvidenceBundleV2Schema = z.object({
   greenEvidence: GreenEvidenceSchema.extend({
     testIdentity: TestIdentitySchema,
     actualTestDiffSha256: z.string().optional(),
+    validatedPatchArtifactSha256: z.string(),
   }),
   reproductionVerified: z.literal(true),
   allTestsPassing: z.literal(true),

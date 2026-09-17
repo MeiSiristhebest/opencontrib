@@ -87,12 +87,6 @@ export function registerGovernanceTools(
         .describe(
           "Whether the caller is preparing for autonomous PR submission (demands empirical evidence)",
         ),
-      humanApproved: z
-        .boolean()
-        .optional()
-        .describe(
-          "Explicit human approval boolean. Must be true to pass approvalGate without a waiver",
-        ),
       confidenceBreakdown: ConfidenceBreakdownSchema.optional().describe(
         "Optional detailed 7-dimensional confidence scores",
       ),
@@ -133,7 +127,6 @@ export function registerGovernanceTools(
         evidence: args.evidence,
         subagentQualityScore: args.subagentQualityScore,
         isAutonomousPrSubmission: args.isAutonomousPrSubmission,
-        humanApproved: args.humanApproved,
         confidenceBreakdown: args.confidenceBreakdown,
       });
 
@@ -288,7 +281,9 @@ export function registerGovernanceTools(
       runId: z
         .string()
         .optional()
-        .describe("Contribution run ID to automatically persist pr_draft artifact"),
+        .describe(
+          "Contribution run ID to automatically persist pr_draft artifact",
+        ),
     },
     wrapHandler(async (args) => {
       const prBody = renderMasterPrTemplate({
@@ -396,9 +391,12 @@ export function registerGovernanceTools(
       if (!run) throw new Error(`Unknown contribution run: ${args.runId}`);
       if (
         args.repoFullName &&
-        args.repoFullName.toLowerCase() !== run.manifest.repoFullName.toLowerCase()
+        args.repoFullName.toLowerCase() !==
+          run.manifest.repoFullName.toLowerCase()
       ) {
-        throw new Error("FlywheelSyncError: repository does not match the run manifest.");
+        throw new Error(
+          "FlywheelSyncError: repository does not match the run manifest.",
+        );
       }
       const result = flywheel.syncFromRun(runManager, args.runId);
 
@@ -568,7 +566,9 @@ export function registerGovernanceTools(
         isDraft: args.isDraft,
       });
       const { ApprovalService } = await import("@opencontrib/core");
-      const challenge = new ApprovalService(runManager).requestApproval(args.runId);
+      const challenge = new ApprovalService(runManager).requestApproval(
+        args.runId,
+      );
 
       return {
         content: [
@@ -606,7 +606,9 @@ export function registerGovernanceTools(
       expectedIntentSha256: z
         .string()
         .optional()
-        .describe("Optional expected intent SHA256 to guard against concurrent mutations"),
+        .describe(
+          "Optional expected intent SHA256 to guard against concurrent mutations",
+        ),
     },
     wrapHandler(async (args) => {
       const { GitHubSubmissionService, GitHubClient, ContributionPrService } =
@@ -623,7 +625,8 @@ export function registerGovernanceTools(
       // Guard against concurrent mutations if expectedIntentSha256 is supplied
       if (args.expectedIntentSha256) {
         const run = runManager.getRun(args.runId);
-        const intentSha = (run?.artifacts?.submissionIntent as any)?.intentSha256;
+        const intentSha = (run?.artifacts?.submissionIntent as any)
+          ?.intentSha256;
         if (intentSha && intentSha !== args.expectedIntentSha256) {
           throw new Error(
             `SubmissionIntentMismatchError: expected intent SHA "${args.expectedIntentSha256}" does not match recorded intent SHA "${intentSha}".`,

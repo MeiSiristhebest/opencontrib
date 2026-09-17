@@ -1,12 +1,12 @@
-import { beforeAll, describe, expect, it } from 'bun:test';
-import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { LLMService, MockLLMProvider } from '../src/llm/llm-service.js';
-import { PatchDraftSchema } from '../src/contracts/llm-schemas.js';
-import { AgentOrchestrator } from '../src/orchestration/agent-orchestrator.js';
-import { OpenContribStorage } from '../src/storage/storage-layout.js';
-import { isIntegrationEnabled } from './helpers/integration-guard.js';
+import { beforeAll, describe, expect, it } from "bun:test";
+import { spawnSync } from "child_process";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+import { LLMService, MockLLMProvider } from "../src/llm/llm-service.js";
+import { PatchDraftSchema } from "../src/contracts/llm-schemas.js";
+import { AgentOrchestrator } from "../src/orchestration/agent-orchestrator.js";
+import { OpenContribStorage } from "../src/storage/storage-layout.js";
+import { isIntegrationEnabled } from "./helpers/integration-guard.js";
 
 // The three pipeline tests depend on live GitHub returning issues that match a
 // specific profile for bytedance/flowgram.ai, so they are opt-in only
@@ -14,131 +14,153 @@ import { isIntegrationEnabled } from './helpers/integration-guard.js';
 // present, because the live data may not satisfy the test's assumptions.
 const integrationEnabled = isIntegrationEnabled();
 
-describe('Agent Orchestrator Pipeline & Schema-First LLM Service', () => {
+describe("Agent Orchestrator Pipeline & Schema-First LLM Service", () => {
   beforeAll(() => {
     // Seed cached repo for bytedance/flowgram.ai so tests run completely offline and network-resilient
     const storage = OpenContribStorage.getInstance();
     const dirs = [
-      join(storage.getHomeDir(), 'repos', 'bytedance__flowgram.ai'),
-      join(storage.getHomeDir(), 'repos', 'bytedance/flowgram.ai'),
+      join(storage.getHomeDir(), "repos", "bytedance__flowgram.ai"),
+      join(storage.getHomeDir(), "repos", "bytedance/flowgram.ai"),
     ];
     for (const cachedDir of dirs) {
-      if (!existsSync(join(cachedDir, '.git')) && !existsSync(join(cachedDir, 'HEAD'))) {
+      if (
+        !existsSync(join(cachedDir, ".git")) &&
+        !existsSync(join(cachedDir, "HEAD"))
+      ) {
         mkdirSync(cachedDir, { recursive: true });
-        spawnSync('git', ['init', '-b', 'main'], { cwd: cachedDir });
-        spawnSync('git', ['config', 'user.name', 'Tester'], { cwd: cachedDir });
-        spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: cachedDir });
-        writeFileSync(join(cachedDir, 'package.json'), JSON.stringify({ name: 'flowgram.ai', version: '1.0.0' }));
-        spawnSync('git', ['add', '.'], { cwd: cachedDir });
-        spawnSync('git', ['commit', '-m', 'Initial commit'], { cwd: cachedDir });
+        spawnSync("git", ["init", "-b", "main"], { cwd: cachedDir });
+        spawnSync("git", ["config", "user.name", "Tester"], { cwd: cachedDir });
+        spawnSync("git", ["config", "user.email", "test@test.com"], {
+          cwd: cachedDir,
+        });
+        writeFileSync(
+          join(cachedDir, "package.json"),
+          JSON.stringify({ name: "flowgram.ai", version: "1.0.0" }),
+        );
+        spawnSync("git", ["add", "."], { cwd: cachedDir });
+        spawnSync("git", ["commit", "-m", "Initial commit"], {
+          cwd: cachedDir,
+        });
       }
     }
   });
 
-  it('parses structured LLM output and validates against Zod schema', async () => {
+  it("parses structured LLM output and validates against Zod schema", async () => {
     const validJson = JSON.stringify({
-      title: 'fix(utils): prevent memory leak',
-      summary: 'Clean up listener handles on component unmount',
-      rationale: 'Avoid retain cycles in long lived views',
-      targetFiles: [{ path: 'packages/utils/src/index.ts', reason: 'Primary fix' }],
-      implementationSteps: ['Add dispose method', 'Clear timers'],
-      regressionTestPlan: ['Run unit tests'],
+      title: "fix(utils): prevent memory leak",
+      summary: "Clean up listener handles on component unmount",
+      rationale: "Avoid retain cycles in long lived views",
+      targetFiles: [
+        { path: "packages/utils/src/index.ts", reason: "Primary fix" },
+      ],
+      implementationSteps: ["Add dispose method", "Clear timers"],
+      regressionTestPlan: ["Run unit tests"],
       estimatedDiffLines: 15,
     });
 
-    const llm = new LLMService(new MockLLMProvider(async () => `\`\`\`json\n${validJson}\n\`\`\``));
+    const llm = new LLMService(
+      new MockLLMProvider(async () => `\`\`\`json\n${validJson}\n\`\`\``),
+    );
     const result = await llm.generateStructured({
-      prompt: 'Generate patch',
+      prompt: "Generate patch",
       schema: PatchDraftSchema,
     });
 
-    expect(result.data.title).toBe('fix(utils): prevent memory leak');
+    expect(result.data.title).toBe("fix(utils): prevent memory leak");
     expect(result.data.estimatedDiffLines).toBe(15);
     expect(result.data.targetFiles.length).toBe(1);
   });
 
-  it.skipIf(!integrationEnabled)('runs full AgentOrchestrator contribution pipeline with explicit MockLLMProvider in dry_run mode', async () => {
-    const mockLlm = new LLMService(new MockLLMProvider());
-    const orchestrator = new AgentOrchestrator({
-      policy: {
-        mode: 'dry_run',
-        allowRealPr: false,
-        autoPurgeSandboxOnFinish: true,
-      },
-      llmService: mockLlm,
-    });
+  it.skipIf(!integrationEnabled)(
+    "runs full AgentOrchestrator contribution pipeline with explicit MockLLMProvider in dry_run mode",
+    async () => {
+      const mockLlm = new LLMService(new MockLLMProvider());
+      const orchestrator = new AgentOrchestrator({
+        policy: {
+          mode: "dry_run",
+          allowRealPr: false,
+          autoPurgeSandboxOnFinish: true,
+        },
+        llmService: mockLlm,
+      });
 
-    const result = await orchestrator.runPipeline({
-      profile: {
-        techStack: ['typescript', 'react'],
-        proficiency: 'intermediate',
-        focusAreas: ['tooling', 'dx'],
-        minMatchScore: 50,
-      },
-      targetRepo: 'bytedance/flowgram.ai',
-      humanApproved: true,
-    });
+      const result = await orchestrator.runPipeline({
+        profile: {
+          techStack: ["typescript", "react"],
+          proficiency: "intermediate",
+          focusAreas: ["tooling", "dx"],
+          minMatchScore: 50,
+        },
+        targetRepo: "bytedance/flowgram.ai",
+      });
 
-    expect(result.status).toBe('DRY_RUN_COMPLETED');
-    expect(result.stage).toBe('COMPLETED');
-    expect(result.selectedOpportunity).toBeDefined();
-    expect(result.confidenceScore).toBeGreaterThanOrEqual(70);
-    expect(result.patchDraft).toBeDefined();
+      expect(result.status).toBe("DRY_RUN_COMPLETED");
+      expect(result.stage).toBe("COMPLETED");
+      expect(result.selectedOpportunity).toBeDefined();
+      expect(result.confidenceScore).toBeGreaterThanOrEqual(70);
+      expect(result.patchDraft).toBeDefined();
 
-    expect(result.appliedFiles).toBeDefined();
-    expect(result.subagentReview).toBeDefined();
-    expect(result.reportSummary).toContain('Dry run completed');
-  }, { timeout: 60000 });
+      expect(result.appliedFiles).toBeDefined();
+      expect(result.subagentReview).toBeDefined();
+      expect(result.reportSummary).toContain("Dry run completed");
+    },
+    { timeout: 60000 },
+  );
 
-  it.skipIf(!integrationEnabled)('pauses at HUMAN_GATE when humanApproved is false in interactive mode', async () => {
-    const mockLlm = new LLMService(new MockLLMProvider());
-    const orchestrator = new AgentOrchestrator({
-      policy: {
-        mode: 'interactive',
-        allowRealPr: false,
-      },
-      llmService: mockLlm,
-    });
+  it.skipIf(!integrationEnabled)(
+    "pauses at HUMAN_GATE in interactive mode without external approval",
+    async () => {
+      const mockLlm = new LLMService(new MockLLMProvider());
+      const orchestrator = new AgentOrchestrator({
+        policy: {
+          mode: "interactive",
+          allowRealPr: false,
+        },
+        llmService: mockLlm,
+      });
 
-    const result = await orchestrator.runPipeline({
-      profile: {
-        techStack: ['typescript', 'react'],
-        proficiency: 'intermediate',
-        focusAreas: ['tooling', 'dx'],
-        minMatchScore: 50,
-      },
-      targetRepo: 'bytedance/flowgram.ai',
-      humanApproved: false,
-    });
+      const result = await orchestrator.runPipeline({
+        profile: {
+          techStack: ["typescript", "react"],
+          proficiency: "intermediate",
+          focusAreas: ["tooling", "dx"],
+          minMatchScore: 50,
+        },
+        targetRepo: "bytedance/flowgram.ai",
+      });
 
-    expect(result.status).toBe('HUMAN_APPROVAL_REQUIRED');
-    expect(result.stage).toBe('HUMAN_GATE');
-    expect(result.confidenceScore).toBeGreaterThanOrEqual(70);
-    expect(result.reportSummary).toContain('Awaiting human');
+      expect(result.status).toBe("HUMAN_APPROVAL_REQUIRED");
+      expect(result.stage).toBe("HUMAN_GATE");
+      expect(result.confidenceScore).toBeGreaterThanOrEqual(70);
+      expect(result.reportSummary).toContain("Awaiting human");
+    },
+    { timeout: 60000 },
+  );
 
-  }, { timeout: 60000 });
+  it.skipIf(!integrationEnabled)(
+    "strictly blocks execution when no LLM provider is configured (no fake patches)",
+    async () => {
+      const orchestratorWithoutLlm = new AgentOrchestrator({
+        policy: {
+          mode: "dry_run",
+          allowRealPr: false,
+        },
+      });
 
-  it.skipIf(!integrationEnabled)('strictly blocks execution when no LLM provider is configured (no fake patches)', async () => {
-    const orchestratorWithoutLlm = new AgentOrchestrator({
-      policy: {
-        mode: 'dry_run',
-        allowRealPr: false,
-      },
-    });
+      const result = await orchestratorWithoutLlm.runPipeline({
+        profile: {
+          techStack: ["typescript", "react"],
+          proficiency: "intermediate",
+          focusAreas: ["tooling", "dx"],
+          minMatchScore: 50,
+        },
+        targetRepo: "bytedance/flowgram.ai",
+      });
 
-    const result = await orchestratorWithoutLlm.runPipeline({
-      profile: {
-        techStack: ['typescript', 'react'],
-        proficiency: 'intermediate',
-        focusAreas: ['tooling', 'dx'],
-        minMatchScore: 50,
-      },
-      targetRepo: 'bytedance/flowgram.ai',
-      humanApproved: true,
-    });
-
-    expect(result.status).toBe('BLOCKED');
-    expect(result.stage).toBe('PATCH_DESIGN');
-    expect(result.reportSummary).toContain('Pipeline halted');
-  }, 60000);
+      expect(result.status).toBe("BLOCKED");
+      expect(result.stage).toBe("PATCH_DESIGN");
+      expect(result.reportSummary).toContain("Pipeline halted");
+    },
+    60000,
+  );
 });

@@ -19,8 +19,7 @@ import {
 import { scoutOpportunities } from "../../discovery/scout.js";
 import { MultiSignalHeuristicRanker } from "../../discovery/ranking.js";
 import { detectSystemCapabilities } from "../../discovery/feasibility.js";
-import {
-} from "../../evidence/evidence-collector.js";
+import {} from "../../evidence/evidence-collector.js";
 import { EvidenceService } from "../../evidence/evidence-service.js";
 import { generateSubagentReviewPrompt } from "../../governance/subagent-reviewer.js";
 import { deriveEvidenceBackedQualityRubric } from "../../governance/governance-auditor.js";
@@ -158,7 +157,10 @@ export class WorkspaceAllocationStep implements PipelineStep {
       "ONBOARDING",
       `Preparing clean-room worktree for ${selectedOpp.repoFullName}`,
     );
-    const workspaceService = new WorkspaceService(runManager, deps.worktreeManager);
+    const workspaceService = new WorkspaceService(
+      runManager,
+      deps.worktreeManager,
+    );
     const { context } = workspaceService.prepare({
       runId: ctx.runId,
       issueOrTaskId: selectedOpp.issueNumber,
@@ -388,7 +390,9 @@ export class ImplementValidateLoopStep implements PipelineStep {
       } else if (testCmd) {
         try {
           if (!ctx.runId) {
-            throw new Error("Canonical run is missing; refusing to persist evidence.");
+            throw new Error(
+              "Canonical run is missing; refusing to persist evidence.",
+            );
           }
           evidenceReport = await new EvidenceService(runManager).verifyGreen({
             runId: ctx.runId,
@@ -580,7 +584,6 @@ export class RiskAssessmentGateStep implements PipelineStep {
       riskAssessment.riskLevel === "CRITICAL" ||
       riskAssessment.recommendedPolicy === "blocked" ||
       (!qualityRubric.isPassed &&
-        !ctx.humanApproved &&
         (validationStatus === "VALIDATION_FAILED" ||
           validationStatus === "VALIDATION_UNAVAILABLE"))
     ) {
@@ -651,10 +654,15 @@ export class HumanGateStep implements PipelineStep {
     const policy = ctx.policy!;
     const riskAssessment = ctx.riskAssessment!;
 
+    // Dry-run/local-artifacts modes have no external side effect and therefore
+    // do not need an approval checkpoint. Real execution always pauses here
+    // when policy, risk, or missing validation requires a human decision.
     const requiresHumanGate =
-      (policy.mode === "interactive" && !ctx.humanApproved) ||
-      (riskAssessment.riskLevel !== "LOW" && !ctx.humanApproved) ||
-      (validationStatus === "NO_TEST_AVAILABLE" && !ctx.humanApproved);
+      policy.mode !== "dry_run" &&
+      policy.mode !== "local_artifacts_only" &&
+      (policy.mode === "interactive" ||
+        riskAssessment.riskLevel !== "LOW" ||
+        validationStatus === "NO_TEST_AVAILABLE");
 
     if (requiresHumanGate) {
       deps.stateMachine.transition("HUMAN_GATE", "Awaiting human confirmation");
@@ -673,9 +681,6 @@ export class HumanGateStep implements PipelineStep {
         telemetry: ctx.telemetry,
         reportSummary: `Candidate patch applied in sandbox (${ctx.implementationAttempts} attempt(s)) for #${selectedOpp.issueNumber}. Risk Level: ${riskAssessment.riskLevel} (${riskAssessment.riskScore}/100). Validation: ${validationStatus}. Awaiting human review before opening PR.`,
       });
-    } else if (ctx.humanApproved) {
-      // Transition through HUMAN_GATE to satisfy reviewRequired constraint
-      deps.stateMachine.transition("HUMAN_GATE", "Approved by human reviewer");
     }
     return continuePipeline();
   }
@@ -826,7 +831,13 @@ export class PrSubmissionStep implements PipelineStep {
       // Ensure only non-authoritative stage artifacts are written generically;
       // evidence must already have been produced by EvidenceService.
       if (ctx.workspace && !runManager.getRun(runId)?.artifacts.workspace) {
-        saveCanonicalArtifact(runManager, runId, "workspace", ctx.workspace as any, "WORKSPACE_PREPARED");
+        saveCanonicalArtifact(
+          runManager,
+          runId,
+          "workspace",
+          ctx.workspace as any,
+          "WORKSPACE_PREPARED",
+        );
       }
       if (ctx.activePatch) {
         runManager.saveArtifact(runId, "patch", ctx.activePatch as any);
@@ -864,11 +875,8 @@ export class PrSubmissionStep implements PipelineStep {
         isDraft: true,
       });
 
-      if (!ctx.humanApproved) {
-        throw new Error(
-          "HumanApprovalRequiredError: autonomous submission requires an external approval decision.",
-        );
-      }
+      // Approval is minted only through the host-injected trusted authority;
+      // the agent-facing pipeline has no approval boolean or minting path.
       if (!deps.approvalAuthority) {
         throw new Error(
           "ApprovalAuthorityRequiredError: no host-issued trusted approval capability is available.",
