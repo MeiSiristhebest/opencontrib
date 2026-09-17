@@ -262,17 +262,11 @@ export const captureRedCommand = evidenceCommand
       try {
         const { runId, workspaceRoot, baselineSha, targetCwd } =
           resolveEvidenceContext(opts);
-        const red = captureRedEvidence({
-          cwd: targetCwd,
-          testCommand: opts.testCmd,
-          workspaceRoot,
-          expectedAssertion: opts.assertion,
-          baselineCommitSha: baselineSha,
-        });
+        let red: RedEvidence;
         let persistence: { saved: boolean; error?: string } | undefined;
         if (runId) {
           const evidenceService = new EvidenceService(getRunManager());
-          evidenceService.captureRed({
+          red = await evidenceService.captureRed({
             runId,
             cwd: targetCwd,
             testCommand: opts.testCmd,
@@ -281,6 +275,14 @@ export const captureRedCommand = evidenceCommand
             baselineCommitSha: baselineSha,
           });
           persistence = { saved: true };
+        } else {
+          red = captureRedEvidence({
+            cwd: targetCwd,
+            testCommand: opts.testCmd,
+            workspaceRoot,
+            expectedAssertion: opts.assertion,
+            baselineCommitSha: baselineSha,
+          });
         }
         printJSON(
           {
@@ -291,7 +293,7 @@ export const captureRedCommand = evidenceCommand
           opts.pretty,
         );
         printPhaseGuidance({
-          currentPhase: "PATCH_DRAFTED",
+          currentPhase: "RED_CAPTURED",
           runId,
           status: red.assertionMatched ? "SUCCESS" : "WARNING",
           humanCheckpoint: "Checkpoint 2 (RED Baseline Captured)",

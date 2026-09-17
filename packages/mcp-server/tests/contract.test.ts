@@ -198,6 +198,27 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
       /* best-effort */
     }
 
+    // Advance to RED_CAPTURED using the canonical writer
+    const { saveCanonicalArtifact } = await import(
+      "../../core/src/run/canonical-writer.js"
+    );
+    const { buildContributionRunManager } = await import("@opencontrib/core");
+    const testRunManager = buildContributionRunManager();
+    saveCanonicalArtifact(
+      testRunManager,
+      manifest.runId,
+      "evidence_red",
+      {
+        command: "bun test",
+        observedOutputSnippet: "failed",
+        exitCode: 1,
+        sourceTreeSha256: "a".repeat(64),
+        capturedAt: new Date().toISOString(),
+        assertionMatched: true,
+      } as any,
+      "RED_CAPTURED",
+    );
+
     // Save artifact and advance phase
     const saveResult = await localTools["contrib_save_artifact"].handler({
       runId: manifest.runId,
@@ -227,7 +248,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(resume.suggestedNextAction).toBe("collect_evidence");
   });
 
-  it("contract test: INITIALIZED -> PATCH_DRAFTED must fail without a workspace artifact", async () => {
+  it("contract test: WORKSPACE_PREPARED -> PATCH_DRAFTED must fail without a RED baseline artifact", async () => {
     const createResult = await tools["contrib_create_run"].handler({
       repoFullName: "test-org/contract-negative-repo",
       issueNumber: 43,
@@ -235,7 +256,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     });
     const manifest = JSON.parse(createResult.content[0].text).manifest;
 
-    // Attempt to jump straight to PATCH_DRAFTED from INITIALIZED (no workspace).
+    // Attempt to jump straight to PATCH_DRAFTED from INITIALIZED or WORKSPACE_PREPARED without evidence_red.
     const saveResult = await tools["contrib_save_artifact"].handler({
       runId: manifest.runId,
       artifactType: "patch",

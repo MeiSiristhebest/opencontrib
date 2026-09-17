@@ -91,6 +91,23 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       "WORKSPACE_PREPARED",
     );
 
+    // 2.6 Save RED baseline
+    saveCanonicalArtifact(
+      manager,
+      manifest.runId,
+      "evidence_red",
+      {
+        command: "bun test",
+        expectedAssertion: "pool timeout assertion failed",
+        observedOutputSnippet: "AssertionError: pool timeout assertion failed",
+        exitCode: 1,
+        sourceTreeSha256: "aaaaaaaa",
+        capturedAt: "2026-07-01T00:00:00.000Z",
+        assertionMatched: true,
+      } as any,
+      "RED_CAPTURED",
+    );
+
     // 3. Save a concrete patch artifact and its later immutable validation.
     const patchContent = JSON.stringify({
       files: [

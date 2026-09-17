@@ -858,12 +858,12 @@ export class PrSubmissionStep implements PipelineStep {
     const prDraftText = buildPrDescription({
       issueNumber: selectedOpp.issueNumber,
       problemSummary: activePatch?.summary || selectedOpp.title,
-      rootCause: activePatch?.rationale || "Targeted surgical bugfix",
-      keyChanges: activePatch?.implementationSteps || ["Applied surgical fix"],
-      reproductionCommand: activePatch?.regressionTestPlan?.[0],
+      rootCause: activePatch?.rationale || "Unavailable (root cause not recorded)",
+      keyChanges: activePatch?.implementationSteps?.length ? activePatch.implementationSteps : ["Applied surgical fix"],
+      reproductionCommand: ctx.evidenceReport?.redEvidence?.command || activePatch?.regressionTestPlan?.[0] || "",
       verificationCommand: ctx.evidenceReport
-        ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand
-        : undefined,
+        ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand || ctx.testCmd || ""
+        : "",
       testCount: ctx.evidenceReport?.passedUnitTestsCount,
       dcoAuthorName: "OpenContrib",
       dcoAuthorEmail: "bot@opencontrib.dev",
@@ -970,6 +970,17 @@ export class PrSubmissionStep implements PipelineStep {
       prUrl = submission.prUrl;
       prNumber = submission.prNumber;
       if (ctx.telemetry) ctx.telemetry.prUrl = prUrl;
+
+      // Ingest canonical submission into local run store so local flywheel/state is synchronized
+      if (runId && submission) {
+        saveCanonicalArtifact(
+          runManager,
+          runId,
+          "submission",
+          submission as any,
+          "PR_SUBMITTED",
+        );
+      }
     } catch (err: any) {
       deps.stateMachine.transition(
         "BLOCKED",

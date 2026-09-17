@@ -30,6 +30,7 @@ export class TrustedRunMaterializer {
   constructor(
     private readonly runManager: ContributionRunManager,
     private readonly worktreeManager: WorktreeManager = new WorktreeManager(),
+    private readonly _sandboxProvider?: import("../sandbox/sandbox-runtime.js").SandboxProvider,
   ) {}
 
   async materialize(input: RunTransferBundle) {

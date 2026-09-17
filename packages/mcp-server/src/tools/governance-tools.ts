@@ -4,6 +4,7 @@ import {
   analyzePatchImpactAndConsistency,
   auditGovernance,
   ConfidenceBreakdownSchema,
+  EvidenceReportSchema,
   parseCiRawLogs,
   ProfileFlywheel,
   renderMasterPrTemplate,
@@ -60,21 +61,9 @@ export function registerGovernanceTools(
         ),
       prTitle: z.string().optional().describe("Proposed PR title"),
       prBody: z.string().optional().describe("Proposed PR body text"),
-      evidence: z
-        .object({
-          stressLoopPassed: z.boolean().optional(),
-          passedUnitTestsCount: z.number().optional(),
-          failedUnitTestsCount: z.number().optional(),
-          reproductionVerified: z.boolean().optional(),
-          allTestsPassing: z.boolean().optional(),
-          testCoveragePercent: z.number().optional(),
-          handleLeakCheckPassed: z.boolean().optional(),
-        })
-        .passthrough()
-        .optional()
-        .describe(
-          "Empirical evidence report (EvidenceReport) from contrib_collect_evidence",
-        ),
+      evidence: EvidenceReportSchema.optional().describe(
+        "Empirical evidence report (EvidenceReport) from contrib_collect_evidence",
+      ),
       subagentQualityScore: z
         .number()
         .min(0)
@@ -614,7 +603,7 @@ export function registerGovernanceTools(
       // MCP is agent-facing: it has no GitHub credential and cannot invoke a
       // provider write. The separately deployed trusted broker owns approval,
       // credentials, and canonical submission state.
-      const { RemoteSubmissionBrokerClient } = await import(
+      const { buildAgentSubmissionPort } = await import(
         "@opencontrib/core"
       );
 
@@ -632,7 +621,7 @@ export function registerGovernanceTools(
 
       // Submit only through the separately deployed trusted broker.
       const submissionArtifact =
-        await new RemoteSubmissionBrokerClient().submit(
+        await buildAgentSubmissionPort(runManager).submit(
           args.runId,
           args.expectedIntentSha256,
         );

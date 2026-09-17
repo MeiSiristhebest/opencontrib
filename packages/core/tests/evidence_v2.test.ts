@@ -211,13 +211,6 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
           },
         ],
       });
-      manager.saveArtifact(
-        manifest.runId,
-        "patch",
-        patchContent,
-        "PATCH_DRAFTED",
-      );
-
       // 1. Capture and seal the real RED baseline through EvidenceService.
       const evidenceService = new EvidenceService(manager);
       const red = evidenceService.captureRed({
@@ -230,6 +223,13 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       expect(red.assertionMatched).toBe(true);
       expect(red.exitCode).toBe(1);
       expect(red.assertionMatchedFingerprint).toBeDefined();
+
+      manager.saveArtifact(
+        manifest.runId,
+        "patch",
+        patchContent,
+        "PATCH_DRAFTED",
+      );
 
       // 2. Mutate source to fix bug (GREEN)
       writeFileSync(stateFile, greenContent);

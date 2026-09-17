@@ -301,19 +301,22 @@ export function auditGovernance(
 } {
   const patch = input.diffText || input.patchContent || "";
   const prBody = input.prBodyText || input.prBody || "";
-  const lines =
-    typeof input.lineCount === "number"
-      ? input.lineCount
-      : patch.split("\n").length;
+  let lines = typeof input.lineCount === "number" ? input.lineCount : 0;
+  if (typeof input.lineCount !== "number") {
+    if (patch) {
+      // Calculate true added/removed line changes from unified diff hunks
+      const diffHunkLines = patch
+        .split("\n")
+        .filter((l) => (l.startsWith("+") || l.startsWith("-")) && !l.startsWith("+++") && !l.startsWith("---"));
+      lines = diffHunkLines.length > 0 ? diffHunkLines.length : patch.split("\n").length;
+    }
+  }
   const maxDiffAllowed = input.maxDiffLines ?? 100;
 
   let breakdown = input.confidenceBreakdown;
   if (!breakdown) {
     const passedTestsCount =
       input.evidence?.passedUnitTestsCount ??
-      (input.evidence && "passedTestsCount" in input.evidence
-        ? (input.evidence as { passedTestsCount: number }).passedTestsCount
-        : undefined) ??
       (input.evidence?.allTestsPassing ? 1 : 0);
 
     const calibrated = deriveEvidenceBackedQualityRubric({
@@ -513,19 +516,18 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     data.problemSummary ||
     data.summary ||
     data.issueTitle ||
-    "Fixes reported issue";
+    "Unavailable (issue description not recorded)";
   const rootCause =
-    data.rootCause || "Identified root cause and applied targeted fix.";
-  const keyChanges = data.keyChanges || [
-    "Targeted surgical code fix",
-    "Added unit regression test",
+    data.rootCause || "Unavailable (root cause rationale not recorded)";
+  const keyChanges = data.keyChanges && data.keyChanges.length > 0 ? data.keyChanges : [
+    "Unavailable (key implementation steps not recorded)",
   ];
   const reproductionCommand =
-    data.reproductionCommand || "targeted test command";
+    data.reproductionCommand || undefined;
   const verificationCommand =
     data.verificationCommand ||
     data.validationCommand ||
-    "targeted test command";
+    undefined;
   const testCountText =
     data.testCount === undefined
       ? "all assertions passed"
@@ -577,7 +579,7 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
       : "";
   const reproductionDetail = data.reproductionCommand
     ? `- **Reproduction**: \`${data.reproductionCommand}\` confirmed failing assertion prior to fix.`
-    : `- **Reproduction**: Not recorded (verified via targeted regression test suite).`;
+    : `- **Reproduction**: Not recorded.`;
 
   let verificationDetail: string;
   if (data.verificationCommand) {
@@ -603,7 +605,7 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     : `- **Verification**: ${verificationDetail}`;
 
   const regressionLine = data.verificationCommand
-    ? `- **Regression Isolation**: Verified 0 resource leaks or flaky baseline regressions.`
+    ? `- **Regression Isolation**: Verified 0 flaky baseline regressions across sandbox runs.`
     : `- **Regression Isolation**: Not recorded.`;
 
   const aiDisclosureSection = data.aiDisclosureRequired

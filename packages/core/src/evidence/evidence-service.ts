@@ -417,12 +417,13 @@ export class EvidenceService {
       );
     }
 
-    // Save authoritative evidence_red artifact only after passing verification
+    // Save authoritative evidence_red artifact only after passing verification and advance to RED_CAPTURED
     saveCanonicalArtifact(
       this.runManager,
       input.runId,
       "evidence_red",
       red as any,
+      "RED_CAPTURED",
     );
 
     // Also update partial evidence report for convenience (does not advance phase)

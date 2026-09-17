@@ -2,7 +2,7 @@
 
 import { Command } from "commander";
 import {
-  RemoteSubmissionBrokerClient,
+  buildAgentSubmissionPort,
   buildContributionRunManager,
   type ContributionRunManager,
   SubmissionIntentArtifactSchema,
@@ -77,7 +77,7 @@ export const submissionCommand = new Command("submission")
         // Agent-facing CLI code never receives a GitHub credential and never
         // performs a provider write. The trusted host/broker owns both.
         const submissionArtifact =
-          await new RemoteSubmissionBrokerClient().submit(
+          await buildAgentSubmissionPort(runManager).submit(
             runId,
             intent.intentSha256,
           );

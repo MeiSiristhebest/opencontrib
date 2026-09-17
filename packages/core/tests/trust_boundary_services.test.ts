@@ -95,6 +95,20 @@ function seedGovernanceReadyRun(
     },
     "WORKSPACE_PREPARED",
   );
+  saveCanonicalArtifact(
+    manager,
+    runId,
+    "evidence_red",
+    {
+      command: "bun test regression.test.ts",
+      observedOutputSnippet: "failed",
+      exitCode: 1,
+      sourceTreeSha256: "c".repeat(64),
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      assertionMatched: true,
+    } as any,
+    "RED_CAPTURED",
+  );
   manager.saveArtifact(runId, "patch", patchContent, "PATCH_DRAFTED");
   saveCanonicalArtifact(manager, runId, "validated_patch", validatedPatch);
   const testIdentity = {
@@ -973,6 +987,20 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         },
         "WORKSPACE_PREPARED",
       );
+      saveCanonicalArtifact(
+        manager,
+        manifest2.runId,
+        "evidence_red",
+        {
+          command: "bun test regression.test.ts",
+          observedOutputSnippet: "failed",
+          exitCode: 1,
+          sourceTreeSha256: "1".repeat(64),
+          capturedAt: "2026-01-01T00:00:00.000Z",
+          assertionMatched: true,
+        } as any,
+        "RED_CAPTURED",
+      );
       manager.saveArtifact(
         manifest2.runId,
         "patch",
@@ -1119,6 +1147,20 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           baseCommitSha,
         },
         "WORKSPACE_PREPARED",
+      );
+      saveCanonicalArtifact(
+        manager,
+        manifest.runId,
+        "evidence_red",
+        {
+          command: "bun test",
+          observedOutputSnippet: "failed",
+          exitCode: 1,
+          sourceTreeSha256: "c".repeat(64),
+          capturedAt: "2026-01-01T00:00:00.000Z",
+          assertionMatched: true,
+        } as any,
+        "RED_CAPTURED",
       );
       manager.saveArtifact(
         manifest.runId,

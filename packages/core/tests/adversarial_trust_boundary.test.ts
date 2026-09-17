@@ -114,6 +114,20 @@ function seedGovernanceReadyRun(
     },
     "WORKSPACE_PREPARED",
   );
+  saveCanonicalArtifact(
+    manager,
+    runId,
+    "evidence_red",
+    {
+      command: "bun test regression.test.ts",
+      observedOutputSnippet: "failed",
+      exitCode: 1,
+      sourceTreeSha256: "c".repeat(64),
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      assertionMatched: true,
+    } as any,
+    "RED_CAPTURED",
+  );
   manager.saveArtifact(runId, "patch", patchContent, "PATCH_DRAFTED");
   saveCanonicalArtifact(manager, runId, "validated_patch", validatedPatch);
   const testIdentity = {

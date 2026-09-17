@@ -194,8 +194,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "Patch Drafted",
     description:
       "Targeted code fix implemented in worktree, awaiting verification.",
-    allowedFromPhases: ["WORKSPACE_PREPARED", "RED_CAPTURED", "POC_GENERATED"],
-    requiredArtifacts: ["workspace"],
+    allowedFromPhases: ["RED_CAPTURED", "POC_GENERATED"],
+    requiredArtifacts: ["workspace", "evidence_red"],
     cli: {
       command: "run",
       subcommand: "save",

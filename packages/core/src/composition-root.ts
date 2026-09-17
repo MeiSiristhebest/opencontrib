@@ -71,6 +71,17 @@ class DeferredRemoteSubmissionPort implements SubmissionPort {
  }
 }
 
+/**
+ * Standard factory for building the agent-facing submission port.
+ * Binds the runManager so proposals can be transferred to the trusted host.
+ */
+export function buildAgentSubmissionPort(
+ runManager: ContributionRunManager,
+ endpoint?: string,
+): SubmissionPort {
+ return new DeferredRemoteSubmissionPort(runManager, endpoint);
+}
+
 export function buildContributionPipeline(
  options: {
   /** Read-only GitHub credential for discovery; never used for provider writes. */
@@ -95,7 +106,7 @@ export function buildContributionPipeline(
    client,
    clock: new SystemClock(),
    runManager,
-   submissionPort: new DeferredRemoteSubmissionPort(
+   submissionPort: buildAgentSubmissionPort(
     runManager,
     options.submissionBrokerEndpoint,
    ),
@@ -175,7 +186,7 @@ export function buildProductionCompositionRoot(
    client: githubClient,
    clock: new SystemClock(),
    runManager,
-   submissionPort: new DeferredRemoteSubmissionPort(
+   submissionPort: buildAgentSubmissionPort(
     runManager,
     options.submissionBrokerEndpoint,
    ),
