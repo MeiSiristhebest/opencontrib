@@ -413,14 +413,14 @@ export const verifyGreenCommand = evidenceCommand
             ? "Checkpoint 2 (RED→GREEN Reproduction Verified)"
             : "Checkpoint 2 (GREEN Not Verified Against RED)",
           nextCommand: verified
-            ? 'opencontrib governance audit --patch <file> --pr-title "<title>"'
+            ? (runId ? `opencontrib governance pr-template --run-id ${runId} --issue <id> --issue-title "<title>" --summary "<summary>"` : 'opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"')
             : "Re-run: opencontrib evidence verify-green --test-cmd '<cmd>' (verify the tree changed and tests pass)",
           invariants: [
             verified
               ? "RED baseline matched, source tree mutated, and GREEN run passes."
               : "GREEN not verified: assert RED was captured, the tree changed, and the test passes.",
             verified
-              ? "Next, execute Phase 7 Governance Audit."
+              ? "Next, render the PR description draft using pr-template before auditing governance."
               : "Establish a verified RED→GREEN cycle before the governance audit.",
           ],
         });

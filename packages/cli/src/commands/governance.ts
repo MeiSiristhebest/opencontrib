@@ -151,23 +151,17 @@ const auditCommand = new Command("audit")
         let isPassed = audit.overallConfidence.isPassed;
 
         if (runId) {
-          try {
-            const { GovernanceService } = await import("@opencontrib/core");
-            const govService = new GovernanceService(getRunManager());
-            canonicalDecision = govService.audit(runId, {
-              prTitle: opts.prTitle,
-              prBody: prBodyContent,
-              subagentScore: opts.subagentScore,
-              isAutonomous: opts.isAutonomous,
-              allowUnverified: opts.allowUnverified,
-            });
-            // When running against a tracked run, the authoritative GovernanceService decision is the source of truth
-            isPassed = Boolean(canonicalDecision?.passed);
-          } catch (err: any) {
-            console.warn(
-              `[Governance] Canonical audit persistence warning: ${err.message}`,
-            );
-          }
+          const { GovernanceService } = await import("@opencontrib/core");
+          const govService = new GovernanceService(getRunManager());
+          canonicalDecision = govService.audit(runId, {
+            prTitle: opts.prTitle,
+            prBody: prBodyContent,
+            subagentScore: opts.subagentScore,
+            isAutonomous: opts.isAutonomous,
+            allowUnverified: opts.allowUnverified,
+          });
+          // When running against a tracked run, the authoritative GovernanceService decision is the source of truth
+          isPassed = Boolean(canonicalDecision?.passed);
         }
 
         printJSON(
@@ -213,7 +207,9 @@ const auditCommand = new Command("audit")
           runId,
           status: "SUCCESS",
           humanCheckpoint: "Checkpoint 3 (Pre-Flight Review - Ready for PR)",
-          nextCommand: `opencontrib governance pr-template --issue <id> --issue-title "${opts.prTitle}" --summary "<summary>"`,
+          nextCommand: runId
+            ? `opencontrib governance request-approval --run-id ${runId}`
+            : "opencontrib governance request-approval",
           invariants: audit.guidance.invariants,
         });
       } catch (err: any) {
@@ -380,8 +376,7 @@ const prTemplateCommand = new Command("pr-template")
             getRunManager().saveArtifact(
               runId,
               "pr_draft",
-              { prBody } as any,
-              "GOVERNANCE_AUDITED",
+              prBody,
             );
           } catch {
             // PR draft persistence is best-effort; template content still output to stdout
@@ -391,16 +386,16 @@ const prTemplateCommand = new Command("pr-template")
         printJSON({ status: "success", prBody }, opts.pretty);
 
         printPhaseGuidance({
-          currentPhase: "GOVERNANCE_AUDITED",
+          currentPhase: "PATCH_DRAFTED",
           runId,
           status: "SUCCESS",
-          humanCheckpoint: "Checkpoint 3 (PR Drafted & Ready for Human Review)",
+          humanCheckpoint: "Checkpoint 3 (PR Drafted & Ready for Governance Audit)",
           nextCommand: runId
-            ? `opencontrib governance request-approval --run-id ${runId}`
-            : "opencontrib governance request-approval",
+            ? `opencontrib governance audit --run-id ${runId} --pr-title "${opts.issueTitle}"`
+            : `opencontrib governance audit --patch <file> --pr-title "${opts.issueTitle}"`,
           invariants: [
             'Ensure the PR description includes "Fixes #<issue_number>".',
-            'Submit only via "opencontrib submission submit" after human/policy approval.',
+            'Audit governance before requesting approval.',
           ],
         });
       } catch (err: any) {

@@ -285,6 +285,10 @@ export function registerGovernanceTools(
         .describe(
           "Set true ONLY if repo CONTRIBUTING.md explicitly demands AI disclosure",
         ),
+      runId: z
+        .string()
+        .optional()
+        .describe("Contribution run ID to automatically persist pr_draft artifact"),
     },
     wrapHandler(async (args) => {
       const prBody = renderMasterPrTemplate({
@@ -303,11 +307,29 @@ export function registerGovernanceTools(
         aiDisclosureRequired: args.aiDisclosureRequired,
       });
 
+      let savedArtifact = false;
+      if (args.runId) {
+        try {
+          runManager.saveArtifact(args.runId, "pr_draft", prBody);
+          savedArtifact = true;
+        } catch {
+          // Best-effort saving
+        }
+      }
+
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ status: "success", prBody }, null, 2),
+            text: JSON.stringify(
+              {
+                status: "success",
+                prBody,
+                savedToRun: savedArtifact ? args.runId : undefined,
+              },
+              null,
+              2,
+            ),
           },
         ],
       };

@@ -29,7 +29,7 @@ function artifactHash(value: unknown): string {
   return sha256(typeof value === "string" ? value : JSON.stringify(value ?? ""));
 }
 
-function isSafeRepositoryPath(path: string): boolean {
+export function isSafeRepositoryPath(path: string): boolean {
   if (!path || path.includes("\0") || path.includes("\\")) return false;
   if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return false;
   return path.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== "..");

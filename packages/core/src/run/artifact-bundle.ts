@@ -22,6 +22,7 @@ import type {
 import { getOpenContribHome } from "../kernel/home.js";
 
 const WRITE_ONCE_ARTIFACT_TYPES = new Set<ArtifactType>([
+  "workspace",
   "evidence_red",
   "governance",
   "submission_intent",

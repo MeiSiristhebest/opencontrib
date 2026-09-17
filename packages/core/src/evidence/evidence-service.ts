@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "fs";
+import { resolve } from "path";
+import { createHash } from "crypto";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import type { EvidenceReport, RedEvidence } from "../contracts/schemas.js";
@@ -6,10 +9,11 @@ import {
   verifyGreenEvidence,
   collectEvidence,
 } from "./evidence-collector.js";
+import { isSafeRepositoryPath } from "../submission/submission-intent-service.js";
 
 export interface CaptureRedInput {
   runId: string;
-  cwd: string;
+  cwd?: string;
   testCommand: string;
   expectedAssertion?: string;
   testFile?: string;
@@ -20,7 +24,7 @@ export interface CaptureRedInput {
 
 export interface VerifyGreenInput {
   runId: string;
-  cwd: string;
+  cwd?: string;
   testCommand: string;
   workspaceRoot?: string;
   baselineCommitSha?: string;
@@ -46,8 +50,10 @@ export class EvidenceService {
         `EvidenceWorkspaceRequiredError: run ${input.runId} has no canonical workspace artifact. Prepare workspace first.`,
       );
     }
+    // Lock workspaceRoot and targetCwd strictly from the canonical WorkspaceArtifact
     const targetCwd = String(ws.workspacePath);
-    const resolvedWorkspaceRoot = input.workspaceRoot || String(ws.workspacePath);
+    const resolvedWorkspaceRoot = String(ws.workspacePath);
+    const baselineCommitSha = typeof ws.baseCommitSha === "string" ? ws.baseCommitSha : input.baselineCommitSha;
 
     const red = captureRedEvidence({
       cwd: targetCwd,
@@ -55,7 +61,7 @@ export class EvidenceService {
       workspaceRoot: resolvedWorkspaceRoot,
       expectedAssertion: input.expectedAssertion,
       testFileSha256: input.testFileSha256,
-      baselineCommitSha: input.baselineCommitSha,
+      baselineCommitSha,
       testFile: input.testFile,
     });
 
@@ -99,6 +105,7 @@ export class EvidenceService {
   /**
    * Verify GREEN and bind it to the captured RED baseline.
    * Reads RED strictly from the trusted `evidence_red` artifact or `evidence.redEvidence`.
+   * Also verifies that the stored patch artifact was actually applied to the workspace.
    * On verified reproduction, advances run phase to EVIDENCE_COLLECTED.
    */
   async verifyGreen(input: VerifyGreenInput): Promise<EvidenceReport> {
@@ -123,8 +130,58 @@ export class EvidenceService {
         `EvidenceWorkspaceRequiredError: run ${input.runId} has no canonical workspace artifact. Prepare workspace first.`,
       );
     }
+    // Lock workspaceRoot and targetCwd strictly from canonical WorkspaceArtifact
     const targetCwd = String(ws.workspacePath);
-    const resolvedWorkspaceRoot = input.workspaceRoot || String(ws.workspacePath);
+    const resolvedWorkspaceRoot = String(ws.workspacePath);
+    const baselineCommitSha = typeof ws.baseCommitSha === "string" ? ws.baseCommitSha : input.baselineCommitSha;
+
+    // Verify patch artifact provenance if present
+    const patchRaw = run.artifacts.patch;
+    let appliedPatchSha256: string | undefined;
+    if (patchRaw) {
+      const patchContent = typeof patchRaw === "string" ? patchRaw : JSON.stringify(patchRaw);
+      appliedPatchSha256 = createHash("sha256").update(patchContent).digest("hex");
+
+      let parsedPatch: any;
+      try {
+        parsedPatch = typeof patchRaw === "string" ? JSON.parse(patchRaw) : patchRaw;
+      } catch {
+        parsedPatch = null;
+      }
+
+      if (parsedPatch && Array.isArray(parsedPatch.files)) {
+        for (const file of parsedPatch.files) {
+          const filePath = String(file.path || "");
+          if (!isSafeRepositoryPath(filePath)) {
+            throw new Error(`EvidencePatchProvenanceError: unsafe patch path '${filePath}' in patch artifact.`);
+          }
+          const fullPath = resolve(targetCwd, filePath);
+          const op = String(file.operation || "MODIFY").toUpperCase();
+
+          if (op === "DELETE") {
+            if (existsSync(fullPath)) {
+              throw new Error(
+                `EvidencePatchProvenanceError: patch specifies DELETE for '${filePath}', but file still exists on disk in workspace.`,
+              );
+            }
+          } else {
+            // CREATE or MODIFY
+            if (!existsSync(fullPath)) {
+              throw new Error(
+                `EvidencePatchProvenanceError: patch specifies file '${filePath}', but file does not exist on disk in workspace.`,
+              );
+            }
+            const onDiskContent = readFileSync(fullPath, "utf-8");
+            const expectedContent = String(file.content ?? "");
+            if (onDiskContent !== expectedContent) {
+              throw new Error(
+                `EvidencePatchProvenanceError: on-disk content for '${filePath}' does not match the patch artifact content.`,
+              );
+            }
+          }
+        }
+      }
+    }
 
     const green = verifyGreenEvidence({
       cwd: targetCwd,
@@ -138,16 +195,21 @@ export class EvidenceService {
     const full = await collectEvidence({
       cwd: targetCwd,
       workspaceRoot: resolvedWorkspaceRoot,
-      baselineCommitSha: input.baselineCommitSha,
+      baselineCommitSha,
       testCommand: input.testCommand,
       stressLoopCount: input.stressLoopCount ?? 1,
       concurrencyWorkers: input.concurrencyWorkers ?? 1,
     });
 
+    const greenEvidenceWithPatch = {
+      ...green.greenEvidence,
+      appliedPatchSha256,
+    };
+
     const report: EvidenceReport = {
       ...full,
       redEvidence,
-      greenEvidence: green.greenEvidence,
+      greenEvidence: greenEvidenceWithPatch,
       reproductionVerified:
         green.reproductionVerified && Boolean(full.allTestsPassing),
       allTestsPassing: Boolean(full.allTestsPassing),

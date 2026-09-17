@@ -56,20 +56,40 @@ export class WorkspaceService {
       );
     }
 
-    // Write-once check: if canonical workspace artifact is already stored, return it
+    // Enforce strict WORM on workspace artifact: if already set on this run, reject any attempt to recreate
     const existingWs = run.artifacts.workspace as unknown as WorkspaceArtifactData | undefined;
-    if (existingWs && existingWs.workspacePath && existsSync(existingWs.workspacePath)) {
-      return {
-        context: {
-          workspacePath: existingWs.workspacePath,
-          branchName: existingWs.branchName,
-          isWorktree: existingWs.isWorktree,
-          baseRepoPath: existingWs.baseRepoPath,
-          baseCommitSha: existingWs.baseCommitSha,
-        },
-        artifact: existingWs,
-        alreadyPrepared: true,
-      };
+    if (existingWs) {
+      if (existingWs.workspacePath && existsSync(existingWs.workspacePath)) {
+        return {
+          context: {
+            workspacePath: existingWs.workspacePath,
+            branchName: existingWs.branchName,
+            isWorktree: existingWs.isWorktree,
+            baseRepoPath: existingWs.baseRepoPath,
+            baseCommitSha: existingWs.baseCommitSha,
+          },
+          artifact: existingWs,
+          alreadyPrepared: true,
+        };
+      }
+      throw new Error(
+        `WorkspaceImmutableViolationError: Workspace artifact has already been allocated for run ${input.runId}. Recreating or mutating workspace within the same run is forbidden.`,
+      );
+    }
+
+    // If localRepoPath is supplied, verify its origin remote matches the manifest repository
+    if (input.localRepoPath && existsSync(input.localRepoPath)) {
+      const originRes = this.worktreeManager.runGit(['-C', input.localRepoPath, 'remote', 'get-url', 'origin']);
+      if (originRes.success && originRes.stdout.trim()) {
+        const originUrl = originRes.stdout.trim().toLowerCase().replace(/\\/g, '/');
+        const expected = manifestRepo.toLowerCase();
+        // Match either https://github.com/owner/repo(.git) or git@github.com:owner/repo(.git)
+        if (!originUrl.includes(expected)) {
+          throw new Error(
+            `WorkspaceOriginMismatchError: localRepoPath "${input.localRepoPath}" origin remote "${originRes.stdout.trim()}" does not match manifest repository "${manifestRepo}".`,
+          );
+        }
+      }
     }
 
     // Create isolated worktree strictly using runId to enforce run-owned branch naming

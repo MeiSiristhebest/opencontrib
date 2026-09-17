@@ -20,30 +20,8 @@ import { LLMService } from './llm/llm-service.js';
 import { ContributionRunManager } from './run/run-manager.js';
 import type { GitHubClientOptions } from './github/types.js';
 import {
-  createTrustedApprovalAuthority,
   type TrustedApprovalAuthority,
-  type HostApprovalPort,
-  type ApprovalAuthorityRequest,
-  type ApprovalAuthorityDecision,
 } from './governance/approval-authority.js';
-
-export class TtyHostApprovalPort implements HostApprovalPort {
-  constructor(private readonly reviewerName: string = process.env.OPENCONTRIB_APPROVER || 'human_maintainer') {}
-
-  issueApproval(request: ApprovalAuthorityRequest): ApprovalAuthorityDecision {
-    return {
-      approvedBy: this.reviewerName,
-      approvalMode: request.requestedMode || 'explicit_human',
-    };
-  }
-}
-
-/** Build trusted approval authority at composition root; never exposed to agent-facing tools directly. */
-export function buildProductionApprovalAuthority(
-  hostPort: HostApprovalPort = new TtyHostApprovalPort(),
-): TrustedApprovalAuthority {
-  return createTrustedApprovalAuthority(hostPort);
-}
 
 /** Production GitHub client with env-based credentials, file cache, and retry. */
 export function buildProductionGitHubClient(options: GitHubClientOptions = {}): GitHubClient {
@@ -76,18 +54,17 @@ export function buildContributionPipeline(options: {
     token: options.githubToken,
     host: options.githubHost,
   });
-  const approvalAuthority = options.approvalAuthority ?? buildProductionApprovalAuthority();
   return new ContributionPipeline({
     githubToken: options.githubToken,
     llmService: options.llmService,
-    deps: { client, clock: new SystemClock(), approvalAuthority },
+    deps: { client, clock: new SystemClock(), approvalAuthority: options.approvalAuthority },
   });
 }
 
 export interface ProductionCompositionRoot {
   githubClient: GitHubClient;
   contributionPipeline: ContributionPipeline;
-  approvalAuthority: TrustedApprovalAuthority;
+  approvalAuthority?: TrustedApprovalAuthority;
 }
 
 /** Build the entire production object graph in one call. */
@@ -101,11 +78,11 @@ export function buildProductionCompositionRoot(options: {
     token: options.githubToken,
     host: options.githubHost,
   });
-  const approvalAuthority = options.approvalAuthority ?? buildProductionApprovalAuthority();
   const contributionPipeline = new ContributionPipeline({
     githubToken: options.githubToken,
     llmService: options.llmService,
-    deps: { client: githubClient, clock: new SystemClock(), approvalAuthority },
+    deps: { client: githubClient, clock: new SystemClock(), approvalAuthority: options.approvalAuthority },
   });
-  return { githubClient, contributionPipeline, approvalAuthority };
+  return { githubClient, contributionPipeline, approvalAuthority: options.approvalAuthority };
 }
+

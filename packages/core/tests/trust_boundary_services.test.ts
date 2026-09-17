@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
@@ -433,6 +433,162 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           testCommand: "bun test",
         });
       }).toThrow("EvidenceWorkspaceRequiredError");
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("WorkspaceService verifies localRepoPath origin remote against manifest.repoFullName", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-origin-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/target-repo" });
+
+      const fakeWorktreeManager = {
+        runGit: (args: string[]) => {
+          if (args.includes("remote") && args.includes("get-url")) {
+            return { success: true, stdout: "https://github.com/attacker/malicious-spoofed-repo.git\n", stderr: "" };
+          }
+          return { success: true, stdout: "", stderr: "" };
+        },
+        createIsolatedWorkspace: () => ({
+          workspacePath: "/fake/path",
+          branchName: "opencontrib/run-123",
+          isWorktree: true,
+          baseRepoPath: "/fake/path",
+        }),
+      } as any;
+
+      const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+      const service = new WorkspaceService(manager, fakeWorktreeManager);
+
+      expect(() => {
+        service.prepare({
+          runId: manifest.runId,
+          issueOrTaskId: 1,
+          localRepoPath: baseDir,
+        });
+      }).toThrow(/WorkspaceOriginMismatchError/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("WorkspaceService enforces strict WORM: cannot re-prepare workspace if already allocated", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-worm-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/repo" });
+
+      const wsPath = join(baseDir, "allocated-ws");
+      mkdirSync(wsPath, { recursive: true });
+
+      const fakeWorktreeManager = {
+        createIsolatedWorkspace: () => ({
+          workspacePath: wsPath,
+          branchName: "opencontrib/run-test",
+          isWorktree: true,
+          baseRepoPath: wsPath,
+        }),
+        detectDefaultBranch: () => "main",
+      } as any;
+
+      const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+      const service = new WorkspaceService(manager, fakeWorktreeManager);
+
+      // First preparation creates workspace artifact
+      const first = service.prepare({
+        runId: manifest.runId,
+        issueOrTaskId: 1,
+      });
+      expect(first.alreadyPrepared).toBe(false);
+
+      // Second preparation returns existing canonical workspace if exists
+      const second = service.prepare({
+        runId: manifest.runId,
+        issueOrTaskId: 1,
+      });
+      expect(second.alreadyPrepared).toBe(true);
+
+      // Deleting the physical folder triggers WorkspaceImmutableViolationError (cannot allocate new workspace for same run)
+      rmSync(first.context.workspacePath, { recursive: true, force: true });
+      expect(() => {
+        service.prepare({
+          runId: manifest.runId,
+          issueOrTaskId: 1,
+        });
+      }).toThrow(/WorkspaceImmutableViolationError/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("EvidenceService.verifyGreen enforces that patch artifact files exist and match on disk", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ev-patch-"));
+    const wsDir = join(baseDir, "workspace");
+    mkdirSync(wsDir, { recursive: true });
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/repo" });
+
+      const { saveCanonicalArtifact } = require("../src/run/canonical-writer.js");
+      saveCanonicalArtifact(manager, manifest.runId, "workspace", {
+        workspacePath: wsDir,
+        branchName: "opencontrib/run-test",
+        isWorktree: true,
+        baseRepoPath: wsDir,
+        baseCommitSha: "abc",
+      }, "WORKSPACE_PREPARED");
+
+      const stateFile = join(wsDir, "test.txt");
+      writeFileSync(stateFile, "FAIL\n");
+
+      const testCmd = process.platform === "win32"
+        ? `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERR; exit 1 } else { Write-Output PASS; exit 0 }"`
+        : `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERR; exit 1; else echo PASS; exit 0; fi"`;
+
+      const evidenceService = new EvidenceService(manager);
+      evidenceService.captureRed({
+        runId: manifest.runId,
+        testCommand: testCmd,
+        expectedAssertion: "ASSERTION_ERR",
+        testFile: "test.txt",
+      });
+
+      // Save a patch artifact that claims to have fixed src/fix.ts with content "fixed code"
+      manager.saveArtifact(manifest.runId, "patch", JSON.stringify({
+        title: "fix",
+        summary: "fix",
+        rationale: "fix",
+        targetFiles: [{ path: "src/fix.ts", reason: "fix" }],
+        files: [{ path: "src/fix.ts", operation: "MODIFY", content: "fixed code", explanation: "fix" }],
+        implementationSteps: [],
+        regressionTestPlan: [],
+        estimatedDiffLines: 1,
+      }), "PATCH_DRAFTED");
+
+      // Now mutate test.txt to PASS, but WITHOUT writing src/fix.ts
+      writeFileSync(stateFile, "PASS\n");
+
+      // verifyGreen should throw EvidencePatchProvenanceError because src/fix.ts does not exist in workspace!
+      await expect(
+        evidenceService.verifyGreen({
+          runId: manifest.runId,
+          testCommand: testCmd,
+        }),
+      ).rejects.toThrow(/EvidencePatchProvenanceError/);
+
+      // Now create src/fix.ts with correct content
+      mkdirSync(join(wsDir, "src"), { recursive: true });
+      writeFileSync(join(wsDir, "src", "fix.ts"), "fixed code");
+
+      // verifyGreen should now succeed and bind appliedPatchSha256
+      const report = await evidenceService.verifyGreen({
+        runId: manifest.runId,
+        testCommand: testCmd,
+      });
+      expect(report.allTestsPassing).toBe(true);
+      expect(report.greenEvidence?.appliedPatchSha256).toBeDefined();
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }

@@ -98,7 +98,7 @@ export class WorktreeManager {
     if (!existsSync(this.cacheRoot)) mkdirSync(this.cacheRoot, { recursive: true });
   }
 
-  private runGit(args: string[], cwd?: string, timeoutMs = 25000): { success: boolean; stdout: string; stderr: string } {
+  runGit(args: string[], cwd?: string, timeoutMs = 25000): { success: boolean; stdout: string; stderr: string } {
     const result = spawnSync('git', args, {
       cwd,
       encoding: 'utf-8',

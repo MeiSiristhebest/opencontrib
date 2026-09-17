@@ -198,6 +198,7 @@ export const GreenEvidenceSchema = z.object({
   testIdentity: TestIdentitySchema.optional(),
   testDiffSha256: z.string().optional(),
   actualTestDiffSha256: z.string().optional(),
+  appliedPatchSha256: z.string().optional(),
 });
 export type GreenEvidence = z.infer<typeof GreenEvidenceSchema>;
 
