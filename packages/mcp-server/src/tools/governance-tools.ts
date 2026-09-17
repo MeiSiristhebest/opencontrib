@@ -611,16 +611,10 @@ export function registerGovernanceTools(
         ),
     },
     wrapHandler(async (args) => {
-      const { GitHubSubmissionService, GitHubClient, ContributionPrService } =
-        await import("@opencontrib/core");
-
-      const client = new GitHubClient();
-      const prService = new ContributionPrService(client);
-      const submissionService = new GitHubSubmissionService(
-        prService,
-        client,
-        runManager,
-      );
+      // MCP is agent-facing: it has no GitHub credential and cannot invoke a
+      // provider write. The separately deployed trusted broker owns approval,
+      // credentials, and canonical submission state.
+      const { RemoteSubmissionBrokerClient } = await import("@opencontrib/core");
 
       // Guard against concurrent mutations if expectedIntentSha256 is supplied
       if (args.expectedIntentSha256) {
@@ -634,8 +628,11 @@ export function registerGovernanceTools(
         }
       }
 
-      // Submit PR strictly binding to the approved immutable SubmissionIntent
-      const result = await submissionService.submit(args.runId);
+      // Submit only through the separately deployed trusted broker.
+      const submissionArtifact = await new RemoteSubmissionBrokerClient().submit(
+        args.runId,
+        args.expectedIntentSha256,
+      );
 
       return {
         content: [
@@ -644,7 +641,7 @@ export function registerGovernanceTools(
             text: JSON.stringify(
               {
                 status: "success",
-                submissionArtifact: result.submissionArtifact,
+                submissionArtifact,
               },
               null,
               2,

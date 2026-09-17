@@ -2,10 +2,8 @@
 
 import { Command } from "commander";
 import {
-  GitHubSubmissionService,
-  ContributionPrService,
+  RemoteSubmissionBrokerClient,
   buildContributionRunManager,
-  buildProductionGitHubClient,
   type ContributionRunManager,
   SubmissionIntentArtifactSchema,
 } from "@opencontrib/core";
@@ -74,21 +72,20 @@ export const submissionCommand = new Command("submission")
           }
         }
 
-        const client = buildProductionGitHubClient();
-        const submissionService = new GitHubSubmissionService(
-          new ContributionPrService(client),
-          client,
-          runManager,
+        // Agent-facing CLI code never receives a GitHub credential and never
+        // performs a provider write. The trusted host/broker owns both.
+        const submissionArtifact = await new RemoteSubmissionBrokerClient().submit(
+          runId,
+          intent.intentSha256,
         );
-        const result = await submissionService.submit(runId);
 
         printJSON(
           {
             status: "success",
-            prNumber: result.submissionArtifact.prNumber,
-            prUrl: result.submissionArtifact.prUrl,
-            headSha: result.submissionArtifact.headSha,
-            verified: result.submissionArtifact.verified,
+            prNumber: submissionArtifact.prNumber,
+            prUrl: submissionArtifact.prUrl,
+            headSha: submissionArtifact.headSha,
+            verified: submissionArtifact.verified,
           },
           opts.pretty,
         );

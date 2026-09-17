@@ -221,7 +221,7 @@ describe('Evidence-Backed Quality Rubric & Subagent Review Decoupling', () => {
         repoFullName: 'nonexistent-org-test-xyz/nonexistent-repo-99999',
         issueOrTaskId: 'test-999',
       });
-    }).toThrow('Failed to create isolated workspace');
+    }).toThrow('WorkspaceBaseCommitUnavailableError: failed to clone');
   }, { timeout: 30000 });
 
   test('SandboxProvider strictly blocks execution when cwd escapes workspaceRoot', () => {

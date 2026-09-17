@@ -3,16 +3,24 @@ import type { ApprovalArtifact } from "../contracts/schemas.js";
 export interface ApprovalAuthorityRequest {
   runId: string;
   intentSha256: string;
-  requestedMode?: "explicit_human" | "policy_waived";
 }
 
 export interface ApprovalAuthorityDecision {
   approvedBy: string;
   approvalMode: "explicit_human" | "policy_waived";
+  signingKeyId: string;
+  signature: string;
 }
 
-export interface HostApprovalPort {
-  issueApproval(request: ApprovalAuthorityRequest): ApprovalAuthorityDecision;
+/** Public-key verification only; the signing key must remain in the host. */
+export interface ApprovalArtifactVerifier {
+  verifyApproval(artifact: ApprovalArtifact): boolean;
+}
+
+export interface HostApprovalPort extends ApprovalArtifactVerifier {
+  issueApproval(
+    request: ApprovalAuthorityRequest,
+  ): ApprovalAuthorityDecision | Promise<ApprovalAuthorityDecision>;
 }
 
 const authorityBrand = Symbol("opencontrib.trustedApprovalAuthority");
@@ -37,6 +45,8 @@ export function createTrustedApprovalAuthority(
     [authorityBrand]: true as const,
     issueApproval: (request: ApprovalAuthorityRequest) =>
       host.issueApproval(request),
+    verifyApproval: (artifact: ApprovalArtifact) =>
+      host.verifyApproval(artifact),
   }) as TrustedApprovalAuthority;
 }
 

@@ -11,6 +11,7 @@ import {
 } from "../contracts/schemas.js";
 import {
   isTrustedApprovalAuthority,
+  type ApprovalArtifactVerifier,
   type TrustedApprovalAuthority,
 } from "./approval-authority.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
@@ -39,15 +40,27 @@ function hash(value: unknown): string {
 }
 
 export class ApprovalService {
+  private readonly verifier?: ApprovalArtifactVerifier;
+
   constructor(
     private readonly runManager: ContributionRunManager,
     private readonly authority?: TrustedApprovalAuthority,
+    verifier?: ApprovalArtifactVerifier,
   ) {
     if (authority !== undefined && !isTrustedApprovalAuthority(authority)) {
       throw new Error(
         "ApprovalAuthorityError: only a host-issued trusted approval capability may be injected.",
       );
     }
+    if (
+      verifier !== undefined &&
+      typeof verifier.verifyApproval !== "function"
+    ) {
+      throw new Error(
+        "ApprovalAuthorityError: an approval verifier is required to validate signed artifacts.",
+      );
+    }
+    this.verifier = verifier ?? authority;
   }
 
   /** Create a challenge; this method never writes an approval artifact. */
@@ -68,7 +81,7 @@ export class ApprovalService {
   }
 
   /** Mint an ApprovalArtifact only when an opaque host capability is present. */
-  recordApproval(input: CreateApprovalInput): ApprovalArtifact {
+  async recordApproval(input: CreateApprovalInput): Promise<ApprovalArtifact> {
     if (!this.authority) {
       throw new Error(
         "ApprovalAuthorityRequiredError: approval can only be minted by a trusted human/policy host. Use requestApproval() to create a challenge.",
@@ -89,13 +102,15 @@ export class ApprovalService {
     }
 
     const challenge = this.requestApproval(input.runId);
-    const authorityDecision = this.authority.issueApproval({
+    const authorityDecision = await this.authority.issueApproval({
       runId: input.runId,
       intentSha256: challenge.intentSha256,
     });
     if (
       !authorityDecision ||
       !authorityDecision.approvedBy ||
+      !authorityDecision.signingKeyId ||
+      !authorityDecision.signature ||
       !["explicit_human", "policy_waived"].includes(
         authorityDecision.approvalMode,
       )
@@ -115,8 +130,15 @@ export class ApprovalService {
       approvedBy: authorityDecision.approvedBy,
       approvedAt: new Date().toISOString(),
       approvalMode: authorityDecision.approvalMode,
+      signingKeyId: authorityDecision.signingKeyId,
+      signature: authorityDecision.signature,
     };
     ApprovalArtifactSchema.parse(artifact);
+    if (!this.verifier || !this.verifier.verifyApproval(artifact)) {
+      throw new Error(
+        "ApprovalAuthorityError: trusted host returned an unverifiable approval signature.",
+      );
+    }
 
     saveCanonicalArtifact(
       this.runManager,
@@ -138,6 +160,13 @@ export class ApprovalService {
       return { valid: false, reason: "No valid ApprovalArtifact recorded" };
     }
     const approval = approvalResult.data;
+    if (!this.verifier || !this.verifier.verifyApproval(approval)) {
+      return {
+        valid: false,
+        reason:
+          "Approval signature is missing or does not verify against a trusted host key.",
+      };
+    }
 
     const intentResult = SubmissionIntentArtifactSchema.safeParse(
       summary.artifacts.submissionIntent,

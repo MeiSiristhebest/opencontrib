@@ -36,7 +36,10 @@ import type { RepoMemoryLedger } from "../../memory/repo-memory.js";
 import type { ProfileFlywheel } from "../../flywheel/profile-sync.js";
 import type { ContributionPrService } from "../../github/contribution-pr-service.js";
 import type { ContributionRunManager } from "../../run/run-manager.js";
-import type { TrustedApprovalAuthority } from "../../governance/approval-authority.js";
+import type {
+ ApprovalArtifactVerifier,
+ TrustedApprovalAuthority,
+} from "../../governance/approval-authority.js";
 import type { Clock } from "../../ports/clock.port.js";
 import type {
  OrchestratorRunResult,
@@ -70,6 +73,8 @@ export interface PipelineDeps {
  runManager?: ContributionRunManager;
  /** Optional host-issued capability; agent input can never mint approval. */
  approvalAuthority?: TrustedApprovalAuthority;
+ /** Public-key verifier used by the trusted submission host. */
+ approvalVerifier?: ApprovalArtifactVerifier;
 }
 
 /**
@@ -111,6 +116,7 @@ export interface PipelineContext {
  riskAssessment?: RiskAssessment;
  telemetry?: TelemetryRecord;
  runId?: string;
+ approvalChallenge?: import("../../governance/approval-service.js").ApprovalChallenge;
  requiresHumanGate?: boolean;
 }
 

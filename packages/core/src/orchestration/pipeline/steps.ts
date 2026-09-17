@@ -10,7 +10,10 @@
  * phase from the original method; no behavioral change is intended.
  */
 
-import type { Opportunity } from "../../contracts/schemas.js";
+import {
+  ApprovalArtifactSchema,
+  type Opportunity,
+} from "../../contracts/schemas.js";
 import {
   PatchDraftSchema,
   SubagentReviewEvaluationSchema,
@@ -739,42 +742,15 @@ export class DryRunStep implements PipelineStep {
 export class SubmissionPolicyStep implements PipelineStep {
   readonly name = "SubmissionPolicy";
   async execute(
-    ctx: PipelineContext,
+    _ctx: PipelineContext,
     deps: PipelineDeps,
   ): Promise<StepOutcome> {
-    const selectedOpp = ctx.selectedOpp!;
-    const activePatch = ctx.activePatch!;
-    const validationStatus = ctx.validationStatus!;
-    const qualityRubric = ctx.qualityRubric!;
-    const riskAssessment = ctx.riskAssessment!;
-
-    const submissionGate = deps.stateMachine.canProceedToSubmission();
-    if (!submissionGate.allowed) {
-      const currentState = deps.stateMachine.getState();
-      deps.stateMachine.transition(
-        "BLOCKED",
-        "Submission blocked by authoritative state machine policy",
-      );
-      return halt({
-        status: "BLOCKED",
-        stage: "SUBMISSION_POLICY_BLOCKED",
-        selectedOpportunity: selectedOpp,
-        workspacePath: ctx.workspace?.workspacePath,
-        patchDraft: activePatch,
-        appliedFiles: ctx.appliedFiles,
-        implementationAttempts: ctx.implementationAttempts,
-        validationStatus,
-        confidenceScore: qualityRubric.overallScore,
-        subagentReview: ctx.subagentReview,
-        riskAssessment,
-        telemetry: { ...ctx.telemetry!, status: "BLOCKED" },
-        reportSummary: `PR submission physically blocked by authoritative state machine policy: confidenceScore (${currentState.confidenceScore}) < 90, reproduction unverified, or execution policy violation.`,
-      });
-    }
-
+    // This state machine is orchestration/UI progress only. The canonical
+    // ContributionRun gate and GitHubSubmissionService are the sole authorities
+    // for whether a provider side effect is permitted.
     deps.stateMachine.transition(
       "PR_SUBMISSION",
-      "Creating Pull Request on GitHub",
+      "Entering canonical submission service",
     );
     return continuePipeline();
   }
@@ -864,7 +840,7 @@ export class PrSubmissionStep implements PipelineStep {
         "../../submission/submission-intent-service.js"
       );
       const intentService = new SubmissionIntentService(runManager);
-      const intent = intentService.createIntent({
+      intentService.createIntent({
         runId,
         upstreamOwner: owner,
         upstreamRepo: repo,
@@ -875,26 +851,40 @@ export class PrSubmissionStep implements PipelineStep {
         isDraft: true,
       });
 
-      // Approval is minted only through the host-injected trusted authority;
-      // the agent-facing pipeline has no approval boolean or minting path.
-      if (!deps.approvalAuthority) {
-        throw new Error(
-          "ApprovalAuthorityRequiredError: no host-issued trusted approval capability is available.",
+      // Approval is an asynchronous host decision. The agent-facing pipeline
+      // may issue a challenge, but it can never mint approval or continue to a
+      // provider side effect on the basis of an injected boolean/callback.
+      const approvedRun = runManager.getRun(runId);
+      if (!ApprovalArtifactSchema.safeParse(approvedRun?.artifacts.approval).success) {
+        const challenge = new ApprovalService(runManager).requestApproval(runId);
+        deps.stateMachine.transition(
+          "HUMAN_GATE",
+          "Approval challenge issued; waiting for trusted host",
         );
+        return halt({
+          status: "HUMAN_APPROVAL_REQUIRED",
+          stage: "HUMAN_GATE",
+          selectedOpportunity: selectedOpp,
+          workspacePath: ctx.workspace?.workspacePath,
+          patchDraft: ctx.patchDraft || activePatch,
+          appliedFiles: ctx.appliedFiles,
+          implementationAttempts: ctx.implementationAttempts,
+          validationStatus,
+          confidenceScore: qualityRubric.overallScore,
+          subagentReview: ctx.subagentReview,
+          riskAssessment,
+          telemetry: ctx.telemetry,
+          approvalChallenge: challenge,
+          reportSummary:
+            `Approval challenge ${challenge.intentSha256} issued for #${selectedOpp.issueNumber}. A separate trusted host must approve it before submission can resume.`,
+        });
       }
-      const approvalService = new ApprovalService(
-        runManager,
-        deps.approvalAuthority,
-      );
-      approvalService.recordApproval({
-        runId,
-        expectedIntentSha256: intent.intentSha256,
-      });
 
       const submissionService = new GitHubSubmissionService(
         deps.prService,
         deps.client,
         runManager,
+        deps.approvalVerifier ?? deps.approvalAuthority,
       );
       const submission = await submissionService.submit(runId);
 

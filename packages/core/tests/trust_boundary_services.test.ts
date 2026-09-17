@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createHash } from "crypto";
+import { createHash, generateKeyPairSync } from "crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -12,6 +12,10 @@ import {
   ContributionRunManager,
   SubmissionIntentService,
   validatePhaseGate,
+  TrustedApprovalBroker,
+  Ed25519ApprovalSigner,
+  Ed25519ApprovalVerifier,
+  InMemoryApprovalBrokerStore,
 } from "../src/index.js";
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
 import { EvidenceService } from "../src/evidence/evidence-service.js";
@@ -23,7 +27,12 @@ const testApprovalAuthority = () =>
     issueApproval: () => ({
       approvedBy: "test-authority",
       approvalMode: "explicit_human",
+      signingKeyId: "test-key",
+      signature: "test-signature",
     }),
+    verifyApproval: (artifact) =>
+      artifact.signingKeyId === "test-key" &&
+      artifact.signature === "test-signature",
   });
 
 function seedGovernanceReadyRun(
@@ -200,7 +209,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
     }
   });
 
-  it("ApprovalService binds patch & evidence hashes and detects TOCTOU mutations", () => {
+  it("ApprovalService binds patch & evidence hashes and detects TOCTOU mutations", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-approval-"));
     try {
       const manager = new ContributionRunManager({ baseDir });
@@ -222,7 +231,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         manager,
         testApprovalAuthority(),
       );
-      const approval = approvalService.recordApproval({
+      const approval = await approvalService.recordApproval({
         runId: manifest.runId,
         expectedIntentSha256: intent.intentSha256,
       });
@@ -260,6 +269,57 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
     }
   });
 
+  it("TrustedApprovalBroker persists pending challenges and mints signed approvals only after host decision", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-approval-broker-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      seedGovernanceReadyRun(manager, manifest.runId);
+      new SubmissionIntentService(manager).createIntent({
+        runId: manifest.runId,
+        upstreamOwner: "org",
+        upstreamRepo: "repo",
+        title: "fix: bug",
+        body: "pr body",
+      });
+
+      const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+      const verifier = new Ed25519ApprovalVerifier("test-ed25519", publicKey);
+      const broker = new TrustedApprovalBroker(
+        manager,
+        new Ed25519ApprovalSigner("test-ed25519", privateKey),
+        verifier,
+        new InMemoryApprovalBrokerStore(),
+      );
+
+      const request = broker.request(manifest.runId);
+      expect(request.status).toBe("PENDING");
+      expect(request.requestId).toMatch(/^approval_[a-f0-9]{64}$/);
+
+      const approval = await broker.approve(request.requestId, {
+        approvedBy: "human@example.com",
+        approvalMode: "explicit_human",
+      });
+      expect(approval.signingKeyId).toBe("test-ed25519");
+      expect(verifier.verifyApproval(approval)).toBe(true);
+      expect(broker.get(request.requestId)?.status).toBe("APPROVED");
+      expect(
+        new ApprovalService(manager, undefined, verifier).verifyApprovalIntegrity(
+          manifest.runId,
+        ).valid,
+      ).toBe(true);
+
+      await expect(
+        broker.approve(request.requestId, {
+          approvedBy: "second-reviewer@example.com",
+          approvalMode: "explicit_human",
+        }),
+      ).rejects.toThrow(/no longer pending/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it("PR_SUBMITTED requires verified SubmissionArtifact produced by submission service", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-submission-"));
     try {
@@ -289,7 +349,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         manager,
         testApprovalAuthority(),
       );
-      approvalService.recordApproval({
+      await approvalService.recordApproval({
         runId: manifest.runId,
         expectedIntentSha256: intent.intentSha256,
       });
@@ -330,6 +390,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         mockPrService,
         mockClient,
         manager,
+        testApprovalAuthority(),
       );
 
       // Authorize submission (creates SubmissionPermit)
@@ -1133,7 +1194,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         manager,
         testApprovalAuthority(),
       );
-      approvalService.recordApproval({
+      await approvalService.recordApproval({
         runId: manifest.runId,
         expectedIntentSha256: intent.intentSha256,
       });
@@ -1169,6 +1230,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         mockPrService,
         mockClient,
         manager,
+        testApprovalAuthority(),
       );
 
       await expect(submissionService.submit(manifest.runId)).rejects.toThrow(

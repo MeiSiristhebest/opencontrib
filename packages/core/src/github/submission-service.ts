@@ -14,6 +14,7 @@ import {
   type SubmissionIntentArtifact,
 } from "../contracts/schemas.js";
 import { ApprovalService } from "../governance/approval-service.js";
+import type { ApprovalArtifactVerifier } from "../governance/approval-authority.js";
 
 export class SubmissionVerificationError extends Error {
   constructor(message: string) {
@@ -68,8 +69,16 @@ export class GitHubSubmissionService {
     private readonly prService: ContributionPrService,
     private readonly client: GitHubClient,
     private readonly runManager: ContributionRunManager,
+    approvalVerifier?: ApprovalArtifactVerifier,
   ) {
-    this.approvalService = new ApprovalService(runManager);
+    // Submission runs in a trusted host only when it can verify the detached
+    // approval signature against a host-pinned public key. Agent-facing callers
+    // that only have local JSON artifacts fail closed.
+    this.approvalService = new ApprovalService(
+      runManager,
+      undefined,
+      approvalVerifier,
+    );
   }
 
   /**

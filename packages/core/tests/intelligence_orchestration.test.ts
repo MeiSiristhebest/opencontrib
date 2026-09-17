@@ -17,16 +17,11 @@ describe('Intelligence & Orchestration Upgrades', () => {
     sm.setReproductionCaptured(true);
     sm.setConfidenceScore(95);
 
-    // 1. Should be blocked in DISCOVERY because stage is not submission-ready
-    const earlyCheck = sm.canProceedToSubmission();
-    expect(earlyCheck.allowed).toBe(false);
-    expect(earlyCheck.reason).toContain('not submission-ready');
-
-    // 2. Transition to HUMAN_GATE - blocked because allowRealPr is false
+    // The orchestration machine records progress only; canonical submission
+    // policy is enforced by the run state machine and SubmissionService.
+    expect(sm.getState().stage).toBe('DISCOVERY');
     sm.transition('HUMAN_GATE', 'Awaiting human review');
-    const policyCheck = sm.canProceedToSubmission();
-    expect(policyCheck.allowed).toBe(false);
-    expect(policyCheck.reason).toContain('Policy forbids real PR');
+    expect(sm.getState().stage).toBe('HUMAN_GATE');
   });
 
 

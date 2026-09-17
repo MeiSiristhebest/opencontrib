@@ -264,9 +264,11 @@ export const ApprovalArtifactSchema = z.object({
   evidenceSha256: z.string(),
   governanceSha256: z.string(),
   prBodySha256: z.string(),
-  approvedBy: z.string().default("human_reviewer"),
+  approvedBy: z.string().min(1),
   approvedAt: z.string(),
   approvalMode: z.enum(["explicit_human", "policy_waived"]),
+  signingKeyId: z.string().min(1),
+  signature: z.string().min(1),
 });
 export type ApprovalArtifact = z.infer<typeof ApprovalArtifactSchema>;
 

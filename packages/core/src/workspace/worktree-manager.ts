@@ -4,11 +4,7 @@ import { homedir as osHomedir, tmpdir } from "os";
 import { dirname, join, resolve, sep } from "path";
 import { sanitizeRunId } from "../run/artifact-bundle.js";
 import { runBranchName } from "../run/run-branch.js";
-import {
-  ensureWorkspaceGuard,
-  releaseWorkspaceGuard,
-  isProtectedWorkspace,
-} from "./workspace-guard.js";
+import { isProtectedWorkspace } from "./workspace-guard.js";
 import { getOpenContribHome } from "../kernel/home.js";
 
 /** Normalize path separators to forward slashes for consistent comparison on all platforms. */
@@ -442,7 +438,7 @@ export class WorktreeManager {
           }
         }
         throw new Error(
-          `Failed to create isolated workspace for ${repoFullName}: clone failed (${cloneRes.stderr || "Network/Auth failure"}). Refusing to initialize empty repository.`,
+          `WorkspaceBaseCommitUnavailableError: failed to clone ${repoFullName}: ${cloneRes.stderr.trim() || "Network/Auth failure"}`,
         );
       }
     }

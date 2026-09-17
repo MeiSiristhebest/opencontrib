@@ -18,8 +18,16 @@ import { ContributionPipeline } from "./application/index.js";
 import { SystemClock } from "./ports/clock.port.js";
 import { LLMService } from "./llm/llm-service.js";
 import { ContributionRunManager } from "./run/run-manager.js";
+import {
+ ContributionPrService,
+ GitHubSubmissionService,
+ TrustedSubmissionBroker,
+} from "./github/index.js";
 import type { GitHubClientOptions } from "./github/types.js";
-import type { TrustedApprovalAuthority } from "./governance/approval-authority.js";
+import type {
+ ApprovalArtifactVerifier,
+ TrustedApprovalAuthority,
+} from "./governance/approval-authority.js";
 
 /** Production GitHub client with env-based credentials, file cache, and retry. */
 export function buildProductionGitHubClient(
@@ -71,6 +79,38 @@ export interface ProductionCompositionRoot {
  githubClient: GitHubClient;
  contributionPipeline: ContributionPipeline;
  approvalAuthority?: TrustedApprovalAuthority;
+}
+
+/**
+ * Build the provider-writing side of the trust boundary. This function belongs
+ * in a separately deployed host process; agent-facing CLI/MCP code must use
+ * RemoteSubmissionBrokerClient instead and must not receive its token.
+ */
+export function buildTrustedSubmissionBroker(options: {
+ githubToken: string;
+ githubHost?: string;
+ approvalVerifier: ApprovalArtifactVerifier;
+}): {
+ githubClient: GitHubClient;
+ runManager: ContributionRunManager;
+ broker: TrustedSubmissionBroker;
+} {
+ const githubClient = buildProductionGitHubClient({
+  token: options.githubToken,
+  host: options.githubHost,
+ });
+ const runManager = buildContributionRunManager();
+ const submissionService = new GitHubSubmissionService(
+  new ContributionPrService(githubClient),
+  githubClient,
+  runManager,
+  options.approvalVerifier,
+ );
+ return {
+  githubClient,
+  runManager,
+  broker: new TrustedSubmissionBroker(runManager, submissionService),
+ };
 }
 
 /** Build the entire production object graph in one call. */

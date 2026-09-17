@@ -17,3 +17,6 @@ export type {
   ApprovalAuthorityArtifact,
 } from './approval-authority.js';
 export { isTrustedApprovalAuthority } from './approval-authority.js';
+export type { ApprovalArtifactVerifier } from './approval-authority.js';
+export * from './approval-signing.js';
+export * from './approval-broker.js';

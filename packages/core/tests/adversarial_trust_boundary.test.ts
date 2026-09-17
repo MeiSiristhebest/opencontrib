@@ -25,7 +25,12 @@ const testApprovalAuthority = () =>
     issueApproval: () => ({
       approvedBy: "test-authority",
       approvalMode: "explicit_human",
+      signingKeyId: "test-key",
+      signature: "test-signature",
     }),
+    verifyApproval: (artifact) =>
+      artifact.signingKeyId === "test-key" &&
+      artifact.signature === "test-signature",
   });
 
 function makeValidatedPatch(
@@ -321,7 +326,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         manager,
         testApprovalAuthority(),
       );
-      approvalService.recordApproval({
+      await approvalService.recordApproval({
         runId: manifest.runId,
         expectedIntentSha256: intent.intentSha256,
       });
@@ -355,6 +360,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         mockPrService,
         mockFailingClient,
         manager,
+        testApprovalAuthority(),
       );
 
       const permit = submissionService.authorizeSubmission(
@@ -449,7 +455,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         manager,
         testApprovalAuthority(),
       );
-      approvalService.recordApproval({
+      await approvalService.recordApproval({
         runId: manifest.runId,
         expectedIntentSha256: intent.intentSha256,
       });
@@ -476,6 +482,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         mockPrService,
         mockClient,
         manager,
+        testApprovalAuthority(),
       );
 
       // Must fail closed due to PR draft body TOCTOU mutation!

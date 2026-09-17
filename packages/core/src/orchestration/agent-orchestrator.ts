@@ -138,12 +138,14 @@ export interface OrchestratorRunResult {
   riskAssessment?: RiskAssessment;
   prUrl?: string;
   prNumber?: number;
+  approvalChallenge?: ApprovalChallenge;
   telemetry?: TelemetryRecord;
   reportSummary: string;
 }
 
 // PatchDraft is only referenced as a type above; alias the import to satisfy it.
 import type { PatchDraft } from "../contracts/llm-schemas.js";
+import type { ApprovalChallenge } from "../governance/approval-service.js";
 
 function resolveLlmService(injected?: LLMService): LLMService | undefined {
   if (injected) return injected;
@@ -207,6 +209,7 @@ export class AgentOrchestrator {
       llmService,
       runManager,
       approvalAuthority: options.deps?.approvalAuthority,
+      approvalVerifier: options.deps?.approvalVerifier,
     };
   }
 
