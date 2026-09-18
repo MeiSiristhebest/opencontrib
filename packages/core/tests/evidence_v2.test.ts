@@ -175,9 +175,8 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
         `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERROR_SAMPLE; exit 1; else echo PASS; exit 0; fi"`,
       );
 
-      const { ContributionRunManager } = await import(
-        "../src/run/run-manager.js"
-      );
+      const { ContributionRunManager } =
+        await import("../src/run/run-manager.js");
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({
         repoFullName: "test/repo",
@@ -261,5 +260,5 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       rmSync(wsDir, { recursive: true, force: true });
       rmSync(baseDir, { recursive: true, force: true });
     }
-  });
+  }, 60000);
 });

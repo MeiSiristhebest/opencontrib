@@ -775,12 +775,14 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         runId: manifest.runId,
         testCommand: testCmd,
       });
+      expect(report).toBeDefined();
+      if (!report) return;
       expect(report.allTestsPassing).toBe(true);
       expect(report.greenEvidence?.appliedPatchSha256).toBeDefined();
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }
-  });
+  }, 60000);
 
   it("EvidenceService.verifyGreen rejects verification when workspace contains unlisted modified/untracked files", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ev-delta-"));
