@@ -47,6 +47,7 @@ function makeValidatedPatch(
     redTreeSha256,
     greenTreeSha256,
     artifactSha256: "",
+    changedLines: 0,
     files: [],
     validatedAt: "2026-01-01T00:01:00Z",
   };
@@ -88,6 +89,7 @@ function seedGovernanceReadyRun(
     redTreeSha256: "c".repeat(64),
     greenTreeSha256: "d".repeat(64),
     artifactSha256: "",
+    changedLines: 0,
     files: [
       {
         path: "src/fix.ts",
@@ -242,6 +244,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         redTreeSha256: "sha-before-fix",
         greenTreeSha256: "sha-after-fix",
         artifactSha256: "",
+        changedLines: 0,
         files: [],
         validatedAt: "2026-01-01T00:01:00Z",
       };

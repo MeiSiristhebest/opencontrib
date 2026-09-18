@@ -61,6 +61,7 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
       redTreeSha256: "a".repeat(8),
       greenTreeSha256: "b".repeat(8),
       artifactSha256: "",
+      changedLines: 0,
       files: [
         {
           path: "src/fix.ts",

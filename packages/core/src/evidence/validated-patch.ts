@@ -4,8 +4,7 @@ import type { ValidatedPatchArtifact } from "../contracts/schemas.js";
 /** Hash the immutable validated-patch payload without its self-referential digest. */
 export function hashValidatedPatchArtifact(
   artifact:
-    | Omit<ValidatedPatchArtifact, "artifactSha256">
-    | ValidatedPatchArtifact,
+    Omit<ValidatedPatchArtifact, "artifactSha256"> | ValidatedPatchArtifact,
 ): string {
   const value = artifact as ValidatedPatchArtifact;
   const payload = {
@@ -15,7 +14,11 @@ export function hashValidatedPatchArtifact(
     baseCommitSha: value.baseCommitSha,
     redTreeSha256: value.redTreeSha256,
     greenTreeSha256: value.greenTreeSha256,
-    changedLines: value.changedLines ?? 0,
+    // changedLines is a required, hash-bound field of every canonical
+    // ValidatedPatchArtifact (the authoritative producer always computes it
+    // from the git diff engine); there is no default that would let a
+    // missing field and a real zero-line diff share one hash payload.
+    changedLines: value.changedLines,
     files: value.files.map((file) => ({
       path: file.path,
       mode: file.mode,

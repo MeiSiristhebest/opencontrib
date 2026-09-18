@@ -69,6 +69,7 @@ function seedGovernanceReadyRun(
     redTreeSha256: "c".repeat(64),
     greenTreeSha256: "d".repeat(64),
     artifactSha256: "",
+    changedLines: 0,
     files: [
       {
         path: "src/fix.ts",
@@ -965,6 +966,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         redTreeSha256: "1".repeat(64),
         greenTreeSha256: "2".repeat(64),
         artifactSha256: "",
+        changedLines: 0,
         files: [
           {
             path: "src/fix.ts",
@@ -1126,6 +1128,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         redTreeSha256: "c".repeat(64),
         greenTreeSha256: "d".repeat(64),
         artifactSha256: "",
+        changedLines: 0,
         files: [
           {
             path: "src/fix.ts",

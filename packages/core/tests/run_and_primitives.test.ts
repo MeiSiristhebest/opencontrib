@@ -141,6 +141,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       redTreeSha256: "aaaaaaaa",
       greenTreeSha256: "bbbbbbbb",
       artifactSha256: "",
+      changedLines: 0,
       files: [
         {
           path: "pool.go",
@@ -378,9 +379,8 @@ describe("Unified OpenContrib Storage Layout", () => {
   });
 
   it("parses structured CommandSpec safely handling quotes and escaped spaces", async () => {
-    const { parseCommandSpec, serializeCommandSpec } = await import(
-      "../src/sandbox/command-spec.js"
-    );
+    const { parseCommandSpec, serializeCommandSpec } =
+      await import("../src/sandbox/command-spec.js");
 
     const parsed1 = parseCommandSpec('npm test -- --grep "falsy cache value"');
     expect(parsed1.executable).toBe("npm");
@@ -439,9 +439,8 @@ describe("ActiveSessionManager & Pointer Store Persistence", () => {
   it("automatically resolves active run ID when not explicitly passed", async () => {
     const customBase = join(tmpdir(), `run_resolve_test_${Date.now()}`);
     const sessionFile = join(tmpdir(), `active_session_${Date.now()}_res.json`);
-    const { ActiveSessionManager, ContributionRunManager } = await import(
-      "../src/index.js"
-    );
+    const { ActiveSessionManager, ContributionRunManager } =
+      await import("../src/index.js");
     const sessionManager = new ActiveSessionManager(sessionFile);
     const runManager = new ContributionRunManager({
       baseDir: customBase,
