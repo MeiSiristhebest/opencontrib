@@ -59,8 +59,9 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         stdio: "ignore",
       });
 
-      const { ContributionRunManager } =
-        await import("../src/run/run-manager.js");
+      const { ContributionRunManager } = await import(
+        "../src/run/run-manager.js"
+      );
       const agentRunManager = new ContributionRunManager({
         baseDir: agentRuns,
       });
@@ -164,8 +165,9 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
       ).ContributionRunManager({
         baseDir: hostRuns,
       });
-      const { WorktreeManager } =
-        await import("../src/workspace/worktree-manager.js");
+      const { WorktreeManager } = await import(
+        "../src/workspace/worktree-manager.js"
+      );
       class TestWorktreeManager extends WorktreeManager {
         override createIsolatedWorkspace(_options: any) {
           return {

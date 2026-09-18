@@ -327,42 +327,107 @@ function countChangedLinesFromActualDelta(
   let total = 0;
   for (const file of deltaFiles) {
     const fullPath = resolve(cwd, file.path);
+
     if (file.operation === "CREATE") {
+      // Use git diff --no-index against an empty temp file for untracked CREATE
+      // This uses Git's own diff engine for correct line counting
       if (!pathExists(fullPath)) {
         throw new Error(
           `EvidencePatchProvenanceError: cannot count lines for created file '${file.path}' that is missing on disk.`,
         );
       }
-      const content = contentAtWorkspace(fullPath, file.mode);
-      const lines = content.length === 0 ? 0 : content.split("\n").length;
-      total += lines;
-    } else if (file.operation === "DELETE") {
-      const baseContent = gitOutput(
-        cwd,
-        ["show", `${baseCommitSha}:${file.path}`],
-        `read deleted base file ${file.path}`,
-      );
-      const lines =
-        baseContent.length === 0 ? 0 : baseContent.split("\n").length;
-      total += lines;
-    } else if (file.operation === "MODIFY") {
-      const baseContent = gitOutput(
-        cwd,
-        ["show", `${baseCommitSha}:${file.path}`],
-        `read modified base file ${file.path}`,
-      );
-      const currentContent = contentAtWorkspace(fullPath, file.mode);
-      const baseLines = baseContent.split("\n");
-      const currentLines = currentContent.split("\n");
-      // Compute symmetric line delta differences
-      let diffLines = Math.abs(currentLines.length - baseLines.length);
-      const minLen = Math.min(baseLines.length, currentLines.length);
-      for (let i = 0; i < minLen; i++) {
-        if (baseLines[i] !== currentLines[i]) {
-          diffLines += 2; // 1 replacement = 1 line deleted + 1 line added
+      const { mkdtempSync, writeFileSync, rmSync } = require("node:fs");
+      const { join } = require("node:path");
+      const { tmpdir } = require("node:os");
+      const { execFileSync } = require("node:child_process");
+      const tmpDir = mkdtempSync(join(tmpdir(), "oc-diff-"));
+      const emptyFile = join(tmpDir, "empty");
+      writeFileSync(emptyFile, "");
+      try {
+        // git diff --no-index returns exit code 1 when there are differences (normal case)
+        let stat = "";
+        try {
+          stat = execFileSync(
+            "git",
+            ["diff", "--no-index", "--numstat", emptyFile, fullPath],
+            { cwd, encoding: "utf-8", timeout: 10000 },
+          );
+        } catch (err: any) {
+          // Exit code 1 means "there are differences" which is expected for CREATE
+          if (err && err.status === 1) {
+            stat = err.stdout || "";
+          } else {
+            throw new Error(
+              `EvidencePatchProvenanceError: git numstat failed for created file '${file.path}': ${err.message}`,
+            );
+          }
+        }
+        const parts = stat.trim().split(/\s+/);
+        if (parts.length >= 2) {
+          const added = parseInt(parts[0], 10);
+          const deleted = parseInt(parts[1], 10);
+          if (Number.isNaN(added) || Number.isNaN(deleted)) {
+            throw new Error(
+              `EvidencePatchProvenanceError: git numstat returned invalid numbers for created file '${file.path}': ${stat.trim()}`,
+            );
+          }
+          total += added + deleted;
+        } else {
+          throw new Error(
+            `EvidencePatchProvenanceError: git numstat returned unexpected format for created file '${file.path}': ${stat.trim()}`,
+          );
+        }
+      } finally {
+        try {
+          rmSync(tmpDir, { recursive: true, force: true });
+        } catch {
+          // best-effort
         }
       }
-      total += diffLines;
+    } else if (file.operation === "DELETE") {
+      // Use git diff --numstat against base commit for tracked DELETE
+      const stat = gitOutput(
+        cwd,
+        ["diff", "--numstat", baseCommitSha, "--", file.path],
+        `count changed lines for deleted file ${file.path}`,
+      );
+      const parts = stat.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const added = parseInt(parts[0], 10);
+        const deleted = parseInt(parts[1], 10);
+        if (Number.isNaN(added) || Number.isNaN(deleted)) {
+          throw new Error(
+            `EvidencePatchProvenanceError: git numstat returned invalid numbers for deleted file '${file.path}': ${stat.trim()}`,
+          );
+        }
+        total += added + deleted;
+      } else {
+        throw new Error(
+          `EvidencePatchProvenanceError: git numstat returned unexpected format for deleted file '${file.path}': ${stat.trim()}`,
+        );
+      }
+    } else if (file.operation === "MODIFY") {
+      // Use git diff --numstat for tracked MODIFY - Git handles line semantics
+      const stat = gitOutput(
+        cwd,
+        ["diff", "--numstat", baseCommitSha, "--", file.path],
+        `count changed lines for modified file ${file.path}`,
+      );
+      const parts = stat.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const added = parseInt(parts[0], 10);
+        const deleted = parseInt(parts[1], 10);
+        if (Number.isNaN(added) || Number.isNaN(deleted)) {
+          throw new Error(
+            `EvidencePatchProvenanceError: git numstat returned invalid numbers for modified file '${file.path}': ${stat.trim()}`,
+          );
+        }
+        total += added + deleted;
+      } else {
+        throw new Error(
+          `EvidencePatchProvenanceError: git numstat returned unexpected format for modified file '${file.path}': ${stat.trim()}`,
+        );
+      }
     }
   }
   return total;
@@ -664,12 +729,14 @@ export class EvidenceService {
         greenTreeSha256: finalGreenTreeSha256,
         artifactSha256: "",
         changedLines,
-        files: exactDelta.files.map((file): ValidatedPatchFile => ({
-          path: file.path,
-          operation: file.operation,
-          mode: file.mode,
-          contentSha256: file.contentSha256,
-        })),
+        files: exactDelta.files.map(
+          (file): ValidatedPatchFile => ({
+            path: file.path,
+            operation: file.operation,
+            mode: file.mode,
+            contentSha256: file.contentSha256,
+          }),
+        ),
         validatedAt: new Date().toISOString(),
       };
       validatedPatch.artifactSha256 =
@@ -978,12 +1045,14 @@ export class EvidenceService {
         greenTreeSha256: finalGreenTreeSha256,
         artifactSha256: "",
         changedLines,
-        files: exactDelta.files.map((file): ValidatedPatchFile => ({
-          path: file.path,
-          operation: file.operation,
-          mode: file.mode,
-          contentSha256: file.contentSha256,
-        })),
+        files: exactDelta.files.map(
+          (file): ValidatedPatchFile => ({
+            path: file.path,
+            operation: file.operation,
+            mode: file.mode,
+            contentSha256: file.contentSha256,
+          }),
+        ),
         validatedAt: new Date().toISOString(),
       };
       validatedPatch.artifactSha256 =

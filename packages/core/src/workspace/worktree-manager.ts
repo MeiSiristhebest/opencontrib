@@ -630,6 +630,78 @@ export class WorktreeManager {
       return { appliedFiles, errors };
     }
 
+    // Security Hardening: Anti-Symlink Traversal Pre-Validation
+    // 1. Collect all paths that this batch will create as symlinks
+    const batchSymlinkPaths = new Set<string>();
+    for (const f of files) {
+      if (f.mode === "120000") {
+        batchSymlinkPaths.add(f.path.replace(/\\/g, "/"));
+      }
+    }
+
+    // 2. Reject any file path whose ancestor is a newly created symlink in this batch
+    for (const f of files) {
+      const normPath = f.path.replace(/\\/g, "/");
+      const parts = normPath.split("/");
+      let currentAncestor = "";
+      for (let i = 0; i < parts.length - 1; i++) {
+        currentAncestor = currentAncestor
+          ? `${currentAncestor}/${parts[i]}`
+          : parts[i];
+        if (batchSymlinkPaths.has(currentAncestor)) {
+          errors.push(
+            `Security violation: File path '${f.path}' attempts traversal beneath symlink '${currentAncestor}' created in same batch`,
+          );
+          return { appliedFiles, errors };
+        }
+      }
+    }
+
+    // 3. Reject any file path whose on-disk ancestor is currently a symlink
+    const { lstatSync, realpathSync } = require("node:fs");
+    const realRoot = existsSync(workspacePath)
+      ? realpathSync(workspacePath)
+      : resolve(workspacePath);
+
+    for (const f of files) {
+      const normPath = f.path.replace(/\\/g, "/");
+      const parts = normPath.split("/");
+      let currentRel = "";
+      for (let i = 0; i < parts.length - 1; i++) {
+        currentRel = currentRel ? `${currentRel}/${parts[i]}` : parts[i];
+        const checkPath = resolve(workspacePath, currentRel);
+        if (existsSync(checkPath)) {
+          try {
+            const st = lstatSync(checkPath);
+            if (st.isSymbolicLink()) {
+              errors.push(
+                `Security violation: Ancestor path '${currentRel}' of file '${f.path}' is a symbolic link`,
+              );
+              return { appliedFiles, errors };
+            }
+          } catch (statErr: unknown) {
+            void statErr;
+          }
+        }
+      }
+
+      // Check realpath boundary of parent directory if it exists
+      const parentPath = resolve(workspacePath, dirname(f.path));
+      if (existsSync(parentPath)) {
+        try {
+          const realParent = realpathSync(parentPath);
+          if (!this.isPathWithinWorkspace(realRoot, realParent)) {
+            errors.push(
+              `Security violation: Resolved real parent path of '${f.path}' escapes workspace boundary`,
+            );
+            return { appliedFiles, errors };
+          }
+        } catch (realErr: unknown) {
+          void realErr;
+        }
+      }
+    }
+
     for (const f of files) {
       if (!this.isPathWithinWorkspace(workspacePath, f.path)) {
         errors.push(

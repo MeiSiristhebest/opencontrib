@@ -15,6 +15,7 @@ export function hashValidatedPatchArtifact(
     baseCommitSha: value.baseCommitSha,
     redTreeSha256: value.redTreeSha256,
     greenTreeSha256: value.greenTreeSha256,
+    changedLines: value.changedLines ?? 0,
     files: value.files.map((file) => ({
       path: file.path,
       mode: file.mode,

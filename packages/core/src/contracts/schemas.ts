@@ -218,7 +218,7 @@ export const ValidatedPatchArtifactSchema = z.object({
   redTreeSha256: z.string(),
   greenTreeSha256: z.string(),
   artifactSha256: z.string(),
-  changedLines: z.number().optional(),
+  changedLines: z.number().int().nonnegative().optional(),
   files: z.array(ValidatedPatchFileSchema),
   validatedAt: z.string(),
 });

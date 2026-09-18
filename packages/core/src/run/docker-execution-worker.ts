@@ -1,4 +1,7 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type {
   TrustedExecutionPort,
   RedExecutionJob,
@@ -67,6 +70,20 @@ function runDockerProcessAsync(
   });
 }
 
+function killContainerByCidFile(cidFile: string): void {
+  try {
+    if (existsSync(cidFile)) {
+      const cid = readFileSync(cidFile, "utf8").trim();
+      if (cid) {
+        spawnSync("docker", ["kill", cid], { timeout: 5000 });
+        spawnSync("docker", ["rm", "-f", cid], { timeout: 5000 });
+      }
+    }
+  } catch {
+    // best-effort cleanup
+  }
+}
+
 /**
  * Production out-of-process containerized execution worker.
  *
@@ -92,7 +109,9 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
     );
     const startTree = computeSourceTreeHash(cwd);
 
-    // Run container with network disabled and broker-secret-free environment
+    const cidDir = mkdtempSync(join(tmpdir(), "docker-cid-"));
+    const cidFile = join(cidDir, "cid");
+
     const dockerArgs = [
       "run",
       "--rm",
@@ -102,6 +121,14 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       "ALL",
       "--security-opt",
       "no-new-privileges",
+      "--cidfile",
+      cidFile,
+      "--memory",
+      "512m",
+      "--cpus",
+      "1",
+      "--pids-limit",
+      "256",
       "-v",
       `${cwd}:/workspace`,
       "-w",
@@ -112,22 +139,33 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       job.testCommand,
     ];
 
-    const res = await runDockerProcessAsync(dockerArgs, this.timeoutMs);
-    const assertionMatched = job.expectedAssertion
-      ? res.output.includes(job.expectedAssertion)
-      : res.exitCode !== 0;
+    try {
+      const res = await runDockerProcessAsync(dockerArgs, this.timeoutMs);
+      if (res.exitCode === 124) {
+        killContainerByCidFile(cidFile);
+      }
+      const assertionMatched = job.expectedAssertion
+        ? res.output.includes(job.expectedAssertion)
+        : res.exitCode !== 0;
 
-    return {
-      command: job.testCommand,
-      exitCode: res.exitCode,
-      stdout: res.stdout,
-      stderr: res.stderr,
-      outputSnippet: res.output.slice(0, 500),
-      assertionMatched,
-      capturedAt: new Date().toISOString(),
-      sourceTreeSha256: startTree,
-      testIdentity,
-    };
+      return {
+        command: job.testCommand,
+        exitCode: res.exitCode,
+        stdout: res.stdout,
+        stderr: res.stderr,
+        outputSnippet: res.output.slice(0, 500),
+        assertionMatched,
+        capturedAt: new Date().toISOString(),
+        sourceTreeSha256: startTree,
+        testIdentity,
+      };
+    } finally {
+      try {
+        rmSync(cidDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
   }
 
   async verifyGreen(job: GreenExecutionJob): Promise<RawGreenExecutionResult> {
@@ -136,28 +174,10 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
     const workerCount = Math.max(1, job.concurrencyWorkers ?? 1);
     const runCount = Math.max(1, job.stressLoopCount ?? 1);
 
-    const dockerArgs = [
-      "run",
-      "--rm",
-      "--network",
-      "none",
-      "--cap-drop",
-      "ALL",
-      "--security-opt",
-      "no-new-privileges",
-      "-v",
-      `${cwd}:/workspace`,
-      "-w",
-      "/workspace",
-      this.image,
-      "sh",
-      "-c",
-      job.testCommand,
-    ];
-
     let executionCount = 0;
     let inFlight = 0;
     let maxConcurrentObserved = 0;
+    let raceCollisions = 0;
     const latencies: number[] = [];
 
     const executeOne = async () => {
@@ -165,8 +185,42 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       inFlight++;
       maxConcurrentObserved = Math.max(maxConcurrentObserved, inFlight);
       const start = Date.now();
+
+      const cidDir = mkdtempSync(join(tmpdir(), "docker-cid-"));
+      const cidFile = join(cidDir, "cid");
+
+      const dockerArgs = [
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--cidfile",
+        cidFile,
+        "--memory",
+        "512m",
+        "--cpus",
+        "1",
+        "--pids-limit",
+        "256",
+        "-v",
+        `${cwd}:/workspace`,
+        "-w",
+        "/workspace",
+        this.image,
+        "sh",
+        "-c",
+        job.testCommand,
+      ];
+
       try {
         const res = await runDockerProcessAsync(dockerArgs, this.timeoutMs);
+        if (res.exitCode === 124) {
+          killContainerByCidFile(cidFile);
+        }
         return {
           passed: res.exitCode === 0,
           exitCode: res.exitCode,
@@ -175,48 +229,80 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         };
       } finally {
         inFlight--;
+        try {
+          rmSync(cidDir, { recursive: true, force: true });
+        } catch {
+          // best-effort
+        }
       }
     };
 
-    let results: Array<{
+    const allResults: Array<{
       passed: boolean;
       exitCode: number;
       output: string;
       elapsed: number;
-    }>;
-    if (workerCount > 1) {
-      let releaseBarrier!: () => void;
-      const startBarrier = new Promise<void>((r) => {
-        releaseBarrier = r;
-      });
-      const workers = Array.from({ length: workerCount }, async () => {
-        await startBarrier;
-        return executeOne();
-      });
-      // All workers created and waiting at the barrier before simultaneous release
-      releaseBarrier();
-      results = await Promise.all(workers);
-    } else {
-      results = [];
-      for (let i = 0; i < runCount; i++) {
-        const r = await executeOne();
-        results.push(r);
-        if (!r.passed) break;
+    }> = [];
+
+    // Batch execution: honor both stressLoopCount and concurrencyWorkers
+    let remaining = runCount;
+    while (remaining > 0) {
+      const batchSize = Math.min(workerCount, remaining);
+      remaining -= batchSize;
+
+      let batchResults: Array<{
+        passed: boolean;
+        exitCode: number;
+        output: string;
+        elapsed: number;
+      }>;
+
+      if (batchSize > 1) {
+        let releaseBarrier!: () => void;
+        const startBarrier = new Promise<void>((r) => {
+          releaseBarrier = r;
+        });
+        const batchWorkers = Array.from({ length: batchSize }, async () => {
+          await startBarrier;
+          return executeOne();
+        });
+        releaseBarrier();
+        batchResults = await Promise.all(batchWorkers);
+      } else {
+        batchResults = [await executeOne()];
       }
+
+      allResults.push(...batchResults);
+
+      // Stop early if any run failed
+      const anyFailed = batchResults.some((r) => !r.passed);
+      if (anyFailed) break;
     }
 
     let allPassed = true;
     let lastOutput = "";
-    for (const r of results) {
+    for (const r of allResults) {
       latencies.push(r.elapsed);
       lastOutput = r.output;
-      if (!r.passed) allPassed = false;
+      if (!r.passed) {
+        allPassed = false;
+        // Detect race conditions from output (same as local runner)
+        if (
+          /data race|race detected|concurrent map|deadlock|collision/i.test(
+            r.output,
+          )
+        ) {
+          raceCollisions++;
+        }
+      }
     }
 
     const minLat = latencies.length > 0 ? Math.min(...latencies) : 0;
     const maxLat = latencies.length > 0 ? Math.max(...latencies) : 0;
     const concurrencyStampedePassed =
-      allPassed && (workerCount === 1 || maxConcurrentObserved >= workerCount);
+      allPassed &&
+      raceCollisions === 0 &&
+      (workerCount === 1 || maxConcurrentObserved >= workerCount);
 
     return {
       command: job.testCommand,
@@ -229,7 +315,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       maxConcurrentObserved,
       concurrencyWorkers: workerCount,
       concurrencyStampedePassed,
-      raceCollisionsDetected: 0,
+      raceCollisionsDetected: raceCollisions,
       latencyJitterMs: maxLat - minLat,
       testIdentity: job.redEvidence.testIdentity,
       passedUnitTestsCount: allPassed ? 1 : 0,
