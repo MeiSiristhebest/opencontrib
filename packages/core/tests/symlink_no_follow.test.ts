@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  mkdirSync,
   mkdtempSync,
-  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -50,7 +50,7 @@ describe("Symlink no-follow provenance rules", () => {
     const outsideTest = join(outsideDir, "leak.test.js");
     writeFileSync(outsideTest, "describe('x', function() {});\n");
     const testsDir = join(wsDir, "tests");
-    writeFileSync(join(testsDir, "placeholder.js"), "x");
+    mkdirSync(testsDir, { recursive: true });
     symlinkSync(outsideTest, join(testsDir, "leak.test.js"));
     try {
       const before = resolveTestFiles(
