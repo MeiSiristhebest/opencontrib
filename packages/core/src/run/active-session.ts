@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ContributionRunPhase } from "./types.js";
-import { getOpenContribHome } from "../kernel/home.js";
+import { getOpenContribDataDir } from "../kernel/home.js";
 
 export interface ActiveSessionData {
   runId: string;
@@ -29,8 +29,7 @@ export class ActiveSessionManager {
 
   constructor(customPath?: string) {
     this.sessionFilePath =
-      customPath ||
-      path.join(getOpenContribHome(), ".opencontrib", "active_session.json");
+      customPath || path.join(getOpenContribDataDir(), "active_session.json");
   }
 
   public getActiveSession(): ActiveSessionData | null {

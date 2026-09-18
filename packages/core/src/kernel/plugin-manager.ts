@@ -1,15 +1,15 @@
-import { spawnSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { TOOL_REGISTRY, type ToolRegistryEntry } from './tool-registry.js';
-import { getOpenContribHome } from './home.js';
-
+import { spawnSync } from "child_process";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { TOOL_REGISTRY, type ToolRegistryEntry } from "./tool-registry.js";
+import { getOpenContribDataDir } from "./home.js";
 
 export interface PluginState {
   enabled: boolean;
   disabledAt?: string;
-  disabledReason?: 'binary-not-found' | 'user-disabled' | 'probe-incompatible' | string;
+  disabledReason?:
+    "binary-not-found" | "user-disabled" | "probe-incompatible" | string;
   installedAt?: string;
 }
 
@@ -30,17 +30,22 @@ export class PluginManager {
   private state: Record<string, PluginState> = {};
 
   constructor(opts: PluginManagerOptions = {}) {
-    this.statePath = opts.statePath || path.join(getOpenContribHome(), '.opencontrib', 'plugins-state.json');
+    this.statePath =
+      opts.statePath ||
+      path.join(getOpenContribDataDir(), "plugins-state.json");
     this.load();
   }
 
   private load(): void {
     try {
       if (fs.existsSync(this.statePath)) {
-        const raw = fs.readFileSync(this.statePath, 'utf8');
+        const raw = fs.readFileSync(this.statePath, "utf8");
         const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') {
-          this.state = parsed.plugins && typeof parsed.plugins === 'object' ? parsed.plugins : parsed;
+        if (parsed && typeof parsed === "object") {
+          this.state =
+            parsed.plugins && typeof parsed.plugins === "object"
+              ? parsed.plugins
+              : parsed;
         }
       }
     } catch {
@@ -51,12 +56,14 @@ export class PluginManager {
   private save(): void {
     const dir = path.dirname(this.statePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const tmpPath = this.statePath + '.tmp';
+    const tmpPath = this.statePath + ".tmp";
     try {
-      fs.writeFileSync(tmpPath, JSON.stringify(this.state, null, 2), 'utf8');
+      fs.writeFileSync(tmpPath, JSON.stringify(this.state, null, 2), "utf8");
       fs.renameSync(tmpPath, this.statePath);
     } catch {
-      try { fs.unlinkSync(tmpPath); } catch {}
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch {}
       throw new Error(`Failed to save plugin state to ${this.statePath}`);
     }
   }
@@ -122,7 +129,7 @@ export class PluginManager {
 
   /** Check which tools from a given list are available. Returns { present, missing }. */
   checkTools(toolIds: string[]): { present: string[]; missing: string[] } {
-    const isWindows = process.platform === 'win32';
+    const isWindows = process.platform === "win32";
 
     const present: string[] = [];
     const missing: string[] = [];
@@ -136,9 +143,12 @@ export class PluginManager {
 
       let found = false;
       for (const bin of entry.bin) {
-        const cmd = isWindows ? 'where.exe' : 'command';
-        const args = isWindows ? ['-q', bin] : ['-v', bin];
-        const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000 });
+        const cmd = isWindows ? "where.exe" : "command";
+        const args = isWindows ? ["-q", bin] : ["-v", bin];
+        const result = spawnSync(cmd, args, {
+          encoding: "utf-8",
+          timeout: 3000,
+        });
         if (result.status === 0) {
           found = true;
           break;

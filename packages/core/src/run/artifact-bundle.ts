@@ -19,7 +19,7 @@ import type {
   RunEvent,
   SavedArtifactResult,
 } from "./types.js";
-import { getOpenContribHome } from "../kernel/home.js";
+import { getOpenContribDataDir } from "../kernel/home.js";
 
 const WRITE_ONCE_ARTIFACT_TYPES = new Set<ArtifactType>([
   "workspace",
@@ -77,8 +77,7 @@ export class ArtifactBundleManager {
   private baseDir: string;
 
   constructor(customBaseDir?: string) {
-    this.baseDir =
-      customBaseDir || join(getOpenContribHome(), ".opencontrib", "runs");
+    this.baseDir = customBaseDir || join(getOpenContribDataDir(), "runs");
     if (!existsSync(this.baseDir)) {
       mkdirSync(this.baseDir, { recursive: true });
     }

@@ -15,7 +15,7 @@ import { dirname, join, resolve, sep } from "path";
 import { sanitizeRunId } from "../run/artifact-bundle.js";
 import { runBranchName } from "../run/run-branch.js";
 import { isProtectedWorkspace } from "./workspace-guard.js";
-import { getOpenContribHome } from "../kernel/home.js";
+import { getOpenContribDataDir, getOpenContribHome } from "../kernel/home.js";
 
 /** Normalize path separators to forward slashes for consistent comparison on all platforms. */
 function norm(p: string): string {
@@ -120,12 +120,8 @@ export class WorktreeManager {
   private cacheRoot: string;
 
   constructor() {
-    this.workspaceRoot = join(
-      getOpenContribHome(),
-      ".opencontrib",
-      "workspaces",
-    );
-    this.cacheRoot = join(getOpenContribHome(), ".opencontrib", "repos");
+    this.workspaceRoot = join(getOpenContribDataDir(), "workspaces");
+    this.cacheRoot = join(getOpenContribDataDir(), "repos");
 
     if (!existsSync(this.workspaceRoot))
       mkdirSync(this.workspaceRoot, { recursive: true });
@@ -572,7 +568,7 @@ export class WorktreeManager {
 
   isSafeScratchDirectory(dirPath: string): boolean {
     const resolved = norm(resolve(dirPath));
-    const opencontribHome = norm(resolve(getOpenContribHome(), ".opencontrib"));
+    const opencontribHome = norm(resolve(getOpenContribDataDir()));
     const tempDir = norm(resolve(tmpdir()));
 
     if (resolved === "/" || resolved === norm(resolve(getOpenContribHome()))) {

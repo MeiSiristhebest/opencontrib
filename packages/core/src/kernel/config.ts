@@ -1,12 +1,11 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import type { CapabilityType } from './capability.js';
-import { getOpenContribHome } from './home.js';
-
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import type { CapabilityType } from "./capability.js";
+import { getOpenContribHome } from "./home.js";
 
 export interface OpenContribPolicy {
-  network: 'allowed' | 'denied';
+  network: "allowed" | "denied";
   maxRuntimeSeconds: number;
   enableHeavy: boolean;
   allowMutation: boolean;
@@ -28,7 +27,10 @@ export const DEFAULT_TOOL_TIMEOUTS = {
   GIT_DISCOVERY: 5_000,
 } as const;
 
-export function getToolTimeout(tool: keyof typeof DEFAULT_TOOL_TIMEOUTS, defaultFallback = 30_000): number {
+export function getToolTimeout(
+  tool: keyof typeof DEFAULT_TOOL_TIMEOUTS,
+  defaultFallback = 30_000,
+): number {
   if (process.env.OPENCONTRIB_SCAN_TIMEOUT_MS) {
     const parsed = parseInt(process.env.OPENCONTRIB_SCAN_TIMEOUT_MS, 10);
     if (!isNaN(parsed) && parsed > 0) return parsed;
@@ -45,27 +47,27 @@ export interface OpenContribConfig {
 }
 
 export const DEFAULT_CONFIG: OpenContribConfig = {
-  version: '1.0',
+  version: "1.0",
   enabledCapabilities: [
-    'security.static-analysis',
-    'bug.reproduction',
-    'forensics.git-hotspot',
-    'testing.property-fuzz',
-    'ci.workflow-lint',
-    'concurrency.leak-detection',
-    'architecture.dead-code',
+    "security.static-analysis",
+    "bug.reproduction",
+    "forensics.git-hotspot",
+    "testing.property-fuzz",
+    "ci.workflow-lint",
+    "concurrency.leak-detection",
+    "architecture.dead-code",
   ],
   policy: {
-    network: 'denied',
+    network: "denied",
     maxRuntimeSeconds: 300,
     enableHeavy: false,
     allowMutation: true,
   },
   toolchains: {
-    astGrepBin: 'ast-grep',
-    semgrepBin: 'semgrep',
-    knipBin: 'knip',
-    goleakBin: 'go',
+    astGrepBin: "ast-grep",
+    semgrepBin: "semgrep",
+    knipBin: "knip",
+    goleakBin: "go",
   },
 };
 
@@ -77,21 +79,24 @@ export const DEFAULT_CONFIG: OpenContribConfig = {
  * 3. ~/.opencontrib/config.json
  * 4. DEFAULT_CONFIG
  */
-export function loadWorkspaceConfig(workspacePath: string = process.cwd()): OpenContribConfig {
+export function loadWorkspaceConfig(
+  workspacePath: string = process.cwd(),
+): OpenContribConfig {
   const candidates = [
-    path.join(workspacePath, '.opencontrib.json'),
-    path.join(workspacePath, '.opencontrib', 'config.json'),
-    path.join(getOpenContribHome(), '.opencontrib', 'config.json'),
+    path.join(workspacePath, ".opencontrib.json"),
+    path.join(workspacePath, ".opencontrib", "config.json"),
+    path.join(getOpenContribHome(), ".opencontrib", "config.json"),
   ];
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
       try {
-        const raw = fs.readFileSync(candidate, 'utf8');
+        const raw = fs.readFileSync(candidate, "utf8");
         const parsed = JSON.parse(raw);
         return {
           version: parsed.version || DEFAULT_CONFIG.version,
-          enabledCapabilities: parsed.enabledCapabilities || DEFAULT_CONFIG.enabledCapabilities,
+          enabledCapabilities:
+            parsed.enabledCapabilities || DEFAULT_CONFIG.enabledCapabilities,
           policy: {
             ...DEFAULT_CONFIG.policy,
             ...(parsed.policy || {}),
@@ -114,10 +119,16 @@ export function loadWorkspaceConfig(workspacePath: string = process.cwd()): Open
 /**
  * Writes an initial configuration template to the workspace root.
  */
-export function initWorkspaceConfig(workspacePath: string = process.cwd()): string {
-  const targetPath = path.join(workspacePath, '.opencontrib.json');
+export function initWorkspaceConfig(
+  workspacePath: string = process.cwd(),
+): string {
+  const targetPath = path.join(workspacePath, ".opencontrib.json");
   if (!fs.existsSync(targetPath)) {
-    fs.writeFileSync(targetPath, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf8');
+    fs.writeFileSync(
+      targetPath,
+      JSON.stringify(DEFAULT_CONFIG, null, 2),
+      "utf8",
+    );
   }
   return targetPath;
 }

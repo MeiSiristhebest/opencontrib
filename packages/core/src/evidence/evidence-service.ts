@@ -20,6 +20,7 @@ import {
 } from "./evidence-collector.js";
 import { isSafeRepositoryPath } from "../submission/submission-intent-service.js";
 import { hashValidatedPatchArtifact } from "./validated-patch.js";
+import type { TestCoverageAdapter } from "./coverage-adapter.js";
 
 export interface CaptureRedInput {
   runId: string;
@@ -40,6 +41,12 @@ export interface VerifyGreenInput {
   baselineCommitSha?: string;
   stressLoopCount?: number;
   concurrencyWorkers?: number;
+  /**
+   * Optional generic coverage adapter: resolves a 0-100 coverage percent
+   * from a runner-produced artifact after GREEN. Absent => coverage stays
+   * explicitly UNAVAILABLE (the governance gate never sees invented data).
+   */
+  coverageAdapter?: TestCoverageAdapter;
 }
 
 export interface PorcelainV1Record {
@@ -672,6 +679,7 @@ export class EvidenceService {
       testCommand: input.testCommand,
       stressLoopCount: input.stressLoopCount ?? 1,
       concurrencyWorkers: input.concurrencyWorkers ?? 1,
+      coverageAdapter: input.coverageAdapter,
       redEvidence,
     });
     requireWorkspaceHead(targetCwd, baselineCommitSha);
@@ -729,14 +737,12 @@ export class EvidenceService {
         greenTreeSha256: finalGreenTreeSha256,
         artifactSha256: "",
         changedLines,
-        files: exactDelta.files.map(
-          (file): ValidatedPatchFile => ({
-            path: file.path,
-            operation: file.operation,
-            mode: file.mode,
-            contentSha256: file.contentSha256,
-          }),
-        ),
+        files: exactDelta.files.map((file): ValidatedPatchFile => ({
+          path: file.path,
+          operation: file.operation,
+          mode: file.mode,
+          contentSha256: file.contentSha256,
+        })),
         validatedAt: new Date().toISOString(),
       };
       validatedPatch.artifactSha256 =
@@ -1045,14 +1051,12 @@ export class EvidenceService {
         greenTreeSha256: finalGreenTreeSha256,
         artifactSha256: "",
         changedLines,
-        files: exactDelta.files.map(
-          (file): ValidatedPatchFile => ({
-            path: file.path,
-            operation: file.operation,
-            mode: file.mode,
-            contentSha256: file.contentSha256,
-          }),
-        ),
+        files: exactDelta.files.map((file): ValidatedPatchFile => ({
+          path: file.path,
+          operation: file.operation,
+          mode: file.mode,
+          contentSha256: file.contentSha256,
+        })),
         validatedAt: new Date().toISOString(),
       };
       validatedPatch.artifactSha256 =

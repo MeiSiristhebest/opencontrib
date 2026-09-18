@@ -3,7 +3,7 @@ import { join } from "path";
 
 import type { RepoMemoryEntry } from "../contracts/schemas.js";
 import { writeAtomic } from "../run/artifact-bundle.js";
-import { getOpenContribHome } from "../kernel/home.js";
+import { getOpenContribDataDir } from "../kernel/home.js";
 
 export interface ContributionSubmissionInput {
   prUrl: string;
@@ -22,7 +22,7 @@ export class RepoMemoryLedger {
   private cache: Map<string, RepoMemoryEntry> = new Map();
 
   constructor(customDir?: string) {
-    const dir = customDir || join(getOpenContribHome(), ".opencontrib");
+    const dir = customDir || getOpenContribDataDir();
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     this.memoryFilePath = join(dir, "repo-memory.json");
     this.load();

@@ -17,13 +17,13 @@ import {
   type ContributionRecord,
 } from "../contracts/schemas.js";
 import type { ContributionRunManager } from "../run/run-manager.js";
-import { getOpenContribHome } from "../kernel/home.js";
+import { getOpenContribDataDir } from "../kernel/home.js";
 
 export class ProfileFlywheel {
   private ledgerPath: string;
 
   constructor() {
-    const dir = join(getOpenContribHome(), ".opencontrib");
+    const dir = getOpenContribDataDir();
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     this.ledgerPath = join(dir, "contributions.json");
   }

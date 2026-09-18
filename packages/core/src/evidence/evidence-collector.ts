@@ -24,6 +24,7 @@ import type {
 } from "../contracts/schemas.js";
 import { defaultTestOutputParserRegistry } from "./parsers/registry.js";
 import { defaultVcsDeltaAdapter, type VcsDeltaPort } from "./vcs-delta.port.js";
+import type { TestCoverageAdapter } from "./coverage-adapter.js";
 
 export interface EvidenceCollectionOptions {
   cwd: string;
@@ -35,6 +36,13 @@ export interface EvidenceCollectionOptions {
   runFlakyBaseline?: boolean;
   /** Trusted coverage adapter result; absence is explicitly UNAVAILABLE. */
   changedCodeCoveragePercent?: number;
+  /**
+   * Generic seam for coverage measurement: the adapter resolves a 0-100
+   * percentage from a coverage artifact the runner already produced.
+   * A caller-supplied changedCodeCoveragePercent always wins; without
+   * either, coverage is reported UNAVAILABLE (no invented numbers).
+   */
+  coverageAdapter?: TestCoverageAdapter;
   redEvidence?: RedEvidence;
 }
 
@@ -1069,9 +1077,17 @@ export async function collectEvidence(
     stressLoopCount = 1,
     concurrencyWorkers = 1,
     runFlakyBaseline = true,
-    changedCodeCoveragePercent,
     redEvidence,
   } = options;
+
+  // Generic coverage adapter seam: an explicit caller-supplied percentage
+  // always wins; otherwise ask the adapter (if any) for runner-produced
+  // coverage data. Neither present => UNAVAILABLE downstream.
+  let changedCodeCoveragePercent: number | undefined =
+    options.changedCodeCoveragePercent;
+  if (changedCodeCoveragePercent === undefined && options.coverageAdapter) {
+    changedCodeCoveragePercent = await options.coverageAdapter.resolve(cwd);
+  }
 
   // 1. Initial System Handle & FD Sampling
   const initialHandles = getProcessHandleCount();

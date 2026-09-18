@@ -1,13 +1,13 @@
-import { existsSync, mkdirSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
+import { existsSync, mkdirSync } from "fs";
+import { join } from "path";
+import { getOpenContribDataDir } from "../kernel/home.js";
 
 export class OpenContribStorage {
   private static instance: OpenContribStorage;
-  private customHome?: string;
+  private customDataDir?: string;
 
-  constructor(customHome?: string) {
-    this.customHome = customHome;
+  constructor(customDataDir?: string) {
+    this.customDataDir = customDataDir;
   }
 
   static getInstance(): OpenContribStorage {
@@ -18,7 +18,9 @@ export class OpenContribStorage {
   }
 
   getHomeDir(): string {
-    const home = this.customHome || process.env.OPENCONTRIB_HOME || join(homedir(), '.opencontrib');
+    // Single source of truth: the canonical OpenContrib data directory
+    // (<OPENCONTRIB_HOME>/.opencontrib or ~/.opencontrib).
+    const home = this.customDataDir || getOpenContribDataDir();
     if (!existsSync(home)) {
       mkdirSync(home, { recursive: true });
     }
@@ -26,7 +28,7 @@ export class OpenContribStorage {
   }
 
   getRunsDir(): string {
-    const dir = join(this.getHomeDir(), 'runs');
+    const dir = join(this.getHomeDir(), "runs");
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
@@ -34,7 +36,7 @@ export class OpenContribStorage {
   }
 
   getWorkspacesDir(): string {
-    const dir = join(this.getHomeDir(), 'workspaces');
+    const dir = join(this.getHomeDir(), "workspaces");
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
@@ -42,7 +44,7 @@ export class OpenContribStorage {
   }
 
   getReposDir(): string {
-    const dir = join(this.getHomeDir(), 'repos');
+    const dir = join(this.getHomeDir(), "repos");
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
@@ -50,19 +52,19 @@ export class OpenContribStorage {
   }
 
   getMemoryFile(): string {
-    return join(this.getHomeDir(), 'memory.json');
+    return join(this.getHomeDir(), "memory.json");
   }
 
   getFlywheelFile(): string {
-    return join(this.getHomeDir(), 'contributions.json');
+    return join(this.getHomeDir(), "contributions.json");
   }
 
   getPresetsFile(): string {
-    return join(this.getHomeDir(), 'presets.json');
+    return join(this.getHomeDir(), "presets.json");
   }
 
   getConfigFile(): string {
-    return join(this.getHomeDir(), 'config.json');
+    return join(this.getHomeDir(), "config.json");
   }
 }
 

@@ -1,10 +1,16 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
-import { createHash } from 'crypto';
-import { join } from 'path';
-import { getOpenContribHome } from '../kernel/home.js';
-import type { ResponseCache } from '../ports/response-cache.port.js';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
+import { createHash } from "crypto";
+import { join } from "path";
+import { getOpenContribDataDir } from "../kernel/home.js";
+import type { ResponseCache } from "../ports/response-cache.port.js";
 
-const SCHEMA_VERSION = 'v4';
+const SCHEMA_VERSION = "v4";
 
 export interface FileResponseCacheOptions {
   host: string;
@@ -31,9 +37,8 @@ export class FileResponseCache implements ResponseCache {
     this.ttlMs = opts.ttlMs ?? 10 * 60 * 1000;
     this.identity = `${SCHEMA_VERSION}_${opts.host}_${opts.apiVersion}_${opts.tokenScope}`;
 
-    const home = getOpenContribHome();
-    const opencontribDir = home.endsWith('.opencontrib') ? home : join(home, '.opencontrib');
-    this.cacheDir = join(opencontribDir, 'cache');
+    const opencontribDir = getOpenContribDataDir();
+    this.cacheDir = join(opencontribDir, "cache");
     if (!existsSync(this.cacheDir)) {
       mkdirSync(this.cacheDir, { recursive: true });
     }
@@ -41,7 +46,7 @@ export class FileResponseCache implements ResponseCache {
 
   private getCachePath(key: string): string {
     const identity = `${this.identity}_${key}`;
-    const hash = createHash('sha256').update(identity).digest('hex');
+    const hash = createHash("sha256").update(identity).digest("hex");
     return join(this.cacheDir, `${hash}.json`);
   }
 
@@ -50,8 +55,12 @@ export class FileResponseCache implements ResponseCache {
     if (!existsSync(filePath)) return null;
 
     try {
-      const data = JSON.parse(readFileSync(filePath, 'utf-8'));
-      if (!data || typeof data !== 'object' || typeof data.timestamp !== 'number') {
+      const data = JSON.parse(readFileSync(filePath, "utf-8"));
+      if (
+        !data ||
+        typeof data !== "object" ||
+        typeof data.timestamp !== "number"
+      ) {
         try {
           unlinkSync(filePath);
         } catch {}
@@ -71,7 +80,11 @@ export class FileResponseCache implements ResponseCache {
   set<T>(key: string, payload: T): void {
     const filePath = this.getCachePath(key);
     try {
-      writeFileSync(filePath, JSON.stringify({ timestamp: Date.now(), payload }), 'utf-8');
+      writeFileSync(
+        filePath,
+        JSON.stringify({ timestamp: Date.now(), payload }),
+        "utf-8",
+      );
     } catch {}
   }
 }

@@ -1,6 +1,6 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 import {
   PluginPermissionError,
   type OpenContribPlugin,
@@ -11,52 +11,54 @@ import {
   type RepoFingerprint,
   type PointerStub,
   type KernelToolDescriptor,
-} from './contract.js';
-import { SmartPointerStore } from './pointer-store.js';
-import { MicrokernelEventBus } from './event-bus.js';
-import { CapabilityRouter } from './capability-router.js';
-import { EvidenceGraph } from './evidence-graph.js';
-import { ProbeScanScheduler } from './scan-scheduler.js';
-import { parseCommandSpec } from '../sandbox/command-spec.js';
-import { getOpenContribHome } from './home.js';
-import { execWithSpawn, defaultBinaryProbe } from './process-runner.js';
-
+} from "./contract.js";
+import { SmartPointerStore } from "./pointer-store.js";
+import { MicrokernelEventBus } from "./event-bus.js";
+import { CapabilityRouter } from "./capability-router.js";
+import { EvidenceGraph } from "./evidence-graph.js";
+import { ProbeScanScheduler } from "./scan-scheduler.js";
+import { parseCommandSpec } from "../sandbox/command-spec.js";
+import { getOpenContribDataDir } from "./home.js";
+import { execWithSpawn, defaultBinaryProbe } from "./process-runner.js";
 
 /** Credential-bearing env var keys that must never be passed to plugin subprocesses. */
 const PLUGIN_CREDENTIAL_ENV_KEYS = new Set([
-  'GH_TOKEN',
-  'GITHUB_TOKEN',
-  'GITLAB_TOKEN',
-  'NPM_TOKEN',
-  'NPM_AUTH_TOKEN',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SESSION_TOKEN',
-  'AZURE_CLIENT_SECRET',
-  'AZURE_TENANT_ID',
-  'GCP_SERVICE_ACCOUNT_KEY',
-  'GOOGLE_APPLICATION_CREDENTIALS',
-  'SLACK_TOKEN',
-  'DOCKER_TOKEN',
-  'DOCKER_PASSWORD',
-  'PRIVATE_KEY',
-  'SSH_AUTH_SOCK',
-  'ANTHROPIC_API_KEY',
-  'OPENAI_API_KEY',
-  'GEMINI_API_KEY',
-  'DEEPSEEK_API_KEY',
-  'GROQ_API_KEY',
-  'COHERE_API_KEY',
-  'MISTRAL_API_KEY',
-  'HF_TOKEN',
-  'AZURE_OPENAI_API_KEY',
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GITLAB_TOKEN",
+  "NPM_TOKEN",
+  "NPM_AUTH_TOKEN",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SESSION_TOKEN",
+  "AZURE_CLIENT_SECRET",
+  "AZURE_TENANT_ID",
+  "GCP_SERVICE_ACCOUNT_KEY",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "SLACK_TOKEN",
+  "DOCKER_TOKEN",
+  "DOCKER_PASSWORD",
+  "PRIVATE_KEY",
+  "SSH_AUTH_SOCK",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "GROQ_API_KEY",
+  "COHERE_API_KEY",
+  "MISTRAL_API_KEY",
+  "HF_TOKEN",
+  "AZURE_OPENAI_API_KEY",
 ]);
 
 /** Return a credential-stripped copy of the process environment. */
 function buildSanitizedPluginEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (!PLUGIN_CREDENTIAL_ENV_KEYS.has(key) && !/(?:_KEY|_TOKEN|_SECRET|_PASSWORD|_AUTH|_CREDENTIAL)$/i.test(key)) {
+    if (
+      !PLUGIN_CREDENTIAL_ENV_KEYS.has(key) &&
+      !/(?:_KEY|_TOKEN|_SECRET|_PASSWORD|_AUTH|_CREDENTIAL)$/i.test(key)
+    ) {
       env[key] = value;
     }
   }
@@ -67,7 +69,10 @@ const SANITIZED_PLUGIN_ENV = buildSanitizedPluginEnv();
 
 export class PluginHost implements ProbeRegistryApi {
   private plugins = new Map<string, OpenContribPlugin>();
-  private pluginCapabilities = new Map<string, { probes: string[]; tools: string[] }>();
+  private pluginCapabilities = new Map<
+    string,
+    { probes: string[]; tools: string[] }
+  >();
   private probes = new Map<string, ProbeDescriptor>();
   private tools = new Map<string, KernelToolDescriptor>();
   public pointers: SmartPointerStore;
@@ -79,10 +84,12 @@ export class PluginHost implements ProbeRegistryApi {
 
   constructor(options: { workspacePath?: string; pluginsDir?: string } = {}) {
     this.workspacePath = options.workspacePath || process.cwd();
-    const home = getOpenContribHome();
-    const opencontribDir = home.endsWith('.opencontrib') ? home : path.join(home, '.opencontrib');
-    this.pluginsDir = options.pluginsDir || path.join(opencontribDir, 'plugins');
-    this.pointers = new SmartPointerStore(path.join(this.workspacePath, '.opencontrib', 'pointers'));
+    const opencontribDir = getOpenContribDataDir();
+    this.pluginsDir =
+      options.pluginsDir || path.join(opencontribDir, "plugins");
+    this.pointers = new SmartPointerStore(
+      path.join(this.workspacePath, ".opencontrib", "pointers"),
+    );
     this.events = new MicrokernelEventBus();
     this.router = new CapabilityRouter();
     this.evidenceGraph = new EvidenceGraph(this.pointers);
@@ -94,12 +101,15 @@ export class PluginHost implements ProbeRegistryApi {
     return defaultBinaryProbe.isAvailable(bin);
   }
 
-  public async exec(cmd: string, opts: { cwd?: string; timeout?: number } = {}): Promise<{ stdout: string; stderr: string }> {
+  public async exec(
+    cmd: string,
+    opts: { cwd?: string; timeout?: number } = {},
+  ): Promise<{ stdout: string; stderr: string }> {
     const cwd = opts.cwd || this.workspacePath;
     return execWithSpawn(cmd, {
       ...opts,
       cwd,
-      shell: process.platform === 'win32',
+      shell: process.platform === "win32",
       env: SANITIZED_PLUGIN_ENV,
     });
   }
@@ -152,15 +162,17 @@ export class PluginHost implements ProbeRegistryApi {
       exec: async (cmd: string, opts = {}) => {
         const parsed = parseCommandSpec(cmd);
         const exe = parsed.executable.toLowerCase();
-        const isGitCmd = exe === 'git' || exe === 'git.exe';
-        const hasGitPerm = plugin.permissions?.includes('exec:git') || plugin.permissions?.includes('exec:binary');
-        const hasBinPerm = plugin.permissions?.includes('exec:binary');
+        const isGitCmd = exe === "git" || exe === "git.exe";
+        const hasGitPerm =
+          plugin.permissions?.includes("exec:git") ||
+          plugin.permissions?.includes("exec:binary");
+        const hasBinPerm = plugin.permissions?.includes("exec:binary");
 
         if (isGitCmd && !hasGitPerm) {
-          throw new PluginPermissionError(plugin.name, 'exec:git', cmd);
+          throw new PluginPermissionError(plugin.name, "exec:git", cmd);
         }
         if (!isGitCmd && !hasBinPerm) {
-          throw new PluginPermissionError(plugin.name, 'exec:binary', cmd);
+          throw new PluginPermissionError(plugin.name, "exec:binary", cmd);
         }
 
         const cwd = opts.cwd || this.workspacePath;
@@ -170,8 +182,10 @@ export class PluginHost implements ProbeRegistryApi {
         });
         return { stdout, stderr };
       },
-      log: (msg: string, level = 'info') => {
-        console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](msg);
+      log: (msg: string, level = "info") => {
+        console[
+          level === "error" ? "error" : level === "warn" ? "warn" : "log"
+        ](msg);
       },
       isBinaryAvailable: (bin: string) => defaultBinaryProbe.isAvailable(bin),
     };
@@ -207,17 +221,24 @@ export class PluginHost implements ProbeRegistryApi {
         tools: registeredTools,
       });
 
-      await this.events.emit('plugin:activated', {
-        name: plugin.name,
-        version: plugin.version,
-        probesCount: registeredProbes.length,
-        toolsCount: registeredTools.length,
-      }, plugin.name);
+      await this.events.emit(
+        "plugin:activated",
+        {
+          name: plugin.name,
+          version: plugin.version,
+          probesCount: registeredProbes.length,
+          toolsCount: registeredTools.length,
+        },
+        plugin.name,
+      );
     } catch (err: any) {
       // Rollback: undo all registrations that occurred before the failure
       for (const pId of registeredProbes) this.unregister(pId);
       for (const tName of registeredTools) this.tools.delete(tName);
-      console.error(`[PluginHost] Failed to activate "${plugin.name}", rolled back ${registeredProbes.length} probes and ${registeredTools.length} tools:`, err.message);
+      console.error(
+        `[PluginHost] Failed to activate "${plugin.name}", rolled back ${registeredProbes.length} probes and ${registeredTools.length} tools:`,
+        err.message,
+      );
       throw err;
     }
   }
@@ -238,11 +259,18 @@ export class PluginHost implements ProbeRegistryApi {
       try {
         await plugin.deactivate();
       } catch (err: any) {
-        console.error(`[PluginHost] Error in deactivate for "${pluginName}":`, err.message);
+        console.error(
+          `[PluginHost] Error in deactivate for "${pluginName}":`,
+          err.message,
+        );
       }
     }
     const removed = this.plugins.delete(pluginName);
-    await this.events.emit('plugin:deactivated', { name: pluginName }, 'kernel');
+    await this.events.emit(
+      "plugin:deactivated",
+      { name: pluginName },
+      "kernel",
+    );
     return removed;
   }
 
@@ -254,7 +282,10 @@ export class PluginHost implements ProbeRegistryApi {
     tools: string[];
   }> {
     return Array.from(this.plugins.values()).map((p) => {
-      const caps = this.pluginCapabilities.get(p.name) || { probes: [], tools: [] };
+      const caps = this.pluginCapabilities.get(p.name) || {
+        probes: [],
+        tools: [],
+      };
       return {
         name: p.name,
         version: p.version,
@@ -280,16 +311,29 @@ export class PluginHost implements ProbeRegistryApi {
     skippedProbes: Array<{ id: string; name: string; reason: string }>;
   } {
     const selectedProbes: ProbeDescriptor[] = [];
-    const skippedProbes: Array<{ id: string; name: string; reason: string }> = [];
+    const skippedProbes: Array<{ id: string; name: string; reason: string }> =
+      [];
 
     for (const probe of this.probes.values()) {
       if (options.skip && options.skip.includes(probe.id)) {
-        skippedProbes.push({ id: probe.id, name: probe.name, reason: 'Explicitly skipped via --skip' });
+        skippedProbes.push({
+          id: probe.id,
+          name: probe.name,
+          reason: "Explicitly skipped via --skip",
+        });
         continue;
       }
 
-      if (options.only && options.only.length > 0 && !options.only.includes(probe.id)) {
-        skippedProbes.push({ id: probe.id, name: probe.name, reason: 'Not in --only list' });
+      if (
+        options.only &&
+        options.only.length > 0 &&
+        !options.only.includes(probe.id)
+      ) {
+        skippedProbes.push({
+          id: probe.id,
+          name: probe.name,
+          reason: "Not in --only list",
+        });
         continue;
       }
 
@@ -305,7 +349,11 @@ export class PluginHost implements ProbeRegistryApi {
           });
         }
       } catch (err: any) {
-        skippedProbes.push({ id: probe.id, name: probe.name, reason: `Match evaluation error: ${err.message}` });
+        skippedProbes.push({
+          id: probe.id,
+          name: probe.name,
+          reason: `Match evaluation error: ${err.message}`,
+        });
       }
     }
 
@@ -325,6 +373,10 @@ export class PluginHost implements ProbeRegistryApi {
     executedProbes: string[];
     pointersCreated: PointerStub[];
   }> {
-    return ProbeScanScheduler.executeScan(targetPath, probesToRun, this.pointers);
+    return ProbeScanScheduler.executeScan(
+      targetPath,
+      probesToRun,
+      this.pointers,
+    );
   }
 }

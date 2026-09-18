@@ -33,6 +33,7 @@ import {
   type AdversarialScenarioId,
 } from "@opencontrib/core";
 import { printJSON } from "../utils/output.js";
+import { CliExitError } from "../utils/exit.js";
 
 // ─── eval judge ───────────────────────────────────────────────────────────────
 // Phase 1: Compress trajectory and emit the judge prompt for a neutral sub-agent.
@@ -51,7 +52,7 @@ const judgeCommand = new Command("judge")
           { status: "error", message: `File not found: ${transcriptFile}` },
           opts.pretty,
         );
-        process.exit(1);
+        throw new CliExitError(1);
       }
 
       const { events, metrics } = parseTrajectoryFromJSONL(transcriptFile);
@@ -87,7 +88,7 @@ const judgeCommand = new Command("judge")
       );
     } catch (err: any) {
       printJSON({ status: "error", message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -139,7 +140,7 @@ const parseJudgmentCommand = new Command("parse-judgment")
               { status: "error", message: `File not found: ${responseFile}` },
               opts?.pretty,
             );
-            process.exit(1);
+            throw new CliExitError(1);
           }
           rawText = fs.readFileSync(responseFile, "utf8");
         } else {
@@ -150,8 +151,7 @@ const parseJudgmentCommand = new Command("parse-judgment")
             },
             opts?.pretty,
           );
-          process.exit(1);
-          return;
+          throw new CliExitError(1);
         }
 
         let metrics;
@@ -163,7 +163,7 @@ const parseJudgmentCommand = new Command("parse-judgment")
         printJSON({ status: "success", report }, opts?.pretty);
       } catch (err: any) {
         printJSON({ status: "error", message: err.message }, opts?.pretty);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );
@@ -199,7 +199,7 @@ const reflectCommand = new Command("reflect")
             { status: "error", message: `File not found: ${judgmentFile}` },
             opts.pretty,
           );
-          process.exit(1);
+          throw new CliExitError(1);
         }
 
         let report;
@@ -215,7 +215,7 @@ const reflectCommand = new Command("reflect")
             },
             opts.pretty,
           );
-          process.exit(1);
+          throw new CliExitError(1);
         }
 
         const insight = synthesizeReflexionInsights(report, [], {
@@ -234,7 +234,7 @@ const reflectCommand = new Command("reflect")
         );
       } catch (err: any) {
         printJSON({ status: "error", message: err.message }, opts.pretty);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );
@@ -318,7 +318,7 @@ const benchmarkCommand = new Command("benchmark")
             { status: "error", message: `Scenario not found: ${scenarioId}` },
             opts?.pretty,
           );
-          process.exit(1);
+          throw new CliExitError(1);
         }
 
         let appliedPatch: string | undefined;
@@ -382,7 +382,7 @@ const benchmarkCommand = new Command("benchmark")
         }
       } catch (err: any) {
         printJSON({ status: "error", message: err.message }, opts?.pretty);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );
@@ -431,7 +431,7 @@ const adversarialCommand = new Command("adversarial")
             },
             opts.pretty,
           );
-          process.exit(1);
+          throw new CliExitError(1);
         }
         if (!["cli", "mcp"].includes(opts.axis)) {
           printJSON(
@@ -441,7 +441,7 @@ const adversarialCommand = new Command("adversarial")
             },
             opts.pretty,
           );
-          process.exit(1);
+          throw new CliExitError(1);
         }
         const scenarioFilter =
           opts.scenario === "all"
@@ -458,7 +458,7 @@ const adversarialCommand = new Command("adversarial")
             },
             opts.pretty,
           );
-          process.exit(1);
+          throw new CliExitError(1);
         }
 
         const report: Record<string, unknown> = {
@@ -526,6 +526,9 @@ const adversarialCommand = new Command("adversarial")
 
         printJSON(report, opts.pretty);
       } catch (error: any) {
+        if (error instanceof CliExitError) {
+          throw error;
+        }
         printJSON(
           {
             status: "error",
@@ -533,7 +536,7 @@ const adversarialCommand = new Command("adversarial")
           },
           opts.pretty,
         );
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );

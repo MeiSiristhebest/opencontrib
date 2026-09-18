@@ -49,7 +49,7 @@ export interface ResumeRunResult {
 }
 
 import { validatePhaseGate } from "./state-machine.js";
-import { getOpenContribHome } from "../kernel/home.js";
+import { getOpenContribDataDir } from "../kernel/home.js";
 import { registerCanonicalRunWriter } from "./canonical-writer.js";
 
 export const PRIVILEGED_PHASES = new Set<ContributionRunPhase>([
@@ -91,8 +91,7 @@ export class ContributionRunManager {
       activeSession?: ActiveSessionManager;
     } = {},
   ) {
-    this.baseDir =
-      deps.baseDir || join(getOpenContribHome(), ".opencontrib", "runs");
+    this.baseDir = deps.baseDir || join(getOpenContribDataDir(), "runs");
     this.bundleManager = new ArtifactBundleManager(this.baseDir);
     this.clock = deps.clock ?? new SystemClock();
     this.idGenerator = deps.idGenerator ?? new RandomIdGenerator();
