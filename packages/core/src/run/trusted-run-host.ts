@@ -28,9 +28,8 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
   async captureRed(
     job: import("./trusted-execution.port.js").RedExecutionJob,
   ): Promise<import("./trusted-execution.port.js").RawRedExecutionResult> {
-    const { captureRedEvidence } = await import(
-      "../evidence/evidence-collector.js"
-    );
+    const { captureRedEvidence } =
+      await import("../evidence/evidence-collector.js");
     const red = captureRedEvidence({
       cwd: job.workspace.workspacePath,
       testCommand: job.testCommand,
@@ -53,9 +52,8 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
   async verifyGreen(
     job: import("./trusted-execution.port.js").GreenExecutionJob,
   ): Promise<import("./trusted-execution.port.js").RawGreenExecutionResult> {
-    const { verifyGreenEvidence, getProcessHandleCount } = await import(
-      "../evidence/evidence-collector.js"
-    );
+    const { verifyGreenEvidence, getProcessHandleCount } =
+      await import("../evidence/evidence-collector.js");
     const initialHandles = getProcessHandleCount();
     const green = await verifyGreenEvidence({
       cwd: job.workspace.workspacePath,
@@ -172,6 +170,7 @@ export class TrustedRunMaterializer {
     );
 
     // If a reproduction patch is supplied, apply it to the clean workspace BEFORE capturing RED
+    const reproAppliedPaths = new Set<string>();
     if (bundle.reproductionPatch && bundle.reproductionPatch.length > 0) {
       const reproApply = this.worktreeManager.applySurgicalFilesSafely(
         workspace.context.workspacePath,
@@ -186,6 +185,9 @@ export class TrustedRunMaterializer {
         throw new TrustedRunMaterializationError(
           `host rejected reproduction patch application: ${reproApply.errors.join("; ")}`,
         );
+      }
+      for (const applied of reproApply.appliedFiles) {
+        reproAppliedPaths.add(applied.path);
       }
     }
 
@@ -214,14 +216,19 @@ export class TrustedRunMaterializer {
       "PATCH_DRAFTED",
     );
 
+    // Deduplicate: files already applied by the reproduction patch must not
+    // be applied a second time. Under strict CREATE semantics a second
+    // CREATE of an existing file is a patch-semantic violation.
     const applied = this.worktreeManager.applySurgicalFilesSafely(
       workspace.context.workspacePath,
-      patch.files.map((file) => ({
-        path: file.path,
-        operation: file.operation,
-        content: file.content,
-        mode: file.mode,
-      })),
+      patch.files
+        .filter((file) => !reproAppliedPaths.has(file.path))
+        .map((file) => ({
+          path: file.path,
+          operation: file.operation,
+          content: file.content,
+          mode: file.mode,
+        })),
     );
     if (applied.errors.length > 0) {
       throw new TrustedRunMaterializationError(

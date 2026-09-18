@@ -1,6 +1,13 @@
 import { createHash } from "crypto";
 import { execSync } from "child_process";
-import { readdirSync, statSync, readFileSync, existsSync } from "fs";
+import {
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  statSync,
+  existsSync,
+} from "node:fs";
 import { join, relative, resolve, sep } from "path";
 import {
   defaultSandboxRuntime,
@@ -455,8 +462,16 @@ export function computeSourceTreeHash(cwd: string): string {
     for (const rel of untrackedLines) {
       const full = join(cwd, rel);
       try {
-        const st = statSync(full);
-        if (!st.isDirectory()) {
+        const st = lstatSync(full);
+        if (st.isSymbolicLink()) {
+          // No-follow: bind the fingerprint to the link's target string, never
+          // to the content the link points at (which may live outside the host).
+          const target = readlinkSync(full);
+          const h = createHash("sha256")
+            .update(`symlink:${target}`)
+            .digest("hex");
+          untrackedHashes.push(`${rel}:symlink:${h}`);
+        } else if (!st.isDirectory()) {
           const buf = readFileSync(full);
           const h = createHash("sha256").update(buf).digest("hex");
           untrackedHashes.push(`${rel}:${String(st.size)}:${h}`);
@@ -491,11 +506,26 @@ export function computeSourceTreeHash(cwd: string): string {
           const full = join(dir, item);
           let st: ReturnType<typeof statSync>;
           try {
-            st = statSync(full);
+            st = lstatSync(full);
           } catch {
             continue;
           }
-          if (st.isDirectory()) {
+          if (st.isSymbolicLink()) {
+            // No-follow: hash the link target string, never the external file.
+            try {
+              const target = readlinkSync(full);
+              const relPath = full
+                .slice(cwd.length)
+                .replace(/^[\\/]+/, "")
+                .replace(/\\/g, "/");
+              const linkHash = createHash("sha256")
+                .update(`symlink:${target}`)
+                .digest("hex");
+              entries.push(`${relPath}:symlink:${linkHash}`);
+            } catch {
+              entries.push(`${item}:symlink:unreadable`);
+            }
+          } else if (st.isDirectory()) {
             walk(full);
           } else {
             try {
@@ -574,7 +604,17 @@ function addFileIdentity(
   if (!isWithinDirectory(cwd, full)) return;
   const normalizedPath = relative(cwd, full).replace(/\\/g, "/");
   try {
-    const st = statSync(full);
+    const st = lstatSync(full);
+    if (st.isSymbolicLink()) {
+      // No-follow: a symlinked test file is bound to the link target string,
+      // never to the content it points at (which may live outside the host).
+      const target = readlinkSync(full);
+      files.set(normalizedPath, {
+        path: normalizedPath,
+        sha256: createHash("sha256").update(`symlink:${target}`).digest("hex"),
+      });
+      return;
+    }
     if (st.isDirectory()) {
       const entries = readdirSync(full, { withFileTypes: true });
       for (const entry of entries) {
@@ -619,6 +659,7 @@ function discoverTestFiles(
       name: string;
       isDirectory(): boolean;
       isFile(): boolean;
+      isSymbolicLink(): boolean;
     }> = [];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
@@ -640,7 +681,7 @@ function discoverTestFiles(
         continue;
       const full = join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.isFile()) {
+      else if (entry.isFile() || entry.isSymbolicLink()) {
         const pathName = relative(cwd, full).replace(/\\/g, "/");
         if (isLikelyTestFile(pathName)) addFileIdentity(cwd, full, discovered);
       }

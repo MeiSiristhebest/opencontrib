@@ -23,7 +23,15 @@ import {
 } from "../src/llm/llm-service.js";
 
 import { deriveEvidenceBackedQualityRubric } from "../src/governance/governance-auditor.js";
-import { existsSync, mkdtempSync, rmSync } from "fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { z } from "zod";
@@ -140,6 +148,110 @@ describe("Workspace Security Boundaries & Path Traversal Protection", () => {
     const gitResult = manager.applySurgicalFilesSafely(testRoot, gitWrite);
     expect(gitResult.appliedFiles.length).toBe(0);
     expect(gitResult.errors[0]).toContain("Security violation");
+  });
+
+  test("apply layer refuses to write through a final-target symlink (no-follow)", () => {
+    if (process.platform === "win32") return; // symlink creation requires privileges
+    const outsideDir = mkdtempSync(join(tmpdir(), "oc-outside-"));
+    const outside = join(outsideDir, "secret.txt");
+    writeFileSync(outside, "secret");
+    const linkPath = join(testRoot, "cfg-link");
+    symlinkSync(outside, linkPath);
+    try {
+      const result = manager.applySurgicalFilesSafely(testRoot, [
+        {
+          path: "cfg-link",
+          operation: "MODIFY",
+          content: "pwned",
+          mode: "100644",
+        },
+      ]);
+      expect(result.errors).toHaveLength(0);
+      // The outside target must remain untouched.
+      expect(readFileSync(outside, "utf8")).toBe("secret");
+      // The link inside the workspace was replaced by a regular file.
+      const st = lstatSync(linkPath);
+      expect(st.isSymbolicLink()).toBe(false);
+      expect(readFileSync(linkPath, "utf8")).toBe("pwned");
+    } finally {
+      rmSync(linkPath, { force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  test("apply layer rejects duplicate normalized paths before any mutation", () => {
+    if (process.platform === "win32") return;
+    const outsideDir = mkdtempSync(join(tmpdir(), "oc-outside-"));
+    const outside = join(outsideDir, "target.txt");
+    writeFileSync(outside, "secret");
+    try {
+      const result = manager.applySurgicalFilesSafely(testRoot, [
+        {
+          path: "escape",
+          operation: "CREATE",
+          content: outside,
+          mode: "120000",
+        },
+        { path: "escape", operation: "MODIFY", content: "PWN", mode: "100644" },
+      ]);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0]).toContain("duplicate normalized path");
+      expect(result.appliedFiles).toHaveLength(0);
+      // No mutation happened: the symlink was not created, outside file untouched.
+      expect(existsSync(join(testRoot, "escape"))).toBe(false);
+      expect(readFileSync(outside, "utf8")).toBe("secret");
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  test("apply layer enforces operation semantics (CREATE missing / MODIFY existing / DELETE idempotent)", () => {
+    const existingPath = "semantic-probe.txt";
+    writeFileSync(join(testRoot, existingPath), "original");
+    try {
+      const r1 = manager.applySurgicalFilesSafely(testRoot, [
+        {
+          path: existingPath,
+          operation: "CREATE",
+          content: "x",
+          mode: "100644",
+        },
+      ]);
+      expect(r1.errors.length).toBe(1);
+      expect(r1.errors[0]).toContain("CREATE target");
+
+      const r2 = manager.applySurgicalFilesSafely(testRoot, [
+        {
+          path: "missing-probe.txt",
+          operation: "MODIFY",
+          content: "x",
+          mode: "100644",
+        },
+      ]);
+      expect(r2.errors.length).toBe(1);
+      expect(r2.errors[0]).toContain("MODIFY target");
+
+      const r3 = manager.applySurgicalFilesSafely(testRoot, [
+        { path: "missing-probe.txt", operation: "DELETE" },
+      ]);
+      expect(r3.errors).toHaveLength(0);
+      expect(r3.appliedFiles.map((a) => a.operation)).toEqual(["DELETE"]);
+
+      const r4 = manager.applySurgicalFilesSafely(testRoot, [
+        {
+          path: existingPath,
+          operation: "MODIFY",
+          content: "updated",
+          mode: "100644",
+        },
+      ]);
+      expect(r4.errors).toHaveLength(0);
+      expect(readFileSync(join(testRoot, existingPath), "utf8")).toBe(
+        "updated",
+      );
+    } finally {
+      rmSync(join(testRoot, existingPath), { force: true });
+    }
   });
 });
 
@@ -340,9 +452,8 @@ describe("Evidence-Backed Quality Rubric & Subagent Review Decoupling", () => {
   });
 
   test("countAddedTestCasesFromGitDiff uses injected VcsDeltaPort (DIP)", async () => {
-    const { countAddedTestCasesFromGitDiff } = await import(
-      "../src/evidence/index.js"
-    );
+    const { countAddedTestCasesFromGitDiff } =
+      await import("../src/evidence/index.js");
 
     const mockVcsAdapter = {
       async getDiff(opts: any) {

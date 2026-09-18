@@ -1,5 +1,15 @@
 import { spawnSync } from "child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  type Stats,
+} from "fs";
 import { homedir as osHomedir, tmpdir } from "os";
 import { dirname, join, resolve, sep } from "path";
 import { sanitizeRunId } from "../run/artifact-bundle.js";
@@ -630,6 +640,21 @@ export class WorktreeManager {
       return { appliedFiles, errors };
     }
 
+    // Reject duplicate normalized paths inside one batch BEFORE any mutation.
+    // Without this, a batch such as [CREATE symlink 'escape', MODIFY 'escape']
+    // would let the second entry write through the link created by the first.
+    const seenNormalizedPaths = new Set<string>();
+    for (const f of files) {
+      const key = resolve(workspacePath, f.path.replace(/\\/g, "/"));
+      if (seenNormalizedPaths.has(key)) {
+        errors.push(
+          `Security violation: duplicate normalized path '${f.path}' in the same batch; the apply layer refuses to mutate one target twice.`,
+        );
+        return { appliedFiles, errors };
+      }
+      seenNormalizedPaths.add(key);
+    }
+
     // Security Hardening: Anti-Symlink Traversal Pre-Validation
     // 1. Collect all paths that this batch will create as symlinks
     const batchSymlinkPaths = new Set<string>();
@@ -658,7 +683,6 @@ export class WorktreeManager {
     }
 
     // 3. Reject any file path whose on-disk ancestor is currently a symlink
-    const { lstatSync, realpathSync } = require("node:fs");
     const realRoot = existsSync(workspacePath)
       ? realpathSync(workspacePath)
       : resolve(workspacePath);
@@ -720,23 +744,59 @@ export class WorktreeManager {
 
       const fullPath = resolve(workspacePath, f.path);
       try {
-        if (f.operation === "DELETE") {
-          if (existsSync(fullPath)) {
-            rmSync(fullPath, { force: true });
+        // No-follow final-target inspection: lstat never follows a link, so
+        // a symlinked target is observed (and later replaced) instead of
+        // written through.
+        let targetLstat: Stats | undefined;
+        try {
+          targetLstat = lstatSync(fullPath);
+        } catch {
+          targetLstat = undefined;
+        }
+
+        // Operation-semantic preflight: the apply layer must agree with the
+        // declared patch semantics before touching the filesystem.
+        if (f.operation === "CREATE") {
+          if (targetLstat !== undefined) {
+            errors.push(
+              `PatchSemanticViolationError: CREATE target '${f.path}' already exists${targetLstat.isSymbolicLink() ? " (as a symbolic link)" : ""}; expected a missing target.`,
+            );
+            continue;
           }
+        } else if (f.operation === "MODIFY") {
+          if (targetLstat === undefined) {
+            errors.push(
+              `PatchSemanticViolationError: MODIFY target '${f.path}' does not exist; expected an existing file.`,
+            );
+            continue;
+          }
+        } else if (f.operation !== "DELETE") {
+          errors.push(
+            `PatchSemanticViolationError: unsupported operation '${f.operation}' for '${f.path}'.`,
+          );
+          continue;
+        }
+
+        if (f.operation === "DELETE") {
+          // Explicit idempotency rule: a missing target is a no-op. rmSync
+          // without `recursive` unlinks the link itself when the target is a
+          // symlink; it never deletes or follows the link target.
+          if (targetLstat !== undefined) rmSync(fullPath, { force: true });
           appliedFiles.push({ path: f.path, operation: "DELETE" });
           continue;
         }
 
         mkdirSync(dirname(fullPath), { recursive: true });
 
-        // Handle symlink mode 120000
+        // Handle symlink mode 120000: replace whatever occupies the path
+        // (regular file or stale link) — rmSync unlinks the link itself.
         if (f.mode === "120000") {
-          if (existsSync(fullPath)) rmSync(fullPath, { force: true });
-          const { symlinkSync } = require("node:fs");
+          if (targetLstat !== undefined) rmSync(fullPath, { force: true });
           symlinkSync(f.content || "", fullPath);
         } else {
-          // Normal file creation/modification with optional chmod 100755 executable
+          // Never write through an existing symlink: unlink it FIRST, then
+          // create a fresh regular file at the same path.
+          if (targetLstat?.isSymbolicLink()) rmSync(fullPath, { force: true });
           writeFileSync(fullPath, f.content || "", "utf8");
           if (f.mode === "100755" && process.platform !== "win32") {
             const { chmodSync } = require("node:fs");
