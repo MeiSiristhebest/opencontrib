@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   ApprovalArtifactSchema,
   SubmissionIntentArtifactSchema,
@@ -170,16 +171,19 @@ export class TrustedSubmissionBroker {
     submission: SubmissionArtifact,
   ): RemoteCompletionAttestation {
     const flywheel = new ProfileFlywheel();
-    const synced = flywheel.syncFromRun(this.runManager, runId);
+    flywheel.syncFromRun(this.runManager, runId);
     const run = this.runManager.getRun(runId);
     const resultArtifact = run?.artifacts.result;
+    const resultSha256 = createHash("sha256")
+      .update(JSON.stringify(resultArtifact || ""))
+      .digest("hex");
     return {
       runId,
       hostIntentSha256: submission.intentSha256,
       prNumber: submission.prNumber,
       prUrl: submission.prUrl,
       headSha: submission.headSha,
-      resultSha256: synced.record.id,
+      resultSha256,
       verified: true,
       completedAt: submission.submittedAt,
       submissionArtifact: submission,

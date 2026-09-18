@@ -21,9 +21,10 @@ export class TrustedRunMaterializationError extends Error {
 
 /**
  * In-process fallback execution adapter implementing TrustedExecutionPort.
- * In low-trust/development mode, executes tests and returns raw metrics to the Host.
+ * For development/test use only. Production deployments must inject a containerized
+ * or out-of-process worker (e.g. DockerExecutionWorker).
  */
-class LocalEvidenceServiceExecutionAdapter implements TrustedExecutionPort {
+export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
   async captureRed(
     job: import("./trusted-execution.port.js").RedExecutionJob,
   ): Promise<import("./trusted-execution.port.js").RawRedExecutionResult> {
@@ -107,8 +108,7 @@ export class TrustedRunMaterializer {
     private readonly worktreeManager: WorktreeManager = new WorktreeManager(),
     executionPort?: TrustedExecutionPort,
   ) {
-    this.executionPort =
-      executionPort ?? new LocalEvidenceServiceExecutionAdapter();
+    this.executionPort = executionPort ?? new DevelopmentUnsafeExecutionPort();
   }
 
   async materialize(input: RunTransferBundle) {

@@ -396,13 +396,40 @@ export class PatchGenerationStep implements PipelineStep {
     }
 
     ctx.patchDraft = patchDraft;
-    ctx.activePatch = patchDraft;
+    // If reproduction design introduced regression test files, merge them into the patch draft
+    // so the final canonical PatchArtifact and exact delta include BOTH test + implementation.
+    let fullPatchDraft: PatchDraft = patchDraft;
+    if (
+      ctx.reproductionDesign?.reproductionFiles &&
+      ctx.reproductionDesign.reproductionFiles.length > 0
+    ) {
+      const existingPaths = new Set(patchDraft.files.map((f) => f.path));
+      const testFilesToInclude =
+        ctx.reproductionDesign.reproductionFiles.filter(
+          (tf) => !existingPaths.has(tf.path),
+        );
+      if (testFilesToInclude.length > 0) {
+        fullPatchDraft = {
+          ...patchDraft,
+          files: [...testFilesToInclude, ...patchDraft.files],
+          targetFiles: [
+            ...testFilesToInclude.map((tf) => ({
+              path: tf.path,
+              reason: "Regression reproduction test",
+            })),
+            ...patchDraft.targetFiles,
+          ],
+        };
+      }
+    }
+
+    ctx.activePatch = fullPatchDraft;
     if (ctx.runId) {
       const runManager = deps.runManager ?? defaultRunManager;
       runManager.saveArtifact(
         ctx.runId,
         "patch",
-        patchDraft as any,
+        fullPatchDraft as any,
         ctx.preFixReproductionCaptured ? "PATCH_DRAFTED" : undefined,
       );
     }

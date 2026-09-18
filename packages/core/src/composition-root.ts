@@ -122,20 +122,25 @@ export interface ProductionCompositionRoot {
 }
 
 /**
- * Build the provider-writing side of the trust boundary. This function belongs
- * in a separately deployed host process; agent-facing CLI/MCP code must use
- * RemoteSubmissionBrokerClient instead and must not receive its token.
+ * Build the production provider-writing side of the trust boundary.
+ * In production, an isolated out-of-process executionPort is MANDATORY.
+ * For development or test runs, use buildDevelopmentSubmissionBroker instead.
  */
 export function buildTrustedSubmissionBroker(options: {
   githubToken: string;
   githubHost?: string;
   approvalVerifier: ApprovalArtifactVerifier;
-  executionPort?: import("./run/trusted-execution.port.js").TrustedExecutionPort;
+  executionPort: import("./run/trusted-execution.port.js").TrustedExecutionPort;
 }): {
   githubClient: GitHubClient;
   runManager: ContributionRunManager;
   broker: TrustedSubmissionBroker;
 } {
+  if (!options.executionPort) {
+    throw new Error(
+      "TrustedBrokerSecurityError: production broker requires an isolated executionPort. Use buildDevelopmentSubmissionBroker() for local development.",
+    );
+  }
   const githubClient = buildProductionGitHubClient({
     token: options.githubToken,
     host: options.githubHost,
@@ -161,6 +166,28 @@ export function buildTrustedSubmissionBroker(options: {
       materializer,
     ),
   };
+}
+
+/**
+ * Convenience builder for development / integration testing with an in-process execution port.
+ * NEVER deploy this in an environment holding production GitHub write tokens.
+ */
+export function buildDevelopmentSubmissionBroker(options: {
+  githubToken: string;
+  githubHost?: string;
+  approvalVerifier: ApprovalArtifactVerifier;
+}): {
+  githubClient: GitHubClient;
+  runManager: ContributionRunManager;
+  broker: TrustedSubmissionBroker;
+} {
+  const {
+    DevelopmentUnsafeExecutionPort,
+  } = require("./run/trusted-run-host.js");
+  return buildTrustedSubmissionBroker({
+    ...options,
+    executionPort: new DevelopmentUnsafeExecutionPort(),
+  });
 }
 
 /** Build the entire production object graph in one call. */

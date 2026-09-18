@@ -145,6 +145,24 @@ export class RemoteSubmissionBrokerClient implements SubmissionPort {
         "SubmissionBrokerProtocolError: trusted broker response did not contain a valid verified SubmissionArtifact.",
       );
     }
-    return result.data as SubmissionArtifact;
+    const submissionArtifact = result.data as SubmissionArtifact;
+
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "completionAttestation" in payload
+    ) {
+      const { RemoteCompletionAttestationSchema } =
+        await import("../run/completion-attestation.js");
+      const attestationResult = RemoteCompletionAttestationSchema.safeParse(
+        (payload as { completionAttestation?: unknown }).completionAttestation,
+      );
+      if (attestationResult.success) {
+        (submissionArtifact as any).completionAttestation =
+          attestationResult.data;
+      }
+    }
+
+    return submissionArtifact;
   }
 }

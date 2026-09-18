@@ -126,8 +126,15 @@ const auditCommand = new Command("audit")
             const raw = JSON.parse(fs.readFileSync(opts.evidenceFile, "utf-8"));
             const { EvidenceReportSchema } = await import("@opencontrib/core");
             const parsed = EvidenceReportSchema.safeParse(raw);
-            evidence = parsed.success ? parsed.data : undefined;
+            if (!parsed.success) {
+              console.error(
+                `❌ Invalid evidence in "${opts.evidenceFile}": ${parsed.error.message}`,
+              );
+              throw new CliExitError(1);
+            }
+            evidence = parsed.data;
           } catch (err: any) {
+            if (err instanceof CliExitError) throw err;
             console.error(
               `Failed to read evidence file "${opts.evidenceFile}": ${err.message}`,
             );
@@ -137,13 +144,20 @@ const auditCommand = new Command("audit")
           const raw = parseJSON(opts.evidence, "--evidence");
           const { EvidenceReportSchema } = await import("@opencontrib/core");
           const parsed = EvidenceReportSchema.safeParse(raw);
-          evidence = parsed.success ? parsed.data : undefined;
+          if (!parsed.success) {
+            console.error(
+              `❌ Invalid --evidence payload: ${parsed.error.message}`,
+            );
+            throw new CliExitError(1);
+          }
+          evidence = parsed.data;
         } else if (runId) {
           try {
             const run = getRunManager().getRun(runId);
             if (run?.artifacts?.evidence) {
-              const { EvidenceReportSchema } =
-                await import("@opencontrib/core");
+              const { EvidenceReportSchema } = await import(
+                "@opencontrib/core"
+              );
               const parsed = EvidenceReportSchema.safeParse(
                 run.artifacts.evidence,
               );

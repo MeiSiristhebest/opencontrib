@@ -7,3 +7,5 @@ export * from "./run-branch.js";
 export * from "./run-transfer.js";
 export * from "./trusted-run-host.js";
 export * from "./trusted-execution.port.js";
+export * from "./docker-execution-worker.js";
+export * from "./completion-attestation.js";

@@ -317,6 +317,29 @@ function collectActualDelta(cwd: string, baseCommitSha: string): DeltaFile[] {
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+function countChangedLinesFromGit(cwd: string, baseCommitSha: string): number {
+  try {
+    const diffStat = gitOutput(
+      cwd,
+      ["diff", "--numstat", baseCommitSha, "--"],
+      "count changed lines from git numstat",
+    );
+    let total = 0;
+    for (const line of diffStat.split("\n")) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const added = parseInt(parts[0], 10);
+        const deleted = parseInt(parts[1], 10);
+        if (!Number.isNaN(added)) total += added;
+        if (!Number.isNaN(deleted)) total += deleted;
+      }
+    }
+    return total;
+  } catch {
+    return 0;
+  }
+}
+
 function computeFinalTreeHash(cwd: string): string {
   const treeHash = computeSourceTreeHash(cwd);
   if (!treeHash) {
@@ -597,6 +620,8 @@ export class EvidenceService {
       allTestsPassing: true,
     };
 
+    const changedLines = countChangedLinesFromGit(targetCwd, baselineCommitSha);
+
     if (report.reproductionVerified === true) {
       const validatedPatch: ValidatedPatchArtifact = {
         runId: input.runId,
@@ -606,6 +631,7 @@ export class EvidenceService {
         redTreeSha256: redEvidence.sourceTreeSha256,
         greenTreeSha256: finalGreenTreeSha256,
         artifactSha256: "",
+        changedLines,
         files: exactDelta.files.map((file): ValidatedPatchFile => ({
           path: file.path,
           operation: file.operation,
@@ -859,6 +885,8 @@ export class EvidenceService {
       reproductionVerified,
     };
 
+    const changedLines = countChangedLinesFromGit(targetCwd, baselineCommitSha);
+
     if (report.reproductionVerified === true) {
       const validatedPatch: ValidatedPatchArtifact = {
         runId,
@@ -868,6 +896,7 @@ export class EvidenceService {
         redTreeSha256: redEvidence.sourceTreeSha256,
         greenTreeSha256: finalGreenTreeSha256,
         artifactSha256: "",
+        changedLines,
         files: exactDelta.files.map((file): ValidatedPatchFile => ({
           path: file.path,
           operation: file.operation,
