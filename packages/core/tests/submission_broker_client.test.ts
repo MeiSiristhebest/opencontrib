@@ -36,15 +36,49 @@ describe("Agent-facing submission broker client", () => {
       },
     });
 
-    const artifact = await client.submit(
-      "run_1234567890abcdef",
-      "b".repeat(64),
-    );
-    expect(artifact.prNumber).toBe(7);
+    const result = await client.submit("run_1234567890abcdef", "b".repeat(64));
+    expect(result.submissionArtifact.prNumber).toBe(7);
+    expect(result.completionAttestation).toBeUndefined();
     expect(JSON.parse(requestBody)).toEqual({
       runId: "run_1234567890abcdef",
       expectedIntentSha256: "b".repeat(64),
     });
+  });
+
+  it("throws a protocol error when the broker sends an invalid completionAttestation", async () => {
+    const client = new RemoteSubmissionBrokerClient({
+      endpoint: "https://broker.example.test/v1/submissions",
+      fetchImpl: async () => {
+        return new Response(
+          JSON.stringify({
+            submissionArtifact: {
+              schemaVersion: 1,
+              runId: "run_1234567890abcdef",
+              provider: "github",
+              owner: "org",
+              repo: "repo",
+              baseBranch: "main",
+              baseCommitSha: "a".repeat(40),
+              branchName: "opencontrib/run_1234567890abcdef",
+              intentSha256: "b".repeat(64),
+              patchSha256: "c".repeat(64),
+              evidenceSha256: "d".repeat(64),
+              governanceSha256: "e".repeat(64),
+              prNumber: 7,
+              prUrl: "https://github.com/org/repo/pull/7",
+              headSha: "f".repeat(40),
+              submittedAt: "2026-01-01T00:00:00.000Z",
+              verified: true,
+            },
+            completionAttestation: { not: "valid" },
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    await expect(client.submit("run_1234567890abcdef")).rejects.toThrow(
+      /invalid completionAttestation/,
+    );
   });
 
   it("rejects non-loopback HTTP endpoints before any network request", () => {

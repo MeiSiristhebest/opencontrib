@@ -8,7 +8,14 @@ import {
   buildRunTransferBundle,
   type RunTransferBundle,
 } from "../run/run-transfer.js";
-import type { SubmissionPort } from "./submission-port.js";
+import type {
+  SubmissionPort,
+  SubmissionPortResult,
+} from "./submission-port.js";
+import {
+  RemoteCompletionAttestationSchema,
+  type RemoteCompletionAttestation,
+} from "../run/completion-attestation.js";
 
 type FetchLike = (
   input: RequestInfo | URL,
@@ -25,10 +32,8 @@ export interface RemoteSubmissionBrokerOptions {
   bundleProvider?: (runId: string) => RunTransferBundle;
 }
 
-export interface RemoteSubmissionBrokerResult {
-  submissionArtifact: SubmissionArtifact;
-  completionAttestation?: import("../run/completion-attestation.js").RemoteCompletionAttestation;
-}
+/** Backward-compatible alias; the canonical shape is `SubmissionPortResult`. */
+export type RemoteSubmissionBrokerResult = SubmissionPortResult;
 
 export class SubmissionBrokerApprovalRequiredError extends Error {
   readonly approvalChallenge?: ApprovalChallenge;
@@ -81,7 +86,7 @@ export class RemoteSubmissionBrokerClient implements SubmissionPort {
   async submit(
     runId: string,
     expectedIntentSha256?: string,
-  ): Promise<SubmissionArtifact> {
+  ): Promise<SubmissionPortResult> {
     if (!runId.trim()) {
       throw new Error("SubmissionBrokerRequestError: runId is required.");
     }
@@ -147,23 +152,27 @@ export class RemoteSubmissionBrokerClient implements SubmissionPort {
     }
     const submissionArtifact = result.data as SubmissionArtifact;
 
+    let completionAttestation: RemoteCompletionAttestation | undefined;
     if (
       typeof payload === "object" &&
       payload !== null &&
       "completionAttestation" in payload
     ) {
-      const { RemoteCompletionAttestationSchema } = await import(
-        "../run/completion-attestation.js"
-      );
       const attestationResult = RemoteCompletionAttestationSchema.safeParse(
         (payload as { completionAttestation?: unknown }).completionAttestation,
       );
-      if (attestationResult.success) {
-        (submissionArtifact as any).completionAttestation =
-          attestationResult.data;
+      // Fail closed: a present but invalid attestation is a protocol violation,
+      // not optional noise. Silently ignoring it would hide host misbehavior.
+      if (!attestationResult.success) {
+        throw new Error(
+          `SubmissionBrokerProtocolError: trusted broker returned an invalid completionAttestation: ${attestationResult.error.issues
+            .map((i) => i.message)
+            .join("; ")}`,
+        );
       }
+      completionAttestation = attestationResult.data;
     }
 
-    return submissionArtifact;
+    return { submissionArtifact, completionAttestation };
   }
 }

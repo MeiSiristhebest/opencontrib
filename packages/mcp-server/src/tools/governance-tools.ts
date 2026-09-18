@@ -618,9 +618,11 @@ export function registerGovernanceTools(
       }
 
       // Submit only through the separately deployed trusted broker.
-      const submissionArtifact = await buildAgentSubmissionPort(
-        runManager,
-      ).submit(args.runId, args.expectedIntentSha256);
+      const { submissionArtifact, completionAttestation } =
+        await buildAgentSubmissionPort(runManager).submit(
+          args.runId,
+          args.expectedIntentSha256,
+        );
 
       return {
         content: [
@@ -630,6 +632,7 @@ export function registerGovernanceTools(
               {
                 status: "success",
                 submissionArtifact,
+                ...(completionAttestation ? { completionAttestation } : {}),
               },
               null,
               2,
