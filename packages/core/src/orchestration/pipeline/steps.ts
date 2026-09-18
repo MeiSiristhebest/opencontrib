@@ -919,14 +919,24 @@ export class PrSubmissionStep implements PipelineStep {
     const repo = ctx.repo!;
     const runManager = deps.runManager ?? defaultRunManager;
 
+    let derivedKeyChanges: string[] = [];
+    if (
+      activePatch?.implementationSteps &&
+      activePatch.implementationSteps.length > 0
+    ) {
+      derivedKeyChanges = activePatch.implementationSteps;
+    } else if (activePatch?.files && activePatch.files.length > 0) {
+      derivedKeyChanges = activePatch.files.map(
+        (f) => `${f.operation}: ${f.path}`,
+      );
+    }
+
     const prDraftText = buildPrDescription({
       issueNumber: selectedOpp.issueNumber,
       problemSummary: activePatch?.summary || selectedOpp.title,
       rootCause:
         activePatch?.rationale || "Unavailable (root cause not recorded)",
-      keyChanges: activePatch?.implementationSteps?.length
-        ? activePatch.implementationSteps
-        : ["Applied surgical fix"],
+      keyChanges: derivedKeyChanges,
       reproductionCommand:
         ctx.evidenceReport?.redEvidence?.command ||
         activePatch?.regressionTestPlan?.[0] ||

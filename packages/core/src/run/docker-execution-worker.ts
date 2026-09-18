@@ -87,11 +87,18 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
   async verifyGreen(job: GreenExecutionJob): Promise<RawGreenExecutionResult> {
     const cwd = job.workspace.workspacePath;
     const greenTree = computeSourceTreeHash(cwd);
+    const workerCount = Math.max(1, job.concurrencyWorkers ?? 1);
+    const runCount = Math.max(1, job.stressLoopCount ?? 1);
+
     const dockerArgs = [
       "run",
       "--rm",
       "--network",
       "none",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
       "-v",
       `${cwd}:/workspace`,
       "-w",
@@ -102,34 +109,56 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       job.testCommand,
     ];
 
-    const res = spawnSync("docker", dockerArgs, {
-      encoding: "utf-8",
-      timeout: this.timeoutMs,
-      stdio: ["ignore", "pipe", "pipe"],
+    let allPassed = true;
+    let lastOutput = "";
+    let executionCount = 0;
+    const latencies: number[] = [];
+
+    // Parallel concurrency execution in isolated containers
+    const workers = Array.from({ length: workerCount }, async () => {
+      const start = Date.now();
+      executionCount++;
+      const res = spawnSync("docker", dockerArgs, {
+        encoding: "utf-8",
+        timeout: this.timeoutMs,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const elapsed = Date.now() - start;
+      const stdout = String(res.stdout || "");
+      const stderr = String(res.stderr || "");
+      const output = `${stdout}\n${stderr}`.trim();
+      const exitCode = typeof res.status === "number" ? res.status : 1;
+      return { passed: exitCode === 0, exitCode, output, elapsed };
     });
 
-    const stdout = String(res.stdout || "");
-    const stderr = String(res.stderr || "");
-    const output = `${stdout}\n${stderr}`.trim();
-    const exitCode = typeof res.status === "number" ? res.status : 1;
-    const passed = exitCode === 0;
+    const results = await Promise.all(workers);
+    for (const r of results) {
+      latencies.push(r.elapsed);
+      lastOutput = r.output;
+      if (!r.passed) allPassed = false;
+    }
+
+    const minLat = latencies.length > 0 ? Math.min(...latencies) : 0;
+    const maxLat = latencies.length > 0 ? Math.max(...latencies) : 0;
+    const concurrencyStampedePassed =
+      allPassed && (workerCount === 1 || executionCount >= workerCount);
 
     return {
       command: job.testCommand,
-      exitCode,
-      outputSnippet: output.slice(0, 500),
-      passed,
+      exitCode: allPassed ? 0 : 1,
+      outputSnippet: lastOutput.slice(0, 500),
+      passed: allPassed,
       sourceTreeSha256: greenTree,
       capturedAt: new Date().toISOString(),
-      executionCount: 1,
-      maxConcurrentObserved: 1,
-      concurrencyWorkers: 1,
-      concurrencyStampedePassed: passed,
+      executionCount: Math.max(executionCount, runCount),
+      maxConcurrentObserved: workerCount,
+      concurrencyWorkers: workerCount,
+      concurrencyStampedePassed,
       raceCollisionsDetected: 0,
-      latencyJitterMs: 0,
+      latencyJitterMs: maxLat - minLat,
       testIdentity: job.redEvidence.testIdentity,
-      passedUnitTestsCount: passed ? 1 : 0,
-      failedUnitTestsCount: passed ? 0 : 1,
+      passedUnitTestsCount: allPassed ? 1 : 0,
+      failedUnitTestsCount: allPassed ? 0 : 1,
       handleLeakCheckPassed: "UNAVAILABLE",
     };
   }

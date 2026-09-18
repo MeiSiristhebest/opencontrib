@@ -1,138 +1,189 @@
 import { describe, expect, it } from "bun:test";
-import { buildContributionRunManager, EvidenceService } from "../src/index.js";
+import { EvidenceService } from "../src/index.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
+import { buildRunTransferBundle } from "../src/run/run-transfer.js";
+import { TrustedRunMaterializer } from "../src/run/trusted-run-host.js";
 
-describe("Autonomous Regression-Test Generation & ValidatedPatch Integration", () => {
-  it("includes reproduction test files in the final ValidatedPatchArtifact", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "oc-repro-test-"));
-    const baseDir = mkdtempSync(join(tmpdir(), "oc-repro-runs-"));
+describe("Autonomous Regression-Test Generation & Transfer Host Integration", () => {
+  it("transfers reproduction files and reproduces RED->GREEN on trusted host", async () => {
+    const agentWorkspace = mkdtempSync(join(tmpdir(), "oc-agent-ws-"));
+    const agentRuns = mkdtempSync(join(tmpdir(), "oc-agent-runs-"));
+    const hostRuns = mkdtempSync(join(tmpdir(), "oc-host-runs-"));
+
     try {
-      // 1. Initialize git repo as baseline
+      // 1. Initialize clean upstream git repo
       execFileSync("git", ["init", "-b", "main"], {
-        cwd: tempDir,
+        cwd: agentWorkspace,
         stdio: "ignore",
       });
       execFileSync("git", ["config", "user.name", "Tester"], {
-        cwd: tempDir,
+        cwd: agentWorkspace,
         stdio: "ignore",
       });
       execFileSync("git", ["config", "user.email", "test@example.com"], {
-        cwd: tempDir,
+        cwd: agentWorkspace,
         stdio: "ignore",
       });
       writeFileSync(
-        join(tempDir, "calc.js"),
-        "export function add(a, b) { return 0; }\n",
+        join(agentWorkspace, "math.js"),
+        "export function mul(a, b) { return 0; }\n",
       );
-      execFileSync("git", ["add", "."], { cwd: tempDir, stdio: "ignore" });
+      execFileSync("git", ["add", "."], {
+        cwd: agentWorkspace,
+        stdio: "ignore",
+      });
       execFileSync("git", ["commit", "-m", "initial baseline"], {
-        cwd: tempDir,
+        cwd: agentWorkspace,
         stdio: "ignore",
       });
       const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
-        cwd: tempDir,
+        cwd: agentWorkspace,
         encoding: "utf8",
       }).trim();
 
-      const runManager = buildContributionRunManager();
-      const manifest = runManager.createRun({
-        repoFullName: "test-org/calc-repo",
-        issueNumber: 1,
+      const { ContributionRunManager } =
+        await import("../src/run/run-manager.js");
+      const agentRunManager = new ContributionRunManager({
+        baseDir: agentRuns,
+      });
+      const manifest = agentRunManager.createRun({
+        repoFullName: "test-org/math-repo",
+        issueNumber: 42,
       });
       saveCanonicalArtifact(
-        runManager,
+        agentRunManager,
         manifest.runId,
         "workspace",
         {
-          workspacePath: tempDir,
-          branchName: "fixture-branch",
+          workspacePath: agentWorkspace,
+          branchName: "opencontrib/run-42",
           baseCommitSha,
-          baseRepoPath: tempDir,
+          baseRepoPath: agentWorkspace,
           baseBranch: "main",
-          repoFullName: "test-org/calc-repo",
+          repoFullName: "test-org/math-repo",
           createdAt: new Date().toISOString(),
         },
         "WORKSPACE_PREPARED",
       );
 
-      // 2. Simulated ReproductionDesign with a brand new regression test file
-      const reproductionTestFile = {
-        path: "calc.test.js",
+      // 2. Agent authoring a brand new regression test
+      const reproTestFile = {
+        path: "math.test.js",
         operation: "CREATE" as const,
         content:
-          "import { add } from './calc.js'; if (add(2, 3) !== 5) { console.error('ASSERTION_FAIL'); process.exit(1); }\n",
+          "import { mul } from './math.js'; if (mul(3, 4) !== 12) { console.error('ASSERTION_MUL_FAIL'); process.exit(1); }\n",
+        explanation: "regression test for multiplication",
       };
       writeFileSync(
-        join(tempDir, reproductionTestFile.path),
-        reproductionTestFile.content,
+        join(agentWorkspace, reproTestFile.path),
+        reproTestFile.content,
       );
 
-      // Capture RED with this newly applied test
-      const testCmd = "bun calc.test.js";
-      const evidenceService = new EvidenceService(runManager);
-      const red = evidenceService.captureRed({
+      const testCmd = "bun math.test.js";
+      const agentEvidence = new EvidenceService(agentRunManager);
+      const red = agentEvidence.captureRed({
         runId: manifest.runId,
         testCommand: testCmd,
-        expectedAssertion: "ASSERTION_FAIL",
-        testFile: "calc.test.js",
+        expectedAssertion: "ASSERTION_MUL_FAIL",
+        testFile: "math.test.js",
       });
       expect(red.assertionMatched).toBe(true);
-      expect(red.exitCode).toBe(1);
 
-      // 3. Simulated fix implementation
+      // Fix implementation
       const fixFile = {
-        path: "calc.js",
+        path: "math.js",
         operation: "MODIFY" as const,
-        content: "export function add(a, b) { return a + b; }\n",
+        content: "export function mul(a, b) { return a * b; }\n",
+        explanation: "implement correct multiplication",
       };
-      writeFileSync(join(tempDir, fixFile.path), fixFile.content);
+      writeFileSync(join(agentWorkspace, fixFile.path), fixFile.content);
 
-      // 4. Draft patch containing BOTH regression test + implementation fix
       const fullPatch = {
-        title: "fix: correct add function",
-        summary: "Fix math addition logic",
-        rationale: "Fix return 0 bug",
+        title: "fix: multiplication logic",
+        summary: "Fix mul function logic",
+        rationale: "Return product instead of 0",
         targetFiles: [
-          { path: reproductionTestFile.path, reason: "Regression test" },
-          { path: fixFile.path, reason: "Fix logic" },
+          { path: reproTestFile.path, reason: "Regression test" },
+          { path: fixFile.path, reason: "Fix" },
         ],
-        files: [reproductionTestFile, fixFile],
-        implementationSteps: ["Add regression test", "Fix addition logic"],
+        files: [reproTestFile, fixFile],
+        implementationSteps: ["Add math.test.js", "Fix math.js"],
         regressionTestPlan: [testCmd],
-        estimatedDiffLines: 5,
+        estimatedDiffLines: 6,
       };
 
-      runManager.saveArtifact(
+      agentRunManager.saveArtifact(
         manifest.runId,
         "patch",
         JSON.stringify(fullPatch),
         "PATCH_DRAFTED",
       );
-
-      // 5. Verify GREEN: exact delta MUST match both test and implementation!
-      const report = await evidenceService.verifyGreen({
-        runId: manifest.runId,
-        testCommand: testCmd,
-      });
-
-      expect(report.allTestsPassing).toBe(true);
-      expect(report.reproductionVerified).toBe(true);
-
-      const run = runManager.getRun(manifest.runId);
-      const validatedPatch = run?.artifacts.validatedPatch as any;
-      expect(validatedPatch).toBeDefined();
-      expect(validatedPatch.files.map((f: any) => f.path)).toContain(
-        "calc.test.js",
+      agentRunManager.saveArtifact(
+        manifest.runId,
+        "pr_draft",
+        "PR description body",
       );
-      expect(validatedPatch.files.map((f: any) => f.path)).toContain("calc.js");
-      expect(validatedPatch.changedLines).toBeGreaterThan(0);
+
+      // 3. Build RunTransferBundle from Agent Run
+      // Reset workspace math.js back to return 0 before transfer materialization
+      writeFileSync(
+        join(agentWorkspace, fixFile.path),
+        "export function mul(a, b) { return 0; }\n",
+      );
+
+      const transferBundle = buildRunTransferBundle(
+        agentRunManager,
+        manifest.runId,
+      );
+      expect(transferBundle.reproductionPatch).toBeDefined();
+      expect(transferBundle.reproductionPatch?.map((f) => f.path)).toContain(
+        "math.test.js",
+      );
+
+      // 4. Trusted Host receives transfer proposal and reproduces in independent store
+      const hostRunManager = new (
+        await import("../src/run/run-manager.js")
+      ).ContributionRunManager({
+        baseDir: hostRuns,
+      });
+      const { WorktreeManager } =
+        await import("../src/workspace/worktree-manager.js");
+      class TestWorktreeManager extends WorktreeManager {
+        override createIsolatedWorkspace(_options: any) {
+          return {
+            workspacePath: agentWorkspace,
+            branchName: `opencontrib/run-${manifest.runId}`,
+            isWorktree: false,
+            baseRepoPath: agentWorkspace,
+            baseBranch: "main",
+            baseCommitSha,
+          };
+        }
+      }
+      const materializer = new TrustedRunMaterializer(
+        hostRunManager,
+        new TestWorktreeManager(),
+      );
+      const hostRun = await materializer.materialize(transferBundle);
+
+      expect(hostRun.manifest.currentPhase).toBe("GOVERNANCE_AUDITED");
+      const hostValidatedPatch = hostRun.artifacts.validatedPatch as any;
+      expect(hostValidatedPatch).toBeDefined();
+      expect(hostValidatedPatch.files.map((f: any) => f.path)).toContain(
+        "math.test.js",
+      );
+      expect(hostValidatedPatch.files.map((f: any) => f.path)).toContain(
+        "math.js",
+      );
+      expect(hostValidatedPatch.changedLines).toBeGreaterThan(0);
     } finally {
-      rmSync(tempDir, { recursive: true, force: true });
-      rmSync(baseDir, { recursive: true, force: true });
+      rmSync(agentWorkspace, { recursive: true, force: true });
+      rmSync(agentRuns, { recursive: true, force: true });
+      rmSync(hostRuns, { recursive: true, force: true });
     }
   });
 });

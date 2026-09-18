@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RedEvidenceSchema } from "../contracts/schemas.js";
+import { CodeChangeFileSchema } from "../contracts/llm-schemas.js";
 import type {
   ContributionRunManifest,
   ContributionRunSummary,
@@ -11,8 +12,8 @@ import type { ContributionRunManager } from "./run-manager.js";
  *
  * This is intentionally a proposal, not a canonical artifact bundle. The host
  * never imports agent Evidence, Governance, Approval, or Submission artifacts.
- * It only uses the patch and RED recipe to reproduce the run in its own
- * workspace and then appends new canonical artifacts to its protected store.
+ * It only uses the patch, optional reproduction patch, and RED recipe to reproduce
+ * the run in its own workspace and then appends new canonical artifacts to its protected store.
  */
 export const RunTransferBundleSchema = z.object({
   protocolVersion: z.literal("1.0"),
@@ -27,6 +28,11 @@ export const RunTransferBundleSchema = z.object({
     metadata: z.record(z.string(), z.unknown()).optional(),
   }),
   patch: z.union([z.string(), z.record(z.string(), z.unknown())]),
+  /**
+   * Optional reproduction-only code modifications (e.g. newly created regression tests)
+   * that must be applied to the baseline workspace BEFORE capturing RED.
+   */
+  reproductionPatch: z.array(CodeChangeFileSchema).optional(),
   prDraft: z.string().min(1),
   redRecipe: z.object({
     command: z.string().min(1).max(8_000),
@@ -69,6 +75,32 @@ export function buildRunTransferBundle(
     );
   }
 
+  // Extract reproduction-only files from context or patch if present
+  let reproductionPatch: any = undefined;
+  if (run.artifacts.patch) {
+    try {
+      const parsed =
+        typeof run.artifacts.patch === "string"
+          ? JSON.parse(run.artifacts.patch)
+          : run.artifacts.patch;
+      if (Array.isArray(parsed.files)) {
+        const testFilePaths = new Set(
+          red.testIdentity.testFiles.map((tf) => tf.path),
+        );
+        const reproFiles = parsed.files.filter((f: any) =>
+          testFilePaths.has(f.path),
+        );
+        if (reproFiles.length > 0) {
+          reproductionPatch = reproFiles;
+        }
+      }
+    } catch (err: any) {
+      console.warn(
+        `[RunTransfer] Could not parse reproduction patch from draft: ${err.message}`,
+      );
+    }
+  }
+
   const bundle: RunTransferBundle = {
     protocolVersion: "1.0",
     manifest: {
@@ -82,6 +114,7 @@ export function buildRunTransferBundle(
       metadata: run.manifest.metadata,
     },
     patch,
+    reproductionPatch,
     prDraft: run.artifacts.prDraft,
     redRecipe: {
       command: red.command,

@@ -92,6 +92,11 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
   }
 }
 
+export interface EvidenceExecutionPolicy {
+  stressLoopCount: number;
+  concurrencyWorkers: number;
+}
+
 /**
  * Materializes an agent proposal into a host-owned run.
  *
@@ -102,13 +107,19 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
  */
 export class TrustedRunMaterializer {
   private readonly executionPort: TrustedExecutionPort;
+  private readonly executionPolicy: EvidenceExecutionPolicy;
 
   constructor(
     private readonly runManager: ContributionRunManager,
     private readonly worktreeManager: WorktreeManager = new WorktreeManager(),
     executionPort?: TrustedExecutionPort,
+    executionPolicy?: Partial<EvidenceExecutionPolicy>,
   ) {
     this.executionPort = executionPort ?? new DevelopmentUnsafeExecutionPort();
+    this.executionPolicy = {
+      stressLoopCount: executionPolicy?.stressLoopCount ?? 3,
+      concurrencyWorkers: executionPolicy?.concurrencyWorkers ?? 2,
+    };
   }
 
   async materialize(input: RunTransferBundle) {
@@ -157,6 +168,24 @@ export class TrustedRunMaterializer {
       "patch",
       JSON.stringify(patch),
     );
+
+    // If a reproduction patch is supplied, apply it to the clean workspace BEFORE capturing RED
+    if (bundle.reproductionPatch && bundle.reproductionPatch.length > 0) {
+      const reproApply = this.worktreeManager.applySurgicalFilesSafely(
+        workspace.context.workspacePath,
+        bundle.reproductionPatch.map((file) => ({
+          path: file.path,
+          operation: file.operation,
+          content: file.content,
+          mode: file.mode,
+        })),
+      );
+      if (reproApply.errors.length > 0) {
+        throw new TrustedRunMaterializationError(
+          `host rejected reproduction patch application: ${reproApply.errors.join("; ")}`,
+        );
+      }
+    }
 
     const rawRed = await this.executionPort.captureRed({
       runId: bundle.manifest.runId,
@@ -207,8 +236,8 @@ export class TrustedRunMaterializer {
       },
       testCommand: bundle.redRecipe.command,
       redEvidence: red,
-      stressLoopCount: 1,
-      concurrencyWorkers: 1,
+      stressLoopCount: this.executionPolicy.stressLoopCount,
+      concurrencyWorkers: this.executionPolicy.concurrencyWorkers,
     });
     await evidenceService.recordGreenExecution(bundle.manifest.runId, rawGreen);
 

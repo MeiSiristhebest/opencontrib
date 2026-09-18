@@ -152,8 +152,9 @@ export class RemoteSubmissionBrokerClient implements SubmissionPort {
       payload !== null &&
       "completionAttestation" in payload
     ) {
-      const { RemoteCompletionAttestationSchema } =
-        await import("../run/completion-attestation.js");
+      const { RemoteCompletionAttestationSchema } = await import(
+        "../run/completion-attestation.js"
+      );
       const attestationResult = RemoteCompletionAttestationSchema.safeParse(
         (payload as { completionAttestation?: unknown }).completionAttestation,
       );

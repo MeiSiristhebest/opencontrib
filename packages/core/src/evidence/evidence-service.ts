@@ -15,6 +15,8 @@ import {
   captureRedEvidence,
   collectEvidence,
   computeSourceTreeHash,
+  computeTestIdentity,
+  computeTestFileDiffSha256,
 } from "./evidence-collector.js";
 import { isSafeRepositoryPath } from "../submission/submission-intent-service.js";
 import { hashValidatedPatchArtifact } from "./validated-patch.js";
@@ -843,8 +845,53 @@ export class EvidenceService {
     const finalGreenTreeSha256 = computeFinalTreeHash(targetCwd);
     const appliedPatchSha256 = parsedPatch.patchSha256;
     const treeChanged = finalGreenTreeSha256 !== redEvidence.sourceTreeSha256;
+
+    // Host-side Test Identity Verification: Never blindly trust worker identity.
+    // Recompute the green test identity on the physical workspace and require exact match with RED.
+    let testIdentityValid = false;
+    let actualTestDiffSha256: string | undefined;
+    const explicitTestFiles =
+      redEvidence.testIdentity?.testFiles.map((file) => file.path) || [];
+    const greenTestIdentity = computeTestIdentity(
+      targetCwd,
+      redEvidence.command,
+      redEvidence.testIdentity?.expectedAssertion ??
+        redEvidence.expectedAssertion,
+      explicitTestFiles,
+    );
+    if (redEvidence.testIdentity) {
+      const redFiles = redEvidence.testIdentity.testFiles || [];
+      const greenFiles = greenTestIdentity.testFiles || [];
+      actualTestDiffSha256 = computeTestFileDiffSha256(redFiles, greenFiles);
+      testIdentityValid =
+        redFiles.length > 0 &&
+        greenFiles.length > 0 &&
+        greenTestIdentity.identitySha256 ===
+          redEvidence.testIdentity.identitySha256;
+      if (
+        !testIdentityValid &&
+        redEvidence.testMutationPolicy?.allowed === true &&
+        actualTestDiffSha256 &&
+        redEvidence.testMutationPolicy.expectedDiffSha256 ===
+          actualTestDiffSha256
+      ) {
+        testIdentityValid = true;
+      }
+    } else {
+      testIdentityValid = true;
+    }
+
+    if (!testIdentityValid) {
+      throw new Error(
+        "TestIdentityMutationError: GREEN test file content differs from authoritative RED baseline without an explicit permitted testMutationPolicy.",
+      );
+    }
+
     const reproductionVerified =
-      redEvidence.assertionMatched === true && rawResult.passed && treeChanged;
+      redEvidence.assertionMatched === true &&
+      rawResult.passed &&
+      treeChanged &&
+      testIdentityValid;
 
     const greenEvidenceBase = {
       command: rawResult.command,
