@@ -319,27 +319,53 @@ function collectActualDelta(cwd: string, baseCommitSha: string): DeltaFile[] {
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function countChangedLinesFromGit(cwd: string, baseCommitSha: string): number {
-  try {
-    const diffStat = gitOutput(
-      cwd,
-      ["diff", "--numstat", baseCommitSha, "--"],
-      "count changed lines from git numstat",
-    );
-    let total = 0;
-    for (const line of diffStat.split("\n")) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length >= 2) {
-        const added = parseInt(parts[0], 10);
-        const deleted = parseInt(parts[1], 10);
-        if (!Number.isNaN(added)) total += added;
-        if (!Number.isNaN(deleted)) total += deleted;
+function countChangedLinesFromActualDelta(
+  cwd: string,
+  baseCommitSha: string,
+  deltaFiles: DeltaFile[],
+): number {
+  let total = 0;
+  for (const file of deltaFiles) {
+    const fullPath = resolve(cwd, file.path);
+    if (file.operation === "CREATE") {
+      if (!pathExists(fullPath)) {
+        throw new Error(
+          `EvidencePatchProvenanceError: cannot count lines for created file '${file.path}' that is missing on disk.`,
+        );
       }
+      const content = contentAtWorkspace(fullPath, file.mode);
+      const lines = content.length === 0 ? 0 : content.split("\n").length;
+      total += lines;
+    } else if (file.operation === "DELETE") {
+      const baseContent = gitOutput(
+        cwd,
+        ["show", `${baseCommitSha}:${file.path}`],
+        `read deleted base file ${file.path}`,
+      );
+      const lines =
+        baseContent.length === 0 ? 0 : baseContent.split("\n").length;
+      total += lines;
+    } else if (file.operation === "MODIFY") {
+      const baseContent = gitOutput(
+        cwd,
+        ["show", `${baseCommitSha}:${file.path}`],
+        `read modified base file ${file.path}`,
+      );
+      const currentContent = contentAtWorkspace(fullPath, file.mode);
+      const baseLines = baseContent.split("\n");
+      const currentLines = currentContent.split("\n");
+      // Compute symmetric line delta differences
+      let diffLines = Math.abs(currentLines.length - baseLines.length);
+      const minLen = Math.min(baseLines.length, currentLines.length);
+      for (let i = 0; i < minLen; i++) {
+        if (baseLines[i] !== currentLines[i]) {
+          diffLines += 2; // 1 replacement = 1 line deleted + 1 line added
+        }
+      }
+      total += diffLines;
     }
-    return total;
-  } catch {
-    return 0;
   }
+  return total;
 }
 
 function computeFinalTreeHash(cwd: string): string {
@@ -622,7 +648,11 @@ export class EvidenceService {
       allTestsPassing: true,
     };
 
-    const changedLines = countChangedLinesFromGit(targetCwd, baselineCommitSha);
+    const changedLines = countChangedLinesFromActualDelta(
+      targetCwd,
+      baselineCommitSha,
+      exactDelta.files,
+    );
 
     if (report.reproductionVerified === true) {
       const validatedPatch: ValidatedPatchArtifact = {
@@ -932,7 +962,11 @@ export class EvidenceService {
       reproductionVerified,
     };
 
-    const changedLines = countChangedLinesFromGit(targetCwd, baselineCommitSha);
+    const changedLines = countChangedLinesFromActualDelta(
+      targetCwd,
+      baselineCommitSha,
+      exactDelta.files,
+    );
 
     if (report.reproductionVerified === true) {
       const validatedPatch: ValidatedPatchArtifact = {

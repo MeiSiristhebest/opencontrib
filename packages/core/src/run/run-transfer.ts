@@ -76,7 +76,7 @@ export function buildRunTransferBundle(
   }
 
   // Extract reproduction-only files from context or patch if present
-  let reproductionPatch: any = undefined;
+  let reproductionPatch: any;
   if (run.artifacts.patch) {
     try {
       const parsed =

@@ -11,11 +11,12 @@ import { TrustedRunMaterializer } from "../src/run/trusted-run-host.js";
 describe("Autonomous Regression-Test Generation & Transfer Host Integration", () => {
   it("transfers reproduction files and reproduces RED->GREEN on trusted host", async () => {
     const agentWorkspace = mkdtempSync(join(tmpdir(), "oc-agent-ws-"));
+    const hostWorkspace = mkdtempSync(join(tmpdir(), "oc-host-ws-"));
     const agentRuns = mkdtempSync(join(tmpdir(), "oc-agent-runs-"));
     const hostRuns = mkdtempSync(join(tmpdir(), "oc-host-runs-"));
 
     try {
-      // 1. Initialize clean upstream git repo
+      // 1. Initialize clean upstream git repo in agentWorkspace
       execFileSync("git", ["init", "-b", "main"], {
         cwd: agentWorkspace,
         stdio: "ignore",
@@ -44,6 +45,19 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         cwd: agentWorkspace,
         encoding: "utf8",
       }).trim();
+
+      // Clone a completely fresh copy for the Host (contains NO math.test.js initially!)
+      execFileSync("git", ["clone", agentWorkspace, hostWorkspace], {
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "Tester"], {
+        cwd: hostWorkspace,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.email", "test@example.com"], {
+        cwd: hostWorkspace,
+        stdio: "ignore",
+      });
 
       const { ContributionRunManager } =
         await import("../src/run/run-manager.js");
@@ -144,7 +158,7 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         "math.test.js",
       );
 
-      // 4. Trusted Host receives transfer proposal and reproduces in independent store
+      // 4. Trusted Host receives transfer proposal and reproduces in independent store & workspace
       const hostRunManager = new (
         await import("../src/run/run-manager.js")
       ).ContributionRunManager({
@@ -155,10 +169,10 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
       class TestWorktreeManager extends WorktreeManager {
         override createIsolatedWorkspace(_options: any) {
           return {
-            workspacePath: agentWorkspace,
+            workspacePath: hostWorkspace,
             branchName: `opencontrib/run-${manifest.runId}`,
             isWorktree: false,
-            baseRepoPath: agentWorkspace,
+            baseRepoPath: hostWorkspace,
             baseBranch: "main",
             baseCommitSha,
           };
@@ -182,6 +196,7 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
       expect(hostValidatedPatch.changedLines).toBeGreaterThan(0);
     } finally {
       rmSync(agentWorkspace, { recursive: true, force: true });
+      rmSync(hostWorkspace, { recursive: true, force: true });
       rmSync(agentRuns, { recursive: true, force: true });
       rmSync(hostRuns, { recursive: true, force: true });
     }

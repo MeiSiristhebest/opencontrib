@@ -28,8 +28,9 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
   async captureRed(
     job: import("./trusted-execution.port.js").RedExecutionJob,
   ): Promise<import("./trusted-execution.port.js").RawRedExecutionResult> {
-    const { captureRedEvidence } =
-      await import("../evidence/evidence-collector.js");
+    const { captureRedEvidence } = await import(
+      "../evidence/evidence-collector.js"
+    );
     const red = captureRedEvidence({
       cwd: job.workspace.workspacePath,
       testCommand: job.testCommand,
@@ -52,8 +53,9 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
   async verifyGreen(
     job: import("./trusted-execution.port.js").GreenExecutionJob,
   ): Promise<import("./trusted-execution.port.js").RawGreenExecutionResult> {
-    const { verifyGreenEvidence, getProcessHandleCount } =
-      await import("../evidence/evidence-collector.js");
+    const { verifyGreenEvidence, getProcessHandleCount } = await import(
+      "../evidence/evidence-collector.js"
+    );
     const initialHandles = getProcessHandleCount();
     const green = await verifyGreenEvidence({
       cwd: job.workspace.workspacePath,

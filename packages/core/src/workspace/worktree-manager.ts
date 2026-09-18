@@ -601,7 +601,12 @@ export class WorktreeManager {
 
   applySurgicalFilesSafely(
     workspacePath: string,
-    files: Array<{ path: string; operation: string; content: string }>,
+    files: Array<{
+      path: string;
+      operation: string;
+      content?: string;
+      mode?: "100644" | "100755" | "120000" | string;
+    }>,
   ): {
     appliedFiles: Array<{ path: string; operation: string }>;
     errors: string[];
@@ -617,7 +622,7 @@ export class WorktreeManager {
     }
 
     let totalChars = 0;
-    for (const f of files) totalChars += f.content.length;
+    for (const f of files) totalChars += f.content ? f.content.length : 0;
     if (totalChars > MAX_GENERATED_FILE_CHARS) {
       errors.push(
         `Generated content size (${totalChars} chars) exceeds safety limit (${MAX_GENERATED_FILE_CHARS})`,
@@ -643,11 +648,32 @@ export class WorktreeManager {
 
       const fullPath = resolve(workspacePath, f.path);
       try {
+        if (f.operation === "DELETE") {
+          if (existsSync(fullPath)) {
+            rmSync(fullPath, { force: true });
+          }
+          appliedFiles.push({ path: f.path, operation: "DELETE" });
+          continue;
+        }
+
         mkdirSync(dirname(fullPath), { recursive: true });
-        writeFileSync(fullPath, f.content, "utf8");
+
+        // Handle symlink mode 120000
+        if (f.mode === "120000") {
+          if (existsSync(fullPath)) rmSync(fullPath, { force: true });
+          const { symlinkSync } = require("node:fs");
+          symlinkSync(f.content || "", fullPath);
+        } else {
+          // Normal file creation/modification with optional chmod 100755 executable
+          writeFileSync(fullPath, f.content || "", "utf8");
+          if (f.mode === "100755" && process.platform !== "win32") {
+            const { chmodSync } = require("node:fs");
+            chmodSync(fullPath, 0o755);
+          }
+        }
         appliedFiles.push({ path: f.path, operation: f.operation });
       } catch (err: any) {
-        errors.push(`Failed writing '${f.path}': ${err.message}`);
+        errors.push(`Failed applying '${f.path}': ${err.message}`);
       }
     }
 

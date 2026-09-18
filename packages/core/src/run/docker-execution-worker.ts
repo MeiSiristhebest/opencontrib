@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import type {
   TrustedExecutionPort,
   RedExecutionJob,
@@ -14,6 +14,57 @@ import {
 export interface DockerExecutionWorkerOptions {
   image?: string;
   timeoutMs?: number;
+}
+
+function runDockerProcessAsync(
+  args: string[],
+  timeoutMs: number,
+): Promise<{
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  output: string;
+}> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+
+    const child = spawn("docker", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        child.kill("SIGKILL");
+      } catch (e: any) {
+        process.stderr.write(
+          `[DockerWorker] Failed to kill child process: ${e.message}\n`,
+        );
+      }
+    }, timeoutMs);
+
+    child.stdout.on("data", (d) => {
+      stdout += d.toString("utf8");
+    });
+    child.stderr.on("data", (d) => {
+      stderr += d.toString("utf8");
+    });
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const exitCode = timedOut ? 124 : typeof code === "number" ? code : 1;
+      const output = `${stdout}\n${stderr}`.trim();
+      resolve({ exitCode, stdout, stderr, output });
+    });
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      const output = `${stdout}\n${stderr}\n${err.message}`.trim();
+      resolve({ exitCode: 1, stdout, stderr, output });
+    });
+  });
 }
 
 /**
@@ -47,6 +98,10 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       "--rm",
       "--network",
       "none",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
       "-v",
       `${cwd}:/workspace`,
       "-w",
@@ -57,26 +112,17 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       job.testCommand,
     ];
 
-    const res = spawnSync("docker", dockerArgs, {
-      encoding: "utf-8",
-      timeout: this.timeoutMs,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    const stdout = String(res.stdout || "");
-    const stderr = String(res.stderr || "");
-    const output = `${stdout}\n${stderr}`.trim();
-    const exitCode = typeof res.status === "number" ? res.status : 1;
+    const res = await runDockerProcessAsync(dockerArgs, this.timeoutMs);
     const assertionMatched = job.expectedAssertion
-      ? output.includes(job.expectedAssertion)
-      : exitCode !== 0;
+      ? res.output.includes(job.expectedAssertion)
+      : res.exitCode !== 0;
 
     return {
       command: job.testCommand,
-      exitCode,
-      stdout,
-      stderr,
-      outputSnippet: output.slice(0, 500),
+      exitCode: res.exitCode,
+      stdout: res.stdout,
+      stderr: res.stderr,
+      outputSnippet: res.output.slice(0, 500),
       assertionMatched,
       capturedAt: new Date().toISOString(),
       sourceTreeSha256: startTree,
@@ -109,29 +155,58 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       job.testCommand,
     ];
 
-    let allPassed = true;
-    let lastOutput = "";
     let executionCount = 0;
+    let inFlight = 0;
+    let maxConcurrentObserved = 0;
     const latencies: number[] = [];
 
-    // Parallel concurrency execution in isolated containers
-    const workers = Array.from({ length: workerCount }, async () => {
-      const start = Date.now();
+    const executeOne = async () => {
       executionCount++;
-      const res = spawnSync("docker", dockerArgs, {
-        encoding: "utf-8",
-        timeout: this.timeoutMs,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      const elapsed = Date.now() - start;
-      const stdout = String(res.stdout || "");
-      const stderr = String(res.stderr || "");
-      const output = `${stdout}\n${stderr}`.trim();
-      const exitCode = typeof res.status === "number" ? res.status : 1;
-      return { passed: exitCode === 0, exitCode, output, elapsed };
-    });
+      inFlight++;
+      maxConcurrentObserved = Math.max(maxConcurrentObserved, inFlight);
+      const start = Date.now();
+      try {
+        const res = await runDockerProcessAsync(dockerArgs, this.timeoutMs);
+        return {
+          passed: res.exitCode === 0,
+          exitCode: res.exitCode,
+          output: res.output,
+          elapsed: Date.now() - start,
+        };
+      } finally {
+        inFlight--;
+      }
+    };
 
-    const results = await Promise.all(workers);
+    let results: Array<{
+      passed: boolean;
+      exitCode: number;
+      output: string;
+      elapsed: number;
+    }>;
+    if (workerCount > 1) {
+      let releaseBarrier!: () => void;
+      const startBarrier = new Promise<void>((r) => {
+        releaseBarrier = r;
+      });
+      const workers = Array.from({ length: workerCount }, async () => {
+        await startBarrier;
+        return executeOne();
+      });
+      // All workers created and waiting at the barrier before simultaneous release
+      releaseBarrier();
+      results = await Promise.all(workers);
+    } else {
+      results = [];
+      for (let i = 0; i < runCount; i++) {
+        const r = await executeOne();
+        results.push(r);
+        if (!r.passed) break;
+      }
+    }
+
+    let allPassed = true;
+    let lastOutput = "";
     for (const r of results) {
       latencies.push(r.elapsed);
       lastOutput = r.output;
@@ -141,7 +216,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
     const minLat = latencies.length > 0 ? Math.min(...latencies) : 0;
     const maxLat = latencies.length > 0 ? Math.max(...latencies) : 0;
     const concurrencyStampedePassed =
-      allPassed && (workerCount === 1 || executionCount >= workerCount);
+      allPassed && (workerCount === 1 || maxConcurrentObserved >= workerCount);
 
     return {
       command: job.testCommand,
@@ -150,8 +225,8 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       passed: allPassed,
       sourceTreeSha256: greenTree,
       capturedAt: new Date().toISOString(),
-      executionCount: Math.max(executionCount, runCount),
-      maxConcurrentObserved: workerCount,
+      executionCount,
+      maxConcurrentObserved,
       concurrencyWorkers: workerCount,
       concurrencyStampedePassed,
       raceCollisionsDetected: 0,
