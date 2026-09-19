@@ -10,6 +10,7 @@
  * phase from the original method; no behavioral change is intended.
  */
 
+import { execFileSync } from "node:child_process";
 import { type Opportunity } from "../../contracts/schemas.js";
 import type { ApprovalChallenge } from "../../governance/approval-service.js";
 import {
@@ -47,6 +48,27 @@ import type {
   OrchestratorSubagentReview,
 } from "./types.js";
 import { halt, continuePipeline } from "./types.js";
+
+function readGitDcoIdentity(
+  cwd?: string,
+): { dcoAuthorName: string; dcoAuthorEmail: string } | undefined {
+  if (!cwd) return undefined;
+  try {
+    const readConfig = (key: string) =>
+      execFileSync("git", ["config", "--get", key], {
+        cwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    const name = readConfig("user.name");
+    const email = readConfig("user.email");
+    return name && email
+      ? { dcoAuthorName: name, dcoAuthorEmail: email }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // ── Phase 0: Discovery & Scout ──────────────────────────────────────────────
 
@@ -931,6 +953,7 @@ export class PrSubmissionStep implements PipelineStep {
       );
     }
 
+    const dcoIdentity = readGitDcoIdentity(ctx.workspace?.workspacePath);
     const prDraftText = buildPrDescription({
       issueNumber: selectedOpp.issueNumber,
       problemSummary: activePatch?.summary || selectedOpp.title,
@@ -946,9 +969,9 @@ export class PrSubmissionStep implements PipelineStep {
           ctx.testCmd ||
           ""
         : "",
-      testCount: ctx.evidenceReport?.passedUnitTestsCount,
-      dcoAuthorName: "OpenContrib",
-      dcoAuthorEmail: "bot@opencontrib.dev",
+      testCount: ctx.evidenceReport?.passedUnitTestsCount ?? 0,
+      evidence: ctx.evidenceReport,
+      ...dcoIdentity,
     });
 
     let prUrl: string;

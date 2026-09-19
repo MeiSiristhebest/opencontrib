@@ -14,8 +14,8 @@ export interface GovernanceAuditRunOptions {
   prTitle?: string;
   /** Inspection-only convenience value; it must equal the stored pr_draft. */
   prBody?: string;
-  /** Deprecated agent-controlled bypasses are rejected, never honored. */
-  allowUnverified?: boolean;
+  coveragePolicy?: import("../domain/governance.js").CoveragePolicy;
+  resourceLeakPolicy?: import("../domain/governance.js").ResourceLeakPolicy;
   isAutonomous?: boolean;
   subagentScore?: number;
 }
@@ -51,12 +51,6 @@ export class GovernanceService {
         `GovernanceNotReadyError: run ${runId} is in phase "${run.manifest.currentPhase}"; audit requires EVIDENCE_COLLECTED.`,
       );
     }
-    if (options.allowUnverified === true) {
-      throw new Error(
-        "GovernanceAuthorityError: agent-controlled --allow-unverified cannot create a canonical governance decision.",
-      );
-    }
-
     const patchRaw = run.artifacts.patch;
     if (!patchRaw || (typeof patchRaw === "string" && patchRaw.trim() === "")) {
       throw new Error(
@@ -119,6 +113,8 @@ export class GovernanceService {
       lineCount: validatedPatch.changedLines,
       // Governance is deliberately technical-only. Approval is minted later
       // by an external trusted authority and is not inferred from this audit.
+      coveragePolicy: options.coveragePolicy,
+      resourceLeakPolicy: options.resourceLeakPolicy,
       subagentQualityScore: options.subagentScore,
     });
 

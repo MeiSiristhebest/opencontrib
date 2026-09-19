@@ -12,6 +12,8 @@ import type {
   ConfidenceBreakdown,
   GovernanceAuditResult,
   EvidenceReport,
+  GreenEvidence,
+  RedEvidence,
 } from "../contracts/schemas.js";
 import { validateMarkdownIntegrity } from "../governance/markdown-validator.js";
 
@@ -281,6 +283,15 @@ export interface GovernanceDecisionOutput {
   };
 }
 
+export interface CoveragePolicy {
+  required?: boolean;
+  minimumChangedLineCoverage?: number;
+}
+
+export interface ResourceLeakPolicy {
+  required?: boolean;
+}
+
 export interface AuditGovernanceInput {
   diffText?: string;
   patchContent?: string;
@@ -291,6 +302,8 @@ export interface AuditGovernanceInput {
   lineCount?: number;
   maxDiffLines?: number;
   evidence?: Partial<EvidenceReport>;
+  coveragePolicy?: CoveragePolicy;
+  resourceLeakPolicy?: ResourceLeakPolicy;
   subagentQualityScore?: number;
   isAutonomousPrSubmission?: boolean;
   variantHuntConducted?: boolean;
@@ -373,11 +386,26 @@ export function auditGovernance(
   // audit never accepts a caller-supplied approval boolean.
   const requiresHumanApproval = true;
 
+  const minimumChangedLineCoverage = Math.min(
+    100,
+    Math.max(0, input.coveragePolicy?.minimumChangedLineCoverage ?? 85),
+  );
+  const coverageGatePassed =
+    input.coveragePolicy?.required !== true ||
+    (input.evidence?.changedCodeCoverageStatus === "PASS" &&
+      typeof input.evidence.changedCodeCoveragePercent === "number" &&
+      input.evidence.changedCodeCoveragePercent >= minimumChangedLineCoverage);
+  const resourceLeakGatePassed =
+    input.resourceLeakPolicy?.required !== true ||
+    input.evidence?.handleLeakCheckPassed === "PASS";
+
   const isTechnicalGatePassed =
     antiAiCheckPassed &&
     markdownIntegrityPassed &&
     rfcGatePassed &&
-    confidence.isPassed;
+    confidence.isPassed &&
+    coverageGatePassed &&
+    resourceLeakGatePassed;
 
   const isGatedPassed = isTechnicalGatePassed;
 
@@ -424,12 +452,24 @@ export function auditGovernance(
       `Diff exceeds 100 lines (${lines} lines). Split into RFC Discussion issue first.`,
     );
   }
-  if (
+  if (input.coveragePolicy?.required === true && !coverageGatePassed) {
+    const measured = input.evidence?.changedCodeCoveragePercent;
+    remediationSuggestions.push(
+      typeof measured === "number"
+        ? `Changed-code coverage is below the required ${minimumChangedLineCoverage}% threshold (Current: ${measured}%). Run GREEN with the repository coverage adapter and cover all modified branches.`
+        : `Changed-code coverage is unavailable. Run GREEN with the repository coverage adapter before governance audit; UNAVAILABLE cannot satisfy a required coverage policy.`,
+    );
+  } else if (
     typeof input.evidence?.testCoveragePercent === "number" &&
     input.evidence.testCoveragePercent < 85
   ) {
     remediationSuggestions.push(
-      `PR accompanying test coverage is below mandatory 85% threshold (Current: ${input.evidence.testCoveragePercent}%). Must add additional unit tests to cover all modified branches.`,
+      `PR accompanying test coverage is below the 85% advisory threshold (Current: ${input.evidence.testCoveragePercent}%). Add tests to cover modified branches or enable the repository coverage policy.`,
+    );
+  }
+  if (input.resourceLeakPolicy?.required === true && !resourceLeakGatePassed) {
+    remediationSuggestions.push(
+      "Resource-leak evidence is unavailable or failed. Run the trusted handle/process leak check before governance audit.",
     );
   }
   if (!confidence.isPassed) {
@@ -489,14 +529,22 @@ export function auditGovernance(
         : [
             "Improve test coverage or add negative assertion cases to increase confidence.",
             "Run variant hunting across sister modules to verify no parallel defects.",
-            "To explicitly request human waiver, rerun with --allow-unverified.",
+            "Do not bypass a failed technical gate; request any exception through a trusted host authority.",
           ],
       nextCommand: isGatedPassed
         ? 'opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"'
-        : "opencontrib governance audit --patch <file> --pr-title <title> --allow-unverified",
+        : 'opencontrib governance audit --run-id <run_id> --pr-title "<title>"',
     },
   };
 }
+
+export type PrTemplateEvidence = Omit<
+  Partial<EvidenceReport>,
+  "redEvidence" | "greenEvidence"
+> & {
+  redEvidence?: Partial<RedEvidence>;
+  greenEvidence?: Partial<GreenEvidence>;
+};
 
 export interface MasterPrTemplateInput {
   issueNumber: number;
@@ -519,10 +567,7 @@ export interface MasterPrTemplateInput {
   aiDisclosureRequired?: boolean;
   conditionalAiRequired?: boolean;
   nativeTemplateContent?: string;
-  evidence?: {
-    baselineFlakyTests?: Array<unknown>;
-    [key: string]: unknown;
-  };
+  evidence?: PrTemplateEvidence;
 }
 
 export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
@@ -538,18 +583,55 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     data.keyChanges && data.keyChanges.length > 0
       ? data.keyChanges
       : ["Unavailable (key implementation steps not recorded)"];
-  const reproductionCommand = data.reproductionCommand || undefined;
-  const verificationCommand =
-    data.verificationCommand || data.validationCommand || undefined;
-  const testCountText =
-    data.testCount === undefined
-      ? "all assertions passed"
-      : `${data.testCount} tests passed`;
-  const stressLoopCount = data.stressLoopCount ?? 1;
+  const evidence = data.evidence;
+  const reproductionVerified =
+    evidence?.reproductionVerified === true &&
+    evidence.redEvidence?.assertionMatched === true;
+  const canonicalReproductionCommand = reproductionVerified
+    ? evidence?.redEvidence?.command
+    : undefined;
+  const verificationPassed =
+    evidence !== undefined &&
+    (evidence.allTestsPassing === true ||
+      evidence.greenEvidence?.passed === true);
+  const canonicalVerificationCommand = verificationPassed
+    ? evidence?.greenEvidence?.command
+    : undefined;
+  const canonicalTestCount = verificationPassed
+    ? evidence?.passedUnitTestsCount
+    : undefined;
+  const stressLoopCount = verificationPassed
+    ? (evidence?.stressLoopRuns ?? 1)
+    : 0;
   const dcoAuthorName = data.dcoAuthorName;
   const dcoAuthorEmail = data.dcoAuthorEmail;
+  const userValidationNote =
+    !evidence &&
+    (data.verificationCommand ||
+      data.validationCommand ||
+      data.validationOutputSnippet)
+      ? `\n- **User-provided validation note (not verified)**: ${[
+          data.verificationCommand || data.validationCommand,
+          data.validationOutputSnippet,
+        ]
+          .filter(Boolean)
+          .join(" — ")}`
+      : "";
 
-  // If target repository provides a native template, merge into it
+  const reproductionDetail = canonicalReproductionCommand
+    ? `- **Reproduction**: \`${canonicalReproductionCommand}\` confirmed failing assertion prior to fix.`
+    : `- **Reproduction**: Not recorded.`;
+  const verificationDetail = canonicalVerificationCommand
+    ? stressLoopCount > 1
+      ? `passed cleanly across ${stressLoopCount} consecutive stress loop runs (${canonicalTestCount ?? "all"} test assertions passed).`
+      : `passed cleanly (${canonicalTestCount ?? "unit test suite"} test assertions passed, 0 regressions).`
+    : "Not recorded.";
+  const verificationLine = canonicalVerificationCommand
+    ? `- **Verification**: \`${canonicalVerificationCommand}\` ${verificationDetail}`
+    : `- **Verification**: ${verificationDetail}`;
+
+  // If target repository provides a native template, merge into it. All
+  // verification facts in this branch are still read from canonical evidence.
   if (
     data.nativeTemplateContent &&
     data.nativeTemplateContent.trim().length > 10
@@ -577,9 +659,13 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
         result,
       )
     ) {
+      const testSuite =
+        canonicalTestCount === undefined
+          ? "Not recorded"
+          : `${canonicalTestCount} tests passed`;
       result = result.replace(
         /(##\s*(?:test plan|verification|how has this been tested)[\s\S]*?)(?=##|$)/i,
-        `$1\n- Reproduction: \`${reproductionCommand}\`\n- Verification: \`${verificationCommand}\`\n- Test Suite: ${testCountText}\n\n`,
+        `$1\n${reproductionDetail}\n${verificationLine}\n- Test Suite: ${testSuite}\n${userValidationNote}\n\n`,
       );
     }
     return result.trim();
@@ -590,40 +676,14 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     dcoAuthorName && dcoAuthorEmail
       ? `\n\nSigned-off-by: ${dcoAuthorName} <${dcoAuthorEmail}>`
       : "";
-  const reproductionDetail = data.reproductionCommand
-    ? `- **Reproduction**: \`${data.reproductionCommand}\` confirmed failing assertion prior to fix.`
-    : `- **Reproduction**: Not recorded.`;
-
-  let verificationDetail: string;
-  if (data.verificationCommand) {
-    if (stressLoopCount > 1) {
-      const countMsg =
-        data.testCount === undefined
-          ? "all assertions passed"
-          : `${data.testCount} test assertions passed`;
-      verificationDetail = `passed cleanly across ${stressLoopCount} consecutive stress loop runs (${countMsg}).`;
-    } else {
-      const countMsg =
-        data.testCount === undefined
-          ? "unit test suite passed"
-          : `${data.testCount} test assertions passed`;
-      verificationDetail = `passed cleanly (${countMsg}, 0 regressions).`;
-    }
-  } else {
-    verificationDetail = `Not recorded.`;
-  }
-
-  const verificationLine = data.verificationCommand
-    ? `- **Verification**: \`${data.verificationCommand}\` ${verificationDetail}`
-    : `- **Verification**: ${verificationDetail}`;
 
   let regressionLine = "- **Regression Isolation**: Not recorded.";
-  if (data.evidence?.baselineFlakyTests !== undefined) {
-    if (data.evidence.baselineFlakyTests.length === 0) {
+  if (evidence?.baselineFlakyTests !== undefined) {
+    if (evidence.baselineFlakyTests.length === 0) {
       regressionLine =
         "- **Regression Isolation**: Verified 0 flaky baseline regressions across sandbox runs.";
     } else {
-      regressionLine = `- **Regression Isolation**: ${data.evidence.baselineFlakyTests.length} baseline flaky test(s) observed.`;
+      regressionLine = `- **Regression Isolation**: ${evidence.baselineFlakyTests.length} baseline flaky test(s) observed.`;
     }
   }
 
@@ -644,6 +704,6 @@ ${changeList}
 ### Verification & Empirical Evidence
 ${reproductionDetail}
 ${verificationLine}
-${regressionLine}${dcoTrailer}${aiDisclosureSection}
+${regressionLine}${userValidationNote}${dcoTrailer}${aiDisclosureSection}
 `;
 }

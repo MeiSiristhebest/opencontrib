@@ -16,21 +16,25 @@ opencontrib governance audit \
   --is-autonomous
 ```
 
-| Flag | Type | Required | Description |
-| ------ | ------ | ---------- | ------------- |
-| `--patch` | string | ✓ | Git unified diff content or path to diff file |
-| `--pr-title` | string | ✓ | Proposed PR title |
-| `--pr-body` | string | — | Proposed PR body text |
-| `--pr-body-file` | string | — | Path to clean markdown file (prevents shell escaping corruption) |
-| `--evidence` | string | — | JSON evidence from `evidence` command |
-| `--subagent-score` | number | — | External review score (0-100) |
-| `--allow-unverified` | flag | — | Explicit human waiver override for unverified/low-scoring PRs |
-| `--run-id` | string | — | Run ID (auto-resolved from active session if omitted) |
-| `--is-autonomous` | flag | — | Mark as autonomous PR submission |
-| `--pretty` | flag | — | Pretty-print output |
+| Flag                            | Type   | Required | Description                                                                       |
+| ------------------------------- | ------ | -------- | --------------------------------------------------------------------------------- |
+| `--patch`                       | string | ✓        | Git unified diff content or path to diff file                                     |
+| `--pr-title`                    | string | ✓        | Proposed PR title                                                                 |
+| `--pr-body`                     | string | —        | Proposed PR body text                                                             |
+| `--pr-body-file`                | string | —        | Path to clean markdown file (prevents shell escaping corruption)                  |
+| `--evidence`                    | string | —        | JSON evidence from `evidence` command                                             |
+| `--subagent-score`              | number | —        | External review score (0-100)                                                     |
+| `--require-coverage`            | flag   | —        | Fail closed unless measured changed-code coverage satisfies the repository policy |
+| `--coverage-minimum`            | number | —        | Minimum changed-code coverage percentage (default: 85)                            |
+| `--require-resource-leak-check` | flag   | —        | Fail closed unless trusted resource/handle leak evidence passes                   |
+| `--run-id`                      | string | —        | Run ID (auto-resolved from active session if omitted)                             |
+| `--is-autonomous`               | flag   | —        | Mark as autonomous PR submission                                                  |
+| `--pretty`                      | flag   | —        | Pretty-print output                                                               |
 
 > [!CAUTION]
-> **Exit Code 2 (GATED_BLOCKED)**: If the quality score $<90\%$ or any dimension $<80\%$, `governance audit` terminates with **Exit Code 2** and blocks PR creation unless `--allow-unverified` is explicitly supplied.
+> **Exit Code 2 (GATED_BLOCKED)**: If the quality score $<90\%$ or any dimension $<80\%$, `governance audit` terminates with **Exit Code 2** and blocks PR creation. Agents cannot waive a failed technical gate; any exception must be issued by a trusted host authority.
+
+Coverage and resource-leak checks are repository-sensitive. Enable them with `--require-coverage` and/or `--require-resource-leak-check`; `UNAVAILABLE` never satisfies an enabled policy.
 
 **Output**: `{"status":"passed","audit":{"overallConfidence":{...},"markdownIntegrityPassed":true,"rfcGatePassed":true,...}}` or `{"status":"failed",...}`
 
@@ -84,20 +88,20 @@ opencontrib governance pr-template \
   --is-docs-only
 ```
 
-| Flag | Type | Required | Description |
-| ------ | ------ | ---------- | ------------- |
-| `--issue` | string | ✓ | Issue number |
-| `--issue-title` | string | ✓ | Issue title |
-| `--summary` | string | ✓ | Concise fix summary |
-| `--validation-cmd` | string | — | Test command used (default: `bun test`) |
-| `--validation-output` | string | — | Test output excerpt (default: `All unit tests pass cleanly.`) |
-| `--key-changes` | list | — | Comma-separated key changes |
-| `--confidence` | number | — | Quality confidence score (0-100) |
-| `--risk` | LOW/MEDIUM/HIGH | — | Risk tier (default: `MEDIUM`) |
-| `--native-template` | string | — | Repo PR template markdown |
-| `--is-docs-only` | flag | — | Documentation-only change |
-| `--ai-disclosure` | flag | — | AI disclosure required |
-| `--pretty` | flag | — | Pretty-print output |
+| Flag                  | Type            | Required | Description                                                                                     |
+| --------------------- | --------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `--issue`             | string          | ✓        | Issue number                                                                                    |
+| `--issue-title`       | string          | ✓        | Issue title                                                                                     |
+| `--summary`           | string          | ✓        | Concise fix summary                                                                             |
+| `--validation-cmd`    | string          | —        | Optional user-provided validation note; never a verified claim without a tracked EvidenceReport |
+| `--validation-output` | string          | —        | Optional user-provided output note; never treated as test evidence                              |
+| `--key-changes`       | list            | —        | Comma-separated key changes                                                                     |
+| `--confidence`        | number          | —        | Quality confidence score (0-100)                                                                |
+| `--risk`              | LOW/MEDIUM/HIGH | —        | Risk tier (default: `MEDIUM`)                                                                   |
+| `--native-template`   | string          | —        | Repo PR template markdown                                                                       |
+| `--is-docs-only`      | flag            | —        | Documentation-only change                                                                       |
+| `--ai-disclosure`     | flag            | —        | AI disclosure required                                                                          |
+| `--pretty`            | flag            | —        | Pretty-print output                                                                             |
 
 **Output**: `{"status":"success","prBody":"### Problem Description\nFixes #42\n..."}`
 
@@ -106,6 +110,7 @@ opencontrib governance pr-template \
 ## Review & Community Protocols
 
 ### 1. Bot Review Handling
+
 - Automated bots (`[bot]` in author username, e.g. `coderabbitai[bot]`, `codecov[bot]`):
   - Do **not** post conversational reply comments.
   - Implement requested improvements in code, then `git push`. The bot will update checkmarks automatically on the next CI trigger.
@@ -113,7 +118,9 @@ opencontrib governance pr-template \
   - Respond concisely and politely in the review thread addressing specific design choices or technical points.
 
 ### 2. Proactive Claim Template
+
 When creating an issue for an unfiled bug, post a claim statement:
+
 ```markdown
 I have investigated this issue and have a reproducible test case and fix ready.
 Please assign this issue to me, I will submit a PR shortly.

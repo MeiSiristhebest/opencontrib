@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createOpenContribMcpServer } from "../src/server.js";
-import { WorktreeManager } from "@opencontrib/core";
+import { PROTOCOL_CONTRACT_PHASES, WorktreeManager } from "@opencontrib/core";
 
 class LocalFetchWorktreeManager extends WorktreeManager {
   constructor(private readonly remotePath: string) {
@@ -27,6 +27,13 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
   const tools = (server as any)._registeredTools;
   const resources = (server as any)._registeredResources;
   const prompts = (server as any)._registeredPrompts;
+
+  it("keeps every canonical protocol MCP tool registered", () => {
+    for (const definition of Object.values(PROTOCOL_CONTRACT_PHASES)) {
+      expect(tools[definition.mcp.tool]).toBeDefined();
+      expect(tools[definition.mcp.tool].handler).toBeFunction();
+    }
+  });
 
   it("verifies all registered MCP tools have well-defined input schemas and handler functions", () => {
     const expectedTools = [
@@ -199,9 +206,8 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     }
 
     // Advance to RED_CAPTURED using the canonical writer
-    const { saveCanonicalArtifact } = await import(
-      "../../core/src/run/canonical-writer.js"
-    );
+    const { saveCanonicalArtifact } =
+      await import("../../core/src/run/canonical-writer.js");
     const { buildContributionRunManager } = await import("@opencontrib/core");
     const testRunManager = buildContributionRunManager();
     saveCanonicalArtifact(

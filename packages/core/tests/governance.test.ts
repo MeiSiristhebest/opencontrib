@@ -158,9 +158,14 @@ describe("Governance & Anti-AI Audit Engine", () => {
       keyChanges: ["Fix"],
       reproductionCommand: "test",
       verificationCommand: "test",
+      validationOutputSnippet: "10 tests passed",
       testCount: 10,
     });
     expect(cleanTemplate).not.toContain("Signed-off-by");
+    expect(cleanTemplate).not.toContain("passed cleanly");
+    expect(cleanTemplate).toContain(
+      "User-provided validation note (not verified)",
+    );
   });
 
   it("detects corrupted Unicode replacement characters and malformed headers", () => {
@@ -219,7 +224,7 @@ Fixes #1106
     expect(
       failAudit.remediationSuggestions.some((s) =>
         s.includes(
-          "PR accompanying test coverage is below mandatory 85% threshold",
+          "PR accompanying test coverage is below the 85% advisory threshold",
         ),
       ),
     ).toBe(true);
@@ -240,5 +245,86 @@ Fixes #1106
 
     expect(passAudit.isGatedPassed).toBe(true);
     expect(passAudit.overallScore).toBeGreaterThanOrEqual(90);
+  });
+
+  it("fails closed when a repository requires unavailable changed-code coverage", () => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/foo b/foo\\n+const a = 1;",
+      prBody: "Fixes #1",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      evidence: {
+        changedCodeCoverageStatus: "UNAVAILABLE",
+        passedUnitTestsCount: 4,
+      },
+      coveragePolicy: { required: true, minimumChangedLineCoverage: 85 },
+      lineCount: 2,
+    });
+
+    expect(audit.technicalGate?.status).toBe("FAIL");
+    expect(audit.isGatedPassed).toBe(false);
+    expect(audit.remediationSuggestions.join(" ")).toContain(
+      "coverage is unavailable",
+    );
+  });
+
+  it("passes a required coverage policy only with measured changed-code coverage", () => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/foo b/foo\\n+const a = 1;",
+      prBody: "Fixes #1",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      evidence: {
+        changedCodeCoverageStatus: "PASS",
+        changedCodeCoveragePercent: 90,
+        passedUnitTestsCount: 4,
+      },
+      coveragePolicy: { required: true, minimumChangedLineCoverage: 85 },
+      lineCount: 2,
+    });
+
+    expect(audit.technicalGate?.status).toBe("PASS");
+    expect(audit.isGatedPassed).toBe(true);
+  });
+
+  it("fails closed when a resource-sensitive contribution lacks leak evidence", () => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/foo b/foo\\n+const a = 1;",
+      prBody: "Fixes #1",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      evidence: {
+        handleLeakCheckPassed: "UNAVAILABLE",
+        passedUnitTestsCount: 4,
+      },
+      resourceLeakPolicy: { required: true },
+      lineCount: 2,
+    });
+
+    expect(audit.technicalGate?.status).toBe("FAIL");
+    expect(audit.remediationSuggestions.join(" ")).toContain(
+      "Resource-leak evidence",
+    );
   });
 });

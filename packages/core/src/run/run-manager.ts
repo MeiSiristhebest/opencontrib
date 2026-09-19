@@ -24,7 +24,11 @@ import {
 // active session; it is only used as a *constructor default*, never bypassed
 // at runtime (transition/updatePhase go through `this.activeSession`).
 
-import { PROTOCOL_CONTRACT_PHASES } from "../workflow/protocol-contract.js";
+import {
+  getProtocolGuidance,
+  PROTOCOL_CONTRACT_PHASES,
+  type ProtocolGuidance,
+} from "../workflow/protocol-contract.js";
 
 export type { CreateRunInput };
 
@@ -46,6 +50,7 @@ export interface ResumeRunResult {
     hasResult: boolean;
   };
   suggestedNextAction: string;
+  guidance: ProtocolGuidance;
 }
 
 import { validatePhaseGate } from "./state-machine.js";
@@ -396,6 +401,7 @@ export class ContributionRunManager {
       availableArtifacts,
       latestArtifactSummary: latestSummary,
       suggestedNextAction,
+      guidance: getProtocolGuidance(summary.manifest.currentPhase),
     };
   }
 }

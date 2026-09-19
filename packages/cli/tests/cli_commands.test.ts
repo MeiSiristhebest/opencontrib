@@ -19,6 +19,7 @@ import { evidenceCommand } from "../src/commands/evidence.js";
 import { verifyCommand } from "../src/commands/verify.js";
 import { evalCommand } from "../src/commands/eval.js";
 import { printPhaseGuidance, printTable } from "../src/utils/output.js";
+import { defaultActiveSessionManager } from "@opencontrib/core";
 
 describe("CLI Commands & Subcommands Test Suite", () => {
   it("registers all 16 command domains correctly with descriptions and subcommands", () => {
@@ -116,6 +117,7 @@ describe("CLI Commands & Subcommands Test Suite", () => {
   });
 
   it("executes governance subcommands (impact, ci-diagnose, pr-template, claim, lint-md)", async () => {
+    defaultActiveSessionManager.clearActiveSession();
     const tempDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "opencontrib-gov-cli-"),
     );

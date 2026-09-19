@@ -26,7 +26,7 @@ const rankCommand = new Command("rank")
       const parsed = parseJSON(input, "stdin") as any;
       if (!parsed?.issue) {
         console.error('❌ Missing required "issue" field in input JSON');
-        process.exit(1);
+        throw new CliExitError(1);
       }
       const repoObj = parsed.repository || parsed.repo;
       const normalizedRepo = {
@@ -42,7 +42,7 @@ const rankCommand = new Command("rank")
       printJSON({ status: "success", signals }, opts.pretty);
     } catch (err: any) {
       printJSON({ status: "error", message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -60,7 +60,7 @@ const qualifyCommand = new Command("qualify")
         console.error(
           '❌ Missing required "issueNumber" and "issueTitle" in input JSON',
         );
-        process.exit(1);
+        throw new CliExitError(1);
       }
       const qualification = qualifyIssue(parsed);
       printJSON(
@@ -72,7 +72,7 @@ const qualifyCommand = new Command("qualify")
       );
     } catch (err: any) {
       printJSON({ status: "error", message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -113,7 +113,7 @@ const feasibilityCommand = new Command("feasibility")
         );
       } catch (err: any) {
         printJSON({ status: "error", message: err.message }, opts.pretty);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );
@@ -139,9 +139,8 @@ const contextCommand = new Command("context")
           );
           throw new CliExitError(1);
         }
-        const { ContextAssembler, buildContributionRunManager } = await import(
-          "@opencontrib/core"
-        );
+        const { ContextAssembler, buildContributionRunManager } =
+          await import("@opencontrib/core");
         const assembler = new ContextAssembler();
         const repoTree = (parsed.repoTree || []).map((item: any) => ({
           path: item.path,
@@ -212,7 +211,7 @@ const manifestsCommand = new Command("manifests")
       printJSON(result, opts.pretty);
     } catch (err: any) {
       printJSON({ status: "error", message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 

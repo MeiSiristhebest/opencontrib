@@ -1,3 +1,4 @@
+import { CliExitError } from "../utils/exit.js";
 /** `opencontrib workspace <sub>` — Git worktree sandbox management. */
 
 import { Command } from "commander";
@@ -6,6 +7,7 @@ import {
   WorkspaceService,
   buildContributionRunManager,
   defaultActiveSessionManager,
+  getProtocolGuidance,
   type ContributionRunManager,
 } from "@opencontrib/core";
 import { printJSON, printPhaseGuidance } from "../utils/output.js";
@@ -57,13 +59,18 @@ const workspacePrepare = new Command("prepare")
           effectiveRunId = manifest.runId;
         }
 
-        const workspaceService = new WorkspaceService(runManager, worktreeManager);
-        const { context, artifact, alreadyPrepared } = workspaceService.prepare({
-          runId: effectiveRunId,
-          issueOrTaskId: opts.issue,
-          localRepoPath: opts.localPath,
-          repoFullName: opts.repo,
-        });
+        const workspaceService = new WorkspaceService(
+          runManager,
+          worktreeManager,
+        );
+        const { context, artifact, alreadyPrepared } = workspaceService.prepare(
+          {
+            runId: effectiveRunId,
+            issueOrTaskId: opts.issue,
+            localRepoPath: opts.localPath,
+            repoFullName: opts.repo,
+          },
+        );
 
         defaultActiveSessionManager.setActiveSession({
           runId: effectiveRunId,
@@ -86,23 +93,25 @@ const workspacePrepare = new Command("prepare")
           opts.pretty,
         );
 
+        const guidance = getProtocolGuidance("WORKSPACE_PREPARED");
         printPhaseGuidance({
           currentPhase: "WORKSPACE_PREPARED",
           runId: effectiveRunId,
           status: "SUCCESS",
           humanCheckpoint: "Checkpoint 1 (Sandbox Isolated & Ready)",
-          nextCommand: `opencontrib evidence --cwd "${context.workspacePath}" --test-cmd "<test_command>"`,
-          forbiddenActions: [
-            "DO NOT edit source code files before reproducing a failing unit test (RED Phase).",
-            "DO NOT run wide root tests (npm test / go test ./...) without scoping to the subpackage.",
-          ],
+          nextCommand: guidance.cliExample
+            .replace("<workspace>", `"${context.workspacePath}"`)
+            .replace("<command>", '"<test_command>"')
+            .replace("<failure-marker>", '"<assertion>"'),
+          forbiddenActions: guidance.forbiddenActions,
           invariants: [
+            ...guidance.invariants,
             `All development must take place inside isolated worktree: ${context.workspacePath}`,
           ],
         });
       } catch (err: any) {
         printJSON({ status: "error", message: err.message }, opts.pretty);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );
@@ -133,7 +142,7 @@ const workspacePurge = new Command("purge")
       );
     } catch (err: any) {
       printJSON({ status: "error", message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -154,7 +163,7 @@ const workspaceList = new Command("list")
       );
     } catch (err: any) {
       printJSON({ status: "error", message: err.message }, opts.pretty);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
