@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
@@ -19,6 +19,7 @@ import {
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
+import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
 
 const testApprovalAuthority = () =>
   createTrustedApprovalAuthority({
@@ -59,7 +60,8 @@ function seedGovernanceReadyRun(
   manager: ContributionRunManager,
   runId: string,
   body = "pr body",
-): void {
+  workspacePath = "/tmp",
+) {
   const baseCommitSha = "a".repeat(40);
   const patch = {
     title: "fix: bug",
@@ -106,13 +108,27 @@ function seedGovernanceReadyRun(
     runId,
     "workspace",
     {
-      workspacePath: "/tmp",
+      workspacePath,
       branchName: "fixture-branch",
       baseRepoPath: "/tmp",
       baseBranch: "main",
       baseCommitSha,
       isWorktree: false,
       repoFullName: "org/repo",
+      policySnapshot: {
+        coverage: {
+          required: true,
+          minimumChangedLineCoverage: 90,
+        },
+        resourceLeakCheck: { required: false },
+      },
+      policySha256: hashTrustedPolicySnapshot({
+        coverage: {
+          required: true,
+          minimumChangedLineCoverage: 90,
+        },
+        resourceLeakCheck: { required: false },
+      }),
     },
     "WORKSPACE_PREPARED",
   );
@@ -151,6 +167,8 @@ function seedGovernanceReadyRun(
       failedUnitTestsCount: 0,
       reproductionVerified: true,
       allTestsPassing: true,
+      changedCodeCoveragePercent: 95,
+      changedCodeCoverageStatus: "PASS",
       redEvidence: {
         command: "bun test regression.test.ts",
         observedOutputSnippet: "failed",
@@ -181,7 +199,7 @@ function seedGovernanceReadyRun(
     "EVIDENCE_COLLECTED",
   );
   manager.saveArtifact(runId, "pr_draft", body);
-  new GovernanceService(manager).audit(runId, {
+  return new GovernanceService(manager).audit(runId, {
     prTitle: "fix: bug",
     prBody: body,
     subagentScore: 100,
@@ -189,6 +207,49 @@ function seedGovernanceReadyRun(
 }
 
 describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
+  it("uses the frozen policy snapshot after the agent lowers worktree policy", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-policy-snapshot-"));
+    const workspacePath = join(baseDir, "workspace");
+    mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(
+      join(workspacePath, ".opencontrib.json"),
+      JSON.stringify({
+        policy: {
+          coverage: {
+            required: false,
+            minimumChangedLineCoverage: 0,
+          },
+        },
+      }),
+    );
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const decision = seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        "pr body",
+        workspacePath,
+      );
+
+      expect(decision.coveragePolicy).toEqual({
+        required: true,
+        minimumChangedLineCoverage: 90,
+      });
+      expect(decision.policySha256).toBe(
+        hashTrustedPolicySnapshot({
+          coverage: {
+            required: true,
+            minimumChangedLineCoverage: 90,
+          },
+          resourceLeakCheck: { required: false },
+        }),
+      );
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it("Attack 1: Agent substitutes RED test command A with different GREEN test command B", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-pen-test-1-"));
     try {

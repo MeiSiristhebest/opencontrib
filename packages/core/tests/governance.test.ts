@@ -312,6 +312,32 @@ Fixes #1106
     expect(audit.isGatedPassed).toBe(true);
   });
 
+  it("uses measured coverage with the trusted policy threshold", () => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/foo b/foo\\n+const a = 1;",
+      prBody: "Fixes #1",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      evidence: {
+        changedCodeCoverageStatus: "PASS",
+        changedCodeCoveragePercent: 75,
+        passedUnitTestsCount: 4,
+      },
+      coveragePolicy: { required: true, minimumChangedLineCoverage: 70 },
+      lineCount: 2,
+    });
+
+    expect(audit.technicalGate?.status).toBe("PASS");
+    expect(audit.isGatedPassed).toBe(true);
+  });
+
   it("fails closed when a resource-sensitive contribution lacks leak evidence", () => {
     const audit = auditGovernance({
       patchContent: "diff --git a/foo b/foo\\n+const a = 1;",

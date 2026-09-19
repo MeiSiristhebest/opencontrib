@@ -1,6 +1,13 @@
 import { existsSync } from "fs";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
+import {
+  hashTrustedPolicySnapshot,
+  loadHostPolicy,
+  mergeTrustedPolicySnapshots,
+  parsePolicyConfig,
+  type TrustedPolicySnapshot,
+} from "../kernel/config.js";
 import { WorktreeManager, type WorkspaceContext } from "./worktree-manager.js";
 
 export interface PrepareWorkspaceInput {
@@ -18,7 +25,61 @@ export interface WorkspaceArtifactData {
   baseCommitSha: string;
   repoFullName: string;
   baseBranch?: string;
+  policySnapshot: TrustedPolicySnapshot;
+  policySha256: string;
   createdAt: string;
+}
+
+const BASELINE_POLICY_PATHS = [
+  ".opencontrib.json",
+  ".opencontrib/config.json",
+] as const;
+
+function readBaselineRepoPolicy(
+  worktreeManager: WorktreeManager,
+  baseRepoPath: string,
+  baseCommitSha: string,
+) {
+  if (typeof worktreeManager.runGit !== "function") return undefined;
+  for (const policyPath of BASELINE_POLICY_PATHS) {
+    const result = worktreeManager.runGit([
+      "-C",
+      baseRepoPath,
+      "show",
+      `${baseCommitSha}:${policyPath}`,
+    ]);
+    if (!result.success) continue;
+    return parsePolicyConfig(result.stdout);
+  }
+  return undefined;
+}
+
+function captureTrustedPolicySnapshot(
+  worktreeManager: WorktreeManager,
+  baseRepoPath: string,
+  baseCommitSha: string,
+): TrustedPolicySnapshot {
+  return mergeTrustedPolicySnapshots(
+    loadHostPolicy(),
+    readBaselineRepoPolicy(worktreeManager, baseRepoPath, baseCommitSha),
+  );
+}
+
+function isTrustedPolicySnapshot(
+  value: unknown,
+): value is TrustedPolicySnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Partial<TrustedPolicySnapshot>;
+  return (
+    !!snapshot.coverage &&
+    typeof snapshot.coverage.required === "boolean" &&
+    typeof snapshot.coverage.minimumChangedLineCoverage === "number" &&
+    Number.isFinite(snapshot.coverage.minimumChangedLineCoverage) &&
+    snapshot.coverage.minimumChangedLineCoverage >= 0 &&
+    snapshot.coverage.minimumChangedLineCoverage <= 100 &&
+    !!snapshot.resourceLeakCheck &&
+    typeof snapshot.resourceLeakCheck.required === "boolean"
+  );
 }
 
 export class WorkspaceService {
@@ -61,9 +122,18 @@ export class WorkspaceService {
     // SAFETY: canonical workspace artifacts are produced by WorkspaceService;
     // the assertion narrows the persisted JSON shape for the WORM read path.
     const existingWs = run.artifacts.workspace as unknown as
-      | WorkspaceArtifactData
-      | undefined;
+      WorkspaceArtifactData | undefined;
     if (existingWs) {
+      if (
+        !isTrustedPolicySnapshot(existingWs.policySnapshot) ||
+        typeof existingWs.policySha256 !== "string" ||
+        hashTrustedPolicySnapshot(existingWs.policySnapshot) !==
+          existingWs.policySha256
+      ) {
+        throw new Error(
+          `WorkspacePolicySnapshotError: canonical workspace for run ${input.runId} is missing a valid immutable policy snapshot.`,
+        );
+      }
       if (
         existingWs.workspacePath &&
         existsSync(existingWs.workspacePath) &&
@@ -164,6 +234,11 @@ export class WorkspaceService {
       );
     }
 
+    const policySnapshot = captureTrustedPolicySnapshot(
+      this.worktreeManager,
+      context.baseRepoPath,
+      context.baseCommitSha,
+    );
     const artifact: WorkspaceArtifactData = {
       workspacePath: context.workspacePath,
       branchName: context.branchName,
@@ -172,6 +247,8 @@ export class WorkspaceService {
       baseCommitSha: context.baseCommitSha,
       repoFullName: manifestRepo,
       baseBranch,
+      policySnapshot,
+      policySha256: hashTrustedPolicySnapshot(policySnapshot),
       createdAt: new Date().toISOString(),
     };
 

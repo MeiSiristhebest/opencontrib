@@ -21,6 +21,7 @@ import { createTrustedApprovalAuthority } from "../src/governance/approval-autho
 import { EvidenceService } from "../src/evidence/evidence-service.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
+import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
 
 const testApprovalAuthority = () =>
   createTrustedApprovalAuthority({
@@ -34,6 +35,15 @@ const testApprovalAuthority = () =>
       artifact.signingKeyId === "test-key" &&
       artifact.signature === "test-signature",
   });
+
+const fixturePolicySnapshot = {
+  coverage: {
+    required: false,
+    minimumChangedLineCoverage: 0,
+  },
+  resourceLeakCheck: { required: false },
+} as const;
+const fixturePolicySha256 = hashTrustedPolicySnapshot(fixturePolicySnapshot);
 
 function seedGovernanceReadyRun(
   manager: ContributionRunManager,
@@ -93,6 +103,8 @@ function seedGovernanceReadyRun(
       baseCommitSha,
       isWorktree: false,
       repoFullName: "org/repo",
+      policySnapshot: fixturePolicySnapshot,
+      policySha256: fixturePolicySha256,
     },
     "WORKSPACE_PREPARED",
   );
@@ -317,12 +329,9 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         approvalMode: "explicit_human",
       });
       expect(approval.signingKeyId).toBe("test-ed25519");
-      expect(approval.policySha256).toBe(
-        manager.getRun(manifest.runId)?.artifacts.submissionIntent
-          ? (manager.getRun(manifest.runId)?.artifacts.submissionIntent as any)
-              .policySha256
-          : undefined,
-      );
+      const submissionIntent = manager.getRun(manifest.runId)?.artifacts
+        .submissionIntent as any;
+      expect(approval.policySha256).toBe(submissionIntent?.policySha256);
       expect(verifier.verifyApproval(approval)).toBe(true);
       expect(broker.get(request.requestId)?.status).toBe("APPROVED");
       expect(
@@ -639,6 +648,23 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       mkdirSync(wsPath, { recursive: true });
 
       const fakeWorktreeManager = {
+        runGit: (args: string[]) => {
+          if (args.includes("show")) {
+            return {
+              success: true,
+              stdout: JSON.stringify({
+                policy: {
+                  coverage: {
+                    required: true,
+                    minimumChangedLineCoverage: 90,
+                  },
+                },
+              }),
+              stderr: "",
+            };
+          }
+          return { success: true, stdout: "", stderr: "" };
+        },
         createIsolatedWorkspace: () => ({
           workspacePath: wsPath,
           branchName: "opencontrib/run-test",
@@ -661,6 +687,13 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         issueOrTaskId: 1,
       });
       expect(first.alreadyPrepared).toBe(false);
+      expect(first.artifact.policySnapshot).toEqual({
+        coverage: {
+          required: true,
+          minimumChangedLineCoverage: 90,
+        },
+        resourceLeakCheck: { required: false },
+      });
 
       // Second preparation returns existing canonical workspace if exists
       const second = service.prepare({
@@ -998,6 +1031,8 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           branchName: "branch2",
           baseBranch: "develop",
           baseCommitSha,
+          policySnapshot: fixturePolicySnapshot,
+          policySha256: fixturePolicySha256,
         },
         "WORKSPACE_PREPARED",
       );
@@ -1160,6 +1195,8 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           branchName: "opencontrib/run-1",
           baseBranch: "main",
           baseCommitSha,
+          policySnapshot: fixturePolicySnapshot,
+          policySha256: fixturePolicySha256,
         },
         "WORKSPACE_PREPARED",
       );
