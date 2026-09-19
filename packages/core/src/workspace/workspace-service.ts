@@ -6,7 +6,8 @@ import {
   isTrustedPolicySnapshot,
   loadHostPolicy,
   mergeTrustedPolicySnapshots,
-  parsePolicyConfig,
+  readTrustedPolicyAtCommit,
+  type TrustedPolicyGitReader,
   type TrustedPolicySnapshot,
 } from "../kernel/config.js";
 import { WorktreeManager, type WorkspaceContext } from "./worktree-manager.js";
@@ -31,15 +32,6 @@ export interface WorkspaceArtifactData {
   createdAt: string;
 }
 
-const BASELINE_POLICY_PATHS = [
-  ".opencontrib.yaml",
-  ".opencontrib.yml",
-  ".opencontrib.json",
-  ".opencontrib/config.yaml",
-  ".opencontrib/config.yml",
-  ".opencontrib/config.json",
-] as const;
-
 function readBaselineRepoPolicy(
   worktreeManager: WorktreeManager,
   baseRepoPath: string,
@@ -50,41 +42,31 @@ function readBaselineRepoPolicy(
   // not evidence of a Git failure; production WorktreeManager always does.
   if (typeof worktreeManager.runGit !== "function") return undefined;
 
-  for (const policyPath of BASELINE_POLICY_PATHS) {
-    const listing = worktreeManager.runGit([
-      "-C",
-      baseRepoPath,
-      "ls-tree",
-      "-r",
-      "--name-only",
-      baseCommitSha,
-      "--",
-      policyPath,
-    ]);
-    if (!listing.success) {
-      throw new Error(
-        `WorkspacePolicySnapshotError: cannot inspect baseline policy path "${policyPath}" at base commit ${baseCommitSha}: ${listing.stderr.trim() || "git ls-tree failed"}.`,
-      );
-    }
-    const existsInBase = listing.stdout
-      .split(/\r?\n/)
-      .some((line) => line.trim() === policyPath);
-    if (!existsInBase) continue;
-
-    const result = worktreeManager.runGit([
-      "-C",
-      baseRepoPath,
-      "show",
-      `${baseCommitSha}:${policyPath}`,
-    ]);
-    if (!result.success) {
-      throw new Error(
-        `WorkspacePolicySnapshotError: cannot read baseline policy path "${policyPath}" at base commit ${baseCommitSha}: ${result.stderr.trim() || "git show failed"}.`,
-      );
-    }
-    return parsePolicyConfig(result.stdout);
-  }
-  return undefined;
+  const reader: TrustedPolicyGitReader = {
+    listTree: (policyPath) =>
+      worktreeManager.runGit([
+        "-C",
+        baseRepoPath,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        baseCommitSha,
+        "--",
+        policyPath,
+      ]),
+    show: (policyPath) =>
+      worktreeManager.runGit([
+        "-C",
+        baseRepoPath,
+        "show",
+        `${baseCommitSha}:${policyPath}`,
+      ]),
+  };
+  return readTrustedPolicyAtCommit(
+    reader,
+    baseCommitSha,
+    "WorkspacePolicySnapshotError",
+  );
 }
 
 function captureTrustedPolicySnapshot(

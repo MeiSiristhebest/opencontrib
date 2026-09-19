@@ -106,6 +106,58 @@ type PolicyConfigInput = {
   };
 };
 
+export const TRUSTED_POLICY_PATHS = [
+  ".opencontrib.yaml",
+  ".opencontrib.yml",
+  ".opencontrib.json",
+  ".opencontrib/config.yaml",
+  ".opencontrib/config.yml",
+  ".opencontrib/config.json",
+] as const;
+
+export interface TrustedPolicyGitCommandResult {
+  success: boolean;
+  stdout: string;
+  stderr: string;
+}
+
+export interface TrustedPolicyGitReader {
+  listTree(policyPath: string): TrustedPolicyGitCommandResult;
+  show(policyPath: string): TrustedPolicyGitCommandResult;
+}
+
+/**
+ * Read the first repository policy that exists at a trusted base commit.
+ * Missing paths are ordinary; any Git inspection/read failure is fatal.
+ */
+export function readTrustedPolicyAtCommit(
+  reader: TrustedPolicyGitReader,
+  baseCommitSha: string,
+  errorPrefix = "TrustedPolicySnapshotError",
+): OpenContribPolicy | undefined {
+  for (const policyPath of TRUSTED_POLICY_PATHS) {
+    const listing = reader.listTree(policyPath);
+    if (!listing.success) {
+      throw new Error(
+        `${errorPrefix}: cannot inspect baseline policy path "${policyPath}" at base commit ${baseCommitSha}: ${listing.stderr.trim() || "git ls-tree failed"}.`,
+      );
+    }
+    const existsInBase = listing.stdout
+      .split(/\r?\n/)
+      .some((line) => line.trim() === policyPath);
+    if (!existsInBase) continue;
+
+    const result = reader.show(policyPath);
+    if (!result.success) {
+      throw new Error(
+        `${errorPrefix}: cannot read baseline policy path "${policyPath}" at base commit ${baseCommitSha}: ${result.stderr.trim() || "git show failed"}.`,
+      );
+    }
+    return parsePolicyConfig(result.stdout);
+  }
+  return undefined;
+}
+
 function parseConfigDocument(raw: string): Record<string, unknown> {
   let parsed: unknown;
   try {

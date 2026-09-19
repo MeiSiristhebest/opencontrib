@@ -33,7 +33,9 @@ import {
   hashTrustedPolicySnapshot,
   loadHostPolicy,
   mergeTrustedPolicySnapshots,
-  parsePolicyConfig,
+  readTrustedPolicyAtCommit,
+  type TrustedPolicyGitCommandResult,
+  type TrustedPolicyGitReader,
 } from "../kernel/config.js";
 import {
   buildRunTransferBundle,
@@ -551,31 +553,48 @@ export interface ScriptedAgent {
   agentWorkspacePath: string;
 }
 
-const BENCHMARK_BASELINE_POLICY_PATHS = [
-  ".opencontrib.yaml",
-  ".opencontrib.yml",
-  ".opencontrib.json",
-  ".opencontrib/config.yaml",
-  ".opencontrib/config.yml",
-  ".opencontrib/config.json",
-] as const;
-
-function readBenchmarkBasePolicy(fixture: BenchmarkFixture) {
-  for (const policyPath of BENCHMARK_BASELINE_POLICY_PATHS) {
-    let raw: string;
-    try {
-      raw = execFileSync("git", ["show", `${fixture.baseSha}:${policyPath}`], {
+function runBenchmarkGit(
+  fixture: BenchmarkFixture,
+  args: string[],
+): TrustedPolicyGitCommandResult {
+  try {
+    return {
+      success: true,
+      stdout: execFileSync("git", args, {
         cwd: fixture.fixtureDir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch {
-      // A missing policy path is expected.
-      continue;
-    }
-    return parsePolicyConfig(raw);
+      }),
+      stderr: "",
+    };
+  } catch (error) {
+    return {
+      success: false,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+    };
   }
-  return undefined;
+}
+
+function readBenchmarkBasePolicy(fixture: BenchmarkFixture) {
+  const reader: TrustedPolicyGitReader = {
+    listTree: (policyPath) =>
+      runBenchmarkGit(fixture, [
+        "ls-tree",
+        "-r",
+        "--name-only",
+        fixture.baseSha,
+        "--",
+        policyPath,
+      ]),
+    show: (policyPath) =>
+      runBenchmarkGit(fixture, ["show", `${fixture.baseSha}:${policyPath}`]),
+  };
+  return readTrustedPolicyAtCommit(
+    reader,
+    fixture.baseSha,
+    "BenchmarkPolicySnapshotError",
+  );
 }
 
 export interface SeedAgentOptions {
