@@ -107,6 +107,19 @@ export function loadWorkspaceConfig(
       try {
         const raw = fs.readFileSync(candidate, "utf8");
         const parsed = JSON.parse(raw);
+        const configuredCoverageMinimum =
+          parsed.policy?.coverage?.minimumChangedLineCoverage;
+        if (
+          configuredCoverageMinimum !== undefined &&
+          (typeof configuredCoverageMinimum !== "number" ||
+            !Number.isFinite(configuredCoverageMinimum) ||
+            configuredCoverageMinimum < 0 ||
+            configuredCoverageMinimum > 100)
+        ) {
+          throw new Error(
+            "Invalid trusted coverage policy: minimumChangedLineCoverage must be a finite number between 0 and 100.",
+          );
+        }
         return {
           version: parsed.version || DEFAULT_CONFIG.version,
           enabledCapabilities:
@@ -134,7 +147,13 @@ export function loadWorkspaceConfig(
           },
           customRules: parsed.customRules || [],
         };
-      } catch {
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.startsWith("Invalid trusted coverage policy:")
+        ) {
+          throw error;
+        }
         // Fallback to next candidate on parse failure
       }
     }

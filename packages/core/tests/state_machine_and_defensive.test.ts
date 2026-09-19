@@ -37,7 +37,7 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
     expect(res.error?.suggestedAction).toMatch(/approval|pr_draft/);
   });
 
-  it("allows advancing to GOVERNANCE_AUDITED when workspace, patch, and evidence are present", () => {
+  it("rejects legacy governance artifacts without a policy hash", () => {
     const runId = "run_test_002";
     const baseCommitSha = "a".repeat(40);
     const patch = {
@@ -150,8 +150,10 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
     };
 
     const res = validatePhaseGate(summary, "GOVERNANCE_AUDITED");
-    expect(res.ok).toBe(true);
-    expect(res.error).toBeUndefined();
+    expect(res.ok).toBe(false);
+    expect(res.error?.message).toContain(
+      "Governance artifact fails semantic validity",
+    );
   });
 });
 

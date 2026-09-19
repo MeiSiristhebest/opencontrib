@@ -198,7 +198,7 @@ Fixes #1106
     ).toBe(true);
   });
 
-  it("strictly enforces >=85% test coverage requirement on PR accompanying tests", () => {
+  it("keeps advisory coverage separate from the explicit changed-code gate", () => {
     // Advisory coverage must not become an implicit hard gate.
     const advisoryAudit = auditGovernance({
       patchContent: "diff --git a/foo b/foo\n+const a = 1;",
@@ -238,6 +238,24 @@ Fixes #1106
 
     expect(passAudit.isGatedPassed).toBe(true);
     expect(passAudit.overallScore).toBeGreaterThanOrEqual(90);
+
+    const belowPolicyAudit = auditGovernance({
+      patchContent: "diff --git a/foo b/foo\\n+const a = 1;",
+      prTitle: "fix(ai): match subdomains",
+      prBody: "Fixes #8736\\n\\n### Problem\\nSubdomain proxy bug.",
+      evidence: {
+        reproductionVerified: true,
+        allTestsPassing: true,
+        changedCodeCoverageStatus: "PASS",
+        changedCodeCoveragePercent: 70,
+        passedUnitTestsCount: 5,
+      },
+      coveragePolicy: { required: true, minimumChangedLineCoverage: 85 },
+      lineCount: 15,
+    });
+
+    expect(belowPolicyAudit.technicalGate?.status).toBe("FAIL");
+    expect(belowPolicyAudit.isGatedPassed).toBe(false);
   });
 
   it("fails closed when a repository requires unavailable changed-code coverage", () => {
