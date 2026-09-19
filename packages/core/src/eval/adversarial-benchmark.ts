@@ -30,6 +30,11 @@ import { tmpdir } from "node:os";
 import { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import {
+  hashTrustedPolicySnapshot,
+  loadHostPolicy,
+  mergeTrustedPolicySnapshots,
+} from "../kernel/config.js";
+import {
   buildRunTransferBundle,
   type RunTransferBundle,
 } from "../run/run-transfer.js";
@@ -589,6 +594,7 @@ export async function seedScriptedAgent(
   const agentRunManager = new ContributionRunManager({
     baseDir: options.agentRunsBaseDir ?? join(rootDir, "agent-runs"),
   });
+  const agentPolicySnapshot = mergeTrustedPolicySnapshots(loadHostPolicy());
   const manifest = agentRunManager.createRun({
     repoFullName: fixture.repoFullName,
     issueNumber: fixture.issueNumber,
@@ -605,6 +611,8 @@ export async function seedScriptedAgent(
       baseRepoPath: agentWs,
       baseBranch: "main",
       repoFullName: fixture.repoFullName,
+      policySnapshot: agentPolicySnapshot,
+      policySha256: hashTrustedPolicySnapshot(agentPolicySnapshot),
       createdAt: new Date().toISOString(),
     },
     "WORKSPACE_PREPARED",
