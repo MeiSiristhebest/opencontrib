@@ -123,10 +123,7 @@ policy:
       },
     );
     const effective = mergeTrustedPolicySnapshots(trusted, {
-      coverage: {
-        required: true,
-        minimumChangedLineCoverage: trusted.coverage.minimumChangedLineCoverage,
-      },
+      coverage: { required: true },
       resourceLeakCheck: { required: false },
     });
 

@@ -335,29 +335,44 @@ export function mergeTrustedPolicySnapshots(
     PolicyConfigInput | OpenContribPolicy | TrustedPolicySnapshot | undefined
   >
 ): TrustedPolicySnapshot {
-  const snapshots = policies.flatMap((policy) =>
-    policy ? [toTrustedPolicySnapshot(policy)] : [],
+  const entries = policies.flatMap((policy) =>
+    policy ? [{ policy, snapshot: toTrustedPolicySnapshot(policy) }] : [],
   );
-  const requiredCoverageSnapshots = snapshots.filter(
-    (snapshot) => snapshot.coverage.required,
+  const requiredCoverageEntries = entries.filter(
+    ({ snapshot }) => snapshot.coverage.required,
   );
-  const coverageFloorSources =
-    requiredCoverageSnapshots.length > 0
-      ? requiredCoverageSnapshots
-      : snapshots;
+  const advisoryCoverageEntries = entries.filter(
+    ({ snapshot }) => !snapshot.coverage.required,
+  );
+  const advisoryFloor = Math.max(
+    0,
+    ...advisoryCoverageEntries.map(
+      ({ snapshot }) => snapshot.coverage.minimumChangedLineCoverage,
+    ),
+  );
+  const minimumChangedLineCoverage =
+    requiredCoverageEntries.length > 0
+      ? Math.max(
+          0,
+          ...requiredCoverageEntries.map(({ policy, snapshot }) => {
+            const configuredMinimum =
+              policy.coverage?.minimumChangedLineCoverage;
+            if (configuredMinimum !== undefined) {
+              return snapshot.coverage.minimumChangedLineCoverage;
+            }
+            if (advisoryCoverageEntries.length > 0) return advisoryFloor;
+            return snapshot.coverage.minimumChangedLineCoverage;
+          }),
+        )
+      : advisoryFloor;
   return {
     coverage: {
-      required: requiredCoverageSnapshots.length > 0,
-      minimumChangedLineCoverage: Math.max(
-        0,
-        ...coverageFloorSources.map(
-          (snapshot) => snapshot.coverage.minimumChangedLineCoverage,
-        ),
-      ),
+      required: requiredCoverageEntries.length > 0,
+      minimumChangedLineCoverage,
     },
     resourceLeakCheck: {
-      required: snapshots.some(
-        (snapshot) => snapshot.resourceLeakCheck.required,
+      required: entries.some(
+        ({ snapshot }) => snapshot.resourceLeakCheck.required,
       ),
     },
   };
