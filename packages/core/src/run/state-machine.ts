@@ -274,6 +274,16 @@ export function validatePhaseGate(
         "Create a SubmissionIntent and obtain explicit approval from a trusted authority before submitting.",
       );
     }
+    if (governanceResult.data.runId !== runSummary.manifest.runId) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [
+          "GovernanceDecisionArtifact runId does not match the current contribution run.",
+        ],
+        "Re-run the canonical GovernanceService audit for this contribution run.",
+      );
+    }
 
     const intent = intentResult.data;
     const approval = approvalResult.data;

@@ -107,8 +107,44 @@ export function loadWorkspaceConfig(
       try {
         const raw = fs.readFileSync(candidate, "utf8");
         const parsed = JSON.parse(raw);
+        const configuredCoverage = parsed.policy?.coverage;
+        const configuredResourceLeakCheck =
+          parsed.policy?.resourceLeakCheck;
         const configuredCoverageMinimum =
-          parsed.policy?.coverage?.minimumChangedLineCoverage;
+          configuredCoverage?.minimumChangedLineCoverage;
+        const configuredCoverageRequired = configuredCoverage?.required;
+        const configuredResourceLeakRequired =
+          configuredResourceLeakCheck?.required;
+        if (
+          configuredCoverage !== undefined &&
+          (typeof configuredCoverage !== "object" ||
+            configuredCoverage === null ||
+            Array.isArray(configuredCoverage))
+        ) {
+          throw new Error(
+            "Invalid trusted coverage policy: coverage must be an object.",
+          );
+        }
+        if (
+          configuredResourceLeakCheck !== undefined &&
+          (typeof configuredResourceLeakCheck !== "object" ||
+            configuredResourceLeakCheck === null ||
+            Array.isArray(configuredResourceLeakCheck))
+        ) {
+          throw new Error(
+            "Invalid trusted resource leak policy: resourceLeakCheck must be an object.",
+          );
+        }
+        if (
+          (configuredCoverageRequired !== undefined &&
+            typeof configuredCoverageRequired !== "boolean") ||
+          (configuredResourceLeakRequired !== undefined &&
+            typeof configuredResourceLeakRequired !== "boolean")
+        ) {
+          throw new Error(
+            "Invalid trusted policy: coverage and resourceLeakCheck required fields must be boolean.",
+          );
+        }
         if (
           configuredCoverageMinimum !== undefined &&
           (typeof configuredCoverageMinimum !== "number" ||
@@ -129,15 +165,22 @@ export function loadWorkspaceConfig(
             ...(parsed.policy || {}),
             coverage: parsed.policy?.coverage
               ? {
-                  required: Boolean(parsed.policy.coverage.required),
-                  minimumChangedLineCoverage: Number(
-                    parsed.policy.coverage.minimumChangedLineCoverage ?? 85,
-                  ),
+                  required:
+                    parsed.policy.coverage.required ??
+                    DEFAULT_CONFIG.policy.coverage?.required ??
+                    false,
+                  minimumChangedLineCoverage:
+                    parsed.policy.coverage.minimumChangedLineCoverage ??
+                    DEFAULT_CONFIG.policy.coverage?.minimumChangedLineCoverage ??
+                    85,
                 }
               : DEFAULT_CONFIG.policy.coverage,
             resourceLeakCheck: parsed.policy?.resourceLeakCheck
               ? {
-                  required: Boolean(parsed.policy.resourceLeakCheck.required),
+                  required:
+                    parsed.policy.resourceLeakCheck.required ??
+                    DEFAULT_CONFIG.policy.resourceLeakCheck?.required ??
+                    false,
                 }
               : DEFAULT_CONFIG.policy.resourceLeakCheck,
           },
@@ -150,7 +193,7 @@ export function loadWorkspaceConfig(
       } catch (error) {
         if (
           error instanceof Error &&
-          error.message.startsWith("Invalid trusted coverage policy:")
+          error.message.startsWith("Invalid trusted")
         ) {
           throw error;
         }
