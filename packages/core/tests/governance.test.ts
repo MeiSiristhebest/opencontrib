@@ -131,16 +131,12 @@ describe("Governance & Anti-AI Audit Engine", () => {
       problemSummary: "Null dereference on empty input",
       rootCause: "Calling parse() with empty string accessed null property",
       keyChanges: ["Add null guard in parse()", "Add unit tests"],
-      reproductionCommand: 'npm test -- -t "empty input"',
       verificationCommand: "npm test",
-      testCount: 42,
-      dcoAuthorName: "Developer Name",
-      dcoAuthorEmail: "dev@domain.com",
     });
 
     expect(template).toContain("Null dereference on empty input");
     expect(template).toContain("Verification");
-    expect(template).toContain("Developer Name <dev@domain.com>");
+    expect(template).not.toContain("Signed-off-by:");
     expect(template).not.toContain("Google / ByteDance Standard");
     expect(template).not.toContain("I have carefully analyzed");
 
@@ -156,11 +152,14 @@ describe("Governance & Anti-AI Audit Engine", () => {
       problemSummary: "Clean fix",
       rootCause: "Fix logic",
       keyChanges: ["Fix"],
-      reproductionCommand: "test",
       verificationCommand: "test",
-      testCount: 10,
+      validationOutputSnippet: "10 tests passed",
     });
     expect(cleanTemplate).not.toContain("Signed-off-by");
+    expect(cleanTemplate).not.toContain("passed cleanly");
+    expect(cleanTemplate).toContain(
+      "User-provided validation note (not verified)",
+    );
   });
 
   it("detects corrupted Unicode replacement characters and malformed headers", () => {
@@ -199,9 +198,9 @@ Fixes #1106
     ).toBe(true);
   });
 
-  it("strictly enforces >=85% test coverage requirement on PR accompanying tests", () => {
-    // 1. Coverage < 85% (e.g. 70%) must fail the gate
-    const failAudit = auditGovernance({
+  it("keeps advisory coverage separate from the explicit changed-code gate", () => {
+    // Advisory coverage must not become an implicit hard gate.
+    const advisoryAudit = auditGovernance({
       patchContent: "diff --git a/foo b/foo\n+const a = 1;",
       prTitle: "fix(ai): match subdomains",
       prBody: "Fixes #8736\n\n### Problem\nSubdomain proxy bug.",
@@ -214,17 +213,16 @@ Fixes #1106
       lineCount: 15,
     });
 
-    expect(failAudit.isGatedPassed).toBe(false);
-    expect(failAudit.weakestDimension.score).toBeLessThan(80);
+    expect(advisoryAudit.isGatedPassed).toBe(true);
     expect(
-      failAudit.remediationSuggestions.some((s) =>
+      advisoryAudit.remediationSuggestions.some((s) =>
         s.includes(
-          "PR accompanying test coverage is below mandatory 85% threshold",
+          "PR accompanying test coverage is below the 85% advisory threshold",
         ),
       ),
     ).toBe(true);
 
-    // 2. Coverage >= 85% (e.g. 95%) must pass the gate
+    // Explicit changed-code coverage policy remains a hard gate.
     const passAudit = auditGovernance({
       patchContent: "diff --git a/foo b/foo\n+const a = 1;",
       prTitle: "fix(ai): match subdomains",
@@ -240,5 +238,104 @@ Fixes #1106
 
     expect(passAudit.isGatedPassed).toBe(true);
     expect(passAudit.overallScore).toBeGreaterThanOrEqual(90);
+
+    const belowPolicyAudit = auditGovernance({
+      patchContent: "diff --git a/foo b/foo\\n+const a = 1;",
+      prTitle: "fix(ai): match subdomains",
+      prBody: "Fixes #8736\\n\\n### Problem\\nSubdomain proxy bug.",
+      evidence: {
+        reproductionVerified: true,
+        allTestsPassing: true,
+        changedCodeCoverageStatus: "PASS",
+        changedCodeCoveragePercent: 70,
+        passedUnitTestsCount: 5,
+      },
+      coveragePolicy: { required: true, minimumChangedLineCoverage: 85 },
+      lineCount: 15,
+    });
+
+    expect(belowPolicyAudit.technicalGate?.status).toBe("FAIL");
+    expect(belowPolicyAudit.isGatedPassed).toBe(false);
+  });
+
+  it("fails closed when a repository requires unavailable changed-code coverage", () => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/foo b/foo\\n+const a = 1;",
+      prBody: "Fixes #1",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      evidence: {
+        changedCodeCoverageStatus: "UNAVAILABLE",
+        passedUnitTestsCount: 4,
+      },
+      coveragePolicy: { required: true, minimumChangedLineCoverage: 85 },
+      lineCount: 2,
+    });
+
+    expect(audit.technicalGate?.status).toBe("FAIL");
+    expect(audit.isGatedPassed).toBe(false);
+    expect(audit.remediationSuggestions.join(" ")).toContain(
+      "coverage is unavailable",
+    );
+  });
+
+  it("passes a required coverage policy only with measured changed-code coverage", () => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/foo b/foo\\n+const a = 1;",
+      prBody: "Fixes #1",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      evidence: {
+        changedCodeCoverageStatus: "PASS",
+        changedCodeCoveragePercent: 90,
+        passedUnitTestsCount: 4,
+      },
+      coveragePolicy: { required: true, minimumChangedLineCoverage: 85 },
+      lineCount: 2,
+    });
+
+    expect(audit.technicalGate?.status).toBe("PASS");
+    expect(audit.isGatedPassed).toBe(true);
+  });
+
+  it("fails closed when a resource-sensitive contribution lacks leak evidence", () => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/foo b/foo\\n+const a = 1;",
+      prBody: "Fixes #1",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      evidence: {
+        handleLeakCheckPassed: "UNAVAILABLE",
+        passedUnitTestsCount: 4,
+      },
+      resourceLeakPolicy: { required: true },
+      lineCount: 2,
+    });
+
+    expect(audit.technicalGate?.status).toBe("FAIL");
+    expect(audit.remediationSuggestions.join(" ")).toContain(
+      "Resource-leak evidence",
+    );
   });
 });

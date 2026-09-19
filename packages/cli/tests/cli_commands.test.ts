@@ -19,6 +19,7 @@ import { evidenceCommand } from "../src/commands/evidence.js";
 import { verifyCommand } from "../src/commands/verify.js";
 import { evalCommand } from "../src/commands/eval.js";
 import { printPhaseGuidance, printTable } from "../src/utils/output.js";
+import { defaultActiveSessionManager } from "@opencontrib/core";
 
 describe("CLI Commands & Subcommands Test Suite", () => {
   it("registers all 16 command domains correctly with descriptions and subcommands", () => {
@@ -116,6 +117,12 @@ describe("CLI Commands & Subcommands Test Suite", () => {
   });
 
   it("executes governance subcommands (impact, ci-diagnose, pr-template, claim, lint-md)", async () => {
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    const testHome = fs.mkdtempSync(
+      path.join(os.tmpdir(), "opencontrib-cli-home-"),
+    );
+    process.env.OPENCONTRIB_HOME = testHome;
+    defaultActiveSessionManager.clearActiveSession();
     const tempDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "opencontrib-gov-cli-"),
     );
@@ -159,6 +166,14 @@ describe("CLI Commands & Subcommands Test Suite", () => {
     } finally {
       if (fs.existsSync(tempDir)) {
         fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+      if (previousHome === undefined) {
+        delete process.env.OPENCONTRIB_HOME;
+      } else {
+        process.env.OPENCONTRIB_HOME = previousHome;
+      }
+      if (fs.existsSync(testHome)) {
+        fs.rmSync(testHome, { recursive: true, force: true });
       }
     }
   });

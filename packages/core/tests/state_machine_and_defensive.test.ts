@@ -37,7 +37,7 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
     expect(res.error?.suggestedAction).toMatch(/approval|pr_draft/);
   });
 
-  it("allows advancing to GOVERNANCE_AUDITED when workspace, patch, and evidence are present", () => {
+  it("rejects legacy governance artifacts without a policy hash", () => {
     const runId = "run_test_002";
     const baseCommitSha = "a".repeat(40);
     const patch = {
@@ -120,23 +120,33 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
         },
         prDraft: "# fix: bug",
         governance: {
-          overallScore: 95,
-          weakestDimension: { dimension: "implementation", score: 90 },
-          technicalGate: { status: "PASS", passed: true },
-          approvalGate: { status: "APPROVED", approved: true },
-          isGatedPassed: true,
-          requiresHumanApproval: false,
-          rfcGatePassed: true,
-          diffLineCount: 12,
-          antiAiCheckPassed: true,
-          flaggedAiPhrases: [],
-          remediationSuggestions: [],
-          guidance: {
-            isPassed: true,
-            forbiddenActions: [],
-            invariants: [],
-            nextCommand: "submit_pr",
+          runId,
+          patchSha256: "p".repeat(64),
+          evidenceSha256: "e".repeat(64),
+          prDraftSha256: "d".repeat(64),
+          prTitle: "chore: contribution",
+          prTitleSha256: "t".repeat(64),
+          auditResult: {
+            overallScore: 95,
+            weakestDimension: { dimension: "implementation", score: 90 },
+            technicalGate: { status: "PASS", passed: true },
+            approvalGate: { status: "APPROVED", approved: true },
+            isGatedPassed: true,
+            requiresHumanApproval: false,
+            rfcGatePassed: true,
+            diffLineCount: 12,
+            antiAiCheckPassed: true,
+            flaggedAiPhrases: [],
+            remediationSuggestions: [],
+            guidance: {
+              isPassed: true,
+              forbiddenActions: [],
+              invariants: [],
+              nextCommand: "submit_pr",
+            },
           },
+          passed: true,
+          auditedAt: "2026-07-01T00:02:00.000Z",
         },
       },
       availableArtifactFiles: [
@@ -150,8 +160,10 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
     };
 
     const res = validatePhaseGate(summary, "GOVERNANCE_AUDITED");
-    expect(res.ok).toBe(true);
-    expect(res.error).toBeUndefined();
+    expect(res.ok).toBe(false);
+    expect(res.error?.message).toContain(
+      "Governance artifact fails semantic validity",
+    );
   });
 });
 

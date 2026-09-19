@@ -1,3 +1,4 @@
+import { CliExitError } from "../utils/exit.js";
 import { Command, Argument } from "commander";
 import {
   buildContributionRunManager,
@@ -56,8 +57,9 @@ const runCreate = new Command("create")
           ],
         });
       } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
         console.error(`❌ ${err.message}`);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );
@@ -72,17 +74,18 @@ const runGet = new Command("get")
       const runId = getRunManager().resolveRunId(targetRunId);
       if (!runId) {
         console.error("❌ No run ID provided and no active session found");
-        process.exit(1);
+        throw new CliExitError(1);
       }
       const run = getRunManager().getRun(runId);
       if (!run) {
         console.error(`❌ Run "${runId}" not found`);
-        process.exit(1);
+        throw new CliExitError(1);
       }
       printJSON({ status: "success", run }, opts?.pretty);
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       console.error(`❌ ${err.message}`);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -98,13 +101,14 @@ const runResume = new Command("resume")
       const runId = getRunManager().resolveRunId(targetRunId);
       if (!runId) {
         console.error("❌ No run ID provided and no active session found");
-        process.exit(1);
+        throw new CliExitError(1);
       }
       const resume = getRunManager().resumeRun(runId);
       printJSON({ status: "success", resume }, opts?.pretty);
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       console.error(`❌ ${err.message}`);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -180,7 +184,7 @@ const runSave = new Command("save")
             console.error(
               "❌ No content provided. Use --content <json> or pipe via stdin",
             );
-            process.exit(1);
+            throw new CliExitError(1);
           }
           payload =
             (parseJSON(stdinData, "stdin") as Record<string, unknown>) || {};
@@ -193,8 +197,9 @@ const runSave = new Command("save")
         );
         printJSON({ status: "success", saved }, opts.pretty);
       } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
         console.error(`❌ ${err.message}`);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );
@@ -217,8 +222,9 @@ const runList = new Command("list")
         opts.pretty,
       );
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       console.error(`❌ ${err.message}`);
-      process.exit(1);
+      throw new CliExitError(1);
     }
   });
 
@@ -265,7 +271,7 @@ const runExecute = new Command("execute")
         }
       } catch (err: any) {
         console.error(`❌ ${err.message}`);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );

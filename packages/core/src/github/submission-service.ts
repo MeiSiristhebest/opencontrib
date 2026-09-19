@@ -54,6 +54,7 @@ export interface SubmissionPermit {
   patchSha256: string;
   evidenceSha256: string;
   governanceSha256: string;
+  policySha256: string;
   prBodySha256: string;
   approvalMode: "explicit_human" | "policy_waived";
 }
@@ -121,6 +122,11 @@ export class GitHubSubmissionService {
     }
     const intent = intentResult.data;
     const approval = approvalResult.data;
+    if (intent.policySha256 !== approval.policySha256) {
+      throw new SubmissionVerificationError(
+        "Cannot authorize submission: approved policy hash does not match the canonical submission intent.",
+      );
+    }
 
     if (owner && owner.toLowerCase() !== intent.upstreamOwner.toLowerCase()) {
       throw new SubmissionVerificationError(
@@ -308,6 +314,7 @@ export class GitHubSubmissionService {
       patchSha256: permit.patchSha256,
       evidenceSha256: permit.evidenceSha256,
       governanceSha256: permit.governanceSha256,
+      policySha256: permit.policySha256,
       prNumber: result.prNumber,
       prUrl: result.prUrl,
       headSha,
@@ -347,6 +354,7 @@ export class GitHubSubmissionService {
       patchSha256: approval.patchSha256,
       evidenceSha256: approval.evidenceSha256,
       governanceSha256: approval.governanceSha256,
+      policySha256: approval.policySha256,
       prBodySha256: approval.prBodySha256,
       approvalMode: approval.approvalMode,
     };

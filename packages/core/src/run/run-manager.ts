@@ -24,7 +24,11 @@ import {
 // active session; it is only used as a *constructor default*, never bypassed
 // at runtime (transition/updatePhase go through `this.activeSession`).
 
-import { PROTOCOL_CONTRACT_PHASES } from "../workflow/protocol-contract.js";
+import {
+  getProtocolGuidance,
+  PROTOCOL_CONTRACT_PHASES,
+  type ProtocolGuidance,
+} from "../workflow/protocol-contract.js";
 
 export type { CreateRunInput };
 
@@ -46,6 +50,7 @@ export interface ResumeRunResult {
     hasResult: boolean;
   };
   suggestedNextAction: string;
+  guidance: ProtocolGuidance;
 }
 
 import { validatePhaseGate } from "./state-machine.js";
@@ -385,9 +390,18 @@ export class ContributionRunManager {
       hasResult: !!artifacts.result,
     };
 
-    const suggestedNextAction =
-      PROTOCOL_CONTRACT_PHASES[summary.manifest.currentPhase]
-        ?.suggestedNextAction || "none";
+    const protocolPhase =
+      PROTOCOL_CONTRACT_PHASES[summary.manifest.currentPhase];
+    const suggestedNextAction = protocolPhase?.suggestedNextAction || "none";
+    const guidance: ProtocolGuidance = protocolPhase
+      ? getProtocolGuidance(summary.manifest.currentPhase)
+      : {
+          suggestedNextAction,
+          cliExample: "",
+          mcpTool: "",
+          forbiddenActions: [],
+          invariants: [],
+        };
 
     return {
       runId,
@@ -396,6 +410,7 @@ export class ContributionRunManager {
       availableArtifacts,
       latestArtifactSummary: latestSummary,
       suggestedNextAction,
+      guidance,
     };
   }
 }

@@ -254,6 +254,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       expect(approval.runId).toBe(manifest.runId);
       expect(approval.patchSha256).toBeDefined();
       expect(approval.intentSha256).toBe(intent.intentSha256);
+      expect(approval.policySha256).toBe(intent.policySha256);
       expect(approval.approvedBy).toBe("test-authority");
 
       // Verify integrity before mutation
@@ -316,6 +317,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         approvalMode: "explicit_human",
       });
       expect(approval.signingKeyId).toBe("test-ed25519");
+      expect(approval.policySha256).toBe(
+        manager.getRun(manifest.runId)?.artifacts.submissionIntent
+          ? (manager.getRun(manifest.runId)?.artifacts.submissionIntent as any)
+              .policySha256
+          : undefined,
+      );
       expect(verifier.verifyApproval(approval)).toBe(true);
       expect(broker.get(request.requestId)?.status).toBe("APPROVED");
       expect(
@@ -430,6 +437,9 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       });
 
       expect(submitted.submissionArtifact.verified).toBe(true);
+      expect(submitted.submissionArtifact.policySha256).toBe(
+        permit.policySha256,
+      );
       expect(submitted.submissionArtifact.prNumber).toBe(42);
 
       const summaryAfterSub = manager.getRun(manifest.runId)!;

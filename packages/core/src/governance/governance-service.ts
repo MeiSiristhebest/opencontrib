@@ -8,14 +8,15 @@ import {
 } from "../contracts/schemas.js";
 import { auditGovernance } from "./governance-auditor.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
+import { loadWorkspaceConfig } from "../kernel/config.js";
 
 export interface GovernanceAuditRunOptions {
   /** Human-readable title to audit and bind to the later SubmissionIntent. */
   prTitle?: string;
   /** Inspection-only convenience value; it must equal the stored pr_draft. */
   prBody?: string;
-  /** Deprecated agent-controlled bypasses are rejected, never honored. */
-  allowUnverified?: boolean;
+  coveragePolicy?: import("../domain/governance.js").CoveragePolicy;
+  resourceLeakPolicy?: import("../domain/governance.js").ResourceLeakPolicy;
   isAutonomous?: boolean;
   subagentScore?: number;
 }
@@ -51,12 +52,6 @@ export class GovernanceService {
         `GovernanceNotReadyError: run ${runId} is in phase "${run.manifest.currentPhase}"; audit requires EVIDENCE_COLLECTED.`,
       );
     }
-    if (options.allowUnverified === true) {
-      throw new Error(
-        "GovernanceAuthorityError: agent-controlled --allow-unverified cannot create a canonical governance decision.",
-      );
-    }
-
     const patchRaw = run.artifacts.patch;
     if (!patchRaw || (typeof patchRaw === "string" && patchRaw.trim() === "")) {
       throw new Error(
@@ -111,6 +106,45 @@ export class GovernanceService {
       run.manifest.issueTitle ||
       "chore: opencontrib contribution";
 
+    const workspacePath =
+      typeof run.artifacts.workspace?.workspacePath === "string"
+        ? run.artifacts.workspace.workspacePath
+        : undefined;
+    const trustedPolicy = loadWorkspaceConfig(
+      workspacePath ?? process.cwd(),
+    ).policy;
+    const trustedCoveragePolicy = trustedPolicy.coverage ?? {
+      required: false,
+      minimumChangedLineCoverage: 85,
+    };
+    const requestedCoverageMinimum =
+      options.coveragePolicy?.minimumChangedLineCoverage;
+    if (
+      requestedCoverageMinimum !== undefined &&
+      requestedCoverageMinimum <
+        trustedCoveragePolicy.minimumChangedLineCoverage
+    ) {
+      throw new Error(
+        `GovernancePolicyViolationError: requested coverage minimum ${requestedCoverageMinimum}% is below the trusted repository floor ${trustedCoveragePolicy.minimumChangedLineCoverage}%.`,
+      );
+    }
+    const effectiveCoveragePolicy = {
+      required:
+        trustedCoveragePolicy.required ||
+        options.coveragePolicy?.required === true,
+      minimumChangedLineCoverage:
+        requestedCoverageMinimum ??
+        trustedCoveragePolicy.minimumChangedLineCoverage,
+    };
+    const trustedResourceLeakPolicy = trustedPolicy.resourceLeakCheck ?? {
+      required: false,
+    };
+    const effectiveResourceLeakPolicy = {
+      required:
+        trustedResourceLeakPolicy.required ||
+        options.resourceLeakPolicy?.required === true,
+    };
+
     const auditResult = auditGovernance({
       patchContent,
       prTitle,
@@ -119,9 +153,15 @@ export class GovernanceService {
       lineCount: validatedPatch.changedLines,
       // Governance is deliberately technical-only. Approval is minted later
       // by an external trusted authority and is not inferred from this audit.
+      coveragePolicy: effectiveCoveragePolicy,
+      resourceLeakPolicy: effectiveResourceLeakPolicy,
       subagentQualityScore: options.subagentScore,
     });
 
+    const policySha256 = hash({
+      coveragePolicy: effectiveCoveragePolicy,
+      resourceLeakPolicy: effectiveResourceLeakPolicy,
+    });
     const decision: GovernanceDecisionArtifact = {
       runId,
       patchSha256: validatedPatch.patchSha256,
@@ -130,6 +170,9 @@ export class GovernanceService {
       prTitle,
       prTitleSha256: hash(prTitle),
       auditResult,
+      coveragePolicy: effectiveCoveragePolicy,
+      resourceLeakPolicy: effectiveResourceLeakPolicy,
+      policySha256,
       passed: auditResult.technicalGate?.status === "PASS",
       auditedAt: new Date().toISOString(),
     };

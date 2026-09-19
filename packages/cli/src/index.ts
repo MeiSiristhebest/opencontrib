@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 import { doctorCommand } from "./commands/doctor.js";
 import { discoveryCommand } from "./commands/discovery.js";
@@ -23,7 +25,7 @@ import { displayFirstRunBannerIfNeeded } from "./utils/banner.js";
 import { sendAnonymousPing } from "./utils/telemetry.js";
 import { CliExitError } from "./utils/exit.js";
 
-const program = new Command();
+export const program = new Command();
 
 program
   .name("opencontrib")
@@ -124,14 +126,21 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 // Boundary: the single place that owns process termination. Command actions
 // signal intent via `CliExitError` (passive view) and never call process.exit
-// themselves; here we translate that signal into the real exit code. Any other
-// unexpected rejection is surfaced with a stack trace and a non-zero exit.
-program.parseAsync().catch((err: unknown) => {
-  if (err instanceof CliExitError) {
-    process.exit(err.exitCode);
-  }
-  console.error(
-    err instanceof Error ? (err.stack ?? err.message) : String(err),
-  );
-  process.exit(1);
-});
+// themselves; here we translate that signal into the real exit code. Keep the
+// registration surface importable for contract tests without parsing test-runner
+// arguments or terminating the importing process.
+const isDirectEntry =
+  typeof process.argv[1] === "string" &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectEntry) {
+  program.parseAsync().catch((err: unknown) => {
+    if (err instanceof CliExitError) {
+      process.exit(err.exitCode);
+    }
+    console.error(
+      err instanceof Error ? (err.stack ?? err.message) : String(err),
+    );
+    process.exit(1);
+  });
+}

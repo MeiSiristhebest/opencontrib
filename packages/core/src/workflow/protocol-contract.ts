@@ -20,6 +20,14 @@ export interface ProtocolContractPhase {
   suggestedNextAction: string;
 }
 
+export interface ProtocolGuidance {
+  suggestedNextAction: string;
+  cliExample: string;
+  mcpTool: string;
+  forbiddenActions: string[];
+  invariants: string[];
+}
+
 export const PROTOCOL_CONTRACT_PHASES = {
   INITIALIZED: {
     phase: "INITIALIZED",
@@ -154,7 +162,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       command: "evidence",
       subcommand: "capture-red",
       example:
-        "opencontrib evidence capture-red --test-cmd '<cmd>' --assertion '<pattern>'",
+        "opencontrib evidence capture-red --cwd <workspace> --test-cmd '<command>' --assertion '<failure-marker>' [--run-id <id>]",
     },
     mcp: {
       tool: "contrib_capture_red",
@@ -211,7 +219,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Diff must be minimal, surgical, and preserve existing architecture idioms.",
     ],
-    suggestedNextAction: "collect_evidence",
+    suggestedNextAction: "verify_green",
   },
   EVIDENCE_COLLECTED: {
     phase: "EVIDENCE_COLLECTED",
@@ -355,6 +363,79 @@ export const PROTOCOL_CONTRACT_PHASES = {
     suggestedNextAction: "inspect_failure_and_replan",
   },
 } satisfies Record<ContributionRunPhase, ProtocolContractPhase>;
+
+const NEXT_ACTION_GUIDANCE: Record<
+  string,
+  { cliExample: string; mcpTool: string }
+> = {
+  scout: {
+    cliExample: PROTOCOL_CONTRACT_PHASES.OPPORTUNITY_SCOUTED.cli.example,
+    mcpTool: PROTOCOL_CONTRACT_PHASES.OPPORTUNITY_SCOUTED.mcp.tool,
+  },
+  assemble_context: {
+    cliExample: PROTOCOL_CONTRACT_PHASES.CONTEXT_ASSEMBLED.cli.example,
+    mcpTool: PROTOCOL_CONTRACT_PHASES.CONTEXT_ASSEMBLED.mcp.tool,
+  },
+  prepare_workspace: {
+    cliExample: PROTOCOL_CONTRACT_PHASES.WORKSPACE_PREPARED.cli.example,
+    mcpTool: PROTOCOL_CONTRACT_PHASES.WORKSPACE_PREPARED.mcp.tool,
+  },
+  capture_red: {
+    cliExample: PROTOCOL_CONTRACT_PHASES.RED_CAPTURED.cli.example,
+    mcpTool: PROTOCOL_CONTRACT_PHASES.RED_CAPTURED.mcp.tool,
+  },
+  draft_patch: {
+    cliExample: PROTOCOL_CONTRACT_PHASES.PATCH_DRAFTED.cli.example,
+    mcpTool: PROTOCOL_CONTRACT_PHASES.PATCH_DRAFTED.mcp.tool,
+  },
+  verify_green: {
+    cliExample: "opencontrib evidence verify-green --test-cmd '<test_cmd>'",
+    mcpTool: PROTOCOL_CONTRACT_PHASES.EVIDENCE_COLLECTED.mcp.tool,
+  },
+  prepare_pr_draft: {
+    cliExample:
+      'opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"',
+    mcpTool: "contrib_render_pr_template",
+  },
+  request_approval: {
+    cliExample: "opencontrib governance request-approval --run-id <run_id>",
+    mcpTool: "contrib_request_approval",
+  },
+  sync_flywheel: {
+    cliExample: PROTOCOL_CONTRACT_PHASES.COMPLETED.cli.example,
+    mcpTool: PROTOCOL_CONTRACT_PHASES.COMPLETED.mcp.tool,
+  },
+  inspect_failure_and_replan: {
+    cliExample: PROTOCOL_CONTRACT_PHASES.FAILED.cli.example,
+    mcpTool: PROTOCOL_CONTRACT_PHASES.FAILED.mcp.tool,
+  },
+};
+
+/**
+ * Return all next-step guidance from the canonical phase contract.
+ * Commands and MCP handlers should consume this instead of maintaining their
+ * own phase-specific next-command strings.
+ */
+export function getProtocolGuidance(
+  phase: ContributionRunPhase,
+): ProtocolGuidance {
+  const definition = PROTOCOL_CONTRACT_PHASES[phase];
+  if (!definition) {
+    throw new Error(`Unknown protocol phase: ${String(phase)}`);
+  }
+  const hasNoNextAction = definition.suggestedNextAction.startsWith("none");
+  const next = hasNoNextAction
+    ? undefined
+    : NEXT_ACTION_GUIDANCE[definition.suggestedNextAction];
+  return {
+    suggestedNextAction: definition.suggestedNextAction,
+    cliExample:
+      next?.cliExample ?? (hasNoNextAction ? "" : definition.cli.example),
+    mcpTool: next?.mcpTool ?? (hasNoNextAction ? "" : definition.mcp.tool),
+    forbiddenActions: [...definition.forbiddenActions],
+    invariants: [...definition.invariants],
+  };
+}
 
 /** Derived from PROTOCOL_CONTRACT_PHASES as single source of truth */
 export const DERIVED_PHASE_REQUIREMENTS = Object.fromEntries(

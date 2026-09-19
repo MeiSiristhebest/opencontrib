@@ -937,18 +937,12 @@ export class PrSubmissionStep implements PipelineStep {
       rootCause:
         activePatch?.rationale || "Unavailable (root cause not recorded)",
       keyChanges: derivedKeyChanges,
-      reproductionCommand:
-        ctx.evidenceReport?.redEvidence?.command ||
-        activePatch?.regressionTestPlan?.[0] ||
-        "",
       verificationCommand: ctx.evidenceReport
         ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
           ctx.testCmd ||
           ""
         : "",
-      testCount: ctx.evidenceReport?.passedUnitTestsCount,
-      dcoAuthorName: "OpenContrib",
-      dcoAuthorEmail: "bot@opencontrib.dev",
+      evidence: ctx.evidenceReport,
     });
 
     let prUrl: string;

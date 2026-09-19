@@ -9,7 +9,6 @@ import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 import {
   EvidenceBundleV2Schema,
   GovernanceDecisionArtifactSchema,
-  GovernanceAuditResultSchema,
   SubmissionIntentArtifactSchema,
   SubmissionArtifactSchema,
   ApprovalArtifactSchema,
@@ -168,30 +167,9 @@ export function validatePhaseGate(
   // authority-controlled artifact and is required only for PR_SUBMITTED.
   if (targetPhase === "GOVERNANCE_AUDITED") {
     const gov = runSummary.artifacts.governance;
-    let decision = gov
+    const decision = gov
       ? GovernanceDecisionArtifactSchema.safeParse(gov)
       : undefined;
-    if (!decision?.success && gov) {
-      const legacyAudit = GovernanceAuditResultSchema.safeParse(gov);
-      if (legacyAudit.success) {
-        decision = {
-          success: true,
-          data: {
-            runId: runSummary.manifest.runId,
-            patchSha256: hashArtifact(runSummary.artifacts.patch),
-            evidenceSha256: hashArtifact(runSummary.artifacts.evidence),
-            prDraftSha256: runSummary.artifacts.prDraft
-              ? hashArtifact(runSummary.artifacts.prDraft)
-              : undefined,
-            prTitle: "chore: contribution",
-            prTitleSha256: hashArtifact("chore: contribution"),
-            auditResult: legacyAudit.data,
-            passed: legacyAudit.data.technicalGate?.status === "PASS",
-            auditedAt: new Date().toISOString(),
-          },
-        } as any;
-      }
-    }
     if (!decision?.success) {
       return {
         ok: false,
@@ -261,6 +239,9 @@ export function validatePhaseGate(
   }
 
   if (targetPhase === "PR_SUBMITTED") {
+    const governanceResult = GovernanceDecisionArtifactSchema.safeParse(
+      runSummary.artifacts.governance,
+    );
     const intentResult = SubmissionIntentArtifactSchema.safeParse(
       runSummary.artifacts.submissionIntent,
     );
@@ -271,11 +252,18 @@ export function validatePhaseGate(
       runSummary.artifacts.submission,
     );
 
-    if (!intentResult.success || !approvalResult.success) {
+    if (
+      !governanceResult.success ||
+      !intentResult.success ||
+      !approvalResult.success
+    ) {
       return gateError(
         runSummary,
         targetPhase,
         [
+          governanceResult.success
+            ? undefined
+            : "Missing or invalid policy-bound GovernanceDecisionArtifact.",
           intentResult.success
             ? undefined
             : "Missing or invalid SubmissionIntentArtifact.",
@@ -284,6 +272,16 @@ export function validatePhaseGate(
             : "Missing or invalid ApprovalArtifact from a trusted approval authority.",
         ],
         "Create a SubmissionIntent and obtain explicit approval from a trusted authority before submitting.",
+      );
+    }
+    if (governanceResult.data.runId !== runSummary.manifest.runId) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [
+          "GovernanceDecisionArtifact runId does not match the current contribution run.",
+        ],
+        "Re-run the canonical GovernanceService audit for this contribution run.",
       );
     }
 
@@ -299,12 +297,14 @@ export function validatePhaseGate(
       approval.patchSha256 === expectedHashes.patchSha256 &&
       approval.evidenceSha256 === expectedHashes.evidenceSha256 &&
       approval.governanceSha256 === expectedHashes.governanceSha256 &&
+      approval.policySha256 === governanceResult.data.policySha256 &&
       approval.prBodySha256 === hashArtifact(intent.body);
     const intentBound =
       intent.runId === runSummary.manifest.runId &&
       intent.patchSha256 === expectedHashes.patchSha256 &&
       intent.evidenceSha256 === expectedHashes.evidenceSha256 &&
       intent.governanceSha256 === expectedHashes.governanceSha256 &&
+      intent.policySha256 === governanceResult.data.policySha256 &&
       intent.bodySha256 === hashArtifact(intent.body);
     const submissionBound =
       !!submission &&
@@ -314,6 +314,7 @@ export function validatePhaseGate(
       submission.patchSha256 === approval.patchSha256 &&
       submission.evidenceSha256 === approval.evidenceSha256 &&
       submission.governanceSha256 === approval.governanceSha256 &&
+      submission.policySha256 === governanceResult.data.policySha256 &&
       submission.baseCommitSha === intent.baseCommitSha &&
       submission.owner.toLowerCase() === intent.upstreamOwner.toLowerCase() &&
       submission.repo.toLowerCase() === intent.upstreamRepo.toLowerCase() &&

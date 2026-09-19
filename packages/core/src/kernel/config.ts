@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import type { CapabilityType } from "./capability.js";
 import { getOpenContribHome } from "./home.js";
 
@@ -9,6 +8,13 @@ export interface OpenContribPolicy {
   maxRuntimeSeconds: number;
   enableHeavy: boolean;
   allowMutation: boolean;
+  coverage?: {
+    required: boolean;
+    minimumChangedLineCoverage: number;
+  };
+  resourceLeakCheck?: {
+    required: boolean;
+  };
 }
 
 /**
@@ -62,6 +68,13 @@ export const DEFAULT_CONFIG: OpenContribConfig = {
     maxRuntimeSeconds: 300,
     enableHeavy: false,
     allowMutation: true,
+    coverage: {
+      required: false,
+      minimumChangedLineCoverage: 85,
+    },
+    resourceLeakCheck: {
+      required: false,
+    },
   },
   toolchains: {
     astGrepBin: "ast-grep",
@@ -93,13 +106,91 @@ export function loadWorkspaceConfig(
       try {
         const raw = fs.readFileSync(candidate, "utf8");
         const parsed = JSON.parse(raw);
+        const configuredPolicy = parsed.policy;
+        if (
+          configuredPolicy !== undefined &&
+          (typeof configuredPolicy !== "object" ||
+            configuredPolicy === null ||
+            Array.isArray(configuredPolicy))
+        ) {
+          throw new Error("Invalid trusted policy: policy must be an object.");
+        }
+        const configuredCoverage = configuredPolicy?.coverage;
+        const configuredResourceLeakCheck =
+          configuredPolicy?.resourceLeakCheck;
+        const configuredCoverageMinimum =
+          configuredCoverage?.minimumChangedLineCoverage;
+        const configuredCoverageRequired = configuredCoverage?.required;
+        const configuredResourceLeakRequired =
+          configuredResourceLeakCheck?.required;
+        if (
+          configuredCoverage !== undefined &&
+          (typeof configuredCoverage !== "object" ||
+            configuredCoverage === null ||
+            Array.isArray(configuredCoverage))
+        ) {
+          throw new Error(
+            "Invalid trusted coverage policy: coverage must be an object.",
+          );
+        }
+        if (
+          configuredResourceLeakCheck !== undefined &&
+          (typeof configuredResourceLeakCheck !== "object" ||
+            configuredResourceLeakCheck === null ||
+            Array.isArray(configuredResourceLeakCheck))
+        ) {
+          throw new Error(
+            "Invalid trusted resource leak policy: resourceLeakCheck must be an object.",
+          );
+        }
+        if (
+          (configuredCoverageRequired !== undefined &&
+            typeof configuredCoverageRequired !== "boolean") ||
+          (configuredResourceLeakRequired !== undefined &&
+            typeof configuredResourceLeakRequired !== "boolean")
+        ) {
+          throw new Error(
+            "Invalid trusted policy: coverage and resourceLeakCheck required fields must be boolean.",
+          );
+        }
+        if (
+          configuredCoverageMinimum !== undefined &&
+          (typeof configuredCoverageMinimum !== "number" ||
+            !Number.isFinite(configuredCoverageMinimum) ||
+            configuredCoverageMinimum < 0 ||
+            configuredCoverageMinimum > 100)
+        ) {
+          throw new Error(
+            "Invalid trusted coverage policy: minimumChangedLineCoverage must be a finite number between 0 and 100.",
+          );
+        }
         return {
           version: parsed.version || DEFAULT_CONFIG.version,
           enabledCapabilities:
             parsed.enabledCapabilities || DEFAULT_CONFIG.enabledCapabilities,
           policy: {
             ...DEFAULT_CONFIG.policy,
-            ...(parsed.policy || {}),
+            ...(configuredPolicy || {}),
+            coverage: configuredCoverage
+              ? {
+                  required:
+                    configuredCoverage.required ??
+                    DEFAULT_CONFIG.policy.coverage?.required ??
+                    false,
+                  minimumChangedLineCoverage:
+                    configuredCoverage.minimumChangedLineCoverage ??
+                    DEFAULT_CONFIG.policy.coverage?.minimumChangedLineCoverage ??
+                    85,
+                }
+              : DEFAULT_CONFIG.policy.coverage,
+            resourceLeakCheck: configuredResourceLeakCheck
+              ? {
+                  required:
+                    configuredResourceLeakCheck.required ??
+                    DEFAULT_CONFIG.policy.resourceLeakCheck?.required ??
+                    false,
+                }
+              : DEFAULT_CONFIG.policy.resourceLeakCheck,
           },
           toolchains: {
             ...DEFAULT_CONFIG.toolchains,
@@ -107,7 +198,13 @@ export function loadWorkspaceConfig(
           },
           customRules: parsed.customRules || [],
         };
-      } catch {
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.startsWith("Invalid trusted")
+        ) {
+          throw error;
+        }
         // Fallback to next candidate on parse failure
       }
     }

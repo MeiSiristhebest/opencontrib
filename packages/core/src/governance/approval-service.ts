@@ -28,6 +28,7 @@ export interface ApprovalChallenge {
   patchSha256: string;
   evidenceSha256: string;
   governanceSha256: string;
+  policySha256: string;
   prBodySha256: string;
   target: string;
   branchName: string;
@@ -74,6 +75,7 @@ export class ApprovalService {
       patchSha256: hashes.patchSha256,
       evidenceSha256: hashes.evidenceSha256,
       governanceSha256: hashes.governanceSha256,
+      policySha256: hashes.policySha256,
       prBodySha256: hash(intent.body),
       target: `${intent.upstreamOwner}/${intent.upstreamRepo}`,
       branchName: intent.branchName,
@@ -126,6 +128,7 @@ export class ApprovalService {
       patchSha256: challenge.patchSha256,
       evidenceSha256: challenge.evidenceSha256,
       governanceSha256: challenge.governanceSha256,
+      policySha256: challenge.policySha256,
       prBodySha256: challenge.prBodySha256,
       approvedBy: authorityDecision.approvedBy,
       approvedAt: new Date().toISOString(),
@@ -217,6 +220,13 @@ export class ApprovalService {
           "TOCTOU violation: governance audit has changed since approval was recorded.",
       };
     }
+    if (hashes.policySha256 !== approval.policySha256) {
+      return {
+        valid: false,
+        reason:
+          "TOCTOU violation: governance policy has changed since approval was recorded.",
+      };
+    }
     if (
       summary.artifacts.prDraft &&
       hash(summary.artifacts.prDraft) !== approval.prBodySha256
@@ -238,6 +248,7 @@ export class ApprovalService {
       intent.patchSha256 !== hashes.patchSha256 ||
       intent.evidenceSha256 !== hashes.evidenceSha256 ||
       intent.governanceSha256 !== hashes.governanceSha256 ||
+      intent.policySha256 !== hashes.policySha256 ||
       intent.bodySha256 !== hash(intent.body)
     ) {
       return {
@@ -286,6 +297,7 @@ export class ApprovalService {
     patchSha256: string;
     evidenceSha256: string;
     governanceSha256: string;
+    policySha256: string;
   } {
     if (
       !summary.artifacts.patch ||
@@ -295,6 +307,14 @@ export class ApprovalService {
     ) {
       throw new Error(
         "ApprovalNotReadyError: patch, validated patch, evidence, and governance artifacts are required.",
+      );
+    }
+    const governance = GovernanceDecisionArtifactSchema.safeParse(
+      summary.artifacts.governance,
+    );
+    if (!governance.success) {
+      throw new Error(
+        "ApprovalNotReadyError: the current GovernanceDecisionArtifact is invalid.",
       );
     }
     const validatedPatch = ValidatedPatchArtifactSchema.safeParse(
@@ -314,6 +334,7 @@ export class ApprovalService {
       patchSha256: validatedPatch.data.patchSha256,
       evidenceSha256: hash(summary.artifacts.evidence),
       governanceSha256: hash(summary.artifacts.governance),
+      policySha256: governance.data.policySha256,
     };
   }
 }

@@ -1,3 +1,4 @@
+import { CliExitError } from "../utils/exit.js";
 /** `opencontrib evidence` — Dual-stage empirical verification. */
 
 import { Command } from "commander";
@@ -228,7 +229,7 @@ export const evidenceRunCommand = evidenceCommand
         });
       } catch (err: any) {
         printJSON({ status: "error", message: err.message }, opts.pretty);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );
@@ -308,7 +309,7 @@ export const captureRedCommand = evidenceCommand
         });
       } catch (err: any) {
         printJSON({ status: "error", message: err.message }, opts.pretty);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );
@@ -349,8 +350,7 @@ export const verifyGreenCommand = evidenceCommand
         if (runId) {
           const run = getRunManager().getRun(runId);
           const evidenceArtifact = run?.artifacts?.evidence as
-            | { redEvidence?: RedEvidence }
-            | undefined;
+            { redEvidence?: RedEvidence } | undefined;
           redEvidence = evidenceArtifact?.redEvidence;
         }
         if (!redEvidence || !redEvidence.sourceTreeSha256) {
@@ -430,7 +430,7 @@ export const verifyGreenCommand = evidenceCommand
         });
       } catch (err: any) {
         printJSON({ status: "error", message: err.message }, opts.pretty);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );

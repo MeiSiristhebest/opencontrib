@@ -59,8 +59,24 @@ const auditCommand = new Command("audit")
   )
   .option("--run-id <id>", "Contribution run ID (defaults to active session)")
   .option(
-    "--allow-unverified",
-    "Allow bypass of quality gate threshold failure",
+    "--require-coverage",
+    "Require measured changed-code coverage to satisfy the repository policy",
+    false,
+  )
+  .option(
+    "--coverage-minimum <n>",
+    "Minimum changed-code coverage percentage when coverage is required",
+    (v) => {
+      const parsed = Number(v);
+      if (!Number.isFinite(parsed)) {
+        throw new Error("--coverage-minimum must be a finite number");
+      }
+      return parsed;
+    },
+  )
+  .option(
+    "--require-resource-leak-check",
+    "Require trusted resource/handle leak evidence",
     false,
   )
   .option("--pretty", "Pretty-print", false)
@@ -75,10 +91,20 @@ const auditCommand = new Command("audit")
       subagentScore?: number;
       isAutonomous?: boolean;
       runId?: string;
-      allowUnverified?: boolean;
+      requireCoverage?: boolean;
+      coverageMinimum?: number;
+      requireResourceLeakCheck?: boolean;
       pretty?: boolean;
     }) => {
       try {
+        const coverageMinimum = opts.coverageMinimum;
+        if (
+          coverageMinimum !== undefined &&
+          (coverageMinimum < 0 || coverageMinimum > 100)
+        ) {
+          console.error("❌ --coverage-minimum must be between 0 and 100.");
+          throw new CliExitError(2);
+        }
         const runId = getRunManager().resolveRunId(opts.runId);
 
         let patchContent = opts.patch || "";
@@ -155,9 +181,8 @@ const auditCommand = new Command("audit")
           try {
             const run = getRunManager().getRun(runId);
             if (run?.artifacts?.evidence) {
-              const { EvidenceReportSchema } = await import(
-                "@opencontrib/core"
-              );
+              const { EvidenceReportSchema } =
+                await import("@opencontrib/core");
               const parsed = EvidenceReportSchema.safeParse(
                 run.artifacts.evidence,
               );
@@ -175,6 +200,13 @@ const auditCommand = new Command("audit")
           prTitle: opts.prTitle,
           prBody: prBodyContent || "",
           evidence,
+          coveragePolicy: {
+            required: opts.requireCoverage ?? false,
+            minimumChangedLineCoverage: opts.coverageMinimum,
+          },
+          resourceLeakPolicy: {
+            required: opts.requireResourceLeakCheck ?? false,
+          },
           subagentQualityScore: opts.subagentScore,
           isAutonomousPrSubmission: opts.isAutonomous ?? false,
         });
@@ -190,7 +222,13 @@ const auditCommand = new Command("audit")
             prBody: prBodyContent, // undefined unless explicitly provided by caller
             subagentScore: opts.subagentScore,
             isAutonomous: opts.isAutonomous,
-            allowUnverified: opts.allowUnverified,
+            coveragePolicy: {
+              required: opts.requireCoverage ?? false,
+              minimumChangedLineCoverage: coverageMinimum,
+            },
+            resourceLeakPolicy: {
+              required: opts.requireResourceLeakCheck ?? false,
+            },
           });
           // When running against a tracked run, the authoritative GovernanceService decision is the source of truth
           isPassed = Boolean(canonicalDecision?.passed);
@@ -206,32 +244,16 @@ const auditCommand = new Command("audit")
         );
 
         if (!isPassed) {
-          if (opts.allowUnverified) {
-            printPhaseGuidance({
-              currentPhase: "GOVERNANCE_AUDITED",
-              runId,
-              status: "WARNING",
-              humanCheckpoint:
-                "Checkpoint 3 (Quality Gate WAIVED by explicit --allow-unverified)",
-              nextCommand: `opencontrib governance pr-template --issue <id> --issue-title "${opts.prTitle}" --summary "<summary>"`,
-              invariants: [
-                "WARNING: Governance quality gate threshold was failed but waived via --allow-unverified.",
-                ...audit.guidance.invariants,
-              ],
-            });
-            return;
-          } else {
-            printPhaseGuidance({
-              currentPhase: "GOVERNANCE_AUDITED",
-              runId,
-              status: "GATED_BLOCKED",
-              humanCheckpoint: "Checkpoint 3 (Governance Quality Gate Failure)",
-              forbiddenActions: audit.guidance.forbiddenActions,
-              invariants: audit.guidance.invariants,
-              nextCommand: audit.guidance.nextCommand,
-            });
-            throw new CliExitError(2);
-          }
+          printPhaseGuidance({
+            currentPhase: "GOVERNANCE_AUDITED",
+            runId,
+            status: "GATED_BLOCKED",
+            humanCheckpoint: "Checkpoint 3 (Governance Quality Gate Failure)",
+            forbiddenActions: audit.guidance.forbiddenActions,
+            invariants: audit.guidance.invariants,
+            nextCommand: audit.guidance.nextCommand,
+          });
+          throw new CliExitError(2);
         }
 
         printPhaseGuidance({
@@ -386,6 +408,23 @@ const prTemplateCommand = new Command("pr-template")
       pretty?: boolean;
     }) => {
       try {
+        const runId = getRunManager().resolveRunId(opts.runId);
+        let evidence: import("@opencontrib/core").EvidenceReport | undefined;
+        if (runId) {
+          const run = getRunManager().getRun(runId);
+          const { EvidenceReportSchema } = await import("@opencontrib/core");
+          const parsed = EvidenceReportSchema.safeParse(
+            run?.artifacts.evidence,
+          );
+          if (parsed.success) {
+            evidence = parsed.data;
+          } else {
+            console.warn(
+              `[Governance] Run ${runId} has no canonical EvidenceReport; rendering an unverified template.`,
+            );
+          }
+        }
+
         const prBody = renderMasterPrTemplate({
           keyChanges: opts.keyChanges || [],
           nativeTemplateContent: opts.nativeTemplate,
@@ -398,9 +437,9 @@ const prTemplateCommand = new Command("pr-template")
           riskLevel: opts.risk,
           isDocumentationOnly: opts.isDocsOnly ?? false,
           aiDisclosureRequired: opts.aiDisclosure ?? false,
+          evidence,
         });
 
-        const runId = getRunManager().resolveRunId(opts.runId);
         if (runId && getRunManager().getRun(runId)) {
           getRunManager().saveArtifact(runId, "pr_draft", prBody);
         }

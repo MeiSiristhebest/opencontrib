@@ -14,9 +14,7 @@ let _runManager: ContributionRunManager | null = null;
 const getRunManager = (): ContributionRunManager =>
   (_runManager ??= buildContributionRunManager());
 
-export const submissionCommand = new Command("submission")
-  .description("Submit a PR only from a trusted, approved run intent")
-  .command("submit")
+const submissionSubmitCommand = new Command("submit")
   .description("Submit the immutable approved intent for a contribution run")
   .option("--owner <owner>", "Inspection-only upstream owner")
   .option("--repo <repo>", "Inspection-only upstream repository")
@@ -100,3 +98,7 @@ export const submissionCommand = new Command("submission")
       }
     },
   );
+
+export const submissionCommand = new Command("submission")
+  .description("Submit a PR only from a trusted, approved run intent")
+  .addCommand(submissionSubmitCommand);

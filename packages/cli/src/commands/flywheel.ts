@@ -1,3 +1,4 @@
+import { CliExitError } from "../utils/exit.js";
 /** `opencontrib flywheel <sub>` — Profile flywheel and PR tracking. */
 
 import { Command } from "commander";
@@ -41,28 +42,41 @@ const flywheelSync = new Command("sync")
       try {
         let parsed: { runId?: string; repo?: string } = {};
         if (opts.inputFile && fs.existsSync(opts.inputFile)) {
-          parsed = (parseJSON(fs.readFileSync(opts.inputFile, "utf-8"), "input-file") as typeof parsed) || {};
+          parsed =
+            (parseJSON(
+              fs.readFileSync(opts.inputFile, "utf-8"),
+              "input-file",
+            ) as typeof parsed) || {};
         } else if (opts.input) {
           parsed = (parseJSON(opts.input, "--input") as typeof parsed) || {};
         } else if (!opts.runId) {
           const stdin = await readStdin();
-          if (stdin.trim()) parsed = (parseJSON(stdin, "stdin") as typeof parsed) || {};
+          if (stdin.trim())
+            parsed = (parseJSON(stdin, "stdin") as typeof parsed) || {};
         }
 
         const runManager = getRunManager();
         const runId = opts.runId || parsed.runId || runManager.resolveRunId();
         if (!runId) {
-          throw new Error("Missing runId; provide --run-id or create an active contribution run.");
+          throw new Error(
+            "Missing runId; provide --run-id or create an active contribution run.",
+          );
         }
         const run = runManager.getRun(runId);
         if (!run) throw new Error(`Unknown contribution run: ${runId}`);
         const expectedRepo = opts.repo || parsed.repo;
-        if (expectedRepo && expectedRepo.toLowerCase() !== run.manifest.repoFullName.toLowerCase()) {
-          throw new Error("FlywheelSyncError: --repo does not match the run manifest.");
+        if (
+          expectedRepo &&
+          expectedRepo.toLowerCase() !== run.manifest.repoFullName.toLowerCase()
+        ) {
+          throw new Error(
+            "FlywheelSyncError: --repo does not match the run manifest.",
+          );
         }
 
         const result = flywheel.syncFromRun(runManager, runId);
-        const effectivePhase = runManager.getRun(runId)?.manifest.currentPhase || "COMPLETED";
+        const effectivePhase =
+          runManager.getRun(runId)?.manifest.currentPhase || "COMPLETED";
         printJSON({ status: "success", flywheelResult: result }, opts.pretty);
         printPhaseGuidance({
           currentPhase: effectivePhase,
@@ -75,7 +89,7 @@ const flywheelSync = new Command("sync")
         });
       } catch (err: any) {
         printJSON({ status: "error", message: err.message }, opts.pretty);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );
@@ -104,7 +118,7 @@ const prTrackCommand = new Command("pr-track")
 
         if (!parsed?.pr) {
           console.error('❌ Missing required "pr" field in input JSON');
-          process.exit(1);
+          throw new CliExitError(1);
         }
         const { trackPrStatus } = await import("@opencontrib/core");
         const evaluation = trackPrStatus({
@@ -132,8 +146,9 @@ const prTrackCommand = new Command("pr-track")
         });
         printJSON({ status: "success", evaluation }, opts.pretty);
       } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
         printJSON({ status: "error", message: err.message }, opts.pretty);
-        process.exit(1);
+        throw new CliExitError(1);
       }
     },
   );

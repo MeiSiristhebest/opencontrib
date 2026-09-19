@@ -79,6 +79,21 @@ export function registerGovernanceTools(
       confidenceBreakdown: ConfidenceBreakdownSchema.optional().describe(
         "Optional detailed 7-dimensional confidence scores",
       ),
+      coveragePolicy: z
+        .object({
+          required: z.boolean().optional(),
+          minimumChangedLineCoverage: z.number().optional(),
+        })
+        .optional()
+        .describe(
+          "Trusted repository-sensitive changed-code coverage policy; required policies fail closed on UNAVAILABLE evidence",
+        ),
+      resourceLeakPolicy: z
+        .object({ required: z.boolean().optional() })
+        .optional()
+        .describe(
+          "Trusted repository-sensitive resource/handle leak policy; required policies fail closed",
+        ),
     },
     wrapHandler(async (args) => {
       if (args.runId) {
@@ -89,6 +104,8 @@ export function registerGovernanceTools(
           prBody: args.prBody,
           subagentScore: args.subagentQualityScore,
           isAutonomous: args.isAutonomousPrSubmission,
+          coveragePolicy: args.coveragePolicy,
+          resourceLeakPolicy: args.resourceLeakPolicy,
         });
 
         return {
@@ -117,6 +134,8 @@ export function registerGovernanceTools(
         subagentQualityScore: args.subagentQualityScore,
         isAutonomousPrSubmission: args.isAutonomousPrSubmission,
         confidenceBreakdown: args.confidenceBreakdown,
+        coveragePolicy: args.coveragePolicy,
+        resourceLeakPolicy: args.resourceLeakPolicy,
       });
 
       return {

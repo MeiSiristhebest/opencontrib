@@ -157,7 +157,7 @@ opencontrib governance audit \
 
 > [!CAUTION]
 > **Hard Quality Gate (Exit Code 2)**:
-> If the Governance Quality score is $<90\%$ or any dimension is $<80\%$, the CLI prints `🛑 GATED_BLOCKED` and **exits with Code 2**. You MUST fix the quality issues before proceeding to PR submission, or obtain explicit human approval with `--allow-unverified`.
+> If the Governance Quality score is $<90\%$ or any dimension is $<80\%$, the CLI prints `🛑 GATED_BLOCKED` and **exits with Code 2**. You MUST fix the quality issues before proceeding to PR submission. Agents cannot waive a failed technical gate; exceptions require a trusted host authority artifact.
 
 ---
 
@@ -185,7 +185,7 @@ opencontrib governance pr-template \
   --issue-title "<Precise Defect Title>" \
   --summary "<Concise explanation of the surgical fix>" \
   --validation-cmd "<targeted_test_command>" \
-  --validation-output "Targeted regression test passed cleanly (0 regressions)"
+  --validation-output "User-provided note only; canonical EvidenceReport is required for verified claims"
 
 gh pr create \
   --repo <owner>/<repo> \
