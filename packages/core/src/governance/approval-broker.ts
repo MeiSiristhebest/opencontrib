@@ -168,6 +168,7 @@ export class TrustedApprovalBroker {
             patchSha256: request.patchSha256,
             evidenceSha256: request.evidenceSha256,
             governanceSha256: request.governanceSha256,
+            policySha256: request.policySha256,
             prBodySha256: request.prBodySha256,
             approvedBy: decision.approvedBy,
             approvalMode: decision.approvalMode,
@@ -232,6 +233,7 @@ function requestIdForChallenge(challenge: ApprovalChallenge): string {
     patchSha256: challenge.patchSha256,
     evidenceSha256: challenge.evidenceSha256,
     governanceSha256: challenge.governanceSha256,
+    policySha256: challenge.policySha256,
     prBodySha256: challenge.prBodySha256,
     target: challenge.target,
     branchName: challenge.branchName,
@@ -251,6 +253,7 @@ function sameChallenge(
     left.patchSha256 === right.patchSha256 &&
     left.evidenceSha256 === right.evidenceSha256 &&
     left.governanceSha256 === right.governanceSha256 &&
+    left.policySha256 === right.policySha256 &&
     left.prBodySha256 === right.prBodySha256 &&
     left.target === right.target &&
     left.branchName === right.branchName

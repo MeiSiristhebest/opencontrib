@@ -69,6 +69,13 @@ export const DEFAULT_CONFIG: OpenContribConfig = {
     maxRuntimeSeconds: 300,
     enableHeavy: false,
     allowMutation: true,
+    coverage: {
+      required: false,
+      minimumChangedLineCoverage: 85,
+    },
+    resourceLeakCheck: {
+      required: false,
+    },
   },
   toolchains: {
     astGrepBin: "ast-grep",

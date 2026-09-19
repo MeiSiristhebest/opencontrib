@@ -8,8 +8,6 @@ export interface PrData {
   keyChanges: string[];
   verificationCommand?: string;
   stressLoopCount?: number;
-  dcoAuthorName?: string;
-  dcoAuthorEmail?: string;
   conditionalAiRequired?: boolean;
   evidence?: PrTemplateEvidence;
 }

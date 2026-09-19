@@ -73,7 +73,6 @@ const auditCommand = new Command("audit")
       }
       return parsed;
     },
-    85,
   )
   .option(
     "--require-resource-leak-check",
@@ -200,7 +199,7 @@ const auditCommand = new Command("audit")
           evidence,
           coveragePolicy: {
             required: opts.requireCoverage ?? false,
-            minimumChangedLineCoverage: coverageMinimum,
+            minimumChangedLineCoverage: opts.coverageMinimum,
           },
           resourceLeakPolicy: {
             required: opts.requireResourceLeakCheck ?? false,

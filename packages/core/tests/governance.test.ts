@@ -131,16 +131,12 @@ describe("Governance & Anti-AI Audit Engine", () => {
       problemSummary: "Null dereference on empty input",
       rootCause: "Calling parse() with empty string accessed null property",
       keyChanges: ["Add null guard in parse()", "Add unit tests"],
-      reproductionCommand: 'npm test -- -t "empty input"',
       verificationCommand: "npm test",
-      testCount: 42,
-      dcoAuthorName: "Developer Name",
-      dcoAuthorEmail: "dev@domain.com",
     });
 
     expect(template).toContain("Null dereference on empty input");
     expect(template).toContain("Verification");
-    expect(template).toContain("Developer Name <dev@domain.com>");
+    expect(template).not.toContain("Signed-off-by:");
     expect(template).not.toContain("Google / ByteDance Standard");
     expect(template).not.toContain("I have carefully analyzed");
 
@@ -156,10 +152,8 @@ describe("Governance & Anti-AI Audit Engine", () => {
       problemSummary: "Clean fix",
       rootCause: "Fix logic",
       keyChanges: ["Fix"],
-      reproductionCommand: "test",
       verificationCommand: "test",
       validationOutputSnippet: "10 tests passed",
-      testCount: 10,
     });
     expect(cleanTemplate).not.toContain("Signed-off-by");
     expect(cleanTemplate).not.toContain("passed cleanly");
@@ -205,8 +199,8 @@ Fixes #1106
   });
 
   it("strictly enforces >=85% test coverage requirement on PR accompanying tests", () => {
-    // 1. Coverage < 85% (e.g. 70%) must fail the gate
-    const failAudit = auditGovernance({
+    // Advisory coverage must not become an implicit hard gate.
+    const advisoryAudit = auditGovernance({
       patchContent: "diff --git a/foo b/foo\n+const a = 1;",
       prTitle: "fix(ai): match subdomains",
       prBody: "Fixes #8736\n\n### Problem\nSubdomain proxy bug.",
@@ -219,17 +213,16 @@ Fixes #1106
       lineCount: 15,
     });
 
-    expect(failAudit.isGatedPassed).toBe(false);
-    expect(failAudit.weakestDimension.score).toBeLessThan(80);
+    expect(advisoryAudit.isGatedPassed).toBe(true);
     expect(
-      failAudit.remediationSuggestions.some((s) =>
+      advisoryAudit.remediationSuggestions.some((s) =>
         s.includes(
           "PR accompanying test coverage is below the 85% advisory threshold",
         ),
       ),
     ).toBe(true);
 
-    // 2. Coverage >= 85% (e.g. 95%) must pass the gate
+    // Explicit changed-code coverage policy remains a hard gate.
     const passAudit = auditGovernance({
       patchContent: "diff --git a/foo b/foo\n+const a = 1;",
       prTitle: "fix(ai): match subdomains",

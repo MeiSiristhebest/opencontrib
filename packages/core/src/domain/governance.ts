@@ -13,8 +13,6 @@ import {
   type ConfidenceBreakdown,
   type GovernanceAuditResult,
   type EvidenceReport,
-  type GreenEvidence,
-  type RedEvidence,
 } from "../contracts/schemas.js";
 import { validateMarkdownIntegrity } from "../governance/markdown-validator.js";
 
@@ -197,12 +195,16 @@ export function deriveEvidenceBackedQualityRubric(input: {
       : Math.max(60, 94 - Math.round((diffLines - 100) * 0.25));
   // Regression confidence: based on actual test passes
   const regression = testsPassed ? 93 : 50;
-  // Defensive and test coverage: based on real passed unit tests count and test coverage percentage (>=85% required)
+  // Defensive coverage comes from executed tests. Changed-code coverage is a
+  // separate mandatory policy gate when a trusted policy enables it.
   const defensiveCoverage =
     passedUnitTests > 0 ? 91 : subagentReviewAvailable ? 86 : 75;
   let testCoverage =
     passedUnitTests > 0 ? 92 : subagentReviewAvailable ? 85 : 70;
-  if (typeof testCoveragePercent === "number") {
+  if (
+    typeof testCoveragePercent === "number" &&
+    input.coverageMinimumPercent !== undefined
+  ) {
     if (testCoveragePercent >= coverageThreshold) {
       testCoverage = Math.min(
         100,
@@ -210,9 +212,6 @@ export function deriveEvidenceBackedQualityRubric(input: {
           coverageThreshold + (testCoveragePercent - coverageThreshold) * 1.0,
         ),
       );
-    } else {
-      // Coverage below the repository threshold strictly caps the score below 80.
-      testCoverage = Math.max(50, Math.round(testCoveragePercent * 0.85));
     }
   }
 
@@ -371,7 +370,7 @@ export function auditGovernance(
       coverageMinimumPercent:
         input.coveragePolicy?.required === true
           ? minimumChangedLineCoverage
-          : 85,
+          : undefined,
       diffLines: lines,
       styleScore: input.subagentQualityScore,
       securityScore: input.subagentQualityScore,
@@ -562,13 +561,7 @@ export function auditGovernance(
   };
 }
 
-export type PrTemplateEvidence = Omit<
-  Partial<EvidenceReport>,
-  "redEvidence" | "greenEvidence"
-> & {
-  redEvidence?: Partial<RedEvidence>;
-  greenEvidence?: Partial<GreenEvidence>;
-};
+export type PrTemplateEvidence = EvidenceReport;
 
 export interface MasterPrTemplateInput {
   issueNumber: number;
@@ -577,14 +570,10 @@ export interface MasterPrTemplateInput {
   problemSummary?: string;
   rootCause?: string;
   keyChanges?: string[];
-  reproductionCommand?: string;
   verificationCommand?: string;
   validationCommand?: string;
   validationOutputSnippet?: string;
-  testCount?: number;
   stressLoopCount?: number;
-  dcoAuthorName?: string;
-  dcoAuthorEmail?: string;
   confidenceScore?: number;
   riskLevel?: "LOW" | "MEDIUM" | "HIGH";
   isDocumentationOnly?: boolean;
@@ -633,8 +622,6 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
   const stressLoopCount = verificationPassed
     ? (validatedEvidence?.stressLoopRuns ?? 1)
     : 0;
-  const dcoAuthorName = data.dcoAuthorName;
-  const dcoAuthorEmail = data.dcoAuthorEmail;
   const userValidationNote =
     !validatedEvidence &&
     (data.verificationCommand ||
@@ -700,19 +687,10 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
           `${section}\n${reproductionDetail}\n${verificationLine}\n- Test Suite: ${testSuite}\n${userValidationNote}\n\n`,
       );
     }
-    const nativeDcoTrailer =
-      dcoAuthorName && dcoAuthorEmail
-        ? `\n\nSigned-off-by: ${dcoAuthorName} <${dcoAuthorEmail}>`
-        : "";
-    return `${result.trim()}${nativeDcoTrailer}`;
+    return result.trim();
   }
 
   const changeList = keyChanges.map((c) => `- ${c}`).join("\n");
-  const dcoTrailer =
-    dcoAuthorName && dcoAuthorEmail
-      ? `\n\nSigned-off-by: ${dcoAuthorName} <${dcoAuthorEmail}>`
-      : "";
-
   let regressionLine = "- **Regression Isolation**: Not recorded.";
   if (validatedEvidence?.baselineFlakyTests !== undefined) {
     if (validatedEvidence.baselineFlakyTests.length === 0) {
@@ -740,6 +718,6 @@ ${changeList}
 ### Verification & Empirical Evidence
 ${reproductionDetail}
 ${verificationLine}
-${regressionLine}${userValidationNote}${dcoTrailer}${aiDisclosureSection}
+${regressionLine}${userValidationNote}${aiDisclosureSection}
 `;
 }

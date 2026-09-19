@@ -204,8 +204,7 @@ export class SubmissionIntentService {
     }
 
     const wsArtifact = run.artifacts.workspace as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     const wsBaseBranch =
       typeof wsArtifact?.baseBranch === "string"
         ? wsArtifact.baseBranch
@@ -301,6 +300,7 @@ export class SubmissionIntentService {
       patchSha256,
       evidenceSha256,
       governanceSha256,
+      policySha256: governanceResult.data.policySha256,
     });
 
     const intent: SubmissionIntentArtifact = {
@@ -319,6 +319,7 @@ export class SubmissionIntentService {
       patchSha256,
       evidenceSha256,
       governanceSha256,
+      policySha256: governanceResult.data.policySha256,
       intentSha256: sha256(intentPayload),
       createdAt: new Date().toISOString(),
     };

@@ -155,7 +155,7 @@ describe("Native Template Merger & Fallback", () => {
             command: "echo fail",
             assertionMatched: true,
           },
-        },
+        } as any,
       },
       nativeTemplate,
     );

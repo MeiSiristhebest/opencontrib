@@ -89,15 +89,11 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
         "Upgrade actions/checkout from v3 to v4 in .github/workflows/ci.yml and common-pr-checks.yml",
         "Upgrade actions/setup-node from v3 to v4",
       ],
-      reproductionCommand: "act -j build (or push to branch for CI)",
       verificationCommand: "rush check && rush lint",
-      testCount: 48,
-      dcoAuthorName: "Contributor",
-      dcoAuthorEmail: "contributor@example.com",
       aiDisclosureRequired: false,
     });
 
-    expect(renderedPr).toContain("Contributor <contributor@example.com>");
+    expect(renderedPr).not.toContain("Signed-off-by:");
     expect(renderedPr).toContain("Motivation");
     expect(renderedPr).not.toContain("I have carefully analyzed");
 

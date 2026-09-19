@@ -219,7 +219,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Diff must be minimal, surgical, and preserve existing architecture idioms.",
     ],
-    suggestedNextAction: "collect_evidence",
+    suggestedNextAction: "verify_green",
   },
   EVIDENCE_COLLECTED: {
     phase: "EVIDENCE_COLLECTED",
@@ -388,7 +388,7 @@ const NEXT_ACTION_GUIDANCE: Record<
     cliExample: PROTOCOL_CONTRACT_PHASES.PATCH_DRAFTED.cli.example,
     mcpTool: PROTOCOL_CONTRACT_PHASES.PATCH_DRAFTED.mcp.tool,
   },
-  collect_evidence: {
+  verify_green: {
     cliExample: "opencontrib evidence verify-green --test-cmd '<test_cmd>'",
     mcpTool: PROTOCOL_CONTRACT_PHASES.EVIDENCE_COLLECTED.mcp.tool,
   },

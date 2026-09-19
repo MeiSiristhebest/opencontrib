@@ -18,6 +18,7 @@ export interface ApprovalSigningPayload {
   patchSha256: string;
   evidenceSha256: string;
   governanceSha256: string;
+  policySha256: string;
   prBodySha256: string;
   approvedBy: string;
   approvalMode: ApprovalArtifact["approvalMode"];
@@ -30,6 +31,7 @@ export function getApprovalSigningPayload(
       patchSha256: string;
       evidenceSha256: string;
       governanceSha256: string;
+      policySha256: string;
       prBodySha256: string;
     },
 ): string {
@@ -39,6 +41,7 @@ export function getApprovalSigningPayload(
     patchSha256: request.patchSha256,
     evidenceSha256: request.evidenceSha256,
     governanceSha256: request.governanceSha256,
+    policySha256: request.policySha256,
     prBodySha256: request.prBodySha256,
     approvedBy: request.approvedBy,
     approvalMode: request.approvalMode,
@@ -98,6 +101,7 @@ export class Ed25519ApprovalVerifier implements ApprovalArtifactVerifier {
       patchSha256: artifact.patchSha256,
       evidenceSha256: artifact.evidenceSha256,
       governanceSha256: artifact.governanceSha256,
+      policySha256: artifact.policySha256,
       prBodySha256: artifact.prBodySha256,
       approvedBy: artifact.approvedBy,
       approvalMode: artifact.approvalMode,

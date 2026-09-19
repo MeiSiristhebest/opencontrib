@@ -251,7 +251,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     });
     const resume = JSON.parse(resumeResult.content[0].text).resume;
     expect(resume.currentPhase).toBe("PATCH_DRAFTED");
-    expect(resume.suggestedNextAction).toBe("collect_evidence");
+    expect(resume.suggestedNextAction).toBe("verify_green");
   });
 
   it("contract test: WORKSPACE_PREPARED -> PATCH_DRAFTED must fail without a RED baseline artifact", async () => {

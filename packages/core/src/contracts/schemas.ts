@@ -251,6 +251,7 @@ export const SubmissionIntentArtifactSchema = z.object({
   patchSha256: z.string(),
   evidenceSha256: z.string(),
   governanceSha256: z.string(),
+  policySha256: z.string(),
   intentSha256: z.string(),
   createdAt: z.string(),
 });
@@ -264,6 +265,7 @@ export const ApprovalArtifactSchema = z.object({
   patchSha256: z.string(),
   evidenceSha256: z.string(),
   governanceSha256: z.string(),
+  policySha256: z.string(),
   prBodySha256: z.string(),
   approvedBy: z.string().min(1),
   approvedAt: z.string(),
@@ -285,6 +287,7 @@ export const SubmissionArtifactSchema = z.object({
   patchSha256: z.string(),
   evidenceSha256: z.string(),
   governanceSha256: z.string(),
+  policySha256: z.string(),
   prNumber: z.number(),
   prUrl: z.string(),
   headSha: z.string(),
@@ -439,6 +442,7 @@ export const GovernanceDecisionArtifactSchema = z.object({
     })
     .optional(),
   resourceLeakPolicy: z.object({ required: z.boolean().optional() }).optional(),
+  policySha256: z.string(),
   passed: z.boolean(),
   auditedAt: z.string(),
 });

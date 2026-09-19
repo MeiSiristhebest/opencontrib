@@ -110,30 +110,40 @@ export class GovernanceService {
       typeof run.artifacts.workspace?.workspacePath === "string"
         ? run.artifacts.workspace.workspacePath
         : undefined;
-    const trustedPolicy = workspacePath
-      ? loadWorkspaceConfig(workspacePath).policy
-      : undefined;
-    const trustedCoveragePolicy = trustedPolicy?.coverage;
-    const effectiveCoveragePolicy = trustedCoveragePolicy
-      ? {
-          required:
-            trustedCoveragePolicy.required ||
-            options.coveragePolicy?.required === true,
-          minimumChangedLineCoverage: Math.max(
-            trustedCoveragePolicy.minimumChangedLineCoverage,
-            options.coveragePolicy?.minimumChangedLineCoverage ??
-              trustedCoveragePolicy.minimumChangedLineCoverage,
-          ),
-        }
-      : options.coveragePolicy;
-    const trustedResourceLeakPolicy = trustedPolicy?.resourceLeakCheck;
-    const effectiveResourceLeakPolicy = trustedResourceLeakPolicy
-      ? {
-          required:
-            trustedResourceLeakPolicy.required ||
-            options.resourceLeakPolicy?.required === true,
-        }
-      : options.resourceLeakPolicy;
+    const trustedPolicy = loadWorkspaceConfig(
+      workspacePath ?? process.cwd(),
+    ).policy;
+    const trustedCoveragePolicy = trustedPolicy.coverage ?? {
+      required: false,
+      minimumChangedLineCoverage: 85,
+    };
+    const requestedCoverageMinimum =
+      options.coveragePolicy?.minimumChangedLineCoverage;
+    if (
+      requestedCoverageMinimum !== undefined &&
+      requestedCoverageMinimum <
+        trustedCoveragePolicy.minimumChangedLineCoverage
+    ) {
+      throw new Error(
+        `GovernancePolicyViolationError: requested coverage minimum ${requestedCoverageMinimum}% is below the trusted repository floor ${trustedCoveragePolicy.minimumChangedLineCoverage}%.`,
+      );
+    }
+    const effectiveCoveragePolicy = {
+      required:
+        trustedCoveragePolicy.required ||
+        options.coveragePolicy?.required === true,
+      minimumChangedLineCoverage:
+        requestedCoverageMinimum ??
+        trustedCoveragePolicy.minimumChangedLineCoverage,
+    };
+    const trustedResourceLeakPolicy = trustedPolicy.resourceLeakCheck ?? {
+      required: false,
+    };
+    const effectiveResourceLeakPolicy = {
+      required:
+        trustedResourceLeakPolicy.required ||
+        options.resourceLeakPolicy?.required === true,
+    };
 
     const auditResult = auditGovernance({
       patchContent,
@@ -148,6 +158,10 @@ export class GovernanceService {
       subagentQualityScore: options.subagentScore,
     });
 
+    const policySha256 = hash({
+      coveragePolicy: effectiveCoveragePolicy,
+      resourceLeakPolicy: effectiveResourceLeakPolicy,
+    });
     const decision: GovernanceDecisionArtifact = {
       runId,
       patchSha256: validatedPatch.patchSha256,
@@ -158,6 +172,7 @@ export class GovernanceService {
       auditResult,
       coveragePolicy: effectiveCoveragePolicy,
       resourceLeakPolicy: effectiveResourceLeakPolicy,
+      policySha256,
       passed: auditResult.technicalGate?.status === "PASS",
       auditedAt: new Date().toISOString(),
     };
