@@ -752,7 +752,9 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         }),
         detectDefaultBranch: () => "main",
       } as any;
-      const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+      const {
+        WorkspaceService,
+      } = require("../src/workspace/workspace-service.js");
 
       expect(() =>
         new WorkspaceService(manager, fakeWorktreeManager).prepare({
