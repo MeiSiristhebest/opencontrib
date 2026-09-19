@@ -390,9 +390,18 @@ export class ContributionRunManager {
       hasResult: !!artifacts.result,
     };
 
-    const suggestedNextAction =
-      PROTOCOL_CONTRACT_PHASES[summary.manifest.currentPhase]
-        ?.suggestedNextAction || "none";
+    const protocolPhase =
+      PROTOCOL_CONTRACT_PHASES[summary.manifest.currentPhase];
+    const suggestedNextAction = protocolPhase?.suggestedNextAction || "none";
+    const guidance: ProtocolGuidance = protocolPhase
+      ? getProtocolGuidance(summary.manifest.currentPhase)
+      : {
+          suggestedNextAction,
+          cliExample: "",
+          mcpTool: "",
+          forbiddenActions: [],
+          invariants: [],
+        };
 
     return {
       runId,
@@ -401,7 +410,7 @@ export class ContributionRunManager {
       availableArtifacts,
       latestArtifactSummary: latestSummary,
       suggestedNextAction,
-      guidance: getProtocolGuidance(summary.manifest.currentPhase),
+      guidance,
     };
   }
 }

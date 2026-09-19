@@ -3,31 +3,9 @@ import {
   getProtocolGuidance,
   PROTOCOL_CONTRACT_PHASES,
 } from "@opencontrib/core";
-import { capabilityCommand } from "../src/commands/capability.js";
-import { discoveryCommand } from "../src/commands/discovery.js";
-import { evidenceCommand } from "../src/commands/evidence.js";
-import { flywheelCommand } from "../src/commands/flywheel.js";
-import { governanceCommand } from "../src/commands/governance.js";
-import { probeCommand } from "../src/commands/probe.js";
-import { runCommand } from "../src/commands/run.js";
-import { scoutCommand } from "../src/commands/scout.js";
-import { submissionCommand } from "../src/commands/submission.js";
-import { verifyCommand } from "../src/commands/verify.js";
-import { workspaceCommand } from "../src/commands/workspace.js";
+import { program } from "../src/index.js";
 
-const registeredCommands = [
-  capabilityCommand,
-  discoveryCommand,
-  evidenceCommand,
-  flywheelCommand,
-  governanceCommand,
-  probeCommand,
-  runCommand,
-  scoutCommand,
-  submissionCommand,
-  verifyCommand,
-  workspaceCommand,
-];
+const registeredCommands = program.commands;
 
 describe("Canonical protocol contract registration", () => {
   it("registers every protocol CLI command and declared subcommand", () => {

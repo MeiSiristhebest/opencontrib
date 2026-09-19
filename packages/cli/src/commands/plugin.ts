@@ -191,6 +191,7 @@ pluginCommand
         printJSON({ status: "success", id, toolIds, steps: allSteps }, true);
       }
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       console.error(`❌ Failed to install "${id}": ${err.message}`);
       throw new CliExitError(1);
     }
@@ -255,6 +256,7 @@ pluginCommand
         opts.pretty,
       );
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       console.error(`❌ Failed to get probe info: ${err.message}`);
       throw new CliExitError(1);
     }

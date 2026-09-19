@@ -432,6 +432,13 @@ export const GovernanceDecisionArtifactSchema = z.object({
   prTitle: z.string(),
   prTitleSha256: z.string(),
   auditResult: GovernanceAuditResultSchema,
+  coveragePolicy: z
+    .object({
+      required: z.boolean().optional(),
+      minimumChangedLineCoverage: z.number().optional(),
+    })
+    .optional(),
+  resourceLeakPolicy: z.object({ required: z.boolean().optional() }).optional(),
   passed: z.boolean(),
   auditedAt: z.string(),
 });

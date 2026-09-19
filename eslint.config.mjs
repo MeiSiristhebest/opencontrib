@@ -2,8 +2,8 @@
  * ESLint flat config — architecture guardrails (review Stage 5).
  *
  * Keeps the dependency-inverted layers free of direct infrastructure imports.
- * Run with `bun x eslint packages/core/src` in CI. (This file is inert until
- * eslint is installed; it declares intent and is safe to commit.)
+ * TypeScript parsing is enabled explicitly and the same active config runs in
+ * CI via `bunx eslint packages/`.
  */
 import tsParser from "@typescript-eslint/parser";
 
@@ -47,7 +47,12 @@ export default [
                 "ports/domain/testkit must not import child_process directly",
             },
           ],
-          patterns: ["fs/*", "child_process/*"],
+          patterns: [
+            "fs/*",
+            "child_process/*",
+            "node:fs/*",
+            "node:child_process/*",
+          ],
         },
       ],
     },

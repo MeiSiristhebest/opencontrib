@@ -41,6 +41,7 @@ const rankCommand = new Command("rank")
       });
       printJSON({ status: "success", signals }, opts.pretty);
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       printJSON({ status: "error", message: err.message }, opts.pretty);
       throw new CliExitError(1);
     }
@@ -71,6 +72,7 @@ const qualifyCommand = new Command("qualify")
         opts.pretty,
       );
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       printJSON({ status: "error", message: err.message }, opts.pretty);
       throw new CliExitError(1);
     }
@@ -112,6 +114,7 @@ const feasibilityCommand = new Command("feasibility")
           opts.pretty,
         );
       } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
         printJSON({ status: "error", message: err.message }, opts.pretty);
         throw new CliExitError(1);
       }
@@ -210,6 +213,7 @@ const manifestsCommand = new Command("manifests")
       const result = diagnoseManifests(parsed || {});
       printJSON(result, opts.pretty);
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       printJSON({ status: "error", message: err.message }, opts.pretty);
       throw new CliExitError(1);
     }

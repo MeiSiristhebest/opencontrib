@@ -57,6 +57,7 @@ const runCreate = new Command("create")
           ],
         });
       } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
         console.error(`❌ ${err.message}`);
         throw new CliExitError(1);
       }
@@ -82,6 +83,7 @@ const runGet = new Command("get")
       }
       printJSON({ status: "success", run }, opts?.pretty);
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       console.error(`❌ ${err.message}`);
       throw new CliExitError(1);
     }
@@ -104,6 +106,7 @@ const runResume = new Command("resume")
       const resume = getRunManager().resumeRun(runId);
       printJSON({ status: "success", resume }, opts?.pretty);
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       console.error(`❌ ${err.message}`);
       throw new CliExitError(1);
     }
@@ -194,6 +197,7 @@ const runSave = new Command("save")
         );
         printJSON({ status: "success", saved }, opts.pretty);
       } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
         console.error(`❌ ${err.message}`);
         throw new CliExitError(1);
       }
@@ -218,6 +222,7 @@ const runList = new Command("list")
         opts.pretty,
       );
     } catch (err: any) {
+      if (err instanceof CliExitError) throw err;
       console.error(`❌ ${err.message}`);
       throw new CliExitError(1);
     }

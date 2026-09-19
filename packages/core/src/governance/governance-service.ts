@@ -8,6 +8,7 @@ import {
 } from "../contracts/schemas.js";
 import { auditGovernance } from "./governance-auditor.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
+import { loadWorkspaceConfig } from "../kernel/config.js";
 
 export interface GovernanceAuditRunOptions {
   /** Human-readable title to audit and bind to the later SubmissionIntent. */
@@ -105,6 +106,35 @@ export class GovernanceService {
       run.manifest.issueTitle ||
       "chore: opencontrib contribution";
 
+    const workspacePath =
+      typeof run.artifacts.workspace?.workspacePath === "string"
+        ? run.artifacts.workspace.workspacePath
+        : undefined;
+    const trustedPolicy = workspacePath
+      ? loadWorkspaceConfig(workspacePath).policy
+      : undefined;
+    const trustedCoveragePolicy = trustedPolicy?.coverage;
+    const effectiveCoveragePolicy = trustedCoveragePolicy
+      ? {
+          required:
+            trustedCoveragePolicy.required ||
+            options.coveragePolicy?.required === true,
+          minimumChangedLineCoverage: Math.max(
+            trustedCoveragePolicy.minimumChangedLineCoverage,
+            options.coveragePolicy?.minimumChangedLineCoverage ??
+              trustedCoveragePolicy.minimumChangedLineCoverage,
+          ),
+        }
+      : options.coveragePolicy;
+    const trustedResourceLeakPolicy = trustedPolicy?.resourceLeakCheck;
+    const effectiveResourceLeakPolicy = trustedResourceLeakPolicy
+      ? {
+          required:
+            trustedResourceLeakPolicy.required ||
+            options.resourceLeakPolicy?.required === true,
+        }
+      : options.resourceLeakPolicy;
+
     const auditResult = auditGovernance({
       patchContent,
       prTitle,
@@ -113,8 +143,8 @@ export class GovernanceService {
       lineCount: validatedPatch.changedLines,
       // Governance is deliberately technical-only. Approval is minted later
       // by an external trusted authority and is not inferred from this audit.
-      coveragePolicy: options.coveragePolicy,
-      resourceLeakPolicy: options.resourceLeakPolicy,
+      coveragePolicy: effectiveCoveragePolicy,
+      resourceLeakPolicy: effectiveResourceLeakPolicy,
       subagentQualityScore: options.subagentScore,
     });
 
@@ -126,6 +156,8 @@ export class GovernanceService {
       prTitle,
       prTitleSha256: hash(prTitle),
       auditResult,
+      coveragePolicy: effectiveCoveragePolicy,
+      resourceLeakPolicy: effectiveResourceLeakPolicy,
       passed: auditResult.technicalGate?.status === "PASS",
       auditedAt: new Date().toISOString(),
     };

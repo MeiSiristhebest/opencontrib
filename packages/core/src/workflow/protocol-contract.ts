@@ -389,7 +389,7 @@ const NEXT_ACTION_GUIDANCE: Record<
     mcpTool: PROTOCOL_CONTRACT_PHASES.PATCH_DRAFTED.mcp.tool,
   },
   collect_evidence: {
-    cliExample: PROTOCOL_CONTRACT_PHASES.EVIDENCE_COLLECTED.cli.example,
+    cliExample: "opencontrib evidence verify-green --test-cmd '<test_cmd>'",
     mcpTool: PROTOCOL_CONTRACT_PHASES.EVIDENCE_COLLECTED.mcp.tool,
   },
   prepare_pr_draft: {
@@ -423,11 +423,15 @@ export function getProtocolGuidance(
   if (!definition) {
     throw new Error(`Unknown protocol phase: ${String(phase)}`);
   }
-  const next = NEXT_ACTION_GUIDANCE[definition.suggestedNextAction];
+  const hasNoNextAction = definition.suggestedNextAction.startsWith("none");
+  const next = hasNoNextAction
+    ? undefined
+    : NEXT_ACTION_GUIDANCE[definition.suggestedNextAction];
   return {
     suggestedNextAction: definition.suggestedNextAction,
-    cliExample: next?.cliExample ?? definition.cli.example,
-    mcpTool: next?.mcpTool ?? definition.mcp.tool,
+    cliExample:
+      next?.cliExample ?? (hasNoNextAction ? "" : definition.cli.example),
+    mcpTool: next?.mcpTool ?? (hasNoNextAction ? "" : definition.mcp.tool),
     forbiddenActions: [...definition.forbiddenActions],
     invariants: [...definition.invariants],
   };

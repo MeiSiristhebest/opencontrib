@@ -145,6 +145,7 @@ export const setupCommand = new Command("setup")
 
         printJSON(result, opts.pretty);
       } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
         printJSON({ status: "error", message: err.message }, opts.pretty);
         throw new CliExitError(1);
       }

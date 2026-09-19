@@ -6,9 +6,7 @@ export interface PrData {
   problemSummary: string;
   rootCause: string;
   keyChanges: string[];
-  reproductionCommand: string;
-  verificationCommand: string;
-  testCount: number;
+  verificationCommand?: string;
   stressLoopCount?: number;
   dcoAuthorName?: string;
   dcoAuthorEmail?: string;

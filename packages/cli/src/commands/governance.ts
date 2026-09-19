@@ -66,7 +66,13 @@ const auditCommand = new Command("audit")
   .option(
     "--coverage-minimum <n>",
     "Minimum changed-code coverage percentage when coverage is required",
-    (v) => Number(v),
+    (v) => {
+      const parsed = Number(v);
+      if (!Number.isFinite(parsed)) {
+        throw new Error("--coverage-minimum must be a finite number");
+      }
+      return parsed;
+    },
     85,
   )
   .option(
@@ -92,6 +98,11 @@ const auditCommand = new Command("audit")
       pretty?: boolean;
     }) => {
       try {
+        const coverageMinimum = opts.coverageMinimum ?? 85;
+        if (coverageMinimum < 0 || coverageMinimum > 100) {
+          console.error("❌ --coverage-minimum must be between 0 and 100.");
+          throw new CliExitError(2);
+        }
         const runId = getRunManager().resolveRunId(opts.runId);
 
         let patchContent = opts.patch || "";
@@ -189,7 +200,7 @@ const auditCommand = new Command("audit")
           evidence,
           coveragePolicy: {
             required: opts.requireCoverage ?? false,
-            minimumChangedLineCoverage: opts.coverageMinimum ?? 85,
+            minimumChangedLineCoverage: coverageMinimum,
           },
           resourceLeakPolicy: {
             required: opts.requireResourceLeakCheck ?? false,
@@ -211,7 +222,7 @@ const auditCommand = new Command("audit")
             isAutonomous: opts.isAutonomous,
             coveragePolicy: {
               required: opts.requireCoverage ?? false,
-              minimumChangedLineCoverage: opts.coverageMinimum ?? 85,
+              minimumChangedLineCoverage: coverageMinimum,
             },
             resourceLeakPolicy: {
               required: opts.requireResourceLeakCheck ?? false,
@@ -403,12 +414,13 @@ const prTemplateCommand = new Command("pr-template")
           const parsed = EvidenceReportSchema.safeParse(
             run?.artifacts.evidence,
           );
-          if (!parsed.success) {
-            throw new Error(
-              `Tracked PR template requires canonical EvidenceReport for run ${runId}.`,
+          if (parsed.success) {
+            evidence = parsed.data;
+          } else {
+            console.warn(
+              `[Governance] Run ${runId} has no canonical EvidenceReport; rendering an unverified template.`,
             );
           }
-          evidence = parsed.data;
         }
 
         const prBody = renderMasterPrTemplate({

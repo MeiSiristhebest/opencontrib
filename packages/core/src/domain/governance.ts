@@ -8,12 +8,13 @@
  * process-environment modules are permitted here — the architecture guard enforces this.
  */
 
-import type {
-  ConfidenceBreakdown,
-  GovernanceAuditResult,
-  EvidenceReport,
-  GreenEvidence,
-  RedEvidence,
+import {
+  EvidenceReportSchema,
+  type ConfidenceBreakdown,
+  type GovernanceAuditResult,
+  type EvidenceReport,
+  type GreenEvidence,
+  type RedEvidence,
 } from "../contracts/schemas.js";
 import { validateMarkdownIntegrity } from "../governance/markdown-validator.js";
 
@@ -168,6 +169,7 @@ export function deriveEvidenceBackedQualityRubric(input: {
   styleScore?: number;
   securityScore?: number;
   subagentReviewAvailable?: boolean;
+  coverageMinimumPercent?: number;
 }): {
   breakdown: ConfidenceBreakdown;
   rubricResult: ReturnType<typeof calculate7DQualityRubric>;
@@ -184,6 +186,8 @@ export function deriveEvidenceBackedQualityRubric(input: {
     subagentReviewAvailable = true,
   } = input;
 
+  const coverageThreshold = input.coverageMinimumPercent ?? 85;
+
   // Root cause confidence: 95 only if empirical failure reproduction was confirmed, 90 if standard tests passed, 65 if untested
   const rootCause = hasReproductionAssertion ? 95 : testsPassed ? 90 : 65;
   // Implementation confidence: based on surgical diff size
@@ -199,13 +203,15 @@ export function deriveEvidenceBackedQualityRubric(input: {
   let testCoverage =
     passedUnitTests > 0 ? 92 : subagentReviewAvailable ? 85 : 70;
   if (typeof testCoveragePercent === "number") {
-    if (testCoveragePercent >= 85) {
+    if (testCoveragePercent >= coverageThreshold) {
       testCoverage = Math.min(
         100,
-        Math.round(85 + (testCoveragePercent - 85) * 1.0),
+        Math.round(
+          coverageThreshold + (testCoveragePercent - coverageThreshold) * 1.0,
+        ),
       );
     } else {
-      // Under 85% test coverage strictly caps score below 80 to enforce Gated Block
+      // Coverage below the repository threshold strictly caps the score below 80.
       testCoverage = Math.max(50, Math.round(testCoveragePercent * 0.85));
     }
   }
@@ -337,6 +343,18 @@ export function auditGovernance(
   }
   const maxDiffAllowed = input.maxDiffLines ?? 100;
 
+  const configuredCoverageMinimum =
+    input.coveragePolicy?.minimumChangedLineCoverage;
+  const coverageMinimumIsValid =
+    configuredCoverageMinimum === undefined ||
+    (typeof configuredCoverageMinimum === "number" &&
+      Number.isFinite(configuredCoverageMinimum) &&
+      configuredCoverageMinimum >= 0 &&
+      configuredCoverageMinimum <= 100);
+  const minimumChangedLineCoverage = coverageMinimumIsValid
+    ? (configuredCoverageMinimum ?? 85)
+    : 101;
+
   let breakdown = input.confidenceBreakdown;
   if (!breakdown) {
     const passedUnitTestsCount =
@@ -350,6 +368,10 @@ export function auditGovernance(
       ),
       passedUnitTestsCount,
       testCoveragePercent: input.evidence?.testCoveragePercent,
+      coverageMinimumPercent:
+        input.coveragePolicy?.required === true
+          ? minimumChangedLineCoverage
+          : 85,
       diffLines: lines,
       styleScore: input.subagentQualityScore,
       securityScore: input.subagentQualityScore,
@@ -386,15 +408,13 @@ export function auditGovernance(
   // audit never accepts a caller-supplied approval boolean.
   const requiresHumanApproval = true;
 
-  const minimumChangedLineCoverage = Math.min(
-    100,
-    Math.max(0, input.coveragePolicy?.minimumChangedLineCoverage ?? 85),
-  );
   const coverageGatePassed =
-    input.coveragePolicy?.required !== true ||
-    (input.evidence?.changedCodeCoverageStatus === "PASS" &&
-      typeof input.evidence.changedCodeCoveragePercent === "number" &&
-      input.evidence.changedCodeCoveragePercent >= minimumChangedLineCoverage);
+    coverageMinimumIsValid &&
+    (input.coveragePolicy?.required !== true ||
+      (input.evidence?.changedCodeCoverageStatus === "PASS" &&
+        typeof input.evidence.changedCodeCoveragePercent === "number" &&
+        input.evidence.changedCodeCoveragePercent >=
+          minimumChangedLineCoverage));
   const resourceLeakGatePassed =
     input.resourceLeakPolicy?.required !== true ||
     input.evidence?.handleLeakCheckPassed === "PASS";
@@ -452,7 +472,11 @@ export function auditGovernance(
       `Diff exceeds 100 lines (${lines} lines). Split into RFC Discussion issue first.`,
     );
   }
-  if (input.coveragePolicy?.required === true && !coverageGatePassed) {
+  if (!coverageMinimumIsValid) {
+    remediationSuggestions.push(
+      "Coverage policy minimum must be a finite number between 0 and 100; invalid thresholds fail closed.",
+    );
+  } else if (input.coveragePolicy?.required === true && !coverageGatePassed) {
     const measured = input.evidence?.changedCodeCoveragePercent;
     remediationSuggestions.push(
       typeof measured === "number"
@@ -584,29 +608,35 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
       ? data.keyChanges
       : ["Unavailable (key implementation steps not recorded)"];
   const evidence = data.evidence;
-  const reproductionVerified =
-    evidence?.reproductionVerified === true &&
-    evidence.redEvidence?.assertionMatched === true;
-  const canonicalReproductionCommand = reproductionVerified
-    ? evidence?.redEvidence?.command
+  const canonicalEvidence = EvidenceReportSchema.safeParse(evidence);
+  const validatedEvidence = canonicalEvidence.success
+    ? canonicalEvidence.data
     : undefined;
+  const reproductionVerified =
+    validatedEvidence?.reproductionVerified === true &&
+    validatedEvidence.redEvidence?.assertionMatched === true;
+  const canonicalReproductionCommand = reproductionVerified
+    ? validatedEvidence.redEvidence?.command
+    : undefined;
+  const explicitGreenResult = validatedEvidence?.greenEvidence?.passed;
   const verificationPassed =
-    evidence !== undefined &&
-    (evidence.allTestsPassing === true ||
-      evidence.greenEvidence?.passed === true);
+    validatedEvidence !== undefined &&
+    (explicitGreenResult !== undefined
+      ? explicitGreenResult
+      : validatedEvidence.allTestsPassing === true);
   const canonicalVerificationCommand = verificationPassed
-    ? evidence?.greenEvidence?.command
+    ? validatedEvidence?.greenEvidence?.command
     : undefined;
   const canonicalTestCount = verificationPassed
-    ? evidence?.passedUnitTestsCount
+    ? validatedEvidence?.passedUnitTestsCount
     : undefined;
   const stressLoopCount = verificationPassed
-    ? (evidence?.stressLoopRuns ?? 1)
+    ? (validatedEvidence?.stressLoopRuns ?? 1)
     : 0;
   const dcoAuthorName = data.dcoAuthorName;
   const dcoAuthorEmail = data.dcoAuthorEmail;
   const userValidationNote =
-    !evidence &&
+    !validatedEvidence &&
     (data.verificationCommand ||
       data.validationCommand ||
       data.validationOutputSnippet)
@@ -651,7 +681,8 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     ) {
       result = result.replace(
         /(##\s*(?:description|summary|motivation)[\s\S]*?)(?=##|$)/i,
-        `$1\n${problemSummary}\n\n**Root Cause**: ${rootCause}\n\n**Key Changes**:\n${keyChanges.map((c) => `- ${c}`).join("\n")}\n\n`,
+        (_match, section) =>
+          `${section}\n${problemSummary}\n\n**Root Cause**: ${rootCause}\n\n**Key Changes**:\n${keyChanges.map((c) => `- ${c}`).join("\n")}\n\n`,
       );
     }
     if (
@@ -665,10 +696,15 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
           : `${canonicalTestCount} tests passed`;
       result = result.replace(
         /(##\s*(?:test plan|verification|how has this been tested)[\s\S]*?)(?=##|$)/i,
-        `$1\n${reproductionDetail}\n${verificationLine}\n- Test Suite: ${testSuite}\n${userValidationNote}\n\n`,
+        (_match, section) =>
+          `${section}\n${reproductionDetail}\n${verificationLine}\n- Test Suite: ${testSuite}\n${userValidationNote}\n\n`,
       );
     }
-    return result.trim();
+    const nativeDcoTrailer =
+      dcoAuthorName && dcoAuthorEmail
+        ? `\n\nSigned-off-by: ${dcoAuthorName} <${dcoAuthorEmail}>`
+        : "";
+    return `${result.trim()}${nativeDcoTrailer}`;
   }
 
   const changeList = keyChanges.map((c) => `- ${c}`).join("\n");
@@ -678,12 +714,12 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
       : "";
 
   let regressionLine = "- **Regression Isolation**: Not recorded.";
-  if (evidence?.baselineFlakyTests !== undefined) {
-    if (evidence.baselineFlakyTests.length === 0) {
+  if (validatedEvidence?.baselineFlakyTests !== undefined) {
+    if (validatedEvidence.baselineFlakyTests.length === 0) {
       regressionLine =
         "- **Regression Isolation**: Verified 0 flaky baseline regressions across sandbox runs.";
     } else {
-      regressionLine = `- **Regression Isolation**: ${evidence.baselineFlakyTests.length} baseline flaky test(s) observed.`;
+      regressionLine = `- **Regression Isolation**: ${validatedEvidence.baselineFlakyTests.length} baseline flaky test(s) observed.`;
     }
   }
 

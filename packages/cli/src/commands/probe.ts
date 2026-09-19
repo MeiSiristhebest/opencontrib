@@ -190,24 +190,13 @@ probeCommand
         opts.pretty,
       );
 
-      const firstPointer = triaged.topPointers[0];
-      const nextCmd = firstPointer
-        ? `opencontrib pointer resolve ${firstPointer.uri} --view slice`
-        : `opencontrib pointer list`;
-
       printPhaseGuidance({
         currentPhase: "PROBE_COMPLETED",
         runId,
         status: "SUCCESS",
         humanCheckpoint: "Checkpoint 1 (Review Smart Pointer Findings)",
-        nextCommand: nextCmd,
-        forbiddenActions: [
-          "DO NOT perform blind sequential file reads (> 3 views) across the repository.",
-          "Pinpoint symbols and defect context strictly via Smart Pointer slices (ptr://...).",
-        ],
-        invariants: [
-          "Pointers have been persisted to session store and can be dereferenced via opencontrib pointer resolve.",
-        ],
+        // Derive next command, forbidden actions, and invariants from the
+        // canonical PROBE_COMPLETED protocol contract.
       });
     } catch (err: any) {
       console.error(`❌ Probe execution failed: ${err.message}`);

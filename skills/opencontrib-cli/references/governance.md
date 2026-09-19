@@ -23,6 +23,7 @@ opencontrib governance audit \
 | `--pr-body`                     | string | —        | Proposed PR body text                                                             |
 | `--pr-body-file`                | string | —        | Path to clean markdown file (prevents shell escaping corruption)                  |
 | `--evidence`                    | string | —        | JSON evidence from `evidence` command                                             |
+| `--evidence-file`               | string | —        | Path to a canonical evidence JSON file                                            |
 | `--subagent-score`              | number | —        | External review score (0-100)                                                     |
 | `--require-coverage`            | flag   | —        | Fail closed unless measured changed-code coverage satisfies the repository policy |
 | `--coverage-minimum`            | number | —        | Minimum changed-code coverage percentage (default: 85)                            |
@@ -101,6 +102,7 @@ opencontrib governance pr-template \
 | `--native-template`   | string          | —        | Repo PR template markdown                                                                       |
 | `--is-docs-only`      | flag            | —        | Documentation-only change                                                                       |
 | `--ai-disclosure`     | flag            | —        | AI disclosure required                                                                          |
+| `--run-id`            | string          | —        | Run ID (defaults to the active session; canonical evidence is loaded when present)              |
 | `--pretty`            | flag            | —        | Pretty-print output                                                                             |
 
 **Output**: `{"status":"success","prBody":"### Problem Description\nFixes #42\n..."}`

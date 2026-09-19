@@ -954,22 +954,22 @@ export class PrSubmissionStep implements PipelineStep {
     }
 
     const dcoIdentity = readGitDcoIdentity(ctx.workspace?.workspacePath);
+    if (!dcoIdentity) {
+      console.warn(
+        "[Governance] No real Git identity found; omitting Signed-off-by rather than generating a synthetic DCO trailer.",
+      );
+    }
     const prDraftText = buildPrDescription({
       issueNumber: selectedOpp.issueNumber,
       problemSummary: activePatch?.summary || selectedOpp.title,
       rootCause:
         activePatch?.rationale || "Unavailable (root cause not recorded)",
       keyChanges: derivedKeyChanges,
-      reproductionCommand:
-        ctx.evidenceReport?.redEvidence?.command ||
-        activePatch?.regressionTestPlan?.[0] ||
-        "",
       verificationCommand: ctx.evidenceReport
         ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
           ctx.testCmd ||
           ""
         : "",
-      testCount: ctx.evidenceReport?.passedUnitTestsCount ?? 0,
       evidence: ctx.evidenceReport,
       ...dcoIdentity,
     });

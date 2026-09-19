@@ -9,6 +9,13 @@ export interface OpenContribPolicy {
   maxRuntimeSeconds: number;
   enableHeavy: boolean;
   allowMutation: boolean;
+  coverage?: {
+    required: boolean;
+    minimumChangedLineCoverage: number;
+  };
+  resourceLeakCheck?: {
+    required: boolean;
+  };
 }
 
 /**
@@ -100,6 +107,19 @@ export function loadWorkspaceConfig(
           policy: {
             ...DEFAULT_CONFIG.policy,
             ...(parsed.policy || {}),
+            coverage: parsed.policy?.coverage
+              ? {
+                  required: Boolean(parsed.policy.coverage.required),
+                  minimumChangedLineCoverage: Number(
+                    parsed.policy.coverage.minimumChangedLineCoverage ?? 85,
+                  ),
+                }
+              : DEFAULT_CONFIG.policy.coverage,
+            resourceLeakCheck: parsed.policy?.resourceLeakCheck
+              ? {
+                  required: Boolean(parsed.policy.resourceLeakCheck.required),
+                }
+              : DEFAULT_CONFIG.policy.resourceLeakCheck,
           },
           toolchains: {
             ...DEFAULT_CONFIG.toolchains,

@@ -101,8 +101,9 @@ const workspacePrepare = new Command("prepare")
           humanCheckpoint: "Checkpoint 1 (Sandbox Isolated & Ready)",
           nextCommand: guidance.cliExample
             .replace("<workspace>", `"${context.workspacePath}"`)
-            .replace("<command>", '"<test_command>"')
-            .replace("<failure-marker>", '"<assertion>"'),
+            .replace("'<command>'", "'<test_command>'")
+            .replace("'<failure-marker>'", "'<assertion>'")
+            .replace("[--run-id <id>]", `--run-id ${effectiveRunId}`),
           forbiddenActions: guidance.forbiddenActions,
           invariants: [
             ...guidance.invariants,
