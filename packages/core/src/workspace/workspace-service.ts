@@ -3,6 +3,7 @@ import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import {
   hashTrustedPolicySnapshot,
+  isTrustedPolicySnapshot,
   loadHostPolicy,
   mergeTrustedPolicySnapshots,
   parsePolicyConfig,
@@ -31,7 +32,11 @@ export interface WorkspaceArtifactData {
 }
 
 const BASELINE_POLICY_PATHS = [
+  ".opencontrib.yaml",
+  ".opencontrib.yml",
   ".opencontrib.json",
+  ".opencontrib/config.yaml",
+  ".opencontrib/config.yml",
   ".opencontrib/config.json",
 ] as const;
 
@@ -40,15 +45,43 @@ function readBaselineRepoPolicy(
   baseRepoPath: string,
   baseCommitSha: string,
 ) {
+  // Lightweight injected managers used by dry-run orchestration do not expose
+  // Git inspection. They cannot contribute a repository policy, but they are
+  // not evidence of a Git failure; production WorktreeManager always does.
   if (typeof worktreeManager.runGit !== "function") return undefined;
+
   for (const policyPath of BASELINE_POLICY_PATHS) {
+    const listing = worktreeManager.runGit([
+      "-C",
+      baseRepoPath,
+      "ls-tree",
+      "-r",
+      "--name-only",
+      baseCommitSha,
+      "--",
+      policyPath,
+    ]);
+    if (!listing.success) {
+      throw new Error(
+        `WorkspacePolicySnapshotError: cannot inspect baseline policy path "${policyPath}" at base commit ${baseCommitSha}: ${listing.stderr.trim() || "git ls-tree failed"}.`,
+      );
+    }
+    const existsInBase = listing.stdout
+      .split(/\r?\n/)
+      .some((line) => line.trim() === policyPath);
+    if (!existsInBase) continue;
+
     const result = worktreeManager.runGit([
       "-C",
       baseRepoPath,
       "show",
       `${baseCommitSha}:${policyPath}`,
     ]);
-    if (!result.success) continue;
+    if (!result.success) {
+      throw new Error(
+        `WorkspacePolicySnapshotError: cannot read baseline policy path "${policyPath}" at base commit ${baseCommitSha}: ${result.stderr.trim() || "git show failed"}.`,
+      );
+    }
     return parsePolicyConfig(result.stdout);
   }
   return undefined;
@@ -62,23 +95,6 @@ function captureTrustedPolicySnapshot(
   return mergeTrustedPolicySnapshots(
     loadHostPolicy(),
     readBaselineRepoPolicy(worktreeManager, baseRepoPath, baseCommitSha),
-  );
-}
-
-function isTrustedPolicySnapshot(
-  value: unknown,
-): value is TrustedPolicySnapshot {
-  if (!value || typeof value !== "object") return false;
-  const snapshot = value as Partial<TrustedPolicySnapshot>;
-  return (
-    !!snapshot.coverage &&
-    typeof snapshot.coverage.required === "boolean" &&
-    typeof snapshot.coverage.minimumChangedLineCoverage === "number" &&
-    Number.isFinite(snapshot.coverage.minimumChangedLineCoverage) &&
-    snapshot.coverage.minimumChangedLineCoverage >= 0 &&
-    snapshot.coverage.minimumChangedLineCoverage <= 100 &&
-    !!snapshot.resourceLeakCheck &&
-    typeof snapshot.resourceLeakCheck.required === "boolean"
   );
 }
 

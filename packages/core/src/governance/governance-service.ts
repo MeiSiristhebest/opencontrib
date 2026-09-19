@@ -10,6 +10,7 @@ import { auditGovernance } from "./governance-auditor.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 import {
   hashTrustedPolicySnapshot,
+  isTrustedPolicySnapshot,
   mergeTrustedPolicySnapshots,
   type TrustedPolicySnapshot,
 } from "../kernel/config.js";
@@ -29,23 +30,6 @@ function hash(value: unknown): string {
   const content =
     typeof value === "string" ? value : JSON.stringify(value ?? "");
   return createHash("sha256").update(content).digest("hex");
-}
-
-function isTrustedPolicySnapshot(
-  value: unknown,
-): value is TrustedPolicySnapshot {
-  if (!value || typeof value !== "object") return false;
-  const snapshot = value as Partial<TrustedPolicySnapshot>;
-  return (
-    !!snapshot.coverage &&
-    typeof snapshot.coverage.required === "boolean" &&
-    typeof snapshot.coverage.minimumChangedLineCoverage === "number" &&
-    Number.isFinite(snapshot.coverage.minimumChangedLineCoverage) &&
-    snapshot.coverage.minimumChangedLineCoverage >= 0 &&
-    snapshot.coverage.minimumChangedLineCoverage <= 100 &&
-    !!snapshot.resourceLeakCheck &&
-    typeof snapshot.resourceLeakCheck.required === "boolean"
-  );
 }
 
 export class GovernanceService {
@@ -180,10 +164,7 @@ export class GovernanceService {
     const requestedPolicy = {
       coverage: options.coveragePolicy
         ? {
-            required:
-              options.coveragePolicy.required === true ||
-              typeof options.coveragePolicy.minimumChangedLineCoverage ===
-                "number",
+            required: options.coveragePolicy.required === true,
             minimumChangedLineCoverage:
               options.coveragePolicy.minimumChangedLineCoverage,
           }

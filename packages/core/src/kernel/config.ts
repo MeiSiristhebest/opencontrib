@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { load as loadYaml } from "js-yaml";
 import * as fs from "fs";
 import * as path from "path";
 import type { CapabilityType } from "./capability.js";
@@ -105,20 +106,29 @@ type PolicyConfigInput = {
   };
 };
 
-/** Parse only the policy portion of a trusted JSON configuration artifact. */
-export function parsePolicyConfig(raw: string): OpenContribPolicy {
+function parseConfigDocument(raw: string): Record<string, unknown> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(
-      `Invalid trusted policy config: ${error instanceof Error ? error.message : String(error)}`,
-    );
+  } catch (jsonError) {
+    try {
+      parsed = loadYaml(raw);
+    } catch (yamlError) {
+      throw new Error(
+        `Invalid trusted policy config: ${yamlError instanceof Error ? yamlError.message : jsonError instanceof Error ? jsonError.message : String(yamlError)}`,
+      );
+    }
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error("Invalid trusted policy config: root must be an object.");
   }
-  const configuredPolicy = (parsed as { policy?: unknown }).policy;
+  return parsed as Record<string, unknown>;
+}
+
+/** Parse only the policy portion of a trusted JSON or YAML configuration artifact. */
+export function parsePolicyConfig(raw: string): OpenContribPolicy {
+  const parsed = parseConfigDocument(raw);
+  const configuredPolicy = parsed.policy;
   if (
     configuredPolicy !== undefined &&
     (typeof configuredPolicy !== "object" ||
@@ -201,9 +211,15 @@ export function parsePolicyConfig(raw: string): OpenContribPolicy {
 
 /** Load only host-owned policy; never inspect a contribution worktree. */
 export function loadHostPolicy(): OpenContribPolicy {
+  const dataDir = getOpenContribDataDir();
+  const homeConfigDir = path.join(getOpenContribHome(), ".opencontrib");
   const candidates = [
-    path.join(getOpenContribDataDir(), "config.json"),
-    path.join(getOpenContribHome(), ".opencontrib", "config.json"),
+    path.join(dataDir, "config.json"),
+    path.join(dataDir, "config.yaml"),
+    path.join(dataDir, "config.yml"),
+    path.join(homeConfigDir, "config.json"),
+    path.join(homeConfigDir, "config.yaml"),
+    path.join(homeConfigDir, "config.yml"),
   ].filter((candidate, index, all) => all.indexOf(candidate) === index);
   for (const candidate of candidates) {
     if (!fs.existsSync(candidate)) continue;
@@ -221,22 +237,38 @@ export function loadHostPolicy(): OpenContribPolicy {
 export function toTrustedPolicySnapshot(
   policy: PolicyConfigInput | OpenContribPolicy | TrustedPolicySnapshot,
 ): TrustedPolicySnapshot {
-  const coverageRequired = policy.coverage?.required === true;
   const configuredMinimum = policy.coverage?.minimumChangedLineCoverage;
   return {
     coverage: {
-      required: coverageRequired,
-      // A non-required/default minimum is advisory and must not become a
-      // hidden hard gate when trusted policy is merged.
+      required: policy.coverage?.required === true,
+      // Preserve advisory floors for provenance and hashing. Governance keeps
+      // the required flag separate and only enforces this value when required.
       minimumChangedLineCoverage:
-        coverageRequired && typeof configuredMinimum === "number"
+        typeof configuredMinimum === "number"
           ? configuredMinimum
-          : 0,
+          : (DEFAULT_CONFIG.policy.coverage?.minimumChangedLineCoverage ?? 85),
     },
     resourceLeakCheck: {
       required: policy.resourceLeakCheck?.required === true,
     },
   };
+}
+
+export function isTrustedPolicySnapshot(
+  value: unknown,
+): value is TrustedPolicySnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Partial<TrustedPolicySnapshot>;
+  return (
+    !!snapshot.coverage &&
+    typeof snapshot.coverage.required === "boolean" &&
+    typeof snapshot.coverage.minimumChangedLineCoverage === "number" &&
+    Number.isFinite(snapshot.coverage.minimumChangedLineCoverage) &&
+    snapshot.coverage.minimumChangedLineCoverage >= 0 &&
+    snapshot.coverage.minimumChangedLineCoverage <= 100 &&
+    !!snapshot.resourceLeakCheck &&
+    typeof snapshot.resourceLeakCheck.required === "boolean"
+  );
 }
 
 /** Merge policy sources monotonically: required flags OR, thresholds MAX. */
@@ -278,16 +310,22 @@ export function hashTrustedPolicySnapshot(
  * Loads project-level or user-level OpenContrib configuration.
  * Resolution priority:
  * 1. <workspace>/.opencontrib.yaml or .opencontrib.json
- * 2. <workspace>/.opencontrib/config.json
- * 3. ~/.opencontrib/config.json
+ * 2. <workspace>/.opencontrib/config.yaml or config.json
+ * 3. ~/.opencontrib/config.yaml or config.json
  * 4. DEFAULT_CONFIG
  */
 export function loadWorkspaceConfig(
   workspacePath: string = process.cwd(),
 ): OpenContribConfig {
   const candidates = [
+    path.join(workspacePath, ".opencontrib.yaml"),
+    path.join(workspacePath, ".opencontrib.yml"),
     path.join(workspacePath, ".opencontrib.json"),
+    path.join(workspacePath, ".opencontrib", "config.yaml"),
+    path.join(workspacePath, ".opencontrib", "config.yml"),
     path.join(workspacePath, ".opencontrib", "config.json"),
+    path.join(getOpenContribHome(), ".opencontrib", "config.yaml"),
+    path.join(getOpenContribHome(), ".opencontrib", "config.yml"),
     path.join(getOpenContribHome(), ".opencontrib", "config.json"),
   ];
 
@@ -295,13 +333,15 @@ export function loadWorkspaceConfig(
     if (fs.existsSync(candidate)) {
       try {
         const raw = fs.readFileSync(candidate, "utf8");
-        const parsed = JSON.parse(raw);
-        const configuredPolicy = parsed.policy;
+        const parsed = parseConfigDocument(raw);
+        const configuredPolicyValue = parsed.policy;
+        const configuredPolicy = configuredPolicyValue as
+          PolicyConfigInput | undefined;
         if (
-          configuredPolicy !== undefined &&
-          (typeof configuredPolicy !== "object" ||
-            configuredPolicy === null ||
-            Array.isArray(configuredPolicy))
+          configuredPolicyValue !== undefined &&
+          (typeof configuredPolicyValue !== "object" ||
+            configuredPolicyValue === null ||
+            Array.isArray(configuredPolicyValue))
         ) {
           throw new Error("Invalid trusted policy: policy must be an object.");
         }
@@ -353,10 +393,30 @@ export function loadWorkspaceConfig(
             "Invalid trusted coverage policy: minimumChangedLineCoverage must be a finite number between 0 and 100.",
           );
         }
+        const configuredCapabilities = Array.isArray(parsed.enabledCapabilities)
+          ? (parsed.enabledCapabilities as CapabilityType[])
+          : DEFAULT_CONFIG.enabledCapabilities;
+        const configuredToolchains =
+          parsed.toolchains &&
+          typeof parsed.toolchains === "object" &&
+          !Array.isArray(parsed.toolchains)
+            ? Object.fromEntries(
+                Object.entries(parsed.toolchains).filter(
+                  ([, value]) => typeof value === "string",
+                ),
+              )
+            : {};
+        const configuredCustomRules = Array.isArray(parsed.customRules)
+          ? parsed.customRules.filter(
+              (rule): rule is string => typeof rule === "string",
+            )
+          : [];
         return {
-          version: parsed.version || DEFAULT_CONFIG.version,
-          enabledCapabilities:
-            parsed.enabledCapabilities || DEFAULT_CONFIG.enabledCapabilities,
+          version:
+            typeof parsed.version === "string"
+              ? parsed.version
+              : DEFAULT_CONFIG.version,
+          enabledCapabilities: configuredCapabilities,
           policy: {
             ...DEFAULT_CONFIG.policy,
             ...(configuredPolicy || {}),
@@ -384,9 +444,9 @@ export function loadWorkspaceConfig(
           },
           toolchains: {
             ...DEFAULT_CONFIG.toolchains,
-            ...(parsed.toolchains || {}),
+            ...configuredToolchains,
           },
-          customRules: parsed.customRules || [],
+          customRules: configuredCustomRules,
         };
       } catch (error) {
         if (

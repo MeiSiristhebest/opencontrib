@@ -20,6 +20,7 @@ import { createTrustedApprovalAuthority } from "../src/governance/approval-autho
 import { GovernanceService } from "../src/governance/governance-service.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
+import { WorkspaceService } from "../src/workspace/workspace-service.js";
 
 const testApprovalAuthority = () =>
   createTrustedApprovalAuthority({
@@ -61,6 +62,7 @@ function seedGovernanceReadyRun(
   runId: string,
   body = "pr body",
   workspacePath = "/tmp",
+  options: { skipWorkspace?: boolean } = {},
 ) {
   const baseCommitSha = "a".repeat(40);
   const patch = {
@@ -103,35 +105,32 @@ function seedGovernanceReadyRun(
     validatedAt: "2026-01-01T00:01:00.000Z",
   };
   validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
-  saveCanonicalArtifact(
-    manager,
-    runId,
-    "workspace",
-    {
-      workspacePath,
-      branchName: "fixture-branch",
-      baseRepoPath: "/tmp",
-      baseBranch: "main",
-      baseCommitSha,
-      isWorktree: false,
-      repoFullName: "org/repo",
-      policySnapshot: {
-        coverage: {
-          required: true,
-          minimumChangedLineCoverage: 90,
-        },
-        resourceLeakCheck: { required: false },
+  if (!options.skipWorkspace) {
+    const policySnapshot = {
+      coverage: {
+        required: true,
+        minimumChangedLineCoverage: 90,
       },
-      policySha256: hashTrustedPolicySnapshot({
-        coverage: {
-          required: true,
-          minimumChangedLineCoverage: 90,
-        },
-        resourceLeakCheck: { required: false },
-      }),
-    },
-    "WORKSPACE_PREPARED",
-  );
+      resourceLeakCheck: { required: false },
+    } as const;
+    saveCanonicalArtifact(
+      manager,
+      runId,
+      "workspace",
+      {
+        workspacePath,
+        branchName: "fixture-branch",
+        baseRepoPath: "/tmp",
+        baseBranch: "main",
+        baseCommitSha,
+        isWorktree: false,
+        repoFullName: "org/repo",
+        policySnapshot,
+        policySha256: hashTrustedPolicySnapshot(policySnapshot),
+      },
+      "WORKSPACE_PREPARED",
+    );
+  }
   saveCanonicalArtifact(
     manager,
     runId,
@@ -210,32 +209,86 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
   it("uses the frozen policy snapshot after the agent lowers worktree policy", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-policy-snapshot-"));
     const workspacePath = join(baseDir, "workspace");
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = join(baseDir, "host-home");
     mkdirSync(workspacePath, { recursive: true });
-    writeFileSync(
-      join(workspacePath, ".opencontrib.json"),
-      JSON.stringify({
-        policy: {
-          coverage: {
-            required: false,
-            minimumChangedLineCoverage: 0,
-          },
-        },
-      }),
-    );
     try {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const fakeWorktreeManager = {
+        runGit: (args: string[]) => {
+          if (args.includes("ls-tree")) {
+            return {
+              success: true,
+              stdout: args.includes(".opencontrib.json")
+                ? ".opencontrib.json\n"
+                : "",
+              stderr: "",
+            };
+          }
+          if (args.includes("show")) {
+            return {
+              success: true,
+              stdout: JSON.stringify({
+                policy: {
+                  coverage: {
+                    required: true,
+                    minimumChangedLineCoverage: 90,
+                  },
+                },
+              }),
+              stderr: "",
+            };
+          }
+          return { success: true, stdout: "", stderr: "" };
+        },
+        createIsolatedWorkspace: () => ({
+          workspacePath,
+          branchName: "fixture-branch",
+          isWorktree: false,
+          baseRepoPath: workspacePath,
+          baseCommitSha: "a".repeat(40),
+          baseBranch: "main",
+        }),
+        detectDefaultBranch: () => "main",
+      } as any;
+      const prepared = new WorkspaceService(
+        manager,
+        fakeWorktreeManager,
+      ).prepare({
+        runId: manifest.runId,
+        issueOrTaskId: 1,
+      });
+
+      writeFileSync(
+        join(workspacePath, ".opencontrib.json"),
+        JSON.stringify({
+          policy: {
+            coverage: {
+              required: false,
+              minimumChangedLineCoverage: 0,
+            },
+          },
+        }),
+      );
       const decision = seedGovernanceReadyRun(
         manager,
         manifest.runId,
         "pr body",
         workspacePath,
+        { skipWorkspace: true },
       );
 
-      expect(decision.coveragePolicy).toEqual({
-        required: true,
-        minimumChangedLineCoverage: 90,
+      expect(prepared.artifact.policySnapshot).toEqual({
+        coverage: {
+          required: true,
+          minimumChangedLineCoverage: 90,
+        },
+        resourceLeakCheck: { required: false },
       });
+      expect(decision.coveragePolicy).toEqual(
+        prepared.artifact.policySnapshot.coverage,
+      );
       expect(decision.policySha256).toBe(
         hashTrustedPolicySnapshot({
           coverage: {
@@ -246,6 +299,8 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         }),
       );
     } finally {
+      if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+      else process.env.OPENCONTRIB_HOME = previousHome;
       rmSync(baseDir, { recursive: true, force: true });
     }
   });

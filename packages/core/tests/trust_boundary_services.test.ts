@@ -640,6 +640,8 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
 
   it("WorkspaceService enforces strict WORM: cannot re-prepare workspace if already allocated", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-worm-"));
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = join(baseDir, "isolated-home");
     try {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "owner/repo" });
@@ -649,6 +651,15 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
 
       const fakeWorktreeManager = {
         runGit: (args: string[]) => {
+          if (args.includes("ls-tree")) {
+            return {
+              success: true,
+              stdout: args.includes(".opencontrib.json")
+                ? ".opencontrib.json\n"
+                : "",
+              stderr: "",
+            };
+          }
           if (args.includes("show")) {
             return {
               success: true,
@@ -711,6 +722,47 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         });
       }).toThrow(/WorkspaceImmutableViolationError/);
     } finally {
+      if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+      else process.env.OPENCONTRIB_HOME = previousHome;
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("WorkspaceService fails closed when baseline policy inspection fails", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-policy-failure-"));
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = join(baseDir, "isolated-home");
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/repo" });
+      const wsPath = join(baseDir, "allocated-ws");
+      mkdirSync(wsPath, { recursive: true });
+      const fakeWorktreeManager = {
+        runGit: (args: string[]) =>
+          args.includes("ls-tree")
+            ? { success: false, stdout: "", stderr: "fatal: invalid base" }
+            : { success: true, stdout: "", stderr: "" },
+        createIsolatedWorkspace: () => ({
+          workspacePath: wsPath,
+          branchName: "opencontrib/run-test",
+          isWorktree: false,
+          baseRepoPath: wsPath,
+          baseCommitSha: "a".repeat(40),
+          baseBranch: "main",
+        }),
+        detectDefaultBranch: () => "main",
+      } as any;
+      const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+
+      expect(() =>
+        new WorkspaceService(manager, fakeWorktreeManager).prepare({
+          runId: manifest.runId,
+          issueOrTaskId: 1,
+        }),
+      ).toThrow(/WorkspacePolicySnapshotError/);
+    } finally {
+      if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+      else process.env.OPENCONTRIB_HOME = previousHome;
       rmSync(baseDir, { recursive: true, force: true });
     }
   });

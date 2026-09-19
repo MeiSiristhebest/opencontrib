@@ -33,6 +33,7 @@ import {
   hashTrustedPolicySnapshot,
   loadHostPolicy,
   mergeTrustedPolicySnapshots,
+  parsePolicyConfig,
 } from "../kernel/config.js";
 import {
   buildRunTransferBundle,
@@ -550,6 +551,33 @@ export interface ScriptedAgent {
   agentWorkspacePath: string;
 }
 
+const BENCHMARK_BASELINE_POLICY_PATHS = [
+  ".opencontrib.yaml",
+  ".opencontrib.yml",
+  ".opencontrib.json",
+  ".opencontrib/config.yaml",
+  ".opencontrib/config.yml",
+  ".opencontrib/config.json",
+] as const;
+
+function readBenchmarkBasePolicy(fixture: BenchmarkFixture) {
+  for (const policyPath of BENCHMARK_BASELINE_POLICY_PATHS) {
+    let raw: string;
+    try {
+      raw = execFileSync("git", ["show", `${fixture.baseSha}:${policyPath}`], {
+        cwd: fixture.fixtureDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      // A missing policy path is expected.
+      continue;
+    }
+    return parsePolicyConfig(raw);
+  }
+  return undefined;
+}
+
 export interface SeedAgentOptions {
   rootDir: string;
   fixture: BenchmarkFixture;
@@ -594,7 +622,10 @@ export async function seedScriptedAgent(
   const agentRunManager = new ContributionRunManager({
     baseDir: options.agentRunsBaseDir ?? join(rootDir, "agent-runs"),
   });
-  const agentPolicySnapshot = mergeTrustedPolicySnapshots(loadHostPolicy());
+  const agentPolicySnapshot = mergeTrustedPolicySnapshots(
+    loadHostPolicy(),
+    readBenchmarkBasePolicy(fixture),
+  );
   const manifest = agentRunManager.createRun({
     repoFullName: fixture.repoFullName,
     issueNumber: fixture.issueNumber,
