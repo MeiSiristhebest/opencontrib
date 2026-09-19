@@ -323,28 +323,56 @@ export function isTrustedPolicySnapshot(
   );
 }
 
-/** Merge policy sources monotonically: required flags OR, thresholds MAX. */
+/**
+ * Merge policy sources monotonically.
+ *
+ * Coverage minimums from advisory sources are provenance only. Once any
+ * source requires coverage, only required-source minimums form the hard floor;
+ * otherwise advisory minimums are retained as advisory provenance.
+ */
 export function mergeTrustedPolicySnapshots(
   ...policies: Array<
     PolicyConfigInput | OpenContribPolicy | TrustedPolicySnapshot | undefined
   >
 ): TrustedPolicySnapshot {
-  const snapshots = policies
-    .filter(Boolean)
-    .map((policy) => toTrustedPolicySnapshot(policy!));
+  const entries = policies.flatMap((policy) =>
+    policy ? [{ policy, snapshot: toTrustedPolicySnapshot(policy) }] : [],
+  );
+  const requiredCoverageEntries = entries.filter(
+    ({ snapshot }) => snapshot.coverage.required,
+  );
+  const advisoryCoverageEntries = entries.filter(
+    ({ snapshot }) => !snapshot.coverage.required,
+  );
+  const advisoryFloor = Math.max(
+    0,
+    ...advisoryCoverageEntries.map(
+      ({ snapshot }) => snapshot.coverage.minimumChangedLineCoverage,
+    ),
+  );
+  const minimumChangedLineCoverage =
+    requiredCoverageEntries.length > 0
+      ? Math.max(
+          0,
+          ...requiredCoverageEntries.map(({ policy, snapshot }) => {
+            const configuredMinimum =
+              policy.coverage?.minimumChangedLineCoverage;
+            if (configuredMinimum !== undefined) {
+              return snapshot.coverage.minimumChangedLineCoverage;
+            }
+            if (advisoryCoverageEntries.length > 0) return advisoryFloor;
+            return snapshot.coverage.minimumChangedLineCoverage;
+          }),
+        )
+      : advisoryFloor;
   return {
     coverage: {
-      required: snapshots.some((snapshot) => snapshot.coverage.required),
-      minimumChangedLineCoverage: Math.max(
-        0,
-        ...snapshots.map(
-          (snapshot) => snapshot.coverage.minimumChangedLineCoverage,
-        ),
-      ),
+      required: requiredCoverageEntries.length > 0,
+      minimumChangedLineCoverage,
     },
     resourceLeakCheck: {
-      required: snapshots.some(
-        (snapshot) => snapshot.resourceLeakCheck.required,
+      required: entries.some(
+        ({ snapshot }) => snapshot.resourceLeakCheck.required,
       ),
     },
   };

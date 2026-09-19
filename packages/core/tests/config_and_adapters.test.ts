@@ -9,6 +9,7 @@ import {
   type RepoFingerprint,
 } from "../src/index.js";
 import {
+  mergeTrustedPolicySnapshots,
   parsePolicyConfig,
   toTrustedPolicySnapshot,
 } from "../src/kernel/config.js";
@@ -54,6 +55,82 @@ policy:
     expect(
       toTrustedPolicySnapshot({ coverage: { required: true } }).coverage,
     ).toEqual({ required: true, minimumChangedLineCoverage: 85 });
+  });
+
+  it("ignores advisory floors when a required repository floor exists", () => {
+    const effective = mergeTrustedPolicySnapshots(
+      {
+        coverage: {
+          required: false,
+          minimumChangedLineCoverage: 85,
+        },
+        resourceLeakCheck: { required: false },
+      },
+      {
+        coverage: {
+          required: true,
+          minimumChangedLineCoverage: 70,
+        },
+        resourceLeakCheck: { required: false },
+      },
+    );
+
+    expect(effective.coverage).toEqual({
+      required: true,
+      minimumChangedLineCoverage: 70,
+    });
+  });
+
+  it("keeps the strictest minimum across required policy sources", () => {
+    const effective = mergeTrustedPolicySnapshots(
+      {
+        coverage: {
+          required: true,
+          minimumChangedLineCoverage: 90,
+        },
+        resourceLeakCheck: { required: false },
+      },
+      {
+        coverage: {
+          required: true,
+          minimumChangedLineCoverage: 70,
+        },
+        resourceLeakCheck: { required: false },
+      },
+    );
+
+    expect(effective.coverage).toEqual({
+      required: true,
+      minimumChangedLineCoverage: 90,
+    });
+  });
+
+  it("retains the trusted advisory floor when coverage is later required", () => {
+    const trusted = mergeTrustedPolicySnapshots(
+      {
+        coverage: {
+          required: false,
+          minimumChangedLineCoverage: 90,
+        },
+        resourceLeakCheck: { required: false },
+      },
+      {
+        coverage: {
+          required: false,
+          minimumChangedLineCoverage: 70,
+        },
+        resourceLeakCheck: { required: false },
+      },
+    );
+    const effective = mergeTrustedPolicySnapshots(trusted, {
+      coverage: { required: true },
+      resourceLeakCheck: { required: false },
+    });
+
+    expect(effective.coverage).toEqual({
+      required: true,
+      minimumChangedLineCoverage: 90,
+    });
   });
 
   it("filters registered capabilities based on workspace configuration", async () => {
