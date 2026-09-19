@@ -323,21 +323,34 @@ export function isTrustedPolicySnapshot(
   );
 }
 
-/** Merge policy sources monotonically: required flags OR, thresholds MAX. */
+/**
+ * Merge policy sources monotonically.
+ *
+ * Coverage minimums from advisory sources are provenance only. Once any
+ * source requires coverage, only required-source minimums form the hard floor;
+ * otherwise advisory minimums are retained as advisory provenance.
+ */
 export function mergeTrustedPolicySnapshots(
   ...policies: Array<
     PolicyConfigInput | OpenContribPolicy | TrustedPolicySnapshot | undefined
   >
 ): TrustedPolicySnapshot {
-  const snapshots = policies
-    .filter(Boolean)
-    .map((policy) => toTrustedPolicySnapshot(policy!));
+  const snapshots = policies.flatMap((policy) =>
+    policy ? [toTrustedPolicySnapshot(policy)] : [],
+  );
+  const requiredCoverageSnapshots = snapshots.filter(
+    (snapshot) => snapshot.coverage.required,
+  );
+  const coverageFloorSources =
+    requiredCoverageSnapshots.length > 0
+      ? requiredCoverageSnapshots
+      : snapshots;
   return {
     coverage: {
-      required: snapshots.some((snapshot) => snapshot.coverage.required),
+      required: requiredCoverageSnapshots.length > 0,
       minimumChangedLineCoverage: Math.max(
         0,
-        ...snapshots.map(
+        ...coverageFloorSources.map(
           (snapshot) => snapshot.coverage.minimumChangedLineCoverage,
         ),
       ),

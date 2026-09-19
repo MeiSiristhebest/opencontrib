@@ -17,9 +17,16 @@ import {
   type GitHubClient,
 } from "../src/index.js";
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
-import { GovernanceService } from "../src/governance/governance-service.js";
+import {
+  GovernanceService,
+  type GovernanceAuditRunOptions,
+} from "../src/governance/governance-service.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
-import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
+import {
+  hashTrustedPolicySnapshot,
+  mergeTrustedPolicySnapshots,
+  type TrustedPolicySnapshot,
+} from "../src/kernel/config.js";
 import { WorkspaceService } from "../src/workspace/workspace-service.js";
 
 const testApprovalAuthority = () =>
@@ -62,7 +69,11 @@ function seedGovernanceReadyRun(
   runId: string,
   body = "pr body",
   workspacePath = "/tmp",
-  options: { skipWorkspace?: boolean } = {},
+  options: {
+    skipWorkspace?: boolean;
+    policySnapshot?: TrustedPolicySnapshot;
+    auditOptions?: GovernanceAuditRunOptions;
+  } = {},
 ) {
   const baseCommitSha = "a".repeat(40);
   const patch = {
@@ -106,13 +117,15 @@ function seedGovernanceReadyRun(
   };
   validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
   if (!options.skipWorkspace) {
-    const policySnapshot = {
-      coverage: {
-        required: true,
-        minimumChangedLineCoverage: 90,
-      },
-      resourceLeakCheck: { required: false },
-    } as const;
+    const policySnapshot =
+      options.policySnapshot ??
+      ({
+        coverage: {
+          required: true,
+          minimumChangedLineCoverage: 90,
+        },
+        resourceLeakCheck: { required: false },
+      } as const);
     saveCanonicalArtifact(
       manager,
       runId,
@@ -202,10 +215,53 @@ function seedGovernanceReadyRun(
     prTitle: "fix: bug",
     prBody: body,
     subagentScore: 100,
+    ...options.auditOptions,
   });
 }
 
 describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
+  it("promotes the trusted advisory floor when coverage is required without a minimum", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-policy-advisory-floor-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const decision = seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        "pr body",
+        "/tmp",
+        {
+          policySnapshot: mergeTrustedPolicySnapshots(
+            {
+              coverage: {
+                required: false,
+                minimumChangedLineCoverage: 90,
+              },
+              resourceLeakCheck: { required: false },
+            },
+            {
+              coverage: {
+                required: false,
+                minimumChangedLineCoverage: 70,
+              },
+              resourceLeakCheck: { required: false },
+            },
+          ),
+          auditOptions: {
+            coveragePolicy: { required: true },
+          },
+        },
+      );
+
+      expect(decision.coveragePolicy).toEqual({
+        required: true,
+        minimumChangedLineCoverage: 90,
+      });
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it("uses the frozen policy snapshot after the agent lowers worktree policy", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-policy-snapshot-"));
     const workspacePath = join(baseDir, "workspace");

@@ -166,7 +166,8 @@ export class GovernanceService {
         ? {
             required: options.coveragePolicy.required === true,
             minimumChangedLineCoverage:
-              options.coveragePolicy.minimumChangedLineCoverage,
+              options.coveragePolicy.minimumChangedLineCoverage ??
+              trustedPolicySnapshot.coverage.minimumChangedLineCoverage,
           }
         : undefined,
       resourceLeakCheck: options.resourceLeakPolicy,
