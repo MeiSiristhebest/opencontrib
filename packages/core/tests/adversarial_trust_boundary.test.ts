@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
@@ -19,6 +19,8 @@ import {
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
+import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
+import { WorkspaceService } from "../src/workspace/workspace-service.js";
 
 const testApprovalAuthority = () =>
   createTrustedApprovalAuthority({
@@ -59,7 +61,9 @@ function seedGovernanceReadyRun(
   manager: ContributionRunManager,
   runId: string,
   body = "pr body",
-): void {
+  workspacePath = "/tmp",
+  options: { skipWorkspace?: boolean } = {},
+) {
   const baseCommitSha = "a".repeat(40);
   const patch = {
     title: "fix: bug",
@@ -101,21 +105,32 @@ function seedGovernanceReadyRun(
     validatedAt: "2026-01-01T00:01:00.000Z",
   };
   validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
-  saveCanonicalArtifact(
-    manager,
-    runId,
-    "workspace",
-    {
-      workspacePath: "/tmp",
-      branchName: "fixture-branch",
-      baseRepoPath: "/tmp",
-      baseBranch: "main",
-      baseCommitSha,
-      isWorktree: false,
-      repoFullName: "org/repo",
-    },
-    "WORKSPACE_PREPARED",
-  );
+  if (!options.skipWorkspace) {
+    const policySnapshot = {
+      coverage: {
+        required: true,
+        minimumChangedLineCoverage: 90,
+      },
+      resourceLeakCheck: { required: false },
+    } as const;
+    saveCanonicalArtifact(
+      manager,
+      runId,
+      "workspace",
+      {
+        workspacePath,
+        branchName: "fixture-branch",
+        baseRepoPath: "/tmp",
+        baseBranch: "main",
+        baseCommitSha,
+        isWorktree: false,
+        repoFullName: "org/repo",
+        policySnapshot,
+        policySha256: hashTrustedPolicySnapshot(policySnapshot),
+      },
+      "WORKSPACE_PREPARED",
+    );
+  }
   saveCanonicalArtifact(
     manager,
     runId,
@@ -151,6 +166,8 @@ function seedGovernanceReadyRun(
       failedUnitTestsCount: 0,
       reproductionVerified: true,
       allTestsPassing: true,
+      changedCodeCoveragePercent: 95,
+      changedCodeCoverageStatus: "PASS",
       redEvidence: {
         command: "bun test regression.test.ts",
         observedOutputSnippet: "failed",
@@ -181,7 +198,7 @@ function seedGovernanceReadyRun(
     "EVIDENCE_COLLECTED",
   );
   manager.saveArtifact(runId, "pr_draft", body);
-  new GovernanceService(manager).audit(runId, {
+  return new GovernanceService(manager).audit(runId, {
     prTitle: "fix: bug",
     prBody: body,
     subagentScore: 100,
@@ -189,6 +206,105 @@ function seedGovernanceReadyRun(
 }
 
 describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
+  it("uses the frozen policy snapshot after the agent lowers worktree policy", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-policy-snapshot-"));
+    const workspacePath = join(baseDir, "workspace");
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = join(baseDir, "host-home");
+    mkdirSync(workspacePath, { recursive: true });
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const fakeWorktreeManager = {
+        runGit: (args: string[]) => {
+          if (args.includes("ls-tree")) {
+            return {
+              success: true,
+              stdout: args.includes(".opencontrib.json")
+                ? ".opencontrib.json\n"
+                : "",
+              stderr: "",
+            };
+          }
+          if (args.includes("show")) {
+            return {
+              success: true,
+              stdout: JSON.stringify({
+                policy: {
+                  coverage: {
+                    required: true,
+                    minimumChangedLineCoverage: 90,
+                  },
+                },
+              }),
+              stderr: "",
+            };
+          }
+          return { success: true, stdout: "", stderr: "" };
+        },
+        createIsolatedWorkspace: () => ({
+          workspacePath,
+          branchName: "fixture-branch",
+          isWorktree: false,
+          baseRepoPath: workspacePath,
+          baseCommitSha: "a".repeat(40),
+          baseBranch: "main",
+        }),
+        detectDefaultBranch: () => "main",
+      } as any;
+      const prepared = new WorkspaceService(
+        manager,
+        fakeWorktreeManager,
+      ).prepare({
+        runId: manifest.runId,
+        issueOrTaskId: 1,
+      });
+
+      writeFileSync(
+        join(workspacePath, ".opencontrib.json"),
+        JSON.stringify({
+          policy: {
+            coverage: {
+              required: false,
+              minimumChangedLineCoverage: 0,
+            },
+          },
+        }),
+      );
+      const decision = seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        "pr body",
+        workspacePath,
+        { skipWorkspace: true },
+      );
+
+      expect(prepared.artifact.policySnapshot).toEqual({
+        coverage: {
+          required: true,
+          minimumChangedLineCoverage: 90,
+        },
+        resourceLeakCheck: { required: false },
+      });
+      expect(decision.coveragePolicy).toEqual(
+        prepared.artifact.policySnapshot.coverage,
+      );
+      expect(decision.policySha256).toBe(
+        hashTrustedPolicySnapshot({
+          coverage: {
+            required: true,
+            minimumChangedLineCoverage: 90,
+          },
+          resourceLeakCheck: { required: false },
+        }),
+      );
+    } finally {
+      if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+      else process.env.OPENCONTRIB_HOME = previousHome;
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it("Attack 1: Agent substitutes RED test command A with different GREEN test command B", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-pen-test-1-"));
     try {

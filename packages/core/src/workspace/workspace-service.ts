@@ -1,6 +1,15 @@
 import { existsSync } from "fs";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
+import {
+  hashTrustedPolicySnapshot,
+  isTrustedPolicySnapshot,
+  loadHostPolicy,
+  mergeTrustedPolicySnapshots,
+  readTrustedPolicyAtCommit,
+  type TrustedPolicyGitReader,
+  type TrustedPolicySnapshot,
+} from "../kernel/config.js";
 import { WorktreeManager, type WorkspaceContext } from "./worktree-manager.js";
 
 export interface PrepareWorkspaceInput {
@@ -18,7 +27,57 @@ export interface WorkspaceArtifactData {
   baseCommitSha: string;
   repoFullName: string;
   baseBranch?: string;
+  policySnapshot: TrustedPolicySnapshot;
+  policySha256: string;
   createdAt: string;
+}
+
+function readBaselineRepoPolicy(
+  worktreeManager: WorktreeManager,
+  baseRepoPath: string,
+  baseCommitSha: string,
+) {
+  // Lightweight injected managers used by dry-run orchestration do not expose
+  // Git inspection. They cannot contribute a repository policy, but they are
+  // not evidence of a Git failure; production WorktreeManager always does.
+  if (typeof worktreeManager.runGit !== "function") return undefined;
+
+  const reader: TrustedPolicyGitReader = {
+    listTree: (policyPath) =>
+      worktreeManager.runGit([
+        "-C",
+        baseRepoPath,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        baseCommitSha,
+        "--",
+        policyPath,
+      ]),
+    show: (policyPath) =>
+      worktreeManager.runGit([
+        "-C",
+        baseRepoPath,
+        "show",
+        `${baseCommitSha}:${policyPath}`,
+      ]),
+  };
+  return readTrustedPolicyAtCommit(
+    reader,
+    baseCommitSha,
+    "WorkspacePolicySnapshotError",
+  );
+}
+
+function captureTrustedPolicySnapshot(
+  worktreeManager: WorktreeManager,
+  baseRepoPath: string,
+  baseCommitSha: string,
+): TrustedPolicySnapshot {
+  return mergeTrustedPolicySnapshots(
+    loadHostPolicy(),
+    readBaselineRepoPolicy(worktreeManager, baseRepoPath, baseCommitSha),
+  );
 }
 
 export class WorkspaceService {
@@ -61,9 +120,18 @@ export class WorkspaceService {
     // SAFETY: canonical workspace artifacts are produced by WorkspaceService;
     // the assertion narrows the persisted JSON shape for the WORM read path.
     const existingWs = run.artifacts.workspace as unknown as
-      | WorkspaceArtifactData
-      | undefined;
+      WorkspaceArtifactData | undefined;
     if (existingWs) {
+      if (
+        !isTrustedPolicySnapshot(existingWs.policySnapshot) ||
+        typeof existingWs.policySha256 !== "string" ||
+        hashTrustedPolicySnapshot(existingWs.policySnapshot) !==
+          existingWs.policySha256
+      ) {
+        throw new Error(
+          `WorkspacePolicySnapshotError: canonical workspace for run ${input.runId} is missing a valid immutable policy snapshot.`,
+        );
+      }
       if (
         existingWs.workspacePath &&
         existsSync(existingWs.workspacePath) &&
@@ -164,6 +232,11 @@ export class WorkspaceService {
       );
     }
 
+    const policySnapshot = captureTrustedPolicySnapshot(
+      this.worktreeManager,
+      context.baseRepoPath,
+      context.baseCommitSha,
+    );
     const artifact: WorkspaceArtifactData = {
       workspacePath: context.workspacePath,
       branchName: context.branchName,
@@ -172,6 +245,8 @@ export class WorkspaceService {
       baseCommitSha: context.baseCommitSha,
       repoFullName: manifestRepo,
       baseBranch,
+      policySnapshot,
+      policySha256: hashTrustedPolicySnapshot(policySnapshot),
       createdAt: new Date().toISOString(),
     };
 

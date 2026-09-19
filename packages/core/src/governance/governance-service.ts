@@ -8,7 +8,12 @@ import {
 } from "../contracts/schemas.js";
 import { auditGovernance } from "./governance-auditor.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
-import { loadWorkspaceConfig } from "../kernel/config.js";
+import {
+  hashTrustedPolicySnapshot,
+  isTrustedPolicySnapshot,
+  mergeTrustedPolicySnapshots,
+  type TrustedPolicySnapshot,
+} from "../kernel/config.js";
 
 export interface GovernanceAuditRunOptions {
   /** Human-readable title to audit and bind to the later SubmissionIntent. */
@@ -106,44 +111,73 @@ export class GovernanceService {
       run.manifest.issueTitle ||
       "chore: opencontrib contribution";
 
-    const workspacePath =
-      typeof run.artifacts.workspace?.workspacePath === "string"
-        ? run.artifacts.workspace.workspacePath
-        : undefined;
-    const trustedPolicy = loadWorkspaceConfig(
-      workspacePath ?? process.cwd(),
-    ).policy;
-    const trustedCoveragePolicy = trustedPolicy.coverage ?? {
-      required: false,
-      minimumChangedLineCoverage: 85,
-    };
+    const workspaceArtifact = run.artifacts.workspace as
+      | {
+          policySnapshot?: unknown;
+          policySha256?: unknown;
+        }
+      | undefined;
+    let trustedPolicySnapshot: TrustedPolicySnapshot;
+    if (
+      workspaceArtifact?.policySnapshot !== undefined ||
+      workspaceArtifact?.policySha256 !== undefined
+    ) {
+      if (
+        !isTrustedPolicySnapshot(workspaceArtifact.policySnapshot) ||
+        typeof workspaceArtifact.policySha256 !== "string" ||
+        hashTrustedPolicySnapshot(workspaceArtifact.policySnapshot) !==
+          workspaceArtifact.policySha256
+      ) {
+        throw new Error(
+          `GovernancePolicySnapshotError: run ${runId} has an invalid or tampered canonical trusted policy snapshot.`,
+        );
+      }
+      trustedPolicySnapshot = workspaceArtifact.policySnapshot;
+    } else {
+      throw new Error(
+        `GovernancePolicySnapshotError: run ${runId} has no canonical trusted policy snapshot. Re-prepare the workspace before governance audit.`,
+      );
+    }
+
     const requestedCoverageMinimum =
       options.coveragePolicy?.minimumChangedLineCoverage;
     if (
       requestedCoverageMinimum !== undefined &&
-      requestedCoverageMinimum <
-        trustedCoveragePolicy.minimumChangedLineCoverage
+      (typeof requestedCoverageMinimum !== "number" ||
+        !Number.isFinite(requestedCoverageMinimum) ||
+        requestedCoverageMinimum < 0 ||
+        requestedCoverageMinimum > 100)
     ) {
       throw new Error(
-        `GovernancePolicyViolationError: requested coverage minimum ${requestedCoverageMinimum}% is below the trusted repository floor ${trustedCoveragePolicy.minimumChangedLineCoverage}%.`,
+        "GovernancePolicyViolationError: requested coverage minimum must be a finite number between 0 and 100.",
       );
     }
-    const effectiveCoveragePolicy = {
-      required:
-        trustedCoveragePolicy.required ||
-        options.coveragePolicy?.required === true,
-      minimumChangedLineCoverage:
-        requestedCoverageMinimum ??
-        trustedCoveragePolicy.minimumChangedLineCoverage,
+    if (
+      requestedCoverageMinimum !== undefined &&
+      requestedCoverageMinimum <
+        trustedPolicySnapshot.coverage.minimumChangedLineCoverage
+    ) {
+      throw new Error(
+        `GovernancePolicyViolationError: requested coverage minimum ${requestedCoverageMinimum}% is below the trusted repository floor ${trustedPolicySnapshot.coverage.minimumChangedLineCoverage}%.`,
+      );
+    }
+    const requestedPolicy = {
+      coverage: options.coveragePolicy
+        ? {
+            required: options.coveragePolicy.required === true,
+            minimumChangedLineCoverage:
+              options.coveragePolicy.minimumChangedLineCoverage,
+          }
+        : undefined,
+      resourceLeakCheck: options.resourceLeakPolicy,
     };
-    const trustedResourceLeakPolicy = trustedPolicy.resourceLeakCheck ?? {
-      required: false,
-    };
-    const effectiveResourceLeakPolicy = {
-      required:
-        trustedResourceLeakPolicy.required ||
-        options.resourceLeakPolicy?.required === true,
-    };
+    const effectivePolicySnapshot = mergeTrustedPolicySnapshots(
+      trustedPolicySnapshot,
+      requestedPolicy,
+    );
+    const effectiveCoveragePolicy = effectivePolicySnapshot.coverage;
+    const effectiveResourceLeakPolicy =
+      effectivePolicySnapshot.resourceLeakCheck;
 
     const auditResult = auditGovernance({
       patchContent,
@@ -158,10 +192,7 @@ export class GovernanceService {
       subagentQualityScore: options.subagentScore,
     });
 
-    const policySha256 = hash({
-      coveragePolicy: effectiveCoveragePolicy,
-      resourceLeakPolicy: effectiveResourceLeakPolicy,
-    });
+    const policySha256 = hashTrustedPolicySnapshot(effectivePolicySnapshot);
     const decision: GovernanceDecisionArtifact = {
       runId,
       patchSha256: validatedPatch.patchSha256,

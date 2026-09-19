@@ -7,6 +7,7 @@ import {
   NoopCoverageAdapter,
   type TestCoverageAdapter,
 } from "../src/evidence/coverage-adapter.js";
+import { getCoverageMeasurementStatus } from "../src/evidence/evidence-collector.js";
 
 function withTmpDir<T>(fn: (dir: string) => Promise<T> | T): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "oc-coverage-"));
@@ -83,6 +84,14 @@ describe("IstanbulSummaryCoverageAdapter", () => {
       const adapter = new IstanbulSummaryCoverageAdapter("my-coverage.json");
       expect(await adapter.resolve(dir)).toBe(85);
     }));
+});
+
+describe("Evidence coverage measurement status", () => {
+  test("does not apply a hardcoded threshold", () => {
+    expect(getCoverageMeasurementStatus(75)).toBe("PASS");
+    expect(getCoverageMeasurementStatus(0)).toBe("PASS");
+    expect(getCoverageMeasurementStatus(undefined)).toBe("UNAVAILABLE");
+  });
 });
 
 describe("NoopCoverageAdapter", () => {

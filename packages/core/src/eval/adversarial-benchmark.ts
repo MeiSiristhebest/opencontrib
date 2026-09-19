@@ -30,6 +30,14 @@ import { tmpdir } from "node:os";
 import { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import {
+  hashTrustedPolicySnapshot,
+  loadHostPolicy,
+  mergeTrustedPolicySnapshots,
+  readTrustedPolicyAtCommit,
+  type TrustedPolicyGitCommandResult,
+  type TrustedPolicyGitReader,
+} from "../kernel/config.js";
+import {
   buildRunTransferBundle,
   type RunTransferBundle,
 } from "../run/run-transfer.js";
@@ -545,6 +553,50 @@ export interface ScriptedAgent {
   agentWorkspacePath: string;
 }
 
+function runBenchmarkGit(
+  fixture: BenchmarkFixture,
+  args: string[],
+): TrustedPolicyGitCommandResult {
+  try {
+    return {
+      success: true,
+      stdout: execFileSync("git", args, {
+        cwd: fixture.fixtureDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+      stderr: "",
+    };
+  } catch (error) {
+    return {
+      success: false,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function readBenchmarkBasePolicy(fixture: BenchmarkFixture) {
+  const reader: TrustedPolicyGitReader = {
+    listTree: (policyPath) =>
+      runBenchmarkGit(fixture, [
+        "ls-tree",
+        "-r",
+        "--name-only",
+        fixture.baseSha,
+        "--",
+        policyPath,
+      ]),
+    show: (policyPath) =>
+      runBenchmarkGit(fixture, ["show", `${fixture.baseSha}:${policyPath}`]),
+  };
+  return readTrustedPolicyAtCommit(
+    reader,
+    fixture.baseSha,
+    "BenchmarkPolicySnapshotError",
+  );
+}
+
 export interface SeedAgentOptions {
   rootDir: string;
   fixture: BenchmarkFixture;
@@ -589,6 +641,10 @@ export async function seedScriptedAgent(
   const agentRunManager = new ContributionRunManager({
     baseDir: options.agentRunsBaseDir ?? join(rootDir, "agent-runs"),
   });
+  const agentPolicySnapshot = mergeTrustedPolicySnapshots(
+    loadHostPolicy(),
+    readBenchmarkBasePolicy(fixture),
+  );
   const manifest = agentRunManager.createRun({
     repoFullName: fixture.repoFullName,
     issueNumber: fixture.issueNumber,
@@ -605,6 +661,8 @@ export async function seedScriptedAgent(
       baseRepoPath: agentWs,
       baseBranch: "main",
       repoFullName: fixture.repoFullName,
+      policySnapshot: agentPolicySnapshot,
+      policySha256: hashTrustedPolicySnapshot(agentPolicySnapshot),
       createdAt: new Date().toISOString(),
     },
     "WORKSPACE_PREPARED",

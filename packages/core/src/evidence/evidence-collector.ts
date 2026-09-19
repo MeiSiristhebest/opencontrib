@@ -16,6 +16,7 @@ import {
 import { parseCommandSpec } from "../sandbox/command-spec.js";
 import type {
   EvidenceReport,
+  MeasurementStatus,
   FlakyTestRecord,
   RedEvidence,
   GreenEvidence,
@@ -94,6 +95,18 @@ export function parseTestCountsFromOutput(output: string): {
   total: number;
 } {
   return defaultTestOutputParserRegistry.parse(output);
+}
+
+/** Evidence reports measurement availability; Governance applies policy. */
+export function getCoverageMeasurementStatus(
+  changedCodeCoveragePercent: unknown,
+): MeasurementStatus {
+  return typeof changedCodeCoveragePercent === "number" &&
+    Number.isFinite(changedCodeCoveragePercent) &&
+    changedCodeCoveragePercent >= 0 &&
+    changedCodeCoveragePercent <= 100
+    ? "PASS"
+    : "UNAVAILABLE";
 }
 
 export function recordFlakyBaseline(
@@ -1130,14 +1143,11 @@ export async function collectEvidence(
   } else {
     handleLeakCheckPassed = "FAIL";
   }
-  let testCoverageStatus: "PASS" | "FAIL" | "UNAVAILABLE";
-  if (typeof changedCodeCoveragePercent !== "number") {
-    testCoverageStatus = "UNAVAILABLE";
-  } else if (changedCodeCoveragePercent >= 85) {
-    testCoverageStatus = "PASS";
-  } else {
-    testCoverageStatus = "FAIL";
-  }
+  // Evidence reports whether coverage was measured. Governance owns the
+  // repository-specific threshold and performs the policy gate.
+  const testCoverageStatus = getCoverageMeasurementStatus(
+    changedCodeCoveragePercent,
+  );
   const greenVerification = redEvidence
     ? buildGreenEvidenceFromStress({
         cwd,
