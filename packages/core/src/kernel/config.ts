@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import type { CapabilityType } from "./capability.js";
 import { getOpenContribHome } from "./home.js";
 
@@ -107,9 +106,18 @@ export function loadWorkspaceConfig(
       try {
         const raw = fs.readFileSync(candidate, "utf8");
         const parsed = JSON.parse(raw);
-        const configuredCoverage = parsed.policy?.coverage;
+        const configuredPolicy = parsed.policy;
+        if (
+          configuredPolicy !== undefined &&
+          (typeof configuredPolicy !== "object" ||
+            configuredPolicy === null ||
+            Array.isArray(configuredPolicy))
+        ) {
+          throw new Error("Invalid trusted policy: policy must be an object.");
+        }
+        const configuredCoverage = configuredPolicy?.coverage;
         const configuredResourceLeakCheck =
-          parsed.policy?.resourceLeakCheck;
+          configuredPolicy?.resourceLeakCheck;
         const configuredCoverageMinimum =
           configuredCoverage?.minimumChangedLineCoverage;
         const configuredCoverageRequired = configuredCoverage?.required;
@@ -162,23 +170,23 @@ export function loadWorkspaceConfig(
             parsed.enabledCapabilities || DEFAULT_CONFIG.enabledCapabilities,
           policy: {
             ...DEFAULT_CONFIG.policy,
-            ...(parsed.policy || {}),
-            coverage: parsed.policy?.coverage
+            ...(configuredPolicy || {}),
+            coverage: configuredCoverage
               ? {
                   required:
-                    parsed.policy.coverage.required ??
+                    configuredCoverage.required ??
                     DEFAULT_CONFIG.policy.coverage?.required ??
                     false,
                   minimumChangedLineCoverage:
-                    parsed.policy.coverage.minimumChangedLineCoverage ??
+                    configuredCoverage.minimumChangedLineCoverage ??
                     DEFAULT_CONFIG.policy.coverage?.minimumChangedLineCoverage ??
                     85,
                 }
               : DEFAULT_CONFIG.policy.coverage,
-            resourceLeakCheck: parsed.policy?.resourceLeakCheck
+            resourceLeakCheck: configuredResourceLeakCheck
               ? {
                   required:
-                    parsed.policy.resourceLeakCheck.required ??
+                    configuredResourceLeakCheck.required ??
                     DEFAULT_CONFIG.policy.resourceLeakCheck?.required ??
                     false,
                 }
