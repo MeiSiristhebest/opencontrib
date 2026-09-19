@@ -97,8 +97,11 @@ const auditCommand = new Command("audit")
       pretty?: boolean;
     }) => {
       try {
-        const coverageMinimum = opts.coverageMinimum ?? 85;
-        if (coverageMinimum < 0 || coverageMinimum > 100) {
+        const coverageMinimum = opts.coverageMinimum;
+        if (
+          coverageMinimum !== undefined &&
+          (coverageMinimum < 0 || coverageMinimum > 100)
+        ) {
           console.error("❌ --coverage-minimum must be between 0 and 100.");
           throw new CliExitError(2);
         }
