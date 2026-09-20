@@ -310,7 +310,13 @@ export type MeasurementStatus = z.infer<typeof MeasurementStatusSchema>;
 export const EvidenceReportSchema = z.object({
   baselineTestedAt: z.string(),
   baselineFlakyTests: z.array(FlakyTestRecordSchema),
+  // Stress semantics: one round starts workersPerRound workers; requested
+  // executions are roundsRequested * workersPerRound.
   stressLoopRuns: z.number().default(1),
+  roundsRequested: z.number().int().positive().optional(),
+  roundsCompleted: z.number().int().nonnegative().optional(),
+  workersPerRound: z.number().int().positive().optional(),
+  executionsExpected: z.number().int().positive().optional(),
   stressLoopPassed: z.boolean(),
   executionCount: z.number().default(1),
   maxConcurrentObserved: z.number().default(1),

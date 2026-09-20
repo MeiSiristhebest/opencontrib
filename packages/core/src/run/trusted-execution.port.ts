@@ -45,6 +45,10 @@ export interface RawGreenExecutionResult {
  passed: boolean;
  sourceTreeSha256: string;
  capturedAt: string;
+ roundsRequested?: number;
+ roundsCompleted?: number;
+ workersPerRound?: number;
+ executionsExpected?: number;
  executionCount: number;
  maxConcurrentObserved: number;
  concurrencyWorkers: number;

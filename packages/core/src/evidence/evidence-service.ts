@@ -1014,11 +1014,18 @@ export class EvidenceService {
     let report: EvidenceReport = {
       baselineTestedAt: rawResult.capturedAt,
       baselineFlakyTests: [],
-      stressLoopRuns: rawResult.executionCount,
+      stressLoopRuns: rawResult.roundsRequested ?? rawResult.executionCount,
+      roundsRequested: rawResult.roundsRequested ?? 1,
+      roundsCompleted: rawResult.roundsCompleted ?? 0,
+      workersPerRound:
+        rawResult.workersPerRound ?? rawResult.concurrencyWorkers,
+      executionsExpected:
+        rawResult.executionsExpected ?? rawResult.executionCount,
       stressLoopPassed: rawResult.passed,
       executionCount: rawResult.executionCount,
       maxConcurrentObserved: rawResult.maxConcurrentObserved,
-      concurrencyWorkers: rawResult.concurrencyWorkers,
+      concurrencyWorkers:
+        rawResult.workersPerRound ?? rawResult.concurrencyWorkers,
       concurrencyStampedePassed: rawResult.concurrencyStampedePassed,
       raceCollisionsDetected: rawResult.raceCollisionsDetected,
       latencyJitterMs: rawResult.latencyJitterMs,

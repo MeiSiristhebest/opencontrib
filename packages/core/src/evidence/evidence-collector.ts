@@ -26,6 +26,10 @@ import type {
 import { defaultTestOutputParserRegistry } from "./parsers/registry.js";
 import { defaultVcsDeltaAdapter, type VcsDeltaPort } from "./vcs-delta.port.js";
 import type { TestCoverageAdapter } from "./coverage-adapter.js";
+import { matchExpectedFailure } from "./expected-failure-matcher.js";
+import { runConcurrentRounds } from "./stress-runner.js";
+
+export { matchExpectedFailure } from "./expected-failure-matcher.js";
 
 export interface EvidenceCollectionOptions {
   cwd: string;
@@ -162,6 +166,10 @@ export function recordFlakyBaseline(
 export interface StressLoopResult {
   passed: boolean;
   completedRuns: number;
+  roundsRequested: number;
+  roundsCompleted: number;
+  workersPerRound: number;
+  executionsExpected: number;
   executionCount: number;
   maxConcurrentObserved: number;
   lastOutput: string;
@@ -172,8 +180,8 @@ export interface StressLoopResult {
 }
 
 /**
- * The only canonical stress runner. Every execution is asynchronous and the
- * worker batch is released through a barrier before Promise.all awaits it.
+ * The only canonical stress runner. Each round starts the configured number
+ * of workers together; requested executions are rounds × workers.
  */
 export async function runStressLoopAsync(
   cwd: string,
@@ -182,29 +190,19 @@ export async function runStressLoopAsync(
   workspaceRoot?: string,
   concurrencyWorkers: number = 1,
 ): Promise<StressLoopResult> {
-  let completedRuns = 0;
-  let executionCount = 0;
-  let maxConcurrentObserved = 0;
-  let inFlight = 0;
-  let lastOutput = "";
-  let raceCollisions = 0;
-  const latencies: number[] = [];
-
   const isBroadSuite =
     testCommand.includes("./...") ||
     testCommand.includes("npm test") ||
     testCommand.includes("bun test") ||
     testCommand.trim() === "pytest" ||
     testCommand.trim() === "cargo test";
-  const targetCount = count ?? (isBroadSuite ? 1 : 3);
+  const requestedRounds = count ?? (isBroadSuite ? 1 : 3);
   const spec = parseCommandSpec(testCommand);
-
-  const executeOne = async () => {
-    executionCount++;
-    inFlight++;
-    maxConcurrentObserved = Math.max(maxConcurrentObserved, inFlight);
-    const start = Date.now();
-    try {
+  const results = await runConcurrentRounds({
+    rounds: requestedRounds,
+    workersPerRound: concurrencyWorkers,
+    execute: async () => {
+      const start = Date.now();
       const res = await defaultSandboxRuntime.executeAsync({
         cwd,
         workspaceRoot,
@@ -216,40 +214,21 @@ export async function runStressLoopAsync(
         output: res.output,
         elapsed: Date.now() - start,
       };
-    } finally {
-      inFlight--;
-    }
-  };
+    },
+    isSuccess: (result) => result.passed,
+  });
 
-  const workerCount = Math.max(1, concurrencyWorkers);
-  let results: Array<{ passed: boolean; output: string; elapsed: number }>;
-  if (workerCount > 1) {
-    let releaseBarrier!: () => void;
-    const startBarrier = new Promise<void>((resolve) => {
-      releaseBarrier = resolve;
-    });
-    const workers = Array.from({ length: workerCount }, async () => {
-      await startBarrier;
-      return executeOne();
-    });
-    // All workers have been created and are waiting before the barrier opens.
-    releaseBarrier();
-    results = await Promise.all(workers);
-  } else {
-    results = [];
-    for (let index = 0; index < targetCount; index++) {
-      const result = await executeOne();
-      results.push(result);
-      if (!result.passed) break;
-    }
-  }
-
+  let completedRuns = 0;
   let allPassed = true;
-  for (const result of results) {
+  let lastOutput = "";
+  let raceCollisions = 0;
+  const latencies: number[] = [];
+  for (const result of results.results) {
     latencies.push(result.elapsed);
     lastOutput = result.output;
-    if (result.passed) completedRuns++;
-    else {
+    if (result.passed) {
+      completedRuns++;
+    } else {
       allPassed = false;
       if (
         /data race|race detected|concurrent map|deadlock|collision/i.test(
@@ -266,15 +245,20 @@ export async function runStressLoopAsync(
   const concurrencyStampedePassed =
     allPassed &&
     raceCollisions === 0 &&
-    (workerCount === 1 || maxConcurrentObserved >= workerCount);
+    (results.workersPerRound === 1 ||
+      results.maxConcurrentObserved >= results.workersPerRound);
 
   return {
     passed: allPassed,
     completedRuns,
-    executionCount,
-    maxConcurrentObserved,
+    roundsRequested: results.roundsRequested,
+    roundsCompleted: results.roundsCompleted,
+    workersPerRound: results.workersPerRound,
+    executionsExpected: results.executionsExpected,
+    executionCount: results.executionCount,
+    maxConcurrentObserved: results.maxConcurrentObserved,
     lastOutput,
-    concurrencyWorkers: workerCount,
+    concurrencyWorkers: results.workersPerRound,
     concurrencyStampedePassed,
     raceCollisionsDetected: raceCollisions,
     latencyJitterMs: maxLatency - minLatency,
@@ -347,44 +331,6 @@ export function verifyEmpiricalReproduction(input: {
     assertionCaptured: hasFailureFlag,
     exitCode,
   };
-}
-
-export function matchExpectedFailure(input: {
-  output: string;
-  pattern?: string;
-  mode?: "regex" | "literal";
-}): { matched: boolean; expected?: string; observedSnippet?: string } {
-  const { output, pattern, mode = "regex" } = input;
-  if (!pattern || pattern.trim().length === 0) {
-    return { matched: true };
-  }
-
-  const cleanPattern = pattern.trim();
-  if (mode === "literal") {
-    const matched = output.includes(cleanPattern);
-    return {
-      matched,
-      expected: cleanPattern,
-      observedSnippet: output.slice(0, 500),
-    };
-  }
-
-  try {
-    const rx = new RegExp(cleanPattern, "i");
-    const matched = rx.test(output);
-    return {
-      matched,
-      expected: cleanPattern,
-      observedSnippet: output.slice(0, 500),
-    };
-  } catch {
-    const matched = output.includes(cleanPattern);
-    return {
-      matched,
-      expected: cleanPattern,
-      observedSnippet: output.slice(0, 500),
-    };
-  }
 }
 
 export function capturePreFixAssertion(
@@ -1164,11 +1110,15 @@ export async function collectEvidence(
   return {
     baselineTestedAt: new Date().toISOString(),
     baselineFlakyTests,
-    stressLoopRuns: stressResult.executionCount,
+    stressLoopRuns: stressResult.roundsRequested,
+    roundsRequested: stressResult.roundsRequested,
+    roundsCompleted: stressResult.roundsCompleted,
+    workersPerRound: stressResult.workersPerRound,
+    executionsExpected: stressResult.executionsExpected,
     stressLoopPassed: stressResult.passed,
     executionCount: stressResult.executionCount,
     maxConcurrentObserved: stressResult.maxConcurrentObserved,
-    concurrencyWorkers,
+    concurrencyWorkers: stressResult.workersPerRound,
     concurrencyStampedePassed: stressResult.concurrencyStampedePassed,
     raceCollisionsDetected: stressResult.raceCollisionsDetected,
     latencyJitterMs: stressResult.latencyJitterMs,

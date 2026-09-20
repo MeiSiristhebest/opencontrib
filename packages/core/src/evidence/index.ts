@@ -14,3 +14,5 @@ export * from "./parsers/phpunit-parser.js";
 export * from "./vcs-delta.port.js";
 export * from "./validated-patch.js";
 export * from "./coverage-adapter.js";
+export * from "./expected-failure-matcher.js";
+export * from "./stress-runner.js";

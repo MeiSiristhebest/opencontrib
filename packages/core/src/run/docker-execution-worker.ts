@@ -13,6 +13,8 @@ import {
   computeSourceTreeHash,
   computeTestIdentity,
 } from "../evidence/evidence-collector.js";
+import { matchExpectedFailure } from "../evidence/expected-failure-matcher.js";
+import { runConcurrentRounds } from "../evidence/stress-runner.js";
 
 export interface DockerExecutionWorkerOptions {
   image?: string;
@@ -145,7 +147,10 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         killContainerByCidFile(cidFile);
       }
       const assertionMatched = job.expectedAssertion
-        ? res.output.includes(job.expectedAssertion)
+        ? matchExpectedFailure({
+            output: res.output,
+            pattern: job.expectedAssertion,
+          }).matched
         : res.exitCode !== 0;
 
       return {
@@ -171,21 +176,8 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
   async verifyGreen(job: GreenExecutionJob): Promise<RawGreenExecutionResult> {
     const cwd = job.workspace.workspacePath;
     const greenTree = computeSourceTreeHash(cwd);
-    const workerCount = Math.max(1, job.concurrencyWorkers ?? 1);
-    const runCount = Math.max(1, job.stressLoopCount ?? 1);
-
-    let executionCount = 0;
-    let inFlight = 0;
-    let maxConcurrentObserved = 0;
-    let raceCollisions = 0;
-    const latencies: number[] = [];
-
     const executeOne = async () => {
-      executionCount++;
-      inFlight++;
-      maxConcurrentObserved = Math.max(maxConcurrentObserved, inFlight);
       const start = Date.now();
-
       const cidDir = mkdtempSync(join(tmpdir(), "docker-cid-"));
       const cidFile = join(cidDir, "cid");
 
@@ -228,7 +220,6 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
           elapsed: Date.now() - start,
         };
       } finally {
-        inFlight--;
         try {
           rmSync(cidDir, { recursive: true, force: true });
         } catch {
@@ -237,59 +228,25 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       }
     };
 
-    const allResults: Array<{
-      passed: boolean;
-      exitCode: number;
-      output: string;
-      elapsed: number;
-    }> = [];
-
-    // Batch execution: honor both stressLoopCount and concurrencyWorkers
-    let remaining = runCount;
-    while (remaining > 0) {
-      const batchSize = Math.min(workerCount, remaining);
-      remaining -= batchSize;
-
-      let batchResults: Array<{
-        passed: boolean;
-        exitCode: number;
-        output: string;
-        elapsed: number;
-      }>;
-
-      if (batchSize > 1) {
-        let releaseBarrier!: () => void;
-        const startBarrier = new Promise<void>((r) => {
-          releaseBarrier = r;
-        });
-        const batchWorkers = Array.from({ length: batchSize }, async () => {
-          await startBarrier;
-          return executeOne();
-        });
-        releaseBarrier();
-        batchResults = await Promise.all(batchWorkers);
-      } else {
-        batchResults = [await executeOne()];
-      }
-
-      allResults.push(...batchResults);
-
-      // Stop early if any run failed
-      const anyFailed = batchResults.some((r) => !r.passed);
-      if (anyFailed) break;
-    }
+    const scheduled = await runConcurrentRounds({
+      rounds: job.stressLoopCount ?? 1,
+      workersPerRound: job.concurrencyWorkers ?? 1,
+      execute: executeOne,
+      isSuccess: (result) => result.passed,
+    });
 
     let allPassed = true;
     let lastOutput = "";
-    for (const r of allResults) {
-      latencies.push(r.elapsed);
-      lastOutput = r.output;
-      if (!r.passed) {
+    let raceCollisions = 0;
+    const latencies: number[] = [];
+    for (const result of scheduled.results) {
+      latencies.push(result.elapsed);
+      lastOutput = result.output;
+      if (!result.passed) {
         allPassed = false;
-        // Detect race conditions from output (same as local runner)
         if (
           /data race|race detected|concurrent map|deadlock|collision/i.test(
-            r.output,
+            result.output,
           )
         ) {
           raceCollisions++;
@@ -302,7 +259,8 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
     const concurrencyStampedePassed =
       allPassed &&
       raceCollisions === 0 &&
-      (workerCount === 1 || maxConcurrentObserved >= workerCount);
+      (scheduled.workersPerRound === 1 ||
+        scheduled.maxConcurrentObserved >= scheduled.workersPerRound);
 
     return {
       command: job.testCommand,
@@ -311,9 +269,13 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       passed: allPassed,
       sourceTreeSha256: greenTree,
       capturedAt: new Date().toISOString(),
-      executionCount,
-      maxConcurrentObserved,
-      concurrencyWorkers: workerCount,
+      roundsRequested: scheduled.roundsRequested,
+      roundsCompleted: scheduled.roundsCompleted,
+      workersPerRound: scheduled.workersPerRound,
+      executionsExpected: scheduled.executionsExpected,
+      executionCount: scheduled.executionCount,
+      maxConcurrentObserved: scheduled.maxConcurrentObserved,
+      concurrencyWorkers: scheduled.workersPerRound,
       concurrencyStampedePassed,
       raceCollisionsDetected: raceCollisions,
       latencyJitterMs: maxLat - minLat,
