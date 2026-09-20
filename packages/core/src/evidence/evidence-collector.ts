@@ -236,7 +236,9 @@ export async function runStressLoopAsync(
   const latencies: number[] = [];
   for (const result of results.results) {
     latencies.push(result.elapsed);
-    lastOutput = result.output;
+    if (!result.passed || lastOutput.length === 0) {
+      lastOutput = result.output;
+    }
     if (result.passed) {
       completedRuns++;
     } else {

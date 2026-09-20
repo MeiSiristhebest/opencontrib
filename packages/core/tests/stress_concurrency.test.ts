@@ -73,18 +73,29 @@ describe("runConcurrentRounds — rounds × workers contract", () => {
     expect(result.results).toEqual([false, false, false]);
   });
 
-  test("fractional and excessive dimensions are normalized safely", async () => {
+  test("fractional dimensions are normalized to at least one execution", async () => {
     const result = await runConcurrentRounds({
       rounds: 0.5,
-      workersPerRound: 1000,
+      workersPerRound: 0.5,
       execute: async () => true,
       isSuccess: (value) => value,
     });
 
     expect(result.roundsRequested).toBe(1);
-    expect(result.workersPerRound).toBe(32);
-    expect(result.executionCount).toBe(32);
-    expect(result.executionsExpected).toBe(32);
+    expect(result.workersPerRound).toBe(1);
+    expect(result.executionCount).toBe(1);
+    expect(result.executionsExpected).toBe(1);
+  });
+
+  test("excessive dimensions fail before worker allocation", async () => {
+    await expect(
+      runConcurrentRounds({
+        rounds: 1,
+        workersPerRound: 1000,
+        execute: async () => true,
+        isSuccess: (value) => value,
+      }),
+    ).rejects.toThrow(/INVALID_STRESS_DIMENSION/);
   });
 
   test("evidence schema rejects contradictory round metadata", () => {

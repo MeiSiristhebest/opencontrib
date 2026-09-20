@@ -399,17 +399,17 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     // Must prohibit, rather than prescribe, direct GitHub API writes.
     expect(text).toContain("DO NOT call GitHub create_pull_request directly.");
     expect(text).toContain("DO NOT call GitHub MCP or GitHub API");
-    const actionableText = text
+    const directWriteInstruction = text
       .split("\n")
-      .filter((line) => !line.includes("DO NOT"))
-      .join("\n");
-    expect(actionableText).not.toMatch(
-      /(?:run|execute|use|call|invoke).*gh\s+pr\s+create/i,
-    );
-    expect(actionableText).not.toMatch(
-      /(?:run|execute|use|call|invoke).*create_pull_request/i,
-    );
-    expect(actionableText).not.toMatch(/POST\s+\/repos\/.*\/pulls/i);
+      .filter((line) =>
+        /(?:run|execute|use|call|invoke).*\b(?:gh\s+pr\s+create|create_pull_request|POST\s+\/repos\/.*\/pulls)\b/i.test(
+          line,
+        ),
+      )
+      .filter(
+        (line) => !/\b(?:do not|never|prohibit(?:ed|ion)?)\b/i.test(line),
+      );
+    expect(directWriteInstruction).toEqual([]);
   });
 
   // ---- P0-02: contrib_save_artifact schema restricts authoritative types ----

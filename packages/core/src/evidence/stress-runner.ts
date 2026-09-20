@@ -19,7 +19,13 @@ function normalizePositiveInteger(
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return fallback;
   }
-  return Math.min(maximum, Math.max(1, Math.floor(value)));
+  const normalized = Math.max(1, Math.floor(value));
+  if (normalized > maximum) {
+    throw new Error(
+      `INVALID_STRESS_DIMENSION: requested value ${value} exceeds maximum ${maximum}.`,
+    );
+  }
+  return normalized;
 }
 
 /**
