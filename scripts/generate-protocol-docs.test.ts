@@ -14,14 +14,19 @@ import {
 describe("generated protocol documentation", () => {
   const rootDir = resolve(import.meta.dir, "..");
 
+  const normalizeLineEndings = (value: string): string =>
+    value.replace(/\r\n/g, "\n");
+
   it("keeps every marked protocol block in sync with the canonical renderer", () => {
     expect(() => checkProtocolDocs(rootDir)).not.toThrow();
     for (const target of PROTOCOL_DOCUMENTATION_TARGETS) {
-      const content = readFileSync(resolve(rootDir, target.path), "utf8");
+      const content = normalizeLineEndings(
+        readFileSync(resolve(rootDir, target.path), "utf8"),
+      );
       expect(content).toContain(PROTOCOL_DOC_START);
       expect(content).toContain(PROTOCOL_DOC_END);
       expect(content).toContain(
-        renderProtocolDocumentationBlock(target.locale),
+        normalizeLineEndings(renderProtocolDocumentationBlock(target.locale)),
       );
     }
   });
