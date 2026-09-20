@@ -12,6 +12,9 @@ import {
   EvidenceService,
   type ContributionRunManager,
   type RedEvidence,
+  MAX_STRESS_ROUNDS,
+  MAX_WORKERS_PER_ROUND,
+  parseBoundedStressInteger,
 } from "@opencontrib/core";
 import { printJSON, printPhaseGuidance } from "../utils/output.js";
 
@@ -63,13 +66,13 @@ function resolveEvidenceContext(opts: EvidenceContextOptions): {
 }
 
 export const evidenceCommand = new Command("evidence").description(
-  "Empirical evidence: RED→GREEN dual-stage verification (one-shot via 'run', or capture-red + verify-green)",
+  "Canonical RED→GREEN evidence uses capture-red + verify-green; 'run' is diagnostic-only compatibility mode",
 );
 
 export const evidenceRunCommand = evidenceCommand
   .command("run")
   .description(
-    "Execute one-shot dual-stage empirical verification (pre-fix baseline + post-fix stress loop)",
+    "Diagnostic-only one-shot verification; canonical runs must use capture-red followed by verify-green",
   )
   .option(
     "--cwd <path>",
@@ -87,13 +90,13 @@ export const evidenceRunCommand = evidenceCommand
   .option(
     "--stress-loop <n>",
     "Stress loop iterations (use >1 for concurrency/race tests)",
-    (v) => Number(v),
+    (v) => parseBoundedStressInteger(v, "--stress-loop", MAX_STRESS_ROUNDS),
     1,
   )
   .option(
     "--concurrency <n>",
     "Concurrent stampede worker threads",
-    (v) => Number(v),
+    (v) => parseBoundedStressInteger(v, "--concurrency", MAX_WORKERS_PER_ROUND),
     1,
   )
   .option("--workspace-root <path>", "Root workspace for security boundary")
@@ -326,8 +329,18 @@ export const verifyGreenCommand = evidenceCommand
   )
   .option("--run-id <id>", "Contribution run holding the captured RED artifact")
   .option("--cwd <path>", "Workspace directory to run tests in")
-  .option("--stress-loop <n>", "Stress loop iterations", (v) => Number(v), 1)
-  .option("--concurrency <n>", "Concurrent workers", (v) => Number(v), 1)
+  .option(
+    "--stress-loop <n>",
+    "Stress loop iterations (integer 1..100)",
+    (v) => parseBoundedStressInteger(v, "--stress-loop", MAX_STRESS_ROUNDS),
+    1,
+  )
+  .option(
+    "--concurrency <n>",
+    "Concurrent workers (integer 1..32)",
+    (v) => parseBoundedStressInteger(v, "--concurrency", MAX_WORKERS_PER_ROUND),
+    1,
+  )
   .option("--baseline-sha <sha>", "Baseline commit SHA")
   .option("--workspace-root <path>", "Root workspace for security boundary")
   .option("--pretty", "Pretty-print", false)

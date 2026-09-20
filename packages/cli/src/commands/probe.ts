@@ -158,18 +158,13 @@ probeCommand
       const runId = getRunManager().resolveRunId(opts.runId);
       if (runId) {
         try {
-          getRunManager().saveArtifact(
-            runId,
-            "probe",
-            {
-              target: resolved,
-              executedProbes: scanResult.executedProbes,
-              totalPointersCount: scanResult.pointersCreated.length,
-              triagedPointersCount: triaged.triagedCount,
-              topPointers: triaged.topPointers,
-            },
-            "PROBE_COMPLETED",
-          );
+          getRunManager().saveArtifact(runId, "probe", {
+            target: resolved,
+            executedProbes: scanResult.executedProbes,
+            totalPointersCount: scanResult.pointersCreated.length,
+            triagedPointersCount: triaged.triagedCount,
+            topPointers: triaged.topPointers,
+          });
         } catch (err: any) {
           console.warn(
             `[Probe] Failed to auto-save probe artifact: ${err.message}`,

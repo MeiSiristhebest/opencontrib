@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import "./bootstrap-home.js";
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
 import path from "node:path";

@@ -13,9 +13,9 @@ import {
   validatePhaseGate,
   computeTestIdentity,
   resolveTestFiles,
-  type ContributionPrService,
   type GitHubClient,
 } from "../src/index.js";
+import type { ContributionPrService } from "../src/github/contribution-pr-service.js";
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
 import {
   GovernanceService,
@@ -27,6 +27,7 @@ import {
   mergeTrustedPolicySnapshots,
   type TrustedPolicySnapshot,
 } from "../src/kernel/config.js";
+import { hashCommunityGateSnapshot } from "../src/governance/community-gate.js";
 import { WorkspaceService } from "../src/workspace/workspace-service.js";
 
 const testApprovalAuthority = () =>
@@ -126,6 +127,19 @@ function seedGovernanceReadyRun(
         },
         resourceLeakCheck: { required: false },
       } as const);
+    const communityGate = {
+      sourceCommitSha: baseCommitSha,
+      policy: {
+        hasGatingRules: false,
+        requiresIssueApprovalBeforePr: false,
+        autoClosesNewIssues: false,
+        hasLgtmApprovalProtocol: false,
+        restrictedTriageHours: false,
+        reasons: ["fixture policy"],
+        suggestedContributorAction: "Proceed with the canonical protocol.",
+        matchedKeywords: [],
+      },
+    };
     saveCanonicalArtifact(
       manager,
       runId,
@@ -140,6 +154,8 @@ function seedGovernanceReadyRun(
         repoFullName: "org/repo",
         policySnapshot,
         policySha256: hashTrustedPolicySnapshot(policySnapshot),
+        communityGate,
+        communityGateSha256: hashCommunityGateSnapshot(communityGate),
       },
       "WORKSPACE_PREPARED",
     );
@@ -158,7 +174,7 @@ function seedGovernanceReadyRun(
     } as any,
     "RED_CAPTURED",
   );
-  manager.saveArtifact(runId, "patch", patchContent, "PATCH_DRAFTED");
+  manager.saveArtifact(runId, "patch", patchContent);
   saveCanonicalArtifact(manager, runId, "validated_patch", validatedPatch);
   const testIdentity = {
     normalizedCommand: "bun test regression.test.ts",
@@ -173,8 +189,16 @@ function seedGovernanceReadyRun(
       baselineTestedAt: "2026-01-01T00:00:00.000Z",
       baselineFlakyTests: [],
       stressLoopRuns: 1,
+      roundsRequested: 1,
+      roundsCompleted: 1,
+      workersPerRound: 1,
+      executionsExpected: 1,
       stressLoopPassed: true,
-      handleLeakCheckPassed: true,
+      executionCount: 1,
+      maxConcurrentObserved: 1,
+      concurrencyWorkers: 1,
+      concurrencyStampedePassed: true,
+      handleLeakCheckPassed: "PASS",
       passedUnitTestsCount: 1,
       failedUnitTestsCount: 0,
       reproductionVerified: true,
@@ -203,6 +227,11 @@ function seedGovernanceReadyRun(
         appliedPatchSha256: patchSha256,
         validatedPatchArtifactSha256: validatedPatch.artifactSha256,
         stressLoopPassed: true,
+        roundsRequested: 1,
+        roundsCompleted: 1,
+        workersPerRound: 1,
+        executionsExpected: 1,
+        executionCount: 1,
         allTestsPassing: true,
         assertionMatchedFingerprint: "fp",
         testIdentity,
@@ -392,6 +421,11 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           treeChangedComparedToRed: true,
           treeHashMatchesRed: false,
           stressLoopPassed: true,
+          roundsRequested: 1,
+          roundsCompleted: 1,
+          workersPerRound: 1,
+          executionsExpected: 1,
+          executionCount: 1,
           allTestsPassing: true,
           assertionMatchedFingerprint: "shared-fp", // forged to match RED fingerprint!
           testIdentity: {
@@ -649,11 +683,13 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
         expectedIntentSha256: intent.intentSha256,
       });
 
-      // Malicious agent mutates PR body after approval
-      manager.saveArtifact(
-        manifest.runId,
-        "pr_draft",
+      // Simulate a lower-level TOCTOU mutation outside the run manager. The
+      // manager rejects ordinary post-governance writes, but the host must
+      // still re-read the artifact before any provider side effect.
+      writeFileSync(
+        join(baseDir, manifest.runId, "pr_draft.md"),
         "Malicious Injected PR Body",
+        "utf8",
       );
 
       const mockPrService = {
@@ -738,6 +774,11 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           treeChangedComparedToRed: true,
           treeHashMatchesRed: false,
           stressLoopPassed: true,
+          roundsRequested: 1,
+          roundsCompleted: 1,
+          workersPerRound: 1,
+          executionsExpected: 1,
+          executionCount: 1,
           allTestsPassing: true,
           assertionMatchedFingerprint: "fp",
           testIdentity: greenIdentity, // BUT DIFFERENT test-file content!
@@ -842,6 +883,11 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           treeChangedComparedToRed: true,
           treeHashMatchesRed: false,
           stressLoopPassed: true,
+          roundsRequested: 1,
+          roundsCompleted: 1,
+          workersPerRound: 1,
+          executionsExpected: 1,
+          executionCount: 1,
           allTestsPassing: true,
           assertionMatchedFingerprint: "fp",
           testIdentity: greenIdentity,

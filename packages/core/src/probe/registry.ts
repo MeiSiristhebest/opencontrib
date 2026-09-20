@@ -3,7 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import type { ProbeManifest } from "./types.js";
 import { getOpenContribDataDir } from "../kernel/home.js";
-import { defaultPluginManager } from "../kernel/plugin-manager.js";
+import { PluginManager } from "../kernel/plugin-manager.js";
 
 /** Authority consulted to decide whether a probe is enabled. */
 export interface PluginStateProvider {
@@ -489,17 +489,14 @@ export class ProbeRegistry {
   private memoryProbes: Map<string, ProbeManifest> = new Map();
   private stateProvider: PluginStateProvider;
 
-  constructor(
-    customPluginsDir?: string,
-    stateProvider: PluginStateProvider = defaultPluginManager,
-  ) {
+  constructor(customPluginsDir?: string, stateProvider?: PluginStateProvider) {
     this.pluginsDir =
       customPluginsDir || path.join(getOpenContribDataDir(), "plugins");
     // Load built-in probes
     for (const probe of BUILTIN_PROBES) {
       this.memoryProbes.set(probe.name, probe);
     }
-    this.stateProvider = stateProvider;
+    this.stateProvider = stateProvider ?? new PluginManager();
     this.loadCustomPlugins();
   }
 

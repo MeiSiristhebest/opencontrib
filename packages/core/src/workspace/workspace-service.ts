@@ -1,6 +1,9 @@
 import { existsSync } from "fs";
 import type { ContributionRunManager } from "../run/run-manager.js";
-import { saveCanonicalArtifact } from "../run/canonical-writer.js";
+import {
+  markCanonicalRunFailed,
+  saveCanonicalArtifact,
+} from "../run/canonical-writer.js";
 import {
   hashTrustedPolicySnapshot,
   isTrustedPolicySnapshot,
@@ -10,6 +13,13 @@ import {
   type TrustedPolicyGitReader,
   type TrustedPolicySnapshot,
 } from "../kernel/config.js";
+import {
+  hashCommunityGateSnapshot,
+  readCommunityGateAtCommit,
+  type CommunityGateFileReader,
+  type CommunityGateSnapshot,
+} from "../governance/community-gate.js";
+import { CommunityGateSnapshotSchema } from "../contracts/schemas.js";
 import { WorktreeManager, type WorkspaceContext } from "./worktree-manager.js";
 
 export interface PrepareWorkspaceInput {
@@ -29,6 +39,8 @@ export interface WorkspaceArtifactData {
   baseBranch?: string;
   policySnapshot: TrustedPolicySnapshot;
   policySha256: string;
+  communityGate: CommunityGateSnapshot;
+  communityGateSha256: string;
   createdAt: string;
 }
 
@@ -77,6 +89,44 @@ function captureTrustedPolicySnapshot(
   return mergeTrustedPolicySnapshots(
     loadHostPolicy(),
     readBaselineRepoPolicy(worktreeManager, baseRepoPath, baseCommitSha),
+  );
+}
+
+function captureCommunityGateSnapshot(
+  worktreeManager: WorktreeManager,
+  baseRepoPath: string,
+  baseCommitSha: string,
+): CommunityGateSnapshot {
+  if (typeof worktreeManager.runGit !== "function") {
+    throw new Error(
+      `CommunityGateSnapshotError: cannot inspect community policy at verified base commit ${baseCommitSha}.`,
+    );
+  }
+
+  const reader: CommunityGateFileReader = {
+    listTree: (policyPath) =>
+      worktreeManager.runGit([
+        "-C",
+        baseRepoPath,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        baseCommitSha,
+        "--",
+        policyPath,
+      ]),
+    show: (policyPath) =>
+      worktreeManager.runGit([
+        "-C",
+        baseRepoPath,
+        "show",
+        `${baseCommitSha}:${policyPath}`,
+      ]),
+  };
+  return readCommunityGateAtCommit(
+    reader,
+    baseCommitSha,
+    "CommunityGateSnapshotError",
   );
 }
 
@@ -130,6 +180,20 @@ export class WorkspaceService {
       ) {
         throw new Error(
           `WorkspacePolicySnapshotError: canonical workspace for run ${input.runId} is missing a valid immutable policy snapshot.`,
+        );
+      }
+      const existingCommunityGate = CommunityGateSnapshotSchema.safeParse(
+        existingWs.communityGate,
+      );
+      if (
+        !existingCommunityGate.success ||
+        typeof existingWs.communityGateSha256 !== "string" ||
+        hashCommunityGateSnapshot(existingCommunityGate.data) !==
+          existingWs.communityGateSha256 ||
+        existingCommunityGate.data.sourceCommitSha !== existingWs.baseCommitSha
+      ) {
+        throw new Error(
+          `CommunityGateSnapshotError: canonical workspace for run ${input.runId} is missing a valid immutable baseline community gate snapshot.`,
         );
       }
       if (
@@ -212,56 +276,96 @@ export class WorkspaceService {
       }
     }
 
-    // Create isolated worktree strictly using runId to enforce run-owned branch naming
-    const context = this.worktreeManager.createIsolatedWorkspace({
-      repoFullName: manifestRepo,
-      issueOrTaskId: input.issueOrTaskId,
-      localRepoPath: input.localRepoPath,
-      runId: input.runId,
-    });
+    // Create isolated worktree strictly using runId to enforce run-owned branch naming.
+    // Everything after allocation is part of one transaction boundary: if
+    // baseline provenance or canonical persistence fails, the newly allocated
+    // workspace is removed and the run is explicitly marked retryable.
+    let context: WorkspaceContext | undefined;
+    try {
+      context = this.worktreeManager.createIsolatedWorkspace({
+        repoFullName: manifestRepo,
+        issueOrTaskId: input.issueOrTaskId,
+        localRepoPath: input.localRepoPath,
+        runId: input.runId,
+      });
 
-    const baseBranch =
-      context.baseBranch ||
-      (typeof this.worktreeManager.detectDefaultBranch === "function" &&
-      context.baseRepoPath
-        ? this.worktreeManager.detectDefaultBranch(context.baseRepoPath)
-        : "main");
-    if (!context.baseCommitSha) {
-      throw new Error(
-        `WorkspaceBaseCommitUnavailableError: isolated workspace for run ${input.runId} has no verified upstream base commit.`,
+      const baseBranch =
+        context.baseBranch ||
+        (typeof this.worktreeManager.detectDefaultBranch === "function" &&
+        context.baseRepoPath
+          ? this.worktreeManager.detectDefaultBranch(context.baseRepoPath)
+          : "main");
+      if (!context.baseCommitSha) {
+        throw new Error(
+          `WorkspaceBaseCommitUnavailableError: isolated workspace for run ${input.runId} has no verified upstream base commit.`,
+        );
+      }
+
+      const policySnapshot = captureTrustedPolicySnapshot(
+        this.worktreeManager,
+        context.baseRepoPath,
+        context.baseCommitSha,
       );
+      const communityGate = captureCommunityGateSnapshot(
+        this.worktreeManager,
+        context.baseRepoPath,
+        context.baseCommitSha,
+      );
+      const artifact: WorkspaceArtifactData = {
+        workspacePath: context.workspacePath,
+        branchName: context.branchName,
+        isWorktree: context.isWorktree,
+        baseRepoPath: context.baseRepoPath,
+        baseCommitSha: context.baseCommitSha,
+        repoFullName: manifestRepo,
+        baseBranch,
+        policySnapshot,
+        policySha256: hashTrustedPolicySnapshot(policySnapshot),
+        communityGate,
+        communityGateSha256: hashCommunityGateSnapshot(communityGate),
+        createdAt: new Date().toISOString(),
+      };
+
+      saveCanonicalArtifact(
+        this.runManager,
+        input.runId,
+        "workspace",
+        artifact as any,
+        "WORKSPACE_PREPARED",
+      );
+
+      return {
+        context,
+        artifact,
+        alreadyPrepared: false,
+      };
+    } catch (error) {
+      if (context?.workspacePath) {
+        try {
+          this.worktreeManager.cleanupWorkspace(
+            context.workspacePath,
+            context.baseRepoPath,
+          );
+        } catch {
+          // Preserve the provenance failure; cleanup is best effort and never
+          // turns a failed run into an apparent success.
+        }
+      }
+      if (context) {
+        try {
+          markCanonicalRunFailed(
+            this.runManager,
+            input.runId,
+            error instanceof Error ? error.message : String(error),
+            true,
+            false,
+          );
+        } catch {
+          // The original error remains authoritative if failure recording is
+          // unavailable (for example, in an intentionally minimal test double).
+        }
+      }
+      throw error;
     }
-
-    const policySnapshot = captureTrustedPolicySnapshot(
-      this.worktreeManager,
-      context.baseRepoPath,
-      context.baseCommitSha,
-    );
-    const artifact: WorkspaceArtifactData = {
-      workspacePath: context.workspacePath,
-      branchName: context.branchName,
-      isWorktree: context.isWorktree,
-      baseRepoPath: context.baseRepoPath,
-      baseCommitSha: context.baseCommitSha,
-      repoFullName: manifestRepo,
-      baseBranch,
-      policySnapshot,
-      policySha256: hashTrustedPolicySnapshot(policySnapshot),
-      createdAt: new Date().toISOString(),
-    };
-
-    saveCanonicalArtifact(
-      this.runManager,
-      input.runId,
-      "workspace",
-      artifact as any,
-      "WORKSPACE_PREPARED",
-    );
-
-    return {
-      context,
-      artifact,
-      alreadyPrepared: false,
-    };
   }
 }

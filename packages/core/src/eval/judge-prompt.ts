@@ -7,8 +7,13 @@
  * via invoke_subagent or its own reasoning loop, NOT by this library.
  */
 
-import { z } from 'zod';
-import type { TrajectoryEvent, TrajectoryMetrics, JudgeDimensionScore, JudgeEvaluationReport } from './types.js';
+import { z } from "zod";
+import type {
+  TrajectoryEvent,
+  TrajectoryMetrics,
+  JudgeDimensionScore,
+  JudgeEvaluationReport,
+} from "./types.js";
 
 // ─── G-Eval Rubric System Prompt ─────────────────────────────────────────────
 export const JUDGE_SYSTEM_PROMPT = `You are a strict, neutral, and independent evaluator of AI coding agent execution trajectories for open-source contribution tasks. Your role follows the G-Eval Chain-of-Thought evaluation methodology.
@@ -33,7 +38,7 @@ Does the agent manage its context window responsibly?
 
 ### 3. Empirical Rigor & Dual-Stage Reproduction (0–100)
 Does the agent produce real evidence of pre-fix failure (RED) then post-fix pass (GREEN)?
-- EXEMPLARY (85–100): Explicit RED→GREEN cycle; uses opencontrib evidence or equivalent.
+- EXEMPLARY (85–100): Explicit RED→GREEN cycle; uses the canonical capture-red and verify-green evidence flow or equivalent.
 - NEEDS_IMPROVEMENT (40–64): Fix applied without first confirming a failing test.
 - UNSATISFACTORY (0–39): No reproduction whatsoever.
 
@@ -84,7 +89,12 @@ export const JudgeOutputSchema = z.object({
     concurrencyStress: JudgeDimOutputSchema,
     communityCraftsmanship: JudgeDimOutputSchema,
   }),
-  overallVerdict: z.enum(['EXEMPLARY', 'PROFICIENT', 'NEEDS_IMPROVEMENT', 'UNSATISFACTORY']),
+  overallVerdict: z.enum([
+    "EXEMPLARY",
+    "PROFICIENT",
+    "NEEDS_IMPROVEMENT",
+    "UNSATISFACTORY",
+  ]),
   strengths: z.array(z.string()),
   criticalCritiques: z.array(z.string()),
   actionableDirectives: z.array(z.string()),
@@ -112,29 +122,40 @@ export function compressTrajectory(
   for (const event of events) {
     if (!event.toolCalls?.length) continue;
     for (const tc of event.toolCalls) {
-      if (tc.name === 'run_command') {
-        const cmd = String(tc.args?.CommandLine ?? tc.args?.command ?? '').slice(0, 220);
+      if (tc.name === "run_command") {
+        const cmd = String(
+          tc.args?.CommandLine ?? tc.args?.command ?? "",
+        ).slice(0, 220);
         lines.push(`[Step ${event.stepIndex}] run_command: ${cmd}`);
-      } else if (tc.name === 'view_file') {
-        const p = String(tc.args?.AbsolutePath ?? '').split(/[\\/]/).pop() ?? '?';
+      } else if (tc.name === "view_file") {
+        const p =
+          String(tc.args?.AbsolutePath ?? "")
+            .split(/[\\/]/)
+            .pop() ?? "?";
         lines.push(`[Step ${event.stepIndex}] view_file: ${p}`);
-      } else if (tc.name === 'grep_search') {
-        lines.push(`[Step ${event.stepIndex}] grep_search: "${String(tc.args?.Query ?? '').slice(0, 80)}"`);
-      } else if (tc.name === 'write_to_file') {
-        const p = String(tc.args?.TargetFile ?? '').split(/[\\/]/).pop() ?? '?';
+      } else if (tc.name === "grep_search") {
+        lines.push(
+          `[Step ${event.stepIndex}] grep_search: "${String(tc.args?.Query ?? "").slice(0, 80)}"`,
+        );
+      } else if (tc.name === "write_to_file") {
+        const p =
+          String(tc.args?.TargetFile ?? "")
+            .split(/[\\/]/)
+            .pop() ?? "?";
         lines.push(`[Step ${event.stepIndex}] write_to_file: ${p}`);
-      } else if (tc.name === 'replace_file_content') {
+      } else if (tc.name === "replace_file_content") {
         lines.push(`[Step ${event.stepIndex}] replace_file_content`);
-      } else if (tc.name === 'invoke_subagent') {
+      } else if (tc.name === "invoke_subagent") {
         lines.push(`[Step ${event.stepIndex}] invoke_subagent`);
       }
     }
   }
 
-  const text = lines.join('\n');
+  const text = lines.join("\n");
   // Cap at ~6 000 chars to remain within typical context budgets
   return text.length > 6000
-    ? text.slice(0, 6000) + '\n...[truncated — trajectory too large for single context window]'
+    ? text.slice(0, 6000) +
+        "\n...[truncated — trajectory too large for single context window]"
     : text;
 }
 
@@ -153,12 +174,12 @@ export function buildJudgePrompt(
   const trajectoryText = compressTrajectory(events, metrics);
 
   const userPrompt = [
-    'Please evaluate the following AI agent execution trajectory using the G-Eval rubric provided in your system prompt.',
-    '',
+    "Please evaluate the following AI agent execution trajectory using the G-Eval rubric provided in your system prompt.",
+    "",
     trajectoryText,
-    '',
-    'Respond ONLY with the JSON object described in the system prompt. No markdown, no explanation outside the JSON.',
-  ].join('\n');
+    "",
+    "Respond ONLY with the JSON object described in the system prompt. No markdown, no explanation outside the JSON.",
+  ].join("\n");
 
   return {
     systemPrompt: JUDGE_SYSTEM_PROMPT,
@@ -194,25 +215,27 @@ export function parseJudgeResponse(
   const judgeOutput = JudgeOutputSchema.parse(parsed);
 
   const weights: Record<string, number> = {
-    problemFormulation: 0.20,
-    contextEconomy: 0.20,
+    problemFormulation: 0.2,
+    contextEconomy: 0.2,
     empiricalRigor: 0.25,
     concurrencyStress: 0.15,
-    communityCraftsmanship: 0.20,
+    communityCraftsmanship: 0.2,
   };
 
   const titles: Record<string, string> = {
-    problemFormulation: 'Problem Formulation & Defect Convergence',
-    contextEconomy: 'Context Economy & Anti-Drift',
-    empiricalRigor: 'Empirical Rigor & Dual-Stage Reproduction',
-    concurrencyStress: 'Concurrency & Chaos Stress Testing',
-    communityCraftsmanship: 'Community Craftsmanship & Zero-Mojibake Protocol',
+    problemFormulation: "Problem Formulation & Defect Convergence",
+    contextEconomy: "Context Economy & Anti-Drift",
+    empiricalRigor: "Empirical Rigor & Dual-Stage Reproduction",
+    concurrencyStress: "Concurrency & Chaos Stress Testing",
+    communityCraftsmanship: "Community Craftsmanship & Zero-Mojibake Protocol",
   };
 
-  const dimKeys = Object.keys(weights) as Array<keyof typeof judgeOutput.dimensions>;
+  const dimKeys = Object.keys(weights) as Array<
+    keyof typeof judgeOutput.dimensions
+  >;
 
   const dimensions: JudgeDimensionScore[] = dimKeys.map((k) => ({
-    dimension: k as JudgeDimensionScore['dimension'],
+    dimension: k as JudgeDimensionScore["dimension"],
     title: titles[k],
     weight: weights[k],
     score: judgeOutput.dimensions[k].score,
@@ -224,7 +247,9 @@ export function parseJudgeResponse(
 
   // Weakest-dimension gate: any score < 25 → cap overall at 50
   const minScore = Math.min(...dimensions.map((d) => d.score));
-  const overallScore = Math.round(minScore < 25 ? Math.min(rawOverall, 50) : rawOverall);
+  const overallScore = Math.round(
+    minScore < 25 ? Math.min(rawOverall, 50) : rawOverall,
+  );
 
   const defaultMetrics: TrajectoryMetrics = {
     totalSteps: 0,

@@ -18,6 +18,7 @@ import {
 import type { ContributionRunManager } from "../run/run-manager.js";
 import type { ApprovalSigner } from "./approval-signing.js";
 import { getApprovalSigningPayload } from "./approval-signing.js";
+import { communityPolicyRequiresExplicitApproval } from "./community-gate.js";
 
 export type ApprovalRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
 
@@ -155,6 +156,14 @@ export class TrustedApprovalBroker {
     if (!decision.approvedBy.trim()) {
       throw new Error("ApprovalBrokerError: approvedBy is required.");
     }
+    if (
+      communityPolicyRequiresExplicitApproval(request.communityGate.policy) &&
+      decision.approvalMode !== "explicit_human"
+    ) {
+      throw new Error(
+        "ApprovalBrokerError: detected community policy requires explicit human approval; policy waiver is not accepted.",
+      );
+    }
 
     const authorityHost: HostApprovalPort = {
       issueApproval: (): ApprovalAuthorityDecision => ({
@@ -169,6 +178,7 @@ export class TrustedApprovalBroker {
             evidenceSha256: request.evidenceSha256,
             governanceSha256: request.governanceSha256,
             policySha256: request.policySha256,
+            communityGateSha256: request.communityGateSha256,
             prBodySha256: request.prBodySha256,
             approvedBy: decision.approvedBy,
             approvalMode: decision.approvalMode,
@@ -234,6 +244,7 @@ function requestIdForChallenge(challenge: ApprovalChallenge): string {
     evidenceSha256: challenge.evidenceSha256,
     governanceSha256: challenge.governanceSha256,
     policySha256: challenge.policySha256,
+    communityGateSha256: challenge.communityGateSha256,
     prBodySha256: challenge.prBodySha256,
     target: challenge.target,
     branchName: challenge.branchName,
@@ -254,6 +265,9 @@ function sameChallenge(
     left.evidenceSha256 === right.evidenceSha256 &&
     left.governanceSha256 === right.governanceSha256 &&
     left.policySha256 === right.policySha256 &&
+    left.communityGateSha256 === right.communityGateSha256 &&
+    JSON.stringify(left.communityGate) ===
+      JSON.stringify(right.communityGate) &&
     left.prBodySha256 === right.prBodySha256 &&
     left.target === right.target &&
     left.branchName === right.branchName

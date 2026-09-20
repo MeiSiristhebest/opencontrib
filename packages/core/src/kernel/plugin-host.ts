@@ -19,6 +19,7 @@ import { EvidenceGraph } from "./evidence-graph.js";
 import { ProbeScanScheduler } from "./scan-scheduler.js";
 import { parseCommandSpec } from "../sandbox/command-spec.js";
 import { getOpenContribDataDir } from "./home.js";
+import { resolvePointerStoreLocation } from "./pointer-store.js";
 import { execWithSpawn, defaultBinaryProbe } from "./process-runner.js";
 
 /** Credential-bearing env var keys that must never be passed to plugin subprocesses. */
@@ -87,9 +88,13 @@ export class PluginHost implements ProbeRegistryApi {
     const opencontribDir = getOpenContribDataDir();
     this.pluginsDir =
       options.pluginsDir || path.join(opencontribDir, "plugins");
-    this.pointers = new SmartPointerStore(
-      path.join(this.workspacePath, ".opencontrib", "pointers"),
-    );
+    this.pointers = new SmartPointerStore({
+      workspacePath: this.workspacePath,
+      storageDir: resolvePointerStoreLocation({
+        workspacePath: this.workspacePath,
+      }),
+      scope: this.workspacePath,
+    });
     this.events = new MicrokernelEventBus();
     this.router = new CapabilityRouter();
     this.evidenceGraph = new EvidenceGraph(this.pointers);

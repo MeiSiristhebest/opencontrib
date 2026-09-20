@@ -3,17 +3,18 @@ import { CliExitError } from "../utils/exit.js";
 
 import { Command } from "commander";
 import {
+  ActiveSessionManager,
   WorktreeManager,
   WorkspaceService,
   buildContributionRunManager,
-  defaultActiveSessionManager,
   getProtocolGuidance,
   type ContributionRunManager,
 } from "@opencontrib/core";
 import { printJSON, printPhaseGuidance } from "../utils/output.js";
 
-const worktreeManager = new WorktreeManager();
-// Lazy factory: constructed on first use, not at module load time.
+// Storage-bound collaborators are created after Commander preAction applies
+// --home, so every CLI command resolves one canonical data directory.
+const getWorktreeManager = (): WorktreeManager => new WorktreeManager();
 let _runManager: ContributionRunManager | null = null;
 const getRunManager = (): ContributionRunManager =>
   (_runManager ??= buildContributionRunManager());
@@ -59,6 +60,7 @@ const workspacePrepare = new Command("prepare")
           effectiveRunId = manifest.runId;
         }
 
+        const worktreeManager = getWorktreeManager();
         const workspaceService = new WorkspaceService(
           runManager,
           worktreeManager,
@@ -72,7 +74,7 @@ const workspacePrepare = new Command("prepare")
           },
         );
 
-        defaultActiveSessionManager.setActiveSession({
+        new ActiveSessionManager().setActiveSession({
           runId: effectiveRunId,
           repoFullName: opts.repo,
           workspacePath: context.workspacePath,
@@ -130,7 +132,7 @@ const workspacePurge = new Command("purge")
   .option("--pretty", "Pretty-print", false)
   .action(async (opts: { cleanRepos?: boolean; pretty?: boolean }) => {
     try {
-      const report = worktreeManager.purgeAllWorkspaces({
+      const report = getWorktreeManager().purgeAllWorkspaces({
         cleanRepos: opts.cleanRepos ?? false,
       });
       printJSON(
@@ -153,7 +155,7 @@ const workspaceList = new Command("list")
   .option("--pretty", "Pretty-print", false)
   .action((opts: { pretty?: boolean }) => {
     try {
-      const workspaces = worktreeManager.listWorkspaces();
+      const workspaces = getWorktreeManager().listWorkspaces();
       printJSON(
         {
           status: "success",

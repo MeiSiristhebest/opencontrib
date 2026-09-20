@@ -7,11 +7,10 @@
 import type {
   CreateRunInput,
   ContributionRunManifest,
-  ContributionRunPhase,
   ContributionRunSummary,
   SavedArtifactResult,
   ArtifactType,
-} from '../run/types.js';
+} from "../run/types.js";
 
 export interface RunRepository {
   resolveRunId(runId?: string): string | undefined;
@@ -22,7 +21,5 @@ export interface RunRepository {
     runId: string,
     type: ArtifactType,
     content: string | Record<string, unknown>,
-    autoAdvancePhase?: ContributionRunPhase,
   ): SavedArtifactResult;
-  updateRunPhase(runId: string, newPhase: ContributionRunPhase): ContributionRunManifest;
 }

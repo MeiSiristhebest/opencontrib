@@ -238,12 +238,11 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
       "RED_CAPTURED",
     );
 
-    // Save artifact and advance phase
+    // Save the phase-bound patch; the server derives PATCH_DRAFTED.
     const saveResult = await localTools["contrib_save_artifact"].handler({
       runId: manifest.runId,
       artifactType: "patch",
       content: "--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new",
-      autoAdvancePhase: "PATCH_DRAFTED",
     });
     expect(saveResult.isError).toBeUndefined();
     const saved = JSON.parse(saveResult.content[0].text).saved;
@@ -275,12 +274,11 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     });
     const manifest = JSON.parse(createResult.content[0].text).manifest;
 
-    // Attempt to jump straight to PATCH_DRAFTED from INITIALIZED or WORKSPACE_PREPARED without evidence_red.
+    // Attempt to save a phase-bound patch without evidence_red.
     const saveResult = await tools["contrib_save_artifact"].handler({
       runId: manifest.runId,
       artifactType: "patch",
       content: "--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new",
-      autoAdvancePhase: "PATCH_DRAFTED",
     });
     expect(saveResult.isError).toBe(true);
 
@@ -385,6 +383,16 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(captureRedIdx).toBeGreaterThan(-1);
     expect(verifyGreenIdx).toBeGreaterThan(-1);
     expect(captureRedIdx).toBeLessThan(verifyGreenIdx);
+  });
+
+  it("P0-01: prompt orders PR drafting before governance audit", async () => {
+    const result = await prompts["opencontrib_workflow_guide"].callback({});
+    const text = result.messages[0].content.text as string;
+    const renderTemplateIdx = text.indexOf("contrib_render_pr_template");
+    const auditGovernanceIdx = text.indexOf("contrib_audit_governance");
+    expect(renderTemplateIdx).toBeGreaterThan(-1);
+    expect(auditGovernanceIdx).toBeGreaterThan(-1);
+    expect(renderTemplateIdx).toBeLessThan(auditGovernanceIdx);
   });
 
   it("P0-01: prompt requires SubmissionPort-only submission via contrib_submit_pr", async () => {

@@ -19,7 +19,10 @@ import { evidenceCommand } from "../src/commands/evidence.js";
 import { verifyCommand } from "../src/commands/verify.js";
 import { evalCommand } from "../src/commands/eval.js";
 import { printPhaseGuidance, printTable } from "../src/utils/output.js";
-import { defaultActiveSessionManager } from "@opencontrib/core";
+import {
+  defaultActiveSessionManager,
+  SmartPointerStore,
+} from "@opencontrib/core";
 
 describe("CLI Commands & Subcommands Test Suite", () => {
   it("registers all 16 command domains correctly with descriptions and subcommands", () => {
@@ -109,6 +112,49 @@ describe("CLI Commands & Subcommands Test Suite", () => {
       "resolve",
       "ptr://findings/test-123",
     ]);
+  });
+
+  it("hydrates content-addressed pointers across CLI processes", async () => {
+    const workspacePath = fs.mkdtempSync(
+      path.join(os.tmpdir(), "opencontrib-cli-pointers-"),
+    );
+    try {
+      const writer = new SmartPointerStore({
+        workspacePath,
+        cwd: workspacePath,
+        scope: workspacePath,
+      });
+      const pointer = writer.create({
+        namespace: "findings",
+        id: "cli-cross-process",
+        title: "CLI hydration",
+        category: "security_cwe",
+        severity: "medium",
+        file: "src/index.ts",
+        line: 7,
+      });
+
+      await pointerCommand.parseAsync([
+        "node",
+        "test",
+        "list",
+        "findings",
+        "--dir",
+        workspacePath,
+      ]);
+      await pointerCommand.parseAsync([
+        "node",
+        "test",
+        "resolve",
+        pointer.uri,
+        "--dir",
+        workspacePath,
+        "--view",
+        "stub",
+      ]);
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
   });
 
   it("executes workspace subcommands (list, purge)", async () => {
@@ -252,11 +298,21 @@ describe("CLI Commands & Subcommands Test Suite", () => {
   });
 
   it("executes capability & plugin subcommands", async () => {
-    await capabilityCommand.parseAsync(["node", "test", "list"]);
-    await capabilityCommand.parseAsync(["node", "test", "plan", "."]);
+    const previousCwd = process.cwd();
+    const isolatedCwd = fs.mkdtempSync(
+      path.join(os.tmpdir(), "opencontrib-capability-cli-"),
+    );
+    try {
+      process.chdir(isolatedCwd);
+      await capabilityCommand.parseAsync(["node", "test", "list"]);
+      await capabilityCommand.parseAsync(["node", "test", "plan", "."]);
 
-    await pluginCommand.parseAsync(["node", "test", "list"]);
-    await pluginCommand.parseAsync(["node", "test", "status"]);
+      await pluginCommand.parseAsync(["node", "test", "list"]);
+      await pluginCommand.parseAsync(["node", "test", "status"]);
+    } finally {
+      process.chdir(previousCwd);
+      fs.rmSync(isolatedCwd, { recursive: true, force: true });
+    }
   });
 
   it("executes doctor command", async () => {

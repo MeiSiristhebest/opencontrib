@@ -6,10 +6,12 @@ import { join } from "path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import {
   computeSourceTreeHash,
+  computeTestIdentity,
   captureRedEvidence,
   verifyGreenEvidence,
 } from "../src/evidence/evidence-collector.js";
 import {
+  ContributionRunManager,
   validatePhaseGate,
   type ContributionRunSummary,
 } from "../src/index.js";
@@ -86,6 +88,128 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       expect(red.command).toBe(FAILING_CMD);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("trusted RED ingestion binds command, test identity, output, and host tree hash", () => {
+    const wsDir = mkdtempSync(join(tmpdir(), "oc-trusted-red-ws-"));
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-trusted-red-runs-"));
+    try {
+      writeFileSync(join(wsDir, "regression.test.ts"), "test fixture\n");
+      execFileSync("git", ["init"], { cwd: wsDir, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], {
+        cwd: wsDir,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "OpenContrib Test"], {
+        cwd: wsDir,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["add", "."], { cwd: wsDir, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "baseline"], {
+        cwd: wsDir,
+        stdio: "ignore",
+      });
+      const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: wsDir,
+        encoding: "utf8",
+      }).trim();
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      saveCanonicalArtifact(
+        manager,
+        manifest.runId,
+        "workspace",
+        {
+          workspacePath: wsDir,
+          baseCommitSha,
+          baseBranch: "main",
+          branchName: "opencontrib/test-red",
+          repoFullName: "org/repo",
+        },
+        "WORKSPACE_PREPARED",
+      );
+
+      const executionContract = {
+        testCommand: FAILING_CMD,
+        expectedAssertion: "ASSERTFAIL",
+        testFiles: ["regression.test.ts"],
+      };
+      const testIdentity = computeTestIdentity(
+        wsDir,
+        executionContract.testCommand,
+        executionContract.expectedAssertion,
+        executionContract.testFiles,
+      );
+      const validRaw = {
+        command: FAILING_CMD,
+        exitCode: 1,
+        stdout: "ASSERTFAIL",
+        stderr: "",
+        outputSnippet: "ASSERTFAIL",
+        assertionMatched: true,
+        capturedAt: new Date().toISOString(),
+        sourceTreeSha256: computeSourceTreeHash(wsDir),
+        testIdentity,
+      };
+      const evidenceService = new EvidenceService(manager);
+
+      expect(() =>
+        evidenceService.recordRedExecution(
+          manifest.runId,
+          {
+            ...validRaw,
+            command: "",
+            stdout: "",
+            outputSnippet: "",
+            sourceTreeSha256: "not-a-tree-hash",
+          } as any,
+          executionContract,
+        ),
+      ).toThrow(/RedExecutionValidationError/);
+      expect(() =>
+        evidenceService.recordRedExecution(
+          manifest.runId,
+          { ...validRaw, sourceTreeSha256: "f".repeat(64) },
+          executionContract,
+        ),
+      ).toThrow(/host-recomputed workspace hash/);
+      expect(() =>
+        evidenceService.recordRedExecution(
+          manifest.runId,
+          {
+            ...validRaw,
+            testIdentity: {
+              ...testIdentity,
+              identitySha256: "0".repeat(64),
+            },
+          },
+          executionContract,
+        ),
+      ).toThrow(/test identity/);
+      expect(() =>
+        evidenceService.recordRedExecution(
+          manifest.runId,
+          { ...validRaw, stdout: "", outputSnippet: "" },
+          executionContract,
+        ),
+      ).toThrow(/no failure output/);
+      expect(manager.getRun(manifest.runId)?.manifest.currentPhase).toBe(
+        "WORKSPACE_PREPARED",
+      );
+
+      evidenceService.recordRedExecution(
+        manifest.runId,
+        validRaw,
+        executionContract,
+      );
+      manager.saveArtifact(manifest.runId, "patch", "{}");
+      expect(manager.getRun(manifest.runId)?.manifest.currentPhase).toBe(
+        "PATCH_DRAFTED",
+      );
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+      rmSync(wsDir, { recursive: true, force: true });
     }
   });
 
@@ -223,12 +347,7 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       expect(red.exitCode).toBe(1);
       expect(red.assertionMatchedFingerprint).toBeDefined();
 
-      manager.saveArtifact(
-        manifest.runId,
-        "patch",
-        patchContent,
-        "PATCH_DRAFTED",
-      );
+      manager.saveArtifact(manifest.runId, "patch", patchContent);
 
       // 2. Mutate source to fix bug (GREEN)
       writeFileSync(stateFile, greenContent);

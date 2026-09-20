@@ -5,6 +5,7 @@ import type {
   SavedArtifactResult,
 } from "./types.js";
 import type { ContributionRunManager } from "./run-manager.js";
+import { validatePhaseGate } from "./state-machine.js";
 
 /**
  * Private application-layer capability used by canonical artifact services.
@@ -17,11 +18,23 @@ export interface CanonicalRunWriter {
     runId: string,
     type: ArtifactType,
     content: string | Record<string, unknown>,
-    autoAdvancePhase?: ContributionRunPhase,
   ): SavedArtifactResult;
   transition(
     runId: string,
     targetPhase: ContributionRunPhase,
+  ): ContributionRunManifest;
+  markFailed(
+    runId: string,
+    reason: string,
+    retryable?: boolean,
+    providerSideEffectPossible?: boolean,
+  ): ContributionRunManifest;
+  /** Record a retry/reconciliation outcome without changing lifecycle phase. */
+  recordFailure(
+    runId: string,
+    reason: string,
+    retryable?: boolean,
+    providerSideEffectPossible?: boolean,
   ): ContributionRunManifest;
   /** Host-only hydration used by TrustedRunMaterializer before re-verification. */
   hydrateRun(manifest: ContributionRunManifest): ContributionRunManifest;
@@ -51,7 +64,7 @@ export function saveCanonicalArtifact(
   runId: string,
   type: ArtifactType,
   content: string | Record<string, unknown>,
-  autoAdvancePhase?: ContributionRunPhase,
+  trustedTargetPhase?: ContributionRunPhase,
 ): SavedArtifactResult {
   const authoritativeTypes = new Set<ArtifactType>([
     "workspace",
@@ -69,12 +82,51 @@ export function saveCanonicalArtifact(
       `CanonicalArtifactTypeError: '${type}' is not an authoritative artifact type.`,
     );
   }
-  return getWriter(manager).saveArtifact(
-    runId,
-    type,
-    content,
-    autoAdvancePhase,
-  );
+  const writer = getWriter(manager);
+  const current = manager.getRun(runId);
+  if (!current) {
+    throw new Error(`Contribution run ${runId} does not exist`);
+  }
+
+  // Canonical services may request the lifecycle notification associated with
+  // the artifact they just produced, but the writer capability itself never
+  // accepts a caller-selected phase. Validate the prospective artifact before
+  // writing so an invalid transition cannot leave a privileged artifact behind.
+  if (
+    trustedTargetPhase &&
+    trustedTargetPhase !== current.manifest.currentPhase
+  ) {
+    const artifactKey =
+      type === "pr_draft"
+        ? "prDraft"
+        : type === "evidence_red"
+          ? "evidenceRed"
+          : type === "validated_patch"
+            ? "validatedPatch"
+            : type === "submission_intent"
+              ? "submissionIntent"
+              : type;
+    const prospective = {
+      ...current,
+      artifacts: {
+        ...current.artifacts,
+        [artifactKey]: content,
+      },
+    };
+    const gateResult = validatePhaseGate(prospective, trustedTargetPhase);
+    if (!gateResult.ok && gateResult.error) {
+      throw gateResult.error;
+    }
+  }
+
+  const saved = writer.saveArtifact(runId, type, content);
+  if (
+    trustedTargetPhase &&
+    trustedTargetPhase !== current.manifest.currentPhase
+  ) {
+    writer.transition(runId, trustedTargetPhase);
+  }
+  return saved;
 }
 
 export function transitionCanonicalRun(
@@ -90,6 +142,41 @@ export function transitionCanonicalRun(
  * the host hydrates only run metadata and then regenerates all authoritative
  * artifacts from the transferred patch/RED recipe.
  */
+export function markCanonicalRunFailed(
+  manager: ContributionRunManager,
+  runId: string,
+  reason: string,
+  retryable = true,
+  providerSideEffectPossible = false,
+): ContributionRunManifest {
+  return getWriter(manager).markFailed(
+    runId,
+    reason,
+    retryable,
+    providerSideEffectPossible,
+  );
+}
+
+/**
+ * Record a retryable provider failure while preserving the approved lifecycle
+ * phase. This is not a rollback: the next attempt must still pass all current
+ * authorization and provenance checks.
+ */
+export function recordCanonicalRunFailure(
+  manager: ContributionRunManager,
+  runId: string,
+  reason: string,
+  retryable = true,
+  providerSideEffectPossible = true,
+): ContributionRunManifest {
+  return getWriter(manager).recordFailure(
+    runId,
+    reason,
+    retryable,
+    providerSideEffectPossible,
+  );
+}
+
 export function hydrateCanonicalRun(
   manager: ContributionRunManager,
   manifest: ContributionRunManifest,

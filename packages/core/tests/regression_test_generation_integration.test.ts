@@ -59,9 +59,8 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         stdio: "ignore",
       });
 
-      const { ContributionRunManager } = await import(
-        "../src/run/run-manager.js"
-      );
+      const { ContributionRunManager } =
+        await import("../src/run/run-manager.js");
       const agentRunManager = new ContributionRunManager({
         baseDir: agentRuns,
       });
@@ -135,7 +134,6 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         manifest.runId,
         "patch",
         JSON.stringify(fullPatch),
-        "PATCH_DRAFTED",
       );
       agentRunManager.saveArtifact(
         manifest.runId,
@@ -165,9 +163,8 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
       ).ContributionRunManager({
         baseDir: hostRuns,
       });
-      const { WorktreeManager } = await import(
-        "../src/workspace/worktree-manager.js"
-      );
+      const { WorktreeManager } =
+        await import("../src/workspace/worktree-manager.js");
       class TestWorktreeManager extends WorktreeManager {
         override createIsolatedWorkspace(_options: any) {
           return {
@@ -202,5 +199,5 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
       rmSync(agentRuns, { recursive: true, force: true });
       rmSync(hostRuns, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });

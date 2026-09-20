@@ -7,7 +7,12 @@ import {
 import { DERIVED_PHASE_REQUIREMENTS } from "../workflow/protocol-contract.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 import {
+  communityPolicyRequiresExplicitApproval,
+  hashCommunityGateSnapshot,
+} from "../governance/community-gate.js";
+import {
   EvidenceBundleV2Schema,
+  CommunityGateSnapshotSchema,
   GovernanceDecisionArtifactSchema,
   SubmissionIntentArtifactSchema,
   SubmissionArtifactSchema,
@@ -50,9 +55,38 @@ export function validatePhaseGate(
   targetPhase: ContributionRunPhase,
 ): { ok: boolean; error?: PhaseGateViolationError } {
   const req = PHASE_REQUIREMENTS[targetPhase];
-  if (!req) return { ok: true };
-
   const currentPhase = runSummary.manifest.currentPhase;
+  if (!req) {
+    return {
+      ok: false,
+      error: new PhaseGateViolationError(
+        runSummary.manifest.runId,
+        currentPhase,
+        targetPhase,
+        [`Unknown contribution run phase '${String(targetPhase)}'.`],
+        "Use a phase from the canonical protocol contract.",
+      ),
+    };
+  }
+
+  // A repeated phase notification is an explicit idempotent no-op. Every
+  // actual phase change must follow the canonical precursor list, including
+  // FAILED; no caller can use a phase write as a rollback primitive.
+  if (currentPhase === targetPhase) return { ok: true };
+  if (!req.fromPhases.includes(currentPhase)) {
+    return {
+      ok: false,
+      error: new PhaseGateViolationError(
+        runSummary.manifest.runId,
+        currentPhase,
+        targetPhase,
+        [
+          `Phase '${currentPhase}' is not an allowed precursor to '${targetPhase}'`,
+        ],
+        req.suggestedAction,
+      ),
+    };
+  }
 
   const toSummaryKey = (type: ArtifactType): string => {
     switch (type) {
@@ -188,6 +222,15 @@ export function validatePhaseGate(
     }
 
     const audit = decision.data;
+    const communityGateError = validateCommunityGateBinding(runSummary, audit);
+    if (communityGateError) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [communityGateError],
+        "Re-run workspace preparation and GovernanceService.audit from the immutable baseline community policy snapshot.",
+      );
+    }
     if (
       !audit.passed ||
       audit.auditResult.technicalGate?.status !== "PASS" ||
@@ -287,6 +330,33 @@ export function validatePhaseGate(
 
     const intent = intentResult.data;
     const approval = approvalResult.data;
+    const communityGateError = validateCommunityGateBinding(
+      runSummary,
+      governanceResult.data,
+    );
+    if (communityGateError) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [communityGateError],
+        "Re-run the canonical workspace and governance audit; community policy snapshots are immutable and cannot be waived by the agent.",
+      );
+    }
+    if (
+      communityPolicyRequiresExplicitApproval(
+        governanceResult.data.communityGate.policy,
+      ) &&
+      approval.approvalMode !== "explicit_human"
+    ) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [
+          "Detected community policy requires explicit human approval; a policy waiver cannot satisfy the maintainer gate.",
+        ],
+        "Obtain explicit trusted maintainer approval after reviewing the pinned community policy snapshot.",
+      );
+    }
     const submission = submissionResult.success
       ? submissionResult.data
       : undefined;
@@ -298,6 +368,8 @@ export function validatePhaseGate(
       approval.evidenceSha256 === expectedHashes.evidenceSha256 &&
       approval.governanceSha256 === expectedHashes.governanceSha256 &&
       approval.policySha256 === governanceResult.data.policySha256 &&
+      approval.communityGateSha256 ===
+        governanceResult.data.communityGateSha256 &&
       approval.prBodySha256 === hashArtifact(intent.body);
     const intentBound =
       intent.runId === runSummary.manifest.runId &&
@@ -315,6 +387,8 @@ export function validatePhaseGate(
       submission.evidenceSha256 === approval.evidenceSha256 &&
       submission.governanceSha256 === approval.governanceSha256 &&
       submission.policySha256 === governanceResult.data.policySha256 &&
+      submission.communityGateSha256 ===
+        governanceResult.data.communityGateSha256 &&
       submission.baseCommitSha === intent.baseCommitSha &&
       submission.owner.toLowerCase() === intent.upstreamOwner.toLowerCase() &&
       submission.repo.toLowerCase() === intent.upstreamRepo.toLowerCase() &&
@@ -379,26 +453,50 @@ export function validatePhaseGate(
     }
   }
 
+  return { ok: true };
+}
+
+function validateCommunityGateBinding(
+  runSummary: ContributionRunSummary,
+  governance: {
+    communityGate: unknown;
+    communityGateSha256: string;
+  },
+): string | undefined {
+  const workspace = runSummary.artifacts.workspace as
+    | {
+        baseCommitSha?: unknown;
+        communityGate?: unknown;
+        communityGateSha256?: unknown;
+      }
+    | undefined;
+  const workspaceGate = CommunityGateSnapshotSchema.safeParse(
+    workspace?.communityGate,
+  );
   if (
-    targetPhase !== "FAILED" &&
-    req.fromPhases.length > 0 &&
-    !req.fromPhases.includes(currentPhase)
+    !workspaceGate.success ||
+    typeof workspace?.communityGateSha256 !== "string" ||
+    hashCommunityGateSnapshot(workspaceGate.data) !==
+      workspace.communityGateSha256 ||
+    typeof workspace?.baseCommitSha !== "string" ||
+    workspaceGate.data.sourceCommitSha !== workspace.baseCommitSha
   ) {
-    return {
-      ok: false,
-      error: new PhaseGateViolationError(
-        runSummary.manifest.runId,
-        currentPhase,
-        targetPhase,
-        [
-          `Phase '${currentPhase}' is not an allowed precursor to '${targetPhase}'`,
-        ],
-        req.suggestedAction,
-      ),
-    };
+    return "Canonical workspace is missing a valid immutable community policy snapshot pinned to its base commit.";
   }
 
-  return { ok: true };
+  const governanceGate = CommunityGateSnapshotSchema.safeParse(
+    governance.communityGate,
+  );
+  if (
+    !governanceGate.success ||
+    governance.communityGateSha256 !==
+      hashCommunityGateSnapshot(governanceGate.data) ||
+    governance.communityGateSha256 !== workspace.communityGateSha256 ||
+    JSON.stringify(governanceGate.data) !== JSON.stringify(workspaceGate.data)
+  ) {
+    return "GovernanceDecisionArtifact community policy snapshot does not bind the canonical workspace snapshot.";
+  }
+  return undefined;
 }
 
 function gateError(

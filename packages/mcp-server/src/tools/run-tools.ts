@@ -4,6 +4,7 @@ import {
   type ContributionRunManager,
   buildContributionPipeline,
   renderReport,
+  MAX_STRESS_ROUNDS,
 } from "@opencontrib/core";
 
 export function registerRunTools(
@@ -84,24 +85,6 @@ export function registerRunTools(
       content: z
         .union([z.string(), z.record(z.unknown())])
         .describe("Artifact payload or raw markdown/diff string"),
-      autoAdvancePhase: z
-        .enum([
-          "INITIALIZED",
-          "OPPORTUNITY_SCOUTED",
-          "PROBE_COMPLETED",
-          "CONTEXT_ASSEMBLED",
-          "WORKSPACE_PREPARED",
-          "RED_CAPTURED",
-          "POC_GENERATED",
-          "PATCH_DRAFTED",
-          "EVIDENCE_COLLECTED",
-          "GOVERNANCE_AUDITED",
-          "PR_SUBMITTED",
-          "COMPLETED",
-          "FAILED",
-        ])
-        .optional()
-        .describe("Optional phase to advance run manifest to"),
     },
     async (args) => {
       try {
@@ -109,7 +92,6 @@ export function registerRunTools(
           args.runId,
           args.artifactType,
           args.content,
-          args.autoAdvancePhase,
         );
 
         return {
@@ -233,6 +215,10 @@ export function registerRunTools(
         .describe('Target repository full name, e.g. "owner/repo"'),
       stressLoopRuns: z
         .number()
+        .finite()
+        .int()
+        .min(1)
+        .max(MAX_STRESS_ROUNDS)
         .default(1)
         .describe(
           "Number of concurrency stampede loops to verify thread safety",

@@ -45,7 +45,10 @@ const auditCommand = new Command("audit")
     "--pr-body-file <path>",
     "Path to markdown file containing proposed PR body",
   )
-  .option("--evidence <json>", "Evidence JSON from collect_evidence")
+  .option(
+    "--evidence <json>",
+    "Diagnostic evidence JSON; canonical runs use capture-red and verify-green",
+  )
   .option("--evidence-file <path>", "Path to evidence.json file")
   .option(
     "--subagent-score <n>",
@@ -409,12 +412,15 @@ const prTemplateCommand = new Command("pr-template")
     }) => {
       try {
         const runId = getRunManager().resolveRunId(opts.runId);
+        const canonicalRun = runId ? getRunManager().getRun(runId) : undefined;
+        if (runId && !canonicalRun) {
+          throw new Error(`Contribution run "${runId}" not found.`);
+        }
         let evidence: import("@opencontrib/core").EvidenceReport | undefined;
         if (runId) {
-          const run = getRunManager().getRun(runId);
           const { EvidenceReportSchema } = await import("@opencontrib/core");
           const parsed = EvidenceReportSchema.safeParse(
-            run?.artifacts.evidence,
+            canonicalRun?.artifacts.evidence,
           );
           if (parsed.success) {
             evidence = parsed.data;
@@ -428,11 +434,16 @@ const prTemplateCommand = new Command("pr-template")
         const prBody = renderMasterPrTemplate({
           keyChanges: opts.keyChanges || [],
           nativeTemplateContent: opts.nativeTemplate,
-          issueNumber: parseInt(opts.issue, 10) || 1,
-          issueTitle: opts.issueTitle,
+          issueNumber:
+            canonicalRun?.manifest.issueNumber ??
+            (parseInt(opts.issue, 10) || 1),
+          issueTitle: canonicalRun?.manifest.issueTitle ?? opts.issueTitle,
           summary: opts.summary,
-          validationCommand: opts.validationCmd,
-          validationOutputSnippet: opts.validationOutput,
+          // A canonical run may only render verification facts from its
+          // host-owned EvidenceReport; CLI-supplied validation text is
+          // diagnostic-only and cannot enter the stored PR draft.
+          validationCommand: runId ? undefined : opts.validationCmd,
+          validationOutputSnippet: runId ? undefined : opts.validationOutput,
           confidenceScore: opts.confidence,
           riskLevel: opts.risk,
           isDocumentationOnly: opts.isDocsOnly ?? false,
@@ -444,10 +455,13 @@ const prTemplateCommand = new Command("pr-template")
           getRunManager().saveArtifact(runId, "pr_draft", prBody);
         }
 
+        const effectivePhase = runId
+          ? getRunManager().getRun(runId)?.manifest.currentPhase
+          : "PATCH_DRAFTED";
         printJSON({ status: "success", prBody }, opts.pretty);
 
         printPhaseGuidance({
-          currentPhase: "PATCH_DRAFTED",
+          currentPhase: effectivePhase,
           runId,
           status: "SUCCESS",
           humanCheckpoint:

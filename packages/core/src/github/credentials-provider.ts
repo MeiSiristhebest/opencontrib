@@ -1,9 +1,9 @@
-import { existsSync, readFileSync } from 'fs';
-import { spawnSync } from 'child_process';
-import { join } from 'path';
-import { createHash } from 'crypto';
-import { getOpenContribHome } from '../kernel/home.js';
-import type { CredentialsProvider } from '../ports/credentials-provider.port.js';
+import { existsSync, readFileSync } from "fs";
+import { spawnSync } from "child_process";
+import { join } from "path";
+import { createHash } from "crypto";
+import { getOpenContribDataDir } from "../kernel/home.js";
+import type { CredentialsProvider } from "../ports/credentials-provider.port.js";
 
 /**
  * Resolves a GitHub token using the same precedence the monolith used:
@@ -22,8 +22,8 @@ export class EnvConfigGhCliCredentialsProvider implements CredentialsProvider {
     const token = EnvConfigGhCliCredentialsProvider.resolve(explicitToken);
     this.token = token;
     this.scope = token
-      ? createHash('sha256').update(token).digest('hex').slice(0, 8)
-      : 'anon';
+      ? createHash("sha256").update(token).digest("hex").slice(0, 8)
+      : "anon";
   }
 
   getToken(): string {
@@ -35,15 +35,21 @@ export class EnvConfigGhCliCredentialsProvider implements CredentialsProvider {
   }
 
   private static resolve(explicit?: string): string {
-    let token = explicit || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
+    let token =
+      explicit || process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "";
 
     // Fallback 1: Read from ~/.config/opencontrib/config.json
     if (!token) {
       try {
-        const configPath = join(getOpenContribHome(), '.config', 'opencontrib', 'config.json');
+        const configPath = join(
+          getOpenContribDataDir(),
+          ".config",
+          "opencontrib",
+          "config.json",
+        );
         if (existsSync(configPath)) {
-          const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
-          token = cfg?.github?.pat || '';
+          const cfg = JSON.parse(readFileSync(configPath, "utf-8"));
+          token = cfg?.github?.pat || "";
         }
       } catch {}
     }
@@ -51,12 +57,12 @@ export class EnvConfigGhCliCredentialsProvider implements CredentialsProvider {
     // Fallback 2: Read from GitHub CLI (gh auth token)
     if (!token) {
       try {
-        const res = spawnSync('gh', ['auth', 'token'], {
-          encoding: 'utf-8',
+        const res = spawnSync("gh", ["auth", "token"], {
+          encoding: "utf-8",
           timeout: 2000,
-          stdio: ['ignore', 'pipe', 'ignore'],
+          stdio: ["ignore", "pipe", "ignore"],
         });
-        token = res.stdout ? res.stdout.trim() : '';
+        token = res.stdout ? res.stdout.trim() : "";
       } catch {}
     }
 

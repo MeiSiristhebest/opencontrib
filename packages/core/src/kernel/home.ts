@@ -1,29 +1,54 @@
-import { homedir } from "os";
-import * as path from "path";
+import { homedir } from "node:os";
+import * as path from "node:path";
 
-/**
- * Single source of truth for the OpenContrib home directory.
- *
- * Replaces 13 duplicated `getOpenContribHome()` definitions that were scattered
- * across the codebase, each re-reading `process.env.OPENCONTRIB_HOME` directly
- * (a DIP violation — high-level policy depended on a global mutable env var).
- * Centralizing it also makes the value trivially mockable/injectable later.
- */
-export function getOpenContribHome(): string {
- return process.env.OPENCONTRIB_HOME || homedir();
+export interface OpenContribPaths {
+  /** The configured parent/home boundary used for security checks. */
+  baseDir: string;
+  /** The single canonical directory for OpenContrib persistent state. */
+  dataDir: string;
+}
+
+export interface OpenContribPathOptions {
+  /** Explicit home value; useful for tests and CLI bootstrap. */
+  home?: string;
 }
 
 /**
- * Single canonical data directory for OpenContrib persistent state.
- * If OPENCONTRIB_HOME is set:
- *   - If it already points to a directory named '.opencontrib', use it as-is.
- *   - Otherwise, treat it as the root/parent and append '.opencontrib' or use it directly if configured.
- * Default: path.join(homedir(), '.opencontrib')
+ * Resolve OpenContrib storage paths from one semantic contract.
+ *
+ * OPENCONTRIB_HOME names either the parent directory (`/tmp/oc`) or the final
+ * data directory (`/tmp/oc/.opencontrib`).  Both forms resolve to exactly one
+ * canonical data directory and are normalized before any caller uses them.
  */
+export function resolveOpenContribPaths(
+  options: OpenContribPathOptions = {},
+): OpenContribPaths {
+  const configured = (options.home ?? process.env.OPENCONTRIB_HOME)?.trim();
+  if (!configured) {
+    const baseDir = path.resolve(homedir());
+    return { baseDir, dataDir: path.join(baseDir, ".opencontrib") };
+  }
+
+  const configuredPath = path.resolve(configured);
+  const isDataDir =
+    path.basename(configuredPath).toLowerCase() === ".opencontrib";
+  const baseDir = isDataDir ? path.dirname(configuredPath) : configuredPath;
+  // Normalize case variants of the marker to the one canonical spelling. This
+  // prevents `/tmp/oc/.OPENCONTRIB` and `/tmp/oc` from becoming two logical
+  // stores on case-sensitive hosts while still handling Windows paths.
+  const dataDir = path.join(baseDir, ".opencontrib");
+  return {
+    baseDir: path.resolve(baseDir),
+    dataDir: path.resolve(dataDir),
+  };
+}
+
+/** Compatibility wrapper: returns the configured parent/home boundary. */
+export function getOpenContribHome(): string {
+  return resolveOpenContribPaths().baseDir;
+}
+
+/** Compatibility wrapper: returns the canonical persistent data directory. */
 export function getOpenContribDataDir(): string {
- const env = process.env.OPENCONTRIB_HOME;
- if (!env) {
-  return path.join(homedir(), ".opencontrib");
- }
- return env.endsWith(".opencontrib") ? env : path.join(env, ".opencontrib");
+  return resolveOpenContribPaths().dataDir;
 }

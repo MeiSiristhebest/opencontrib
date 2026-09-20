@@ -16,6 +16,7 @@ import {
   seedAgentForCliAxis,
   type ScriptedAgent,
 } from "./adversarial-benchmark.js";
+import { resolveOpenContribPaths } from "../kernel/home.js";
 
 export interface AgentTask {
   /** Label for reporting. */
@@ -208,11 +209,12 @@ export async function runPiAdversarialScenario(
   const axis: PiAxis = options.axis ?? "cli";
   const startedAt = Date.now();
 
-  // Agent home: where the spawned CLI/MCP resolve the agent-side run store
-  // (OPENCONTRIB_HOME/.opencontrib/runs). The host store is separate.
+  // Agent home is the parent semantic accepted by OPENCONTRIB_HOME; resolve
+  // the final data directory through the canonical resolver before seeding.
   const agentHomeDir = join(options.rootDir, "agent-home");
+  const agentDataDir = resolveOpenContribPaths({ home: agentHomeDir }).dataDir;
   const agentRunsBaseDir =
-    options.agentRunsBaseDir ?? join(agentHomeDir, ".opencontrib", "runs");
+    options.agentRunsBaseDir ?? join(agentDataDir, "runs");
   mkdirSync(agentRunsBaseDir, { recursive: true });
 
   const host = withLoopbackBroker(

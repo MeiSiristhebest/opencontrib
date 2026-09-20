@@ -501,7 +501,7 @@ export function auditGovernance(
     );
     if (!input.evidence) {
       remediationSuggestions.push(
-        "Missing empirical evidence artifact: Run 'opencontrib evidence --test-cmd <cmd>' before governance audit to record fail-first and post-fix assertions.",
+        "Missing empirical evidence artifact: Run 'opencontrib evidence capture-red --test-cmd <cmd> --assertion <pattern>' before the fix, then verify GREEN before governance audit.",
       );
     }
   }
@@ -603,24 +603,35 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     : undefined;
   const reproductionVerified =
     validatedEvidence?.reproductionVerified === true &&
-    validatedEvidence.redEvidence?.assertionMatched === true;
+    validatedEvidence.redEvidence?.assertionMatched === true &&
+    validatedEvidence.redEvidence.exitCode !== 0;
   const canonicalReproductionCommand = reproductionVerified
     ? validatedEvidence.redEvidence?.command
     : undefined;
-  const explicitGreenResult = validatedEvidence?.greenEvidence?.passed;
+  const green = validatedEvidence?.greenEvidence;
   const verificationPassed =
     validatedEvidence !== undefined &&
-    (explicitGreenResult !== undefined
-      ? explicitGreenResult
-      : validatedEvidence.allTestsPassing === true);
+    validatedEvidence.reproductionVerified === true &&
+    green?.passed === true &&
+    green.exitCode === 0 &&
+    green.treeChangedComparedToRed === true &&
+    green.treeHashMatchesRed !== true &&
+    validatedEvidence.allTestsPassing === true &&
+    validatedEvidence.stressLoopPassed === true &&
+    validatedEvidence.failedUnitTestsCount === 0 &&
+    validatedEvidence.roundsRequested !== undefined &&
+    validatedEvidence.roundsCompleted === validatedEvidence.roundsRequested &&
+    validatedEvidence.workersPerRound !== undefined &&
+    validatedEvidence.executionsExpected !== undefined &&
+    validatedEvidence.executionCount === validatedEvidence.executionsExpected;
   const canonicalVerificationCommand = verificationPassed
-    ? validatedEvidence?.greenEvidence?.command
+    ? green?.command
     : undefined;
   const canonicalTestCount = verificationPassed
     ? validatedEvidence?.passedUnitTestsCount
     : undefined;
   const stressLoopCount = verificationPassed
-    ? (validatedEvidence?.stressLoopRuns ?? 1)
+    ? (validatedEvidence?.roundsRequested ?? 0)
     : 0;
   const userValidationNote =
     !validatedEvidence &&
@@ -639,9 +650,7 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     ? `- **Reproduction**: \`${canonicalReproductionCommand}\` confirmed failing assertion prior to fix.`
     : `- **Reproduction**: Not recorded.`;
   const verificationDetail = canonicalVerificationCommand
-    ? stressLoopCount > 1
-      ? `passed cleanly across ${stressLoopCount} consecutive stress loop runs (${canonicalTestCount ?? "all"} test assertions passed).`
-      : `passed cleanly (${canonicalTestCount ?? "unit test suite"} test assertions passed, 0 regressions).`
+    ? `passed; ${canonicalTestCount ?? "unit test suite"} test assertions reported across ${stressLoopCount} completed stress loop run(s).`
     : "Not recorded.";
   const verificationLine = canonicalVerificationCommand
     ? `- **Verification**: \`${canonicalVerificationCommand}\` ${verificationDetail}`
@@ -692,13 +701,8 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
 
   const changeList = keyChanges.map((c) => `- ${c}`).join("\n");
   let regressionLine = "- **Regression Isolation**: Not recorded.";
-  if (validatedEvidence?.baselineFlakyTests !== undefined) {
-    if (validatedEvidence.baselineFlakyTests.length === 0) {
-      regressionLine =
-        "- **Regression Isolation**: Verified 0 flaky baseline regressions across sandbox runs.";
-    } else {
-      regressionLine = `- **Regression Isolation**: ${validatedEvidence.baselineFlakyTests.length} baseline flaky test(s) observed.`;
-    }
+  if (validatedEvidence?.baselineFlakyTests?.length) {
+    regressionLine = `- **Regression Isolation**: ${validatedEvidence.baselineFlakyTests.length} baseline flaky test(s) observed.`;
   }
 
   const aiDisclosureSection = data.aiDisclosureRequired

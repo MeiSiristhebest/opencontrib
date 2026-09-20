@@ -4,7 +4,7 @@ import { homedir, platform } from "os";
 import { join } from "path";
 import { discoverDocker } from "./docker-discovery.js";
 import { isBinaryOnPath, areBinariesOnPath } from "../kernel/tool-registry.js";
-import { defaultPluginManager } from "../kernel/plugin-manager.js";
+import { PluginManager } from "../kernel/plugin-manager.js";
 import { getOpenContribDataDir } from "../kernel/home.js";
 
 export interface ContingencyPlanInfo {
@@ -76,7 +76,9 @@ export function runDoctorAudit(forceRefresh = false): DoctorReport {
   const checks: DoctorCheckResult[] = [];
   const currentOs = platform();
   const isWindows = currentOs === "win32";
-  const pm = defaultPluginManager;
+  // Resolve the state path when the diagnostic is invoked so callers that
+  // selected OPENCONTRIB_HOME after module import are still isolated.
+  const pm = new PluginManager();
 
   // 1. Check Git
   let gitVersion: string | undefined;

@@ -30,7 +30,10 @@ import {
   matchExpectedFailure,
   validateExpectedFailurePattern,
 } from "./expected-failure-matcher.js";
-import { runConcurrentRounds } from "./stress-runner.js";
+import {
+  runConcurrentRounds,
+  validateStressDimensions,
+} from "./stress-runner.js";
 
 export {
   matchExpectedFailure,
@@ -203,10 +206,16 @@ export async function runStressLoopAsync(
     testCommand.trim() === "pytest" ||
     testCommand.trim() === "cargo test";
   const requestedRounds = count ?? (isBroadSuite ? 1 : 3);
+  // Validate before parsing or spawning any worker. Explicit invalid values
+  // must never be normalized, floored, or silently clamped.
+  const dimensions = validateStressDimensions(
+    requestedRounds,
+    concurrencyWorkers,
+  );
   const spec = parseCommandSpec(testCommand);
   const results = await runConcurrentRounds({
-    rounds: requestedRounds,
-    workersPerRound: concurrencyWorkers,
+    rounds: dimensions.rounds,
+    workersPerRound: dimensions.workersPerRound,
     execute: async () => {
       const start = Date.now();
       const res = await defaultSandboxRuntime.executeAsync({
@@ -908,6 +917,11 @@ function buildGreenEvidenceFromStress(input: {
     treeHashMatchesRed: !treeChanged,
     stressLoopPassed: stressResult.passed,
     allTestsPassing: passed,
+    roundsRequested: stressResult.roundsRequested,
+    roundsCompleted: stressResult.roundsCompleted,
+    workersPerRound: stressResult.workersPerRound,
+    executionsExpected: stressResult.executionsExpected,
+    executionCount: stressResult.executionCount,
     assertionMatchedFingerprint: greenFingerprint,
     testIdentity: greenTestIdentity,
     actualTestDiffSha256,

@@ -103,7 +103,9 @@ export class ContributionStateMachine {
         "BLOCKED",
       ],
       HUMAN_GATE: ["PR_SUBMISSION", "COMPLETED", "PATCH_DESIGN", "BLOCKED"],
-      PR_SUBMISSION: ["COMPLETED", "BLOCKED"],
+      // A trusted broker may pause a submission while waiting for an
+      // approval challenge.  This is a forward hand-off, not a rollback.
+      PR_SUBMISSION: ["HUMAN_GATE", "COMPLETED", "BLOCKED"],
       COMPLETED: [],
       BLOCKED: ["IDLE", "PATCH_DESIGN"],
     };

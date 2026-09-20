@@ -383,12 +383,7 @@ export function registerDiscoveryTools(server: McpServer): void {
       if (args.runId) {
         try {
           const runManager = buildContributionRunManager();
-          runManager.saveArtifact(
-            args.runId,
-            "context",
-            context as any,
-            "CONTEXT_ASSEMBLED",
-          );
+          runManager.saveArtifact(args.runId, "context", context as any);
         } catch (err: any) {
           console.warn(
             `[discovery-tools] Failed to auto-save context artifact: ${err.message}`,
@@ -467,16 +462,11 @@ export function registerDiscoveryTools(server: McpServer): void {
             "@opencontrib/core"
           );
           const runManager = buildContributionRunManager();
-          runManager.saveArtifact(
-            args.runId,
-            "opportunity",
-            {
-              target: args.target,
-              opportunities,
-              topOpportunity: opportunities[0],
-            },
-            "OPPORTUNITY_SCOUTED",
-          );
+          runManager.saveArtifact(args.runId, "opportunity", {
+            target: args.target,
+            opportunities,
+            topOpportunity: opportunities[0],
+          });
         } catch (err: any) {
           console.warn(
             `[discovery-tools] Failed to auto-save opportunity artifact: ${err.message}`,

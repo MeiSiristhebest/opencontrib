@@ -62,12 +62,11 @@ export const scoutCommand = new Command("scout")
         const runId = getRunManager().resolveRunId(opts.runId);
         if (runId && opportunities.length > 0) {
           try {
-            getRunManager().saveArtifact(
-              runId,
-              "opportunity",
-              { target, opportunities, topOpportunity: opportunities[0] },
-              "OPPORTUNITY_SCOUTED",
-            );
+            getRunManager().saveArtifact(runId, "opportunity", {
+              target,
+              opportunities,
+              topOpportunity: opportunities[0],
+            });
           } catch (err: any) {
             console.warn(
               `[Scout] Failed to auto-save opportunity artifact: ${err.message}`,

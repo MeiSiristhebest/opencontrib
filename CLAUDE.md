@@ -6,7 +6,13 @@ This project integrates with **OpenContrib**, the deterministic open-source cont
 
 When conducting open-source scouting, vulnerability probing, bug fixing, or pull request creation:
 
-1. **Verify Environment & Capabilities:**
+1. **Create the run anchor first:**
+
+   ```bash
+   opencontrib run create --repo <owner/repo> --issue <issue_id>
+   ```
+
+   Then verify environment and capabilities:
 
    ```bash
    opencontrib doctor
@@ -56,7 +62,8 @@ When conducting open-source scouting, vulnerability probing, bug fixing, or pull
 
    ```bash
    opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"
-   gh pr create --title "<title>" --body-file pr-body.md
+   opencontrib governance request-approval --run-id "$RUN_ID"
+   opencontrib submission submit --run-id "$RUN_ID"
    ```
 
 8. **Flywheel Sync:**
@@ -73,7 +80,8 @@ If OpenContrib MCP server is active (`npx -y @opencontrib/mcp`), invoke native M
 - `contrib_probe_run` / `contrib_resolve_pointer`
 - `contrib_assemble_context`
 - `contrib_prepare_workspace`
-- `contrib_collect_evidence`
+- `contrib_capture_red` / `contrib_verify_green`
+- `contrib_request_approval` / `contrib_submit_pr`
 - `contrib_audit_governance`
 - `contrib_render_pr_template`
 - `contrib_sync_flywheel`
@@ -83,3 +91,13 @@ If OpenContrib MCP server is active (`npx -y @opencontrib/mcp`), invoke native M
 - **Issue-First on 0-Days**: Always file an Issue before opening a PR.
 - **Fail-First Verification**: Prove bug reproduction with failing test before fixing.
 - **Anti-AI Governance**: Never introduce generic boilerplate or non-reproducible changes.
+
+<!-- OPENCONTRIB:GENERATED protocol:start -->
+## Canonical OpenContrib Protocol (generated)
+
+- **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
+- **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
+- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
+<!-- OPENCONTRIB:GENERATED protocol:end -->

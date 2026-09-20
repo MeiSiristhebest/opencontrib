@@ -11,6 +11,55 @@ import {
 } from "../src/index.js";
 
 describe("Phase-Gated State Machine & Lifecycle Lock", () => {
+  it("requires authoritative RED before PATCH_DRAFTED and makes PoC optional", () => {
+    const base = {
+      schemaVersion: "1.0.0",
+      runId: "run_poc_patch_contract",
+      repoFullName: "org/repo",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as const;
+    const artifacts = {
+      workspace: { workspacePath: "/tmp/worktree" },
+      poc: { script: "repro.ts" },
+      evidenceRed: { exitCode: 1, assertionMatched: true },
+    };
+
+    const pocToPatch = validatePhaseGate(
+      {
+        manifest: { ...base, currentPhase: "POC_GENERATED" },
+        artifacts,
+        availableArtifactFiles: [],
+      },
+      "PATCH_DRAFTED",
+    );
+    expect(pocToPatch.ok).toBe(false);
+    expect(pocToPatch.error?.message).toContain("is not an allowed precursor");
+
+    const redToPatch = validatePhaseGate(
+      {
+        manifest: { ...base, currentPhase: "RED_CAPTURED" },
+        artifacts: {
+          workspace: artifacts.workspace,
+          evidenceRed: artifacts.evidenceRed,
+        },
+        availableArtifactFiles: [],
+      },
+      "PATCH_DRAFTED",
+    );
+    expect(redToPatch.ok).toBe(true);
+
+    const pocToRed = validatePhaseGate(
+      {
+        manifest: { ...base, currentPhase: "POC_GENERATED" },
+        artifacts,
+        availableArtifactFiles: [],
+      },
+      "RED_CAPTURED",
+    );
+    expect(pocToRed.ok).toBe(true);
+  });
+
   it("strictly blocks advancing to GOVERNANCE_AUDITED without evidence artifact", () => {
     const summary: ContributionRunSummary = {
       manifest: {
@@ -30,9 +79,9 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
     const res = validatePhaseGate(summary, "GOVERNANCE_AUDITED");
     expect(res.ok).toBe(false);
     expect(res.error).toBeDefined();
-    expect(res.error?.message).toContain("Missing artifact: evidence");
+    expect(res.error?.message).toContain("is not an allowed precursor");
     expect(res.error?.missingPrerequisites).toContain(
-      "Missing artifact: evidence",
+      "Phase 'WORKSPACE_PREPARED' is not an allowed precursor to 'GOVERNANCE_AUDITED'",
     );
     expect(res.error?.suggestedAction).toMatch(/approval|pr_draft/);
   });

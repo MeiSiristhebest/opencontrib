@@ -12,6 +12,10 @@ import {
   readStdin,
   printPhaseGuidance,
 } from "../utils/output.js";
+import {
+  MAX_STRESS_ROUNDS,
+  parseBoundedStressInteger,
+} from "@opencontrib/core";
 
 // Lazy factory: the run manager is constructed on first use (inside an action),
 // not at module load time — so importing the command module never touches the
@@ -123,39 +127,13 @@ const runSave = new Command("save")
       "opportunity",
       "probe",
       "context",
-      "workspace",
       "poc",
       "patch",
-      "evidence",
-      "governance",
       "pr_draft",
-      "result",
     ];
     if (!valid.includes(v)) {
       throw new Error(
         `Invalid type "${v}". Must be one of: ${valid.join(", ")}`,
-      );
-    }
-    return v;
-  })
-  .option("--phase <phase>", "Phase to auto-advance to", (v) => {
-    const validPhases = [
-      "INITIALIZED",
-      "OPPORTUNITY_SCOUTED",
-      "PROBE_COMPLETED",
-      "CONTEXT_ASSEMBLED",
-      "WORKSPACE_PREPARED",
-      "POC_GENERATED",
-      "PATCH_DRAFTED",
-      "EVIDENCE_COLLECTED",
-      "GOVERNANCE_AUDITED",
-      "PR_SUBMITTED",
-      "COMPLETED",
-      "FAILED",
-    ];
-    if (!validPhases.includes(v)) {
-      throw new Error(
-        `Invalid phase "${v}". Must be one of: ${validPhases.join(", ")}`,
       );
     }
     return v;
@@ -168,7 +146,6 @@ const runSave = new Command("save")
       opts: {
         type: string;
         content?: string;
-        phase?: string;
         pretty?: boolean;
       },
     ) => {
@@ -193,7 +170,6 @@ const runSave = new Command("save")
           runId,
           opts.type as any,
           payload,
-          opts.phase as any,
         );
         printJSON({ status: "success", saved }, opts.pretty);
       } catch (err: any) {
@@ -238,7 +214,7 @@ const runExecute = new Command("execute")
   .option(
     "--stress-runs <n>",
     "Number of stress loop iterations",
-    (v) => Number(v),
+    (v) => parseBoundedStressInteger(v, "--stress-runs", MAX_STRESS_ROUNDS),
     1,
   )
   .option("--pretty", "Pretty-print JSON output", false)

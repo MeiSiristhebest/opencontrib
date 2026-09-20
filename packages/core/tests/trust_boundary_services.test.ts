@@ -7,7 +7,6 @@ import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import {
   ApprovalService,
   GitHubSubmissionService,
-  ContributionPrService,
   GitHubClient,
   ContributionRunManager,
   SubmissionIntentService,
@@ -17,17 +16,24 @@ import {
   Ed25519ApprovalVerifier,
   InMemoryApprovalBrokerStore,
 } from "../src/index.js";
+import { ContributionPrService } from "../src/github/contribution-pr-service.js";
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
 import { EvidenceService } from "../src/evidence/evidence-service.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
+import {
+  hashCommunityGateSnapshot,
+  type CommunityGatePolicy,
+} from "../src/governance/community-gate.js";
 
-const testApprovalAuthority = () =>
+const testApprovalAuthority = (
+  approvalMode: "explicit_human" | "policy_waived" = "explicit_human",
+) =>
   createTrustedApprovalAuthority({
     issueApproval: () => ({
       approvedBy: "test-authority",
-      approvalMode: "explicit_human",
+      approvalMode,
       signingKeyId: "test-key",
       signature: "test-signature",
     }),
@@ -45,10 +51,35 @@ const fixturePolicySnapshot = {
 } as const;
 const fixturePolicySha256 = hashTrustedPolicySnapshot(fixturePolicySnapshot);
 
+function fixtureCommunityGate(
+  sourceCommitSha: string,
+  overrides: Partial<CommunityGatePolicy> = {},
+) {
+  const communityGate = {
+    sourceCommitSha,
+    policy: {
+      hasGatingRules: false,
+      requiresIssueApprovalBeforePr: false,
+      autoClosesNewIssues: false,
+      hasLgtmApprovalProtocol: false,
+      restrictedTriageHours: false,
+      reasons: ["fixture policy"],
+      suggestedContributorAction: "Proceed with the canonical protocol.",
+      matchedKeywords: [],
+      ...overrides,
+    },
+  };
+  return {
+    communityGate,
+    communityGateSha256: hashCommunityGateSnapshot(communityGate),
+  };
+}
+
 function seedGovernanceReadyRun(
   manager: ContributionRunManager,
   runId: string,
   body = "pr body",
+  communityPolicy: Partial<CommunityGatePolicy> = {},
 ): void {
   const baseCommitSha = "a".repeat(40);
   const patch = {
@@ -105,6 +136,7 @@ function seedGovernanceReadyRun(
       repoFullName: "org/repo",
       policySnapshot: fixturePolicySnapshot,
       policySha256: fixturePolicySha256,
+      ...fixtureCommunityGate(baseCommitSha, communityPolicy),
     },
     "WORKSPACE_PREPARED",
   );
@@ -122,7 +154,7 @@ function seedGovernanceReadyRun(
     } as any,
     "RED_CAPTURED",
   );
-  manager.saveArtifact(runId, "patch", patchContent, "PATCH_DRAFTED");
+  manager.saveArtifact(runId, "patch", patchContent);
   saveCanonicalArtifact(manager, runId, "validated_patch", validatedPatch);
   const testIdentity = {
     normalizedCommand: "bun test regression.test.ts",
@@ -137,8 +169,16 @@ function seedGovernanceReadyRun(
       baselineTestedAt: "2026-01-01T00:00:00.000Z",
       baselineFlakyTests: [],
       stressLoopRuns: 1,
+      roundsRequested: 1,
+      roundsCompleted: 1,
+      workersPerRound: 1,
+      executionsExpected: 1,
       stressLoopPassed: true,
-      handleLeakCheckPassed: true,
+      executionCount: 1,
+      maxConcurrentObserved: 1,
+      concurrencyWorkers: 1,
+      concurrencyStampedePassed: true,
+      handleLeakCheckPassed: "PASS",
       passedUnitTestsCount: 1,
       failedUnitTestsCount: 0,
       reproductionVerified: true,
@@ -165,6 +205,11 @@ function seedGovernanceReadyRun(
         appliedPatchSha256: patchSha256,
         validatedPatchArtifactSha256: validatedPatch.artifactSha256,
         stressLoopPassed: true,
+        roundsRequested: 1,
+        roundsCompleted: 1,
+        workersPerRound: 1,
+        executionsExpected: 1,
+        executionCount: 1,
         allTestsPassing: true,
         assertionMatchedFingerprint: "fp",
         testIdentity,
@@ -182,54 +227,53 @@ function seedGovernanceReadyRun(
 }
 
 describe("Trust Boundary: Approval & Submission Services with Provenance Gates", () => {
-  it("rejects generic save trying to autoAdvance to privileged phases or write authoritative artifacts", () => {
+  it("rejects generic saves of authoritative artifacts", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-priv-"));
     try {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
       expect(() => {
-        manager.saveArtifact(
-          manifest.runId,
-          "evidence",
-          { fake: "data" },
-          "EVIDENCE_COLLECTED",
-        );
+        manager.saveArtifact(manifest.runId, "evidence", { fake: "data" });
       }).toThrow(
-        /AuthoritativeArtifactViolationError|PrivilegedPhaseViolationError/,
+        /AuthoritativeArtifactViolationError/,
       );
+
+      expect(() => {
+        manager.saveArtifact(manifest.runId, "governance", { fake: "data" });
+      }).toThrow(/AuthoritativeArtifactViolationError/);
+
+      expect(() => {
+        manager.saveArtifact(manifest.runId, "submission", { fake: "data" });
+      }).toThrow(/AuthoritativeArtifactViolationError/);
+
+      expect(() => {
+        manager.saveArtifact(manifest.runId, "result", { fake: "data" });
+      }).toThrow(/AuthoritativeArtifactViolationError/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects PR draft mutation after governance and preserves the canonical body", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-pr-draft-worm-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const originalBody = "Original PR Body";
+
+      seedGovernanceReadyRun(manager, manifest.runId, originalBody);
 
       expect(() => {
         manager.saveArtifact(
           manifest.runId,
-          "governance",
-          { fake: "data" },
-          "GOVERNANCE_AUDITED",
+          "pr_draft",
+          "Malicious Injected PR Body",
         );
-      }).toThrow(
-        /AuthoritativeArtifactViolationError|PrivilegedPhaseViolationError/,
-      );
+      }).toThrow(/ImmutableArtifactViolationError/);
 
-      expect(() => {
-        manager.saveArtifact(
-          manifest.runId,
-          "submission",
-          { fake: "data" },
-          "PR_SUBMITTED",
-        );
-      }).toThrow(
-        /AuthoritativeArtifactViolationError|PrivilegedPhaseViolationError/,
-      );
-
-      expect(() => {
-        manager.saveArtifact(
-          manifest.runId,
-          "result",
-          { fake: "data" },
-          "COMPLETED",
-        );
-      }).toThrow(
-        /AuthoritativeArtifactViolationError|PrivilegedPhaseViolationError/,
+      expect(manager.getRun(manifest.runId)?.artifacts.prDraft).toBe(
+        originalBody,
       );
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
@@ -273,11 +317,13 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const check1 = approvalService.verifyApprovalIntegrity(manifest.runId);
       expect(check1.valid).toBe(true);
 
-      // Now mutate the patch (TOCTOU attack)
-      manager.saveArtifact(
-        manifest.runId,
-        "patch",
+      // Now mutate the patch through a lower-level artifact tamper (TOCTOU
+      // attack). The run manager rejects ordinary post-governance writes, but
+      // approval verification must still detect on-disk mutation.
+      writeFileSync(
+        join(baseDir, manifest.runId, "patch.diff"),
         JSON.stringify({ files: [] }),
+        "utf8",
       );
 
       // Verification must fail!
@@ -348,6 +394,58 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           approvalMode: "explicit_human",
         }),
       ).rejects.toThrow(/no longer pending/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("detected community policy rejects policy waivers at broker and submission", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-community-submit-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      seedGovernanceReadyRun(manager, manifest.runId, "pr body", {
+        hasGatingRules: true,
+        requiresIssueApprovalBeforePr: true,
+        reasons: ["maintainer approval is required"],
+      });
+      const intent = new SubmissionIntentService(manager).createIntent({
+        runId: manifest.runId,
+        upstreamOwner: "org",
+        upstreamRepo: "repo",
+        title: "fix: bug",
+        body: "pr body",
+      });
+
+      const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+      const broker = new TrustedApprovalBroker(
+        manager,
+        new Ed25519ApprovalSigner("community-key", privateKey),
+        new Ed25519ApprovalVerifier("community-key", publicKey),
+        new InMemoryApprovalBrokerStore(),
+      );
+      const request = broker.request(manifest.runId);
+      await expect(
+        broker.approve(request.requestId, {
+          approvedBy: "policy-engine",
+          approvalMode: "policy_waived",
+        }),
+      ).rejects.toThrow(/requires explicit human approval/);
+
+      // Even a separately trusted authority cannot mint a policy waiver for a
+      // detected maintainer gate; rejection occurs before any artifact write.
+      await expect(
+        new ApprovalService(
+          manager,
+          testApprovalAuthority("policy_waived"),
+        ).recordApproval({
+          runId: manifest.runId,
+          expectedIntentSha256: intent.intentSha256,
+        }),
+      ).rejects.toThrow(/community policy requires explicit human approval/);
+      expect(
+        manager.getRun(manifest.runId)?.artifacts.approval,
+      ).toBeUndefined();
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }
@@ -850,8 +948,14 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           regressionTestPlan: [],
           estimatedDiffLines: 1,
         }),
-        "PATCH_DRAFTED",
       );
+
+      await expect(
+        evidenceService.verifyGreen({
+          runId: manifest.runId,
+          testCommand: "echo unrelated-command",
+        }),
+      ).rejects.toThrow(/GreenExecutionValidationError/);
 
       // Now mutate test.txt to PASS, but WITHOUT writing src/fix.ts
       writeFileSync(stateFile, "PASS\n");
@@ -965,7 +1069,6 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           regressionTestPlan: [],
           estimatedDiffLines: 1,
         }),
-        "PATCH_DRAFTED",
       );
 
       writeFileSync(stateFile, "PASS\n");
@@ -1087,6 +1190,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           baseCommitSha,
           policySnapshot: fixturePolicySnapshot,
           policySha256: fixturePolicySha256,
+          ...fixtureCommunityGate(baseCommitSha),
         },
         "WORKSPACE_PREPARED",
       );
@@ -1104,12 +1208,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         } as any,
         "RED_CAPTURED",
       );
-      manager.saveArtifact(
-        manifest2.runId,
-        "patch",
-        patchContent,
-        "PATCH_DRAFTED",
-      );
+      manager.saveArtifact(manifest2.runId, "patch", patchContent);
       saveCanonicalArtifact(
         manager,
         manifest2.runId,
@@ -1129,8 +1228,16 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           baselineTestedAt: "2026-01-01T00:00:00.000Z",
           baselineFlakyTests: [],
           stressLoopRuns: 1,
+          roundsRequested: 1,
+          roundsCompleted: 1,
+          workersPerRound: 1,
+          executionsExpected: 1,
           stressLoopPassed: true,
-          handleLeakCheckPassed: true,
+          executionCount: 1,
+          maxConcurrentObserved: 1,
+          concurrencyWorkers: 1,
+          concurrencyStampedePassed: true,
+          handleLeakCheckPassed: "PASS",
           passedUnitTestsCount: 1,
           failedUnitTestsCount: 0,
           reproductionVerified: true,
@@ -1157,6 +1264,11 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
             appliedPatchSha256: patchSha256,
             validatedPatchArtifactSha256: validatedPatch.artifactSha256,
             stressLoopPassed: true,
+            roundsRequested: 1,
+            roundsCompleted: 1,
+            workersPerRound: 1,
+            executionsExpected: 1,
+            executionCount: 1,
             allTestsPassing: true,
             assertionMatchedFingerprint: "fp",
             testIdentity,
@@ -1251,6 +1363,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           baseCommitSha,
           policySnapshot: fixturePolicySnapshot,
           policySha256: fixturePolicySha256,
+          ...fixtureCommunityGate(baseCommitSha),
         },
         "WORKSPACE_PREPARED",
       );
@@ -1268,12 +1381,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         } as any,
         "RED_CAPTURED",
       );
-      manager.saveArtifact(
-        manifest.runId,
-        "patch",
-        patchContent,
-        "PATCH_DRAFTED",
-      );
+      manager.saveArtifact(manifest.runId, "patch", patchContent);
       saveCanonicalArtifact(
         manager,
         manifest.runId,
@@ -1292,6 +1400,18 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         "evidence",
         {
           baselineTestedAt: "2026-01-01T00:00:00.000Z",
+          roundsRequested: 1,
+          roundsCompleted: 1,
+          workersPerRound: 1,
+          executionsExpected: 1,
+          stressLoopPassed: true,
+          executionCount: 1,
+          maxConcurrentObserved: 1,
+          concurrencyWorkers: 1,
+          concurrencyStampedePassed: true,
+          handleLeakCheckPassed: "PASS",
+          passedUnitTestsCount: 1,
+          failedUnitTestsCount: 0,
           reproductionVerified: true,
           allTestsPassing: true,
           redEvidence: {
@@ -1316,6 +1436,11 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
             appliedPatchSha256: patchSha256,
             validatedPatchArtifactSha256: validatedPatch.artifactSha256,
             stressLoopPassed: true,
+            roundsRequested: 1,
+            roundsCompleted: 1,
+            workersPerRound: 1,
+            executionsExpected: 1,
+            executionCount: 1,
             allTestsPassing: true,
             assertionMatchedFingerprint: "fp",
             testIdentity,

@@ -109,8 +109,6 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       job.expectedAssertion,
       job.testFiles,
     );
-    const startTree = computeSourceTreeHash(cwd);
-
     const cidDir = mkdtempSync(join(tmpdir(), "docker-cid-"));
     const cidFile = join(cidDir, "cid");
 
@@ -161,7 +159,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         outputSnippet: res.output.slice(0, 500),
         assertionMatched,
         capturedAt: new Date().toISOString(),
-        sourceTreeSha256: startTree,
+        sourceTreeSha256: computeSourceTreeHash(cwd),
         testIdentity,
       };
     } finally {

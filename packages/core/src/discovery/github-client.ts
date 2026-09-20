@@ -1,8 +1,8 @@
-import { EnvConfigGhCliCredentialsProvider } from '../github/credentials-provider.js';
-import { FileResponseCache } from '../github/response-cache.js';
-import { OctokitIssueSource } from '../github/octokit-issue-source.js';
-import { CredentialsProvider } from '../ports/credentials-provider.port.js';
-import { ResponseCache } from '../ports/response-cache.port.js';
+import { EnvConfigGhCliCredentialsProvider } from "../github/credentials-provider.js";
+import { FileResponseCache } from "../github/response-cache.js";
+import { OctokitIssueSource } from "../github/octokit-issue-source.js";
+import { CredentialsProvider } from "../ports/credentials-provider.port.js";
+import { ResponseCache } from "../ports/response-cache.port.js";
 import type {
   ApiResult,
   ApiStatus,
@@ -10,7 +10,7 @@ import type {
   IssueOrOpportunity,
   RepoDetails,
   SearchIssuesResult,
-} from '../github/types.js';
+} from "../github/types.js";
 
 // Re-export the shared types so existing callers that imported them from
 // `discovery/github-client.js` keep working unchanged.
@@ -21,7 +21,7 @@ export type {
   IssueOrOpportunity,
   RepoDetails,
   SearchIssuesResult,
-} from '../github/types.js';
+} from "../github/types.js";
 
 export interface GitHubClientDependencies {
   credentials?: CredentialsProvider;
@@ -47,11 +47,15 @@ export class GitHubClient {
   private cache: ResponseCache;
   private source: OctokitIssueSource;
 
-  constructor(options: GitHubClientOptions = {}, deps: GitHubClientDependencies = {}) {
-    const host = options.host || 'github.com';
-    const apiVersion = options.apiVersion || '2022-11-28';
+  constructor(
+    options: GitHubClientOptions = {},
+    deps: GitHubClientDependencies = {},
+  ) {
+    const host = options.host || "github.com";
+    const apiVersion = options.apiVersion || "2022-11-28";
 
-    this.credentials = deps.credentials ?? new EnvConfigGhCliCredentialsProvider(options.token);
+    this.credentials =
+      deps.credentials ?? new EnvConfigGhCliCredentialsProvider(options.token);
     this.cache =
       deps.cache ??
       new FileResponseCache({
@@ -93,11 +97,18 @@ export class GitHubClient {
     return this.source.getIssueComments(owner, repo, issue_number, maxPages);
   }
 
-  getRepoTextFile(owner: string, repo: string, path: string): Promise<string | null> {
+  getRepoTextFile(
+    owner: string,
+    repo: string,
+    path: string,
+  ): Promise<string | null> {
     return this.source.getRepoTextFile(owner, repo, path);
   }
 
-  listWorkflowFiles(owner: string, repo: string): Promise<Array<{ path: string; content: string }>> {
+  listWorkflowFiles(
+    owner: string,
+    repo: string,
+  ): Promise<Array<{ path: string; content: string }>> {
     return this.source.listWorkflowFiles(owner, repo);
   }
 
@@ -113,7 +124,12 @@ export class GitHubClient {
     issue_number: number,
     maxPages = 2,
   ): Promise<ApiResult<number>> {
-    return this.source.getIssueLinkedPrsCount(owner, repo, issue_number, maxPages);
+    return this.source.getIssueLinkedPrsCount(
+      owner,
+      repo,
+      issue_number,
+      maxPages,
+    );
   }
 
   /** High-level domain contract for checking existence of active linked PRs. */
@@ -123,12 +139,5 @@ export class GitHubClient {
     issue_number: number,
   ): Promise<ApiResult<boolean>> {
     return this.source.hasActiveLinkedPr(owner, repo, issue_number);
-  }
-
-  /** Submit Pull Request adhering to GitHostPort contract. */
-  async submitPullRequest(options: any): Promise<any> {
-    const { ContributionPrService } = await import('../github/contribution-pr-service.js');
-    const prService = new ContributionPrService(this);
-    return prService.submitPullRequest(options);
   }
 }

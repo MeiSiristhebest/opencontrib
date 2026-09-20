@@ -73,18 +73,20 @@ describe("runConcurrentRounds — rounds × workers contract", () => {
     expect(result.results).toEqual([false, false, false]);
   });
 
-  test("fractional dimensions are normalized to at least one execution", async () => {
-    const result = await runConcurrentRounds({
-      rounds: 0.5,
-      workersPerRound: 0.5,
-      execute: async () => true,
-      isSuccess: (value) => value,
-    });
-
-    expect(result.roundsRequested).toBe(1);
-    expect(result.workersPerRound).toBe(1);
-    expect(result.executionCount).toBe(1);
-    expect(result.executionsExpected).toBe(1);
+  test("fractional dimensions are rejected before worker allocation", async () => {
+    let executed = false;
+    await expect(
+      runConcurrentRounds({
+        rounds: 0.5,
+        workersPerRound: 0.5,
+        execute: async () => {
+          executed = true;
+          return true;
+        },
+        isSuccess: (value) => value,
+      }),
+    ).rejects.toThrow(/INVALID_STRESS_DIMENSION/);
+    expect(executed).toBe(false);
   });
 
   test("excessive dimensions fail before worker allocation", async () => {

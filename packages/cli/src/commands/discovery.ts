@@ -175,12 +175,7 @@ const contextCommand = new Command("context")
         const runId = runManager.resolveRunId(opts.runId);
         if (runId) {
           try {
-            runManager.saveArtifact(
-              runId,
-              "context",
-              context as any,
-              "CONTEXT_ASSEMBLED",
-            );
+            runManager.saveArtifact(runId, "context", context as any);
           } catch (err: any) {
             console.warn(
               `[Discovery] Failed to auto-save context artifact: ${err.message}`,

@@ -151,26 +151,57 @@ export class RemoteSubmissionBrokerClient implements SubmissionPort {
       );
     }
     const submissionArtifact = result.data as SubmissionArtifact;
-
-    let completionAttestation: RemoteCompletionAttestation | undefined;
+    if (submissionArtifact.runId !== runId) {
+      throw new Error(
+        "SubmissionBrokerProtocolError: trusted broker returned a SubmissionArtifact for a different run.",
+      );
+    }
     if (
+      expectedIntentSha256 !== undefined &&
+      submissionArtifact.intentSha256 !== expectedIntentSha256
+    ) {
+      throw new Error(
+        "SubmissionBrokerProtocolError: trusted broker returned a SubmissionArtifact for a different approved intent.",
+      );
+    }
+
+    const hasAttestation =
       typeof payload === "object" &&
       payload !== null &&
-      "completionAttestation" in payload
-    ) {
-      const attestationResult = RemoteCompletionAttestationSchema.safeParse(
-        (payload as { completionAttestation?: unknown }).completionAttestation,
+      "completionAttestation" in payload;
+    if (!hasAttestation) {
+      throw new Error(
+        "SubmissionBrokerProtocolError: trusted broker response is missing the required completionAttestation.",
       );
-      // Fail closed: a present but invalid attestation is a protocol violation,
-      // not optional noise. Silently ignoring it would hide host misbehavior.
-      if (!attestationResult.success) {
-        throw new Error(
-          `SubmissionBrokerProtocolError: trusted broker returned an invalid completionAttestation: ${attestationResult.error.issues
-            .map((i) => i.message)
-            .join("; ")}`,
-        );
-      }
-      completionAttestation = attestationResult.data;
+    }
+    const attestationResult = RemoteCompletionAttestationSchema.safeParse(
+      (payload as { completionAttestation?: unknown }).completionAttestation,
+    );
+    // Fail closed: a missing or invalid attestation is a protocol violation,
+    // not optional noise. Silently accepting it would let a PR-shaped response
+    // masquerade as a completed canonical run.
+    if (!attestationResult.success) {
+      throw new Error(
+        `SubmissionBrokerProtocolError: trusted broker returned an invalid completionAttestation: ${attestationResult.error.issues
+          .map((i) => i.message)
+          .join("; ")}`,
+      );
+    }
+    const completionAttestation = attestationResult.data;
+    if (
+      completionAttestation.runId !== runId ||
+      completionAttestation.hostIntentSha256 !==
+        submissionArtifact.intentSha256 ||
+      completionAttestation.prNumber !== submissionArtifact.prNumber ||
+      completionAttestation.prUrl !== submissionArtifact.prUrl ||
+      completionAttestation.headSha !== submissionArtifact.headSha ||
+      completionAttestation.submissionArtifact.runId !== runId ||
+      completionAttestation.submissionArtifact.intentSha256 !==
+        submissionArtifact.intentSha256
+    ) {
+      throw new Error(
+        "SubmissionBrokerProtocolError: completion attestation is not bound to the returned verified submission.",
+      );
     }
 
     return { submissionArtifact, completionAttestation };

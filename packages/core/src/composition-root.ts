@@ -21,12 +21,12 @@ import { ContributionRunManager } from "./run/run-manager.js";
 import { TrustedRunMaterializer } from "./run/trusted-run-host.js";
 import { WorktreeManager } from "./workspace/worktree-manager.js";
 import {
-  ContributionPrService,
   GitHubSubmissionService,
   RemoteSubmissionBrokerClient,
   TrustedSubmissionBroker,
   type SubmissionPort,
 } from "./github/index.js";
+import { ContributionPrService } from "./github/contribution-pr-service.js";
 import type { GitHubClientOptions } from "./github/types.js";
 import type {
   ApprovalArtifactVerifier,

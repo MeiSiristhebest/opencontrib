@@ -28,6 +28,10 @@ describe("Native Template Merger & Fallback", () => {
       evidence: {
         baselineTestedAt: "2026-01-01T00:00:00.000Z",
         stressLoopRuns: 1,
+        roundsRequested: 1,
+        roundsCompleted: 1,
+        workersPerRound: 1,
+        executionsExpected: 1,
         stressLoopPassed: true,
         executionCount: 1,
         maxConcurrentObserved: 1,
@@ -54,6 +58,8 @@ describe("Native Template Merger & Fallback", () => {
           appliedPatchSha256: "patch",
         },
         passedUnitTestsCount: 15,
+        failedUnitTestsCount: 0,
+        allTestsPassing: true,
         baselineFlakyTests: [],
       },
     };
@@ -96,6 +102,10 @@ describe("Native Template Merger & Fallback", () => {
       evidence: {
         baselineTestedAt: "2026-01-01T00:00:00.000Z",
         stressLoopRuns: 1,
+        roundsRequested: 1,
+        roundsCompleted: 1,
+        workersPerRound: 1,
+        executionsExpected: 1,
         stressLoopPassed: true,
         executionCount: 1,
         maxConcurrentObserved: 1,
@@ -122,6 +132,8 @@ describe("Native Template Merger & Fallback", () => {
           appliedPatchSha256: "patch",
         },
         passedUnitTestsCount: 20,
+        failedUnitTestsCount: 0,
+        allTestsPassing: true,
         baselineFlakyTests: [],
       },
     };

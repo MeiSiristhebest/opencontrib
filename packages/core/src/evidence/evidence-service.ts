@@ -5,9 +5,14 @@ import { resolve } from "node:path";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import {
+  AuthoritativeRedEvidenceSchema,
+  TrustedGreenExecutionResultSchema,
+  EvidenceReportSchema,
+  TrustedRedExecutionResultSchema,
   ValidatedPatchArtifactSchema,
   type EvidenceReport,
   type RedEvidence,
+  type TestIdentity,
   type ValidatedPatchArtifact,
   type ValidatedPatchFile,
 } from "../contracts/schemas.js";
@@ -17,10 +22,23 @@ import {
   computeSourceTreeHash,
   computeTestIdentity,
   computeTestFileDiffSha256,
+  computeTestIdentityFingerprint,
+  matchExpectedFailure,
+  validateExpectedFailurePattern,
 } from "./evidence-collector.js";
 import { isSafeRepositoryPath } from "../submission/submission-intent-service.js";
 import { hashValidatedPatchArtifact } from "./validated-patch.js";
 import type { TestCoverageAdapter } from "./coverage-adapter.js";
+import type {
+  RawRedExecutionResult,
+  RedExecutionJob,
+} from "../run/trusted-execution.port.js";
+import { validateStressDimensions } from "../contracts/stress.js";
+
+export type RedExecutionContract = Pick<
+  RedExecutionJob,
+  "testCommand" | "expectedAssertion" | "testFiles"
+>;
 
 export interface CaptureRedInput {
   runId: string;
@@ -124,6 +142,144 @@ function requireBaseCommitSha(value: unknown, runId: string): string {
     );
   }
   return value.trim();
+}
+
+function normalizeCommand(command: string): string {
+  return command.trim().replace(/\s+/g, " ");
+}
+
+function sameTestIdentity(left: TestIdentity, right: TestIdentity): boolean {
+  return (
+    left.normalizedCommand === right.normalizedCommand &&
+    left.expectedAssertion === right.expectedAssertion &&
+    left.identitySha256 === right.identitySha256 &&
+    JSON.stringify(left.testFiles) === JSON.stringify(right.testFiles)
+  );
+}
+
+function schemaIssueSummary(error: {
+  issues: Array<{ path: (string | number)[]; message: string }>;
+}): string {
+  return error.issues
+    .map((issue) => `${issue.path.join(".") || "result"}: ${issue.message}`)
+    .join("; ");
+}
+
+function requireRawRedResult(
+  rawResult: RawRedExecutionResult,
+  runId: string,
+): import("../contracts/schemas.js").TrustedRedExecutionResult {
+  const parsed = TrustedRedExecutionResultSchema.safeParse(rawResult);
+  if (!parsed.success) {
+    throw new Error(
+      `RedExecutionValidationError: worker RED result for run ${runId} is invalid: ${schemaIssueSummary(parsed.error)}.`,
+    );
+  }
+  return parsed.data;
+}
+
+function requireRedContract(
+  contract: RedExecutionContract,
+  runId: string,
+): RedExecutionContract {
+  if (
+    !contract ||
+    typeof contract.testCommand !== "string" ||
+    !contract.testCommand.trim() ||
+    typeof contract.expectedAssertion !== "string" ||
+    !contract.expectedAssertion.trim() ||
+    !Array.isArray(contract.testFiles) ||
+    contract.testFiles.length === 0 ||
+    contract.testFiles.some(
+      (file) => typeof file !== "string" || !isSafeRepositoryPath(file.trim()),
+    )
+  ) {
+    throw new Error(
+      `RedExecutionValidationError: trusted RED contract for run ${runId} must bind a command, assertion, and safe concrete test files.`,
+    );
+  }
+  validateExpectedFailurePattern(contract.expectedAssertion);
+  return {
+    testCommand: contract.testCommand,
+    expectedAssertion: contract.expectedAssertion.trim(),
+    testFiles: contract.testFiles.map((file) => file.trim()),
+  };
+}
+
+function requireAuthoritativeSourceHash(
+  workspacePath: string,
+  rawSourceTreeSha256: string,
+  runId: string,
+): string {
+  const hostSourceTreeSha256 = computeSourceTreeHash(workspacePath);
+  if (!/^[0-9a-f]{64}$/i.test(hostSourceTreeSha256)) {
+    throw new Error(
+      `RedExecutionValidationError: host could not compute a valid workspace tree hash for run ${runId}.`,
+    );
+  }
+  if (
+    rawSourceTreeSha256.toLowerCase() !== hostSourceTreeSha256.toLowerCase()
+  ) {
+    throw new Error(
+      `RedExecutionValidationError: worker RED tree hash does not match the host-recomputed workspace hash for run ${runId}.`,
+    );
+  }
+  return hostSourceTreeSha256;
+}
+
+function requireAuthoritativeOutput(
+  rawResult: import("../contracts/schemas.js").TrustedRedExecutionResult,
+  contract: RedExecutionContract,
+  runId: string,
+): string {
+  const fullOutput = `${rawResult.stdout}\n${rawResult.stderr}`.trim();
+  const reportedOutput = rawResult.outputSnippet.trim();
+  const output = fullOutput || reportedOutput;
+  if (!output) {
+    throw new Error(
+      `RedExecutionValidationError: worker RED result for run ${runId} contains no failure output.`,
+    );
+  }
+  if (fullOutput && reportedOutput !== fullOutput.slice(0, 500).trim()) {
+    throw new Error(
+      `RedExecutionValidationError: worker RED output snippet does not match its stdout/stderr for run ${runId}.`,
+    );
+  }
+  const assertion = matchExpectedFailure({
+    output,
+    pattern: contract.expectedAssertion,
+  });
+  if (!rawResult.assertionMatched || !assertion.matched) {
+    throw new Error(
+      `RedAssertionMismatchError: trusted host could not verify expected assertion "${contract.expectedAssertion}" in worker RED output. Evidence_red not saved.`,
+    );
+  }
+  return output.slice(0, 500);
+}
+
+function requireAuthoritativeTestIdentity(
+  workspacePath: string,
+  rawResult: import("../contracts/schemas.js").TrustedRedExecutionResult,
+  contract: RedExecutionContract,
+  runId: string,
+): TestIdentity {
+  if (!rawResult.testIdentity) {
+    throw new Error(
+      `RedAssertionMismatchError: worker RED result for run ${runId} is missing a concrete test identity. Evidence_red not saved.`,
+    );
+  }
+  const hostIdentity = computeTestIdentity(
+    workspacePath,
+    contract.testCommand,
+    contract.expectedAssertion,
+    contract.testFiles,
+  );
+  if (!sameTestIdentity(rawResult.testIdentity, hostIdentity)) {
+    throw new Error(
+      `RedExecutionValidationError: worker RED test identity does not match the host-recomputed command/file identity for run ${runId}.`,
+    );
+  }
+  return hostIdentity;
 }
 
 function requireWorkspaceHead(cwd: string, baseCommitSha: string): void {
@@ -361,7 +517,7 @@ function countChangedLinesFromActualDelta(
           );
         } catch (err: any) {
           // Exit code 1 means "there are differences" which is expected for CREATE
-          if (err && err.status === 1) {
+          if (err && (err.status === 1 || err.code === 1)) {
             stat = err.stdout || "";
           } else {
             throw new Error(
@@ -515,12 +671,19 @@ export class EvidenceService {
       input.runId,
     );
     requireWorkspaceHead(targetCwd, baselineCommitSha);
+    const expectedAssertion = input.expectedAssertion?.trim();
+    if (!expectedAssertion) {
+      throw new Error(
+        `RedExecutionValidationError: canonical RED capture for run ${input.runId} requires a concrete expected failure assertion. Use diagnostic-only evidence for assertion-free inspection.`,
+      );
+    }
+    validateExpectedFailurePattern(expectedAssertion);
 
     const red = captureRedEvidence({
       cwd: targetCwd,
       testCommand: input.testCommand,
       workspaceRoot: resolvedWorkspaceRoot,
-      expectedAssertion: input.expectedAssertion,
+      expectedAssertion,
       testFileSha256: input.testFileSha256,
       baselineCommitSha,
       testFile: input.testFile,
@@ -534,13 +697,16 @@ export class EvidenceService {
         `RedReproductionFailedError: test command exited with code 0 (expected failure). Evidence_red not saved so run is not permanently bricked. Output snippet: ${red.observedOutputSnippet.slice(0, 200)}`,
       );
     }
-    if (input.expectedAssertion && !red.assertionMatched) {
+    if (!red.assertionMatched) {
       throw new Error(
-        `RedAssertionMismatchError: expected assertion "${input.expectedAssertion}" was not observed in test output. Evidence_red not saved. Output snippet: ${red.observedOutputSnippet.slice(0, 200)}`,
+        `RedAssertionMismatchError: expected assertion "${expectedAssertion}" was not observed in test output. Evidence_red not saved. Output snippet: ${red.observedOutputSnippet.slice(0, 200)}`,
       );
     }
 
-    // Save authoritative evidence_red artifact only after passing verification and advance to RED_CAPTURED
+    // Save authoritative evidence_red artifact only after passing verification and advance to RED_CAPTURED.
+    // Local host capture retains the broader legacy file-resolution behavior;
+    // worker-originated RED is sealed through the stricter recordRedExecution
+    // contract above.
     saveCanonicalArtifact(
       this.runManager,
       input.runId,
@@ -578,6 +744,13 @@ export class EvidenceService {
    * On verified reproduction, advances run phase to EVIDENCE_COLLECTED.
    */
   async verifyGreen(input: VerifyGreenInput): Promise<EvidenceReport> {
+    // Reject dimensions before any workspace inspection or execution. This is
+    // intentionally strict for explicit values; defaults are applied only for
+    // omitted fields by the shared contract.
+    const dimensions = validateStressDimensions(
+      input.stressLoopCount,
+      input.concurrencyWorkers,
+    );
     const run = this.runManager.getRun(input.runId);
     if (!run) {
       throw new Error(`Contribution run ${input.runId} does not exist`);
@@ -590,6 +763,14 @@ export class EvidenceService {
     if (!redEvidence || !redEvidence.sourceTreeSha256) {
       throw new Error(
         `No authoritative RED baseline found for run ${input.runId}. Call EvidenceService.captureRed() first.`,
+      );
+    }
+    if (
+      normalizeCommand(input.testCommand) !==
+      normalizeCommand(redEvidence.command)
+    ) {
+      throw new Error(
+        `GreenExecutionValidationError: GREEN test command does not match the authoritative RED command for run ${input.runId}.`,
       );
     }
 
@@ -677,8 +858,8 @@ export class EvidenceService {
       workspaceRoot: resolvedWorkspaceRoot,
       baselineCommitSha,
       testCommand: input.testCommand,
-      stressLoopCount: input.stressLoopCount ?? 1,
-      concurrencyWorkers: input.concurrencyWorkers ?? 1,
+      stressLoopCount: dimensions.rounds,
+      concurrencyWorkers: dimensions.workersPerRound,
       coverageAdapter: input.coverageAdapter,
       redEvidence,
     });
@@ -695,7 +876,7 @@ export class EvidenceService {
     const finalGreenTreeSha256 = computeFinalTreeHash(targetCwd);
     const appliedPatchSha256 = parsedPatch.patchSha256;
     if (!full.greenEvidence || full.reproductionVerified !== true) {
-      const report = { ...full, redEvidence };
+      const report = EvidenceReportSchema.parse({ ...full, redEvidence });
       saveCanonicalArtifact(
         this.runManager,
         input.runId,
@@ -756,6 +937,7 @@ export class EvidenceService {
         ...report,
         greenEvidence: greenEvidenceWithPatch,
       };
+      const validatedReport = EvidenceReportSchema.parse(report);
       saveCanonicalArtifact(
         this.runManager,
         input.runId,
@@ -766,16 +948,19 @@ export class EvidenceService {
         this.runManager,
         input.runId,
         "evidence",
-        report as any,
+        validatedReport as any,
         "EVIDENCE_COLLECTED",
       );
+      report = validatedReport;
     } else {
+      const validatedReport = EvidenceReportSchema.parse(report);
       saveCanonicalArtifact(
         this.runManager,
         input.runId,
         "evidence",
-        report as any,
+        validatedReport as any,
       );
+      report = validatedReport;
     }
 
     return report;
@@ -788,8 +973,8 @@ export class EvidenceService {
    */
   recordRedExecution(
     runId: string,
-    rawResult: import("../run/trusted-execution.port.js").RawRedExecutionResult,
-    expectedAssertion?: string,
+    rawResult: RawRedExecutionResult,
+    executionContract: RedExecutionContract,
   ): RedEvidence {
     const run = this.runManager.getRun(runId);
     if (!run) {
@@ -802,30 +987,67 @@ export class EvidenceService {
       );
     }
 
-    if (rawResult.exitCode === 0) {
+    const contract = requireRedContract(executionContract, runId);
+    const trustedRawResult = requireRawRedResult(rawResult, runId);
+    if (trustedRawResult.exitCode === 0) {
       throw new Error(
-        `RedReproductionFailedError: test command exited with code 0 (expected failure). Evidence_red not saved. Output snippet: ${rawResult.outputSnippet.slice(0, 200)}`,
+        `RedReproductionFailedError: test command exited with code 0 (expected failure). Evidence_red not saved.`,
       );
     }
-    if (expectedAssertion && !rawResult.assertionMatched) {
+    if (
+      normalizeCommand(trustedRawResult.command) !==
+      normalizeCommand(contract.testCommand)
+    ) {
       throw new Error(
-        `RedAssertionMismatchError: expected assertion "${expectedAssertion}" was not observed in test output. Evidence_red not saved. Output snippet: ${rawResult.outputSnippet.slice(0, 200)}`,
+        `RedExecutionValidationError: worker RED command does not match the trusted RED contract for run ${runId}.`,
       );
     }
 
-    const red: RedEvidence = {
-      command: rawResult.command,
-      expectedAssertion,
-      observedOutputSnippet: rawResult.outputSnippet.slice(0, 500),
-      exitCode: rawResult.exitCode,
-      sourceTreeSha256: rawResult.sourceTreeSha256,
-      capturedAt: rawResult.capturedAt || new Date().toISOString(),
-      assertionMatched: rawResult.assertionMatched,
-      testIdentity: rawResult.testIdentity,
-      baselineCommitSha: ws.baseCommitSha
-        ? String(ws.baseCommitSha)
-        : undefined,
-    };
+    const targetCwd = String(ws.workspacePath);
+    const baselineCommitSha = requireBaseCommitSha(ws.baseCommitSha, runId);
+    requireWorkspaceHead(targetCwd, baselineCommitSha);
+    const sourceTreeSha256 = requireAuthoritativeSourceHash(
+      targetCwd,
+      trustedRawResult.sourceTreeSha256,
+      runId,
+    );
+    const testIdentity = requireAuthoritativeTestIdentity(
+      targetCwd,
+      trustedRawResult,
+      contract,
+      runId,
+    );
+    const observedOutputSnippet = requireAuthoritativeOutput(
+      trustedRawResult,
+      contract,
+      runId,
+    );
+    const assertionMatchedFingerprint = computeTestIdentityFingerprint({
+      testCommand: contract.testCommand,
+      expectedAssertion: contract.expectedAssertion,
+    });
+    const redResult = AuthoritativeRedEvidenceSchema.safeParse({
+      command: contract.testCommand,
+      expectedAssertion: contract.expectedAssertion,
+      observedOutputSnippet,
+      exitCode: trustedRawResult.exitCode,
+      sourceTreeSha256,
+      testFileSha256:
+        testIdentity.testFiles.length === 1
+          ? testIdentity.testFiles[0].sha256
+          : undefined,
+      baselineCommitSha,
+      capturedAt: new Date().toISOString(),
+      assertionMatched: true,
+      assertionMatchedFingerprint,
+      testIdentity,
+    });
+    if (!redResult.success) {
+      throw new Error(
+        `RedExecutionValidationError: host-built RED evidence for run ${runId} is invalid: ${schemaIssueSummary(redResult.error)}.`,
+      );
+    }
+    const red = redResult.data;
 
     saveCanonicalArtifact(
       this.runManager,
@@ -835,7 +1057,7 @@ export class EvidenceService {
       "RED_CAPTURED",
     );
 
-    saveCanonicalArtifact(this.runManager, runId, "evidence", {
+    const partialEvidence = EvidenceReportSchema.parse({
       baselineTestedAt: red.capturedAt,
       baselineFlakyTests: [],
       stressLoopRuns: 0,
@@ -852,6 +1074,12 @@ export class EvidenceService {
       reproductionVerified: false,
       allTestsPassing: false,
     });
+    saveCanonicalArtifact(
+      this.runManager,
+      runId,
+      "evidence",
+      partialEvidence as any,
+    );
 
     return red;
   }
@@ -865,6 +1093,14 @@ export class EvidenceService {
     runId: string,
     rawResult: import("../run/trusted-execution.port.js").RawGreenExecutionResult,
   ): Promise<EvidenceReport> {
+    const rawValidation =
+      TrustedGreenExecutionResultSchema.safeParse(rawResult);
+    if (!rawValidation.success) {
+      throw new Error(
+        `GreenExecutionValidationError: worker GREEN result for run ${runId} is invalid: ${schemaIssueSummary(rawValidation.error)}.`,
+      );
+    }
+    const trustedRawResult = rawValidation.data;
     const run = this.runManager.getRun(runId);
     if (!run) {
       throw new Error(`Contribution run ${runId} does not exist`);
@@ -886,6 +1122,15 @@ export class EvidenceService {
     const targetCwd = String(ws.workspacePath);
     const baselineCommitSha = requireBaseCommitSha(ws.baseCommitSha, runId);
     requireWorkspaceHead(targetCwd, baselineCommitSha);
+
+    if (
+      normalizeCommand(trustedRawResult.command) !==
+      normalizeCommand(redEvidence.command)
+    ) {
+      throw new Error(
+        `GreenExecutionValidationError: worker GREEN command does not match the authoritative RED command for run ${runId}.`,
+      );
+    }
 
     const patchRaw = run.artifacts.patch;
     if (!patchRaw) {
@@ -946,6 +1191,14 @@ export class EvidenceService {
       patchFilesWithContent,
     );
     const finalGreenTreeSha256 = computeFinalTreeHash(targetCwd);
+    if (
+      trustedRawResult.sourceTreeSha256.toLowerCase() !==
+      finalGreenTreeSha256.toLowerCase()
+    ) {
+      throw new Error(
+        `GreenExecutionValidationError: worker GREEN tree hash does not match the host-recomputed workspace hash for run ${runId} (worker=${trustedRawResult.sourceTreeSha256}, host=${finalGreenTreeSha256}).`,
+      );
+    }
     const appliedPatchSha256 = parsedPatch.patchSha256;
     const treeChanged = finalGreenTreeSha256 !== redEvidence.sourceTreeSha256;
 
@@ -992,80 +1245,68 @@ export class EvidenceService {
 
     const reproductionVerified =
       redEvidence.assertionMatched === true &&
-      rawResult.passed &&
+      trustedRawResult.passed &&
       treeChanged &&
       testIdentityValid;
 
     const greenEvidenceBase = {
-      command: rawResult.command,
-      exitCode: rawResult.exitCode,
-      outputSnippet: rawResult.outputSnippet,
-      passed: rawResult.passed,
+      command: trustedRawResult.command,
+      exitCode: trustedRawResult.exitCode,
+      outputSnippet: trustedRawResult.outputSnippet,
+      passed: trustedRawResult.passed,
       sourceTreeSha256: finalGreenTreeSha256,
-      capturedAt: rawResult.capturedAt,
+      capturedAt: trustedRawResult.capturedAt,
       treeChangedComparedToRed: treeChanged,
       treeHashMatchesRed: !treeChanged,
-      stressLoopPassed: rawResult.passed,
-      allTestsPassing: rawResult.passed,
-      testIdentity: rawResult.testIdentity,
+      roundsRequested: trustedRawResult.roundsRequested,
+      roundsCompleted: trustedRawResult.roundsCompleted,
+      workersPerRound: trustedRawResult.workersPerRound,
+      executionsExpected: trustedRawResult.executionsExpected,
+      executionCount: trustedRawResult.executionCount,
+      passedUnitTestsCount: trustedRawResult.passedUnitTestsCount,
+      stressLoopPassed: trustedRawResult.passed,
+      allTestsPassing: trustedRawResult.passed,
+      assertionMatchedFingerprint: computeTestIdentityFingerprint({
+        testCommand: redEvidence.command,
+        expectedAssertion:
+          redEvidence.testIdentity?.expectedAssertion ??
+          redEvidence.expectedAssertion,
+      }),
+      testIdentity: greenTestIdentity,
       appliedPatchSha256,
     };
 
-    const executionCount =
-      Number.isFinite(rawResult.executionCount) && rawResult.executionCount >= 0
-        ? Math.floor(rawResult.executionCount)
-        : 0;
-    const workerValue =
-      rawResult.workersPerRound ?? rawResult.concurrencyWorkers;
-    const workersPerRound =
-      Number.isFinite(workerValue) && workerValue > 0
-        ? Math.max(1, Math.floor(workerValue))
-        : 1;
-    const requestedRounds = rawResult.roundsRequested;
-    const completedRounds = rawResult.roundsCompleted;
-    const roundsRequested =
-      typeof requestedRounds === "number" &&
-      Number.isFinite(requestedRounds) &&
-      requestedRounds > 0
-        ? Math.max(1, Math.floor(requestedRounds))
-        : Math.max(1, Math.ceil(executionCount / workersPerRound));
-    const roundsCompleted =
-      typeof completedRounds === "number" &&
-      Number.isFinite(completedRounds) &&
-      completedRounds >= 0
-        ? Math.min(roundsRequested, Math.floor(completedRounds))
-        : Math.min(
-            roundsRequested,
-            Math.ceil(executionCount / workersPerRound),
-          );
-    // Never trust a worker-reported expected count. It is derived from the
-    // normalized request dimensions so partial/legacy results cannot create
-    // contradictory evidence metadata.
-    const executionsExpected = roundsRequested * workersPerRound;
+    // Worker dimensions are already validated above. Preserve omitted/zero
+    // metadata for failed or timed-out results instead of inventing rounds.
+    const executionCount = trustedRawResult.executionCount;
+    const roundsRequested = trustedRawResult.roundsRequested;
+    const roundsCompleted = trustedRawResult.roundsCompleted;
+    const workersPerRound = trustedRawResult.workersPerRound;
+    const executionsExpected = trustedRawResult.executionsExpected;
 
     let report: EvidenceReport = {
-      baselineTestedAt: rawResult.capturedAt,
+      baselineTestedAt: trustedRawResult.capturedAt,
       baselineFlakyTests: [],
-      stressLoopRuns: roundsRequested,
-      roundsRequested,
-      roundsCompleted,
-      workersPerRound,
-      executionsExpected,
-      stressLoopPassed: rawResult.passed,
+      stressLoopRuns: roundsRequested ?? 0,
+      ...(roundsRequested === undefined ? {} : { roundsRequested }),
+      ...(roundsCompleted === undefined ? {} : { roundsCompleted }),
+      ...(workersPerRound === undefined ? {} : { workersPerRound }),
+      ...(executionsExpected === undefined ? {} : { executionsExpected }),
+      stressLoopPassed: trustedRawResult.passed,
       executionCount,
-      maxConcurrentObserved: rawResult.maxConcurrentObserved,
-      concurrencyWorkers: workersPerRound,
-      concurrencyStampedePassed: rawResult.concurrencyStampedePassed,
-      raceCollisionsDetected: rawResult.raceCollisionsDetected,
-      latencyJitterMs: rawResult.latencyJitterMs,
-      handleLeakCheckPassed: rawResult.handleLeakCheckPassed,
-      initialDescriptorCount: rawResult.initialDescriptorCount,
-      finalDescriptorCount: rawResult.finalDescriptorCount,
-      passedUnitTestsCount: rawResult.passedUnitTestsCount,
-      failedUnitTestsCount: rawResult.failedUnitTestsCount,
+      maxConcurrentObserved: trustedRawResult.maxConcurrentObserved,
+      concurrencyWorkers: trustedRawResult.concurrencyWorkers,
+      concurrencyStampedePassed: trustedRawResult.concurrencyStampedePassed,
+      raceCollisionsDetected: trustedRawResult.raceCollisionsDetected,
+      latencyJitterMs: trustedRawResult.latencyJitterMs,
+      handleLeakCheckPassed: trustedRawResult.handleLeakCheckPassed,
+      initialDescriptorCount: trustedRawResult.initialDescriptorCount,
+      finalDescriptorCount: trustedRawResult.finalDescriptorCount,
+      passedUnitTestsCount: trustedRawResult.passedUnitTestsCount,
+      failedUnitTestsCount: trustedRawResult.failedUnitTestsCount,
       testCoverageStatus: "UNAVAILABLE",
       changedCodeCoverageStatus: "UNAVAILABLE",
-      allTestsPassing: rawResult.passed,
+      allTestsPassing: trustedRawResult.passed,
       redEvidence,
       greenEvidence: greenEvidenceBase,
       reproductionVerified,
@@ -1106,6 +1347,7 @@ export class EvidenceService {
         ...report,
         greenEvidence: greenEvidenceWithPatch,
       };
+      const validatedReport = EvidenceReportSchema.parse(report);
       saveCanonicalArtifact(
         this.runManager,
         runId,
@@ -1116,11 +1358,19 @@ export class EvidenceService {
         this.runManager,
         runId,
         "evidence",
-        report as any,
+        validatedReport as any,
         "EVIDENCE_COLLECTED",
       );
+      report = validatedReport;
     } else {
-      saveCanonicalArtifact(this.runManager, runId, "evidence", report as any);
+      const validatedReport = EvidenceReportSchema.parse(report);
+      saveCanonicalArtifact(
+        this.runManager,
+        runId,
+        "evidence",
+        validatedReport as any,
+      );
+      report = validatedReport;
     }
 
     return report;

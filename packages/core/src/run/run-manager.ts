@@ -15,14 +15,7 @@ import {
   RandomIdGenerator,
   type IdGenerator,
 } from "../ports/id-generator.port.js";
-import {
-  ActiveSessionManager,
-  defaultActiveSessionManager,
-} from "./active-session.js";
-// `defaultActiveSessionManager` is still re-exported below for backward-
-// compatibility with callers that construct a manager without injecting an
-// active session; it is only used as a *constructor default*, never bypassed
-// at runtime (transition/updatePhase go through `this.activeSession`).
+import { ActiveSessionManager } from "./active-session.js";
 
 import {
   getProtocolGuidance,
@@ -53,7 +46,7 @@ export interface ResumeRunResult {
   guidance: ProtocolGuidance;
 }
 
-import { validatePhaseGate } from "./state-machine.js";
+import { PHASE_REQUIREMENTS, validatePhaseGate } from "./state-machine.js";
 import { getOpenContribDataDir } from "../kernel/home.js";
 import { registerCanonicalRunWriter } from "./canonical-writer.js";
 
@@ -63,6 +56,17 @@ export const PRIVILEGED_PHASES = new Set<ContributionRunPhase>([
   "PR_SUBMITTED",
   "COMPLETED",
 ]);
+
+/** Server-derived mapping: each draft artifact kind has one lifecycle phase. */
+export const DRAFT_PHASE_BY_ARTIFACT: Partial<
+  Record<ArtifactType, ContributionRunPhase>
+> = {
+  opportunity: "OPPORTUNITY_SCOUTED",
+  probe: "PROBE_COMPLETED",
+  context: "CONTEXT_ASSEMBLED",
+  poc: "POC_GENERATED",
+  patch: "PATCH_DRAFTED",
+};
 
 /**
  * Authoritative artifacts that CANNOT be created or overwritten via generic saveArtifact.
@@ -100,15 +104,32 @@ export class ContributionRunManager {
     this.bundleManager = new ArtifactBundleManager(this.baseDir);
     this.clock = deps.clock ?? new SystemClock();
     this.idGenerator = deps.idGenerator ?? new RandomIdGenerator();
-    this.activeSession = deps.activeSession ?? defaultActiveSessionManager;
+    // Resolve the active-session path when this manager is constructed rather
+    // than capturing the module-level singleton.  This keeps a CLI `--home`
+    // selection authoritative for every lazily-created manager.
+    this.activeSession = deps.activeSession ?? new ActiveSessionManager();
 
     // Register the service-only capability after construction. The capability
     // is held in a private WeakMap and is not exposed through the public core
     // barrel; canonical services use it to persist authoritative artifacts.
     registerCanonicalRunWriter(this, {
-      saveArtifact: (runId, type, content, autoAdvancePhase) =>
-        this._saveArtifactInternal(runId, type, content, autoAdvancePhase),
-      transition: (runId, targetPhase) => this.transition(runId, targetPhase),
+      saveArtifact: (runId, type, content) =>
+        this._saveArtifactInternal(runId, type, content),
+      transition: (runId, targetPhase) => this._transition(runId, targetPhase),
+      markFailed: (runId, reason, retryable, providerSideEffectPossible) =>
+        this._markFailedInternal(
+          runId,
+          reason,
+          retryable,
+          providerSideEffectPossible,
+        ),
+      recordFailure: (runId, reason, retryable, providerSideEffectPossible) =>
+        this._recordFailureInternal(
+          runId,
+          reason,
+          retryable,
+          providerSideEffectPossible,
+        ),
       hydrateRun: (manifest) => this._hydrateRunInternal(manifest),
     });
   }
@@ -165,16 +186,8 @@ export class ContributionRunManager {
     return manifest;
   }
 
-  /**
-   * Public, gate-validated phase transition. This is the ONLY sanctioned path
-   * for advancing a contribution run to a new phase from external callers
-   * (CLI flywheel, autonomous pipeline, MCP tools, submission service).
-   * It runs validatePhaseGate() before persisting, so it rejects invalid
-   * jumps (e.g. PR_SUBMITTED without a governance artifact, or COMPLETED
-   * without a verified submission). Callers that must move a run forward
-   * use this method — there is no public raw phase-persistence primitive.
-   */
-  transition(
+  /** Trusted internal phase transition; not exposed through the public run API. */
+  private _transition(
     runId: string,
     targetPhase: ContributionRunPhase,
   ): ContributionRunManifest {
@@ -186,6 +199,13 @@ export class ContributionRunManager {
     const gateResult = validatePhaseGate(summary, targetPhase);
     if (!gateResult.ok && gateResult.error) {
       throw gateResult.error;
+    }
+
+    // Re-applying the current phase is an idempotent notification, not a
+    // lifecycle event. Do not rewrite timestamps, append a transition event,
+    // or give callers a way to manufacture progress by repeating a phase.
+    if (summary.manifest.currentPhase === targetPhase) {
+      return summary.manifest;
     }
 
     return this._updateRunPhase(runId, targetPhase);
@@ -224,68 +244,151 @@ export class ContributionRunManager {
     runId: string,
     type: ArtifactType,
     content: string | Record<string, unknown>,
-    autoAdvancePhase?: ContributionRunPhase,
   ): SavedArtifactResult {
     if (AUTHORITATIVE_ARTIFACT_TYPES.has(type)) {
       throw new Error(
         `AuthoritativeArtifactViolationError: Artifact type '${type}' is authoritative and cannot be written via generic save. Use canonical service.`,
       );
     }
-    if (autoAdvancePhase && PRIVILEGED_PHASES.has(autoAdvancePhase)) {
+
+    const expectedPhase = DRAFT_PHASE_BY_ARTIFACT[type];
+    const summary = this.getRun(runId);
+    if (!summary) {
+      throw new Error(`Contribution run ${runId} does not exist`);
+    }
+
+    // Once governance or submission has bound the exact PR body, the draft is
+    // no longer mutable. Re-rendering it would invalidate the audited hash and
+    // must fail before touching the WORM run bundle.
+    if (
+      type === "pr_draft" &&
+      new Set<ContributionRunPhase>([
+        "GOVERNANCE_AUDITED",
+        "PR_SUBMITTED",
+        "COMPLETED",
+        "FAILED",
+      ]).has(summary.manifest.currentPhase)
+    ) {
       throw new Error(
-        `PrivilegedPhaseViolationError: Phase '${autoAdvancePhase}' is privileged and cannot be advanced via generic save. Use canonical service.`,
+        `ImmutableArtifactViolationError: pr_draft is immutable after governance binding in phase '${summary.manifest.currentPhase}'.`,
       );
     }
-    return this._saveArtifactInternal(runId, type, content, autoAdvancePhase);
+
+    // A phase-bound draft cannot be written from an unrelated or later phase.
+    // Validate the prospective transition before persisting so a caller cannot
+    // smuggle a patch into a run while silently leaving lifecycle state behind.
+    if (
+      expectedPhase &&
+      summary.manifest.currentPhase !== expectedPhase &&
+      !PHASE_REQUIREMENTS[expectedPhase].fromPhases.includes(
+        summary.manifest.currentPhase,
+      )
+    ) {
+      const prospective = {
+        ...summary,
+        artifacts: {
+          ...summary.artifacts,
+          [type]: content,
+        },
+      };
+      const gateResult = validatePhaseGate(prospective, expectedPhase);
+      if (!gateResult.ok && gateResult.error) {
+        throw gateResult.error;
+      }
+    }
+
+    // The artifact kind, not the caller, selects a phase.  Only advance when
+    // the canonical contract says that this draft phase is the next legal
+    // transition.  PR drafts have no lifecycle phase of their own and remain
+    // ordinary draft artifacts after EVIDENCE_COLLECTED.
+    const derivedPhase =
+      expectedPhase &&
+      summary.manifest.currentPhase !== expectedPhase &&
+      PHASE_REQUIREMENTS[expectedPhase].fromPhases.includes(
+        summary.manifest.currentPhase,
+      )
+        ? expectedPhase
+        : undefined;
+
+    const saved = this._saveArtifactInternal(runId, type, content);
+    if (derivedPhase) {
+      this._transition(runId, derivedPhase);
+    }
+    return saved;
   }
 
   private _saveArtifactInternal(
     runId: string,
     type: ArtifactType,
     content: string | Record<string, unknown>,
-    autoAdvancePhase?: ContributionRunPhase,
   ): SavedArtifactResult {
     const manifest = this.bundleManager.readManifest(runId);
     if (!manifest) {
       throw new Error(`Contribution run ${runId} does not exist`);
     }
 
-    // Prospective validation: if autoAdvancePhase is requested, pre-validate before writing artifact
-    if (autoAdvancePhase && autoAdvancePhase !== manifest.currentPhase) {
-      const prospectiveSummary = this.getRun(runId);
-      if (prospectiveSummary) {
-        // Construct prospective artifacts record
-        const prospectiveArtifacts = {
-          ...prospectiveSummary.artifacts,
-          [type === "pr_draft" ? "prDraft" : type]: content,
-        };
-        const prospective = {
-          ...prospectiveSummary,
-          artifacts: prospectiveArtifacts,
-        };
-        const gateResult = validatePhaseGate(prospective, autoAdvancePhase);
-        if (!gateResult.ok && gateResult.error) {
-          throw gateResult.error;
-        }
-      }
-    }
-
     const saved = this.bundleManager.saveArtifact(runId, type, content);
 
     this.bundleManager.appendEvent(runId, {
-      phase: autoAdvancePhase || manifest.currentPhase,
+      phase: manifest.currentPhase,
       eventType: "ARTIFACT_SAVED",
       payload: { artifactType: type, byteSize: saved.byteSize },
     });
 
-    if (autoAdvancePhase && autoAdvancePhase !== manifest.currentPhase) {
-      this.transition(runId, autoAdvancePhase);
-    } else {
-      manifest.updatedAt = this.clock.nowIso();
-      this.bundleManager.saveManifest(manifest);
-    }
+    manifest.updatedAt = this.clock.nowIso();
+    this.bundleManager.saveManifest(manifest);
 
     return saved;
+  }
+
+  /** Record a trusted failure without allowing a lifecycle rollback. */
+  private _markFailedInternal(
+    runId: string,
+    reason: string,
+    retryable = true,
+    providerSideEffectPossible = false,
+  ): ContributionRunManifest {
+    const summary = this.getRun(runId);
+    if (!summary) throw new Error(`Contribution run ${runId} does not exist`);
+    if (summary.manifest.currentPhase !== "FAILED") {
+      this._transition(runId, "FAILED");
+    }
+    return this._recordFailureInternal(
+      runId,
+      reason,
+      retryable,
+      providerSideEffectPossible,
+      "RUN_FAILED",
+    );
+  }
+
+  private _recordFailureInternal(
+    runId: string,
+    reason: string,
+    retryable = true,
+    providerSideEffectPossible = false,
+    eventType: "RUN_FAILED" | "RUN_FAILURE_RECORDED" = "RUN_FAILURE_RECORDED",
+  ): ContributionRunManifest {
+    const manifest = this.bundleManager.readManifest(runId);
+    if (!manifest) throw new Error(`Contribution run ${runId} does not exist`);
+    const failedAt = this.clock.nowIso();
+    manifest.metadata = {
+      ...(manifest.metadata ?? {}),
+      failure: {
+        reason,
+        retryable,
+        providerSideEffectPossible,
+        failedAt,
+      },
+    };
+    manifest.updatedAt = failedAt;
+    this.bundleManager.saveManifest(manifest);
+    this.bundleManager.appendEvent(runId, {
+      phase: manifest.currentPhase,
+      eventType,
+      payload: { reason, retryable, providerSideEffectPossible },
+    });
+    return manifest;
   }
 
   /**

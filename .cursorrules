@@ -1,10 +1,22 @@
 # OpenContrib Engine Rules for Cursor
 
 When working on open-source contributions or triaging issues:
-1. Verify environment & capabilities: `opencontrib doctor` and `opencontrib capability list`.
-2. Inspect findings via Smart Pointers: `opencontrib pointer list` and `opencontrib pointer resolve <uri> --view slice`.
-3. Isolate workspace in a clean Git worktree: `opencontrib workspace prepare --repo <owner/repo> --issue <id>`.
-4. Establish empirical reproduction (RED→GREEN): capture the failing baseline with `opencontrib evidence capture-red --test-cmd "<test_cmd>" --assertion "<pattern>"`, apply the fix, then verify with `opencontrib evidence verify-green --test-cmd "<test_cmd>"`.
-5. Pre-flight governance audit: `opencontrib governance audit --patch <file> --pr-title "<title>"`.
-6. Draft PR following repo standards: `opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"`.
-7. Synchronize contribution flywheel: `opencontrib flywheel sync --repo <owner/repo>`.
+
+1. Create the run anchor first: `opencontrib run create --repo <owner/repo> --issue <id>`.
+2. Verify environment & capabilities: `opencontrib doctor` and `opencontrib capability list`.
+3. Inspect findings via Smart Pointers: `opencontrib pointer list` and `opencontrib pointer resolve <uri> --view slice`.
+4. Isolate workspace in a clean Git worktree: `opencontrib workspace prepare --repo <owner/repo> --issue <id>`.
+5. Establish empirical reproduction (RED→GREEN): capture the failing baseline with `opencontrib evidence capture-red --test-cmd "<test_cmd>" --assertion "<pattern>"`, apply the fix, then verify with `opencontrib evidence verify-green --test-cmd "<test_cmd>"`.
+6. Pre-flight governance audit: `opencontrib governance audit --patch <file> --pr-title "<title>"`.
+7. Draft and submit only through the trusted OpenContrib route: `opencontrib governance pr-template`, `opencontrib governance request-approval`, then `opencontrib submission submit`.
+8. Synchronize contribution flywheel: `opencontrib flywheel sync --repo <owner/repo>`.
+
+<!-- OPENCONTRIB:GENERATED protocol:start -->
+## Canonical OpenContrib Protocol (generated)
+
+- **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
+- **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
+- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
+<!-- OPENCONTRIB:GENERATED protocol:end -->

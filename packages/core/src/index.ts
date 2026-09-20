@@ -25,3 +25,4 @@ export * from "./forensics/index.js";
 export * from "./taskflow/index.js";
 export * from "./eval/index.js";
 export * from "./workflow/protocol-contract.js";
+export * from "./workflow/protocol-renderer.js";

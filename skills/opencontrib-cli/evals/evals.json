@@ -7,7 +7,8 @@
       "expected_actions": [
         "opencontrib probe run ./trpc-agent-go --pretty",
         "opencontrib workspace prepare --repo trpc-group/trpc-agent-go --issue 0",
-        "opencontrib evidence"
+        "opencontrib evidence capture-red",
+        "opencontrib evidence verify-green"
       ],
       "assertions": [
         "Executes multi-probe static analysis without hanging on stdin",
@@ -34,11 +35,13 @@
       "id": "eval_03_governance_and_issue_first_pr",
       "prompt": "Complete surgical remediation, collect empirical verification evidence, run governance quality audit, and submit an Issue-First pull request.",
       "expected_actions": [
-        "opencontrib evidence",
+        "opencontrib evidence capture-red",
+        "opencontrib evidence verify-green",
         "opencontrib governance audit",
         "gh issue create --body-file",
         "opencontrib governance pr-template",
-        "gh pr create --body-file",
+        "opencontrib governance request-approval",
+        "opencontrib submission submit",
         "opencontrib flywheel sync"
       ],
       "assertions": [

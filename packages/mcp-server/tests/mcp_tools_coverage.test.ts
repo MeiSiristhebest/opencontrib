@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createOpenContribMcpServer } from '../src/server.js';
+import { SmartPointerStore } from '@opencontrib/core';
 
 describe('MCP Tools Comprehensive Handler Coverage', () => {
   const server = createOpenContribMcpServer();
@@ -55,29 +56,55 @@ describe('MCP Tools Comprehensive Handler Coverage', () => {
   });
 
   it('executes pointer & probe tools handlers', async () => {
-    const ptrList = await tools['contrib_list_pointers'].handler({});
-    expect(ptrList).toBeDefined();
+    const pointerDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'opencontrib-mcp-pointers-'),
+    );
+    try {
+      const writer = new SmartPointerStore({
+        storageDir: pointerDir,
+        scope: process.cwd(),
+      });
+      const pointer = writer.create({
+        namespace: 'findings',
+        id: 'mcp-cross-process',
+        title: 'MCP hydration',
+        category: 'security_cwe',
+        severity: 'medium',
+        file: 'src/index.ts',
+        line: 7,
+      });
 
-    const ptrRes = await tools['contrib_resolve_pointer'].handler({
-      uri: 'ptr://findings/test-nonexistent',
-      view: 'slice',
-    });
-    expect(ptrRes).toBeDefined();
+      const ptrList = await tools['contrib_list_pointers'].handler({
+        storageDir: pointerDir,
+      });
+      expect(ptrList).toBeDefined();
+      expect(JSON.parse(ptrList.content[0].text).count).toBe(1);
 
-    const probePlan = await tools['contrib_probe_plan'].handler({
-      target: '.',
-      maxCost: 'fast',
-    });
-    expect(probePlan).toBeDefined();
+      const ptrRes = await tools['contrib_resolve_pointer'].handler({
+        uri: pointer.uri,
+        view: 'stub',
+        storageDir: pointerDir,
+      });
+      expect(ptrRes).toBeDefined();
+      expect(JSON.parse(ptrRes.content[0].text).data.id).toBe(pointer.id);
 
-    const capPlan = await tools['contrib_plan_capabilities'].handler({
-      target: '.',
-      intent: 'general_defect',
-    });
-    expect(capPlan).toBeDefined();
+      const probePlan = await tools['contrib_probe_plan'].handler({
+        target: '.',
+        maxCost: 'fast',
+      });
+      expect(probePlan).toBeDefined();
 
-    const plugList = await tools['contrib_list_plugins'].handler({});
-    expect(plugList).toBeDefined();
+      const capPlan = await tools['contrib_plan_capabilities'].handler({
+        target: '.',
+        intent: 'general_defect',
+      });
+      expect(capPlan).toBeDefined();
+
+      const plugList = await tools['contrib_list_plugins'].handler({});
+      expect(plugList).toBeDefined();
+    } finally {
+      fs.rmSync(pointerDir, { recursive: true, force: true });
+    }
   });
 
   it('executes eval tools handlers with temporary transcript', async () => {
