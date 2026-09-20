@@ -70,7 +70,10 @@ describe("OpenContrib Microkernel & Smart Pointer Architecture", () => {
   });
 
   it("manages Smart Pointers with 3-level progressive dereferencing", () => {
-    const store = new SmartPointerStore();
+    const store = new SmartPointerStore({
+      storageDir: path.join(tempDir, "pointers"),
+      scope: tempDir,
+    });
 
     const ptr = store.create({
       namespace: "findings",
@@ -103,7 +106,8 @@ describe("OpenContrib Microkernel & Smart Pointer Architecture", () => {
 
     // Level 1: Stub (~25 tokens)
     const stubResult = store.resolve(ptr.legacyUri!, "stub") as any;
-    expect(stubResult.id).toBe("npe-auth-handler-12");
+    expect(stubResult.id).toBe(ptr.id);
+    expect(stubResult.legacyId).toBe("npe-auth-handler-12");
     expect(stubResult.file).toBe("pkg/auth/handler.go");
     expect(stubResult.slice).toBeUndefined();
     expect(stubResult.evidence).toBeUndefined();

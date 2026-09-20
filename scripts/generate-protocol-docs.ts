@@ -29,9 +29,12 @@ function replaceGeneratedBlock(
   source: string,
   target: ProtocolDocumentationTarget,
 ): string {
-  const replacement = renderMarkedProtocolDocumentationBlock(target.locale);
-  const start = replacement.slice(0, replacement.indexOf("\n"));
-  const end = replacement.slice(replacement.lastIndexOf("\n") + 1);
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const replacement = renderMarkedProtocolDocumentationBlock(
+    target.locale,
+  ).replace(/\n/g, newline);
+  const start = replacement.slice(0, replacement.indexOf(newline));
+  const end = replacement.slice(replacement.lastIndexOf(newline) + newline.length);
   const markerPattern = new RegExp(
     `${escapeRegExp(start)}[\\s\\S]*?${escapeRegExp(end)}`,
   );
