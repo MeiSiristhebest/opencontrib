@@ -1,39 +1,110 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import {
+  getProtocolGuidance,
+  PROTOCOL_CONTRACT_PHASES,
+  type ContributionRunPhase,
+} from "@opencontrib/core";
+
+const GUIDE_EXCLUDED_PHASES = new Set<ContributionRunPhase>([
+  "INITIALIZED",
+  "COMPLETED",
+  "FAILED",
+]);
 
 export function registerPrompts(server: McpServer): void {
   server.prompt(
-    'opencontrib_workflow_guide',
-    'Standard Phase-Gated execution protocol for autonomous open-source contribution',
+    "opencontrib_workflow_guide",
+    "Standard Phase-Gated execution protocol for autonomous open-source contribution",
     {
-      repoFullName: z.string().optional().describe('Target repository, e.g. "owner/repo"'),
-      issueNumber: z.string().optional().describe('Target issue number if known'),
+      repoFullName: z
+        .string()
+        .optional()
+        .describe('Target repository, e.g. "owner/repo"'),
+      issueNumber: z
+        .string()
+        .optional()
+        .describe("Target issue number if known"),
     },
     async (args) => {
-      const targetRepo = args.repoFullName || '<target_owner/target_repo>';
-      const issueNum = args.issueNumber ? `#${args.issueNumber}` : '<issue_number>';
+      const targetRepo = args.repoFullName || "<target_owner/target_repo>";
+      const parsedIssueNumber = Number(args.issueNumber);
+      const issueNumber = Number.isInteger(parsedIssueNumber)
+        ? `, issueNumber: ${parsedIssueNumber}`
+        : "";
+      const initialized = PROTOCOL_CONTRACT_PHASES.INITIALIZED;
+
+      const steps = Object.values(PROTOCOL_CONTRACT_PHASES)
+        .filter(({ phase }) => !GUIDE_EXCLUDED_PHASES.has(phase))
+        .map((definition) => {
+          const guidance = getProtocolGuidance(definition.phase);
+          const allowedFrom = definition.allowedFromPhases.length
+            ? definition.allowedFromPhases
+                .map((phase) => `\`${phase}\``)
+                .join(" or ")
+            : "the run anchor";
+          const forbidden = definition.forbiddenActions.length
+            ? ` Forbidden: ${definition.forbiddenActions.join("; ")}`
+            : "";
+          const invariants = definition.invariants.length
+            ? ` Invariants: ${definition.invariants.join(" ")}`
+            : "";
+          return `- **${definition.phase}: ${definition.name}** — call \`${definition.mcp.tool}\`; allowed from ${allowedFrom}; next canonical action is \`${guidance.mcpTool}\` (\`${guidance.suggestedNextAction}\`).${invariants}${forbidden}`;
+        });
+      const toolFor = (phase: ContributionRunPhase) =>
+        PROTOCOL_CONTRACT_PHASES[phase].mcp.tool;
+      const canonicalPath = [
+        toolFor("INITIALIZED"),
+        `${toolFor("OPPORTUNITY_SCOUTED")} or ${toolFor("PROBE_COMPLETED")}`,
+        toolFor("CONTEXT_ASSEMBLED"),
+        toolFor("WORKSPACE_PREPARED"),
+        `${toolFor("RED_CAPTURED")} or ${toolFor("POC_GENERATED")}`,
+        toolFor("PATCH_DRAFTED"),
+        toolFor("EVIDENCE_COLLECTED"),
+        getProtocolGuidance("EVIDENCE_COLLECTED").mcpTool,
+        toolFor("GOVERNANCE_AUDITED"),
+        getProtocolGuidance("GOVERNANCE_AUDITED").mcpTool,
+        toolFor("PR_SUBMITTED"),
+        toolFor("COMPLETED"),
+      ].join(" → ");
+
+      const workflowText = [
+        "# OpenContrib Phase-Gated Contribution Protocol",
+        "",
+        "This guide is generated from `PROTOCOL_CONTRACT_PHASES`; the state machine is authoritative.",
+        "The dependency graph below is not a mandatory linear checklist: optional branches are shown with `or`, and every transition must satisfy the listed allowed source phase.",
+        "",
+        "## Run anchor",
+        "",
+        `1. **${initialized.phase}: ${initialized.name} (MUST be first)** — call \`${initialized.mcp.tool}({ repoFullName: ${JSON.stringify(targetRepo)}${issueNumber} })\` to obtain \`runId\`. No discovery, probing, context assembly, workspace work, or source modification may begin before this run anchor exists.`,
+        "",
+        "## Canonical dependency path",
+        "",
+        `\`${canonicalPath}\``,
+        "",
+        "## Contract-derived phase graph",
+        "",
+        ...steps,
+        "",
+        "## Evidence and submission invariants",
+        "",
+        "- Capture authoritative RED before drafting a patch, then draft the patch and run authoritative GREEN verification.",
+        "- `contrib_capture_red` and `contrib_verify_poc` are alternative evidence-entry branches from `WORKSPACE_PREPARED`; do not call the POC branch after RED unless the contract explicitly permits it.",
+        "- Modify source only inside the canonical workspace after `contrib_prepare_workspace`.",
+        "- `contrib_verify_green` binds GREEN to RED and advances the evidence gate.",
+        "- Approval is an artifact-level gate. Request approval through OpenContrib, then submit only through `contrib_submit_pr` and the trusted `SubmissionPort`.",
+        "- DO NOT call GitHub create_pull_request directly.",
+        "- DO NOT call GitHub MCP or GitHub API create/update-pull-request operations directly. They bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.",
+        "- Call `contrib_sync_flywheel` only after a verified submission; it creates the completion artifact as the final canonical step.",
+      ].join("\n");
 
       return {
         messages: [
           {
-            role: 'user',
+            role: "user",
             content: {
-              type: 'text',
-              text: `# OpenContrib Phase-Gated Contribution Protocol
-
-You are an expert open-source contributor AI Agent. Follow this mandatory sequence using OpenContrib MCP tools and GitHub MCP tools:
-
-1. **Discovery & Ranking**: Call \`contrib_scout\` or evaluate an issue with \`contrib_rank_opportunity\`. Verify \`isQualified: true\` and \`maintenanceRisk < 0.3\`.
-2. **Context Assembly**: Call \`contrib_assemble_context\` to extract repository skeleton, suggested reading order, target test files, and historical memory pitfalls.
-3. **Session Initialization**: Call \`contrib_create_run\` to obtain a \`runId\` for auditable artifact tracking.
-4. **Isolated Workspace Allocation**: Call \`contrib_prepare_workspace({ repoFullName: "${targetRepo}", issueOrTaskId: "${issueNum}", runId })\` to work inside an ephemeral Git worktree sandbox.
-5. **Code Implementation**: Make surgical edits within the workspace root. Do NOT modify files outside the implementation context.
-6. **Dual-Stage Verification**: Call \`contrib_collect_evidence\` with \`preFixAssertionProbe\` to verify the baseline failed pre-fix and passed 100% post-fix under targeted regression verification.
-7. **Governance & Anti-AI Lint**: Call \`contrib_audit_governance\` to verify 100-line RFC limit, zero AI chatter comments, and mathematical confidence >= 90%.
-8. **PR Template Rendering**: Call \`contrib_render_pr_template\` to merge evidence into the repository's native PR template.
-9. **Submission & Flywheel Sync**: Once approved by human user, create the PR via GitHub MCP and call \`contrib_sync_flywheel\` to record your contribution into local profile memory.
-
-Begin execution starting from Step 1!`,
+              type: "text",
+              text: workflowText,
             },
           },
         ],

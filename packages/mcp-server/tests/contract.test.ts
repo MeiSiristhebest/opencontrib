@@ -4,7 +4,20 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createOpenContribMcpServer } from "../src/server.js";
-import { PROTOCOL_CONTRACT_PHASES, WorktreeManager } from "@opencontrib/core";
+import {
+  AUTHORITATIVE_ARTIFACT_TYPES,
+  PROTOCOL_CONTRACT_PHASES,
+  WorktreeManager,
+} from "@opencontrib/core";
+
+const DRAFT_ARTIFACT_TYPES = [
+  "opportunity",
+  "probe",
+  "context",
+  "poc",
+  "patch",
+  "pr_draft",
+] as const;
 
 class LocalFetchWorktreeManager extends WorktreeManager {
   constructor(private readonly remotePath: string) {
@@ -347,5 +360,103 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(resources["opencontrib://memory"]).toBeDefined();
     expect(resources["opencontrib://runs"]).toBeDefined();
     expect(prompts["opencontrib_workflow_guide"]).toBeDefined();
+  });
+
+  // ---- P0-01: prompt derives from canonical PROTOCOL_CONTRACT_PHASES ----
+  it("P0-01: prompt opencontrib_workflow_guide derives steps from canonical PROTOCOL_CONTRACT_PHASES", async () => {
+    const result = await prompts["opencontrib_workflow_guide"].callback({
+      repoFullName: "x/y",
+      issueNumber: "42",
+    });
+    const text = result.messages[0].content.text as string;
+    // Session init MUST appear before any discovery step
+    const createRunIdx = text.indexOf("contrib_create_run");
+    const scoutIdx = text.indexOf("contrib_scout");
+    expect(createRunIdx).toBeGreaterThan(-1);
+    expect(scoutIdx).toBeGreaterThan(-1);
+    expect(createRunIdx).toBeLessThan(scoutIdx);
+  });
+
+  it("P0-01: prompt enforces capture_red before verify_green ordering", async () => {
+    const result = await prompts["opencontrib_workflow_guide"].callback({});
+    const text = result.messages[0].content.text as string;
+    const captureRedIdx = text.indexOf("contrib_capture_red");
+    const verifyGreenIdx = text.indexOf("contrib_verify_green");
+    expect(captureRedIdx).toBeGreaterThan(-1);
+    expect(verifyGreenIdx).toBeGreaterThan(-1);
+    expect(captureRedIdx).toBeLessThan(verifyGreenIdx);
+  });
+
+  it("P0-01: prompt requires SubmissionPort-only submission via contrib_submit_pr", async () => {
+    const result = await prompts["opencontrib_workflow_guide"].callback({});
+    const text = result.messages[0].content.text as string;
+    expect(text).toContain("contrib_request_approval");
+    expect(text).toContain("contrib_submit_pr");
+    expect(text).toContain("SubmissionPort");
+    expect(text).not.toContain("contrib_collect_evidence");
+    expect(text).not.toContain("preFixAssertionProbe");
+    expect(text).toContain("allowed from `WORKSPACE_PREPARED`");
+    // Must prohibit, rather than prescribe, direct GitHub API writes.
+    expect(text).toContain("DO NOT call GitHub create_pull_request directly.");
+    expect(text).toContain("DO NOT call GitHub MCP or GitHub API");
+    const directWriteInstruction = text
+      .split("\n")
+      .filter((line) =>
+        /(?:run|execute|use|call|invoke).*\b(?:gh\s+pr\s+create|create_pull_request|POST\s+\/repos\/.*\/pulls)\b/i.test(
+          line,
+        ),
+      )
+      .filter(
+        (line) => !/\b(?:do not|never|prohibit(?:ed|ion)?)\b/i.test(line),
+      );
+    expect(directWriteInstruction).toEqual([]);
+  });
+
+  // ---- P0-02: contrib_save_artifact schema restricts authoritative types ----
+  it("P0-02: contrib_save_artifact input schema excludes authoritative artifact types", () => {
+    const schema = tools["contrib_save_artifact"].inputSchema;
+    for (const type of AUTHORITATIVE_ARTIFACT_TYPES) {
+      expect(
+        schema.safeParse({
+          runId: "run_test_foo",
+          artifactType: type,
+          content: "{}",
+        }).success,
+      ).toBe(false);
+    }
+    for (const type of DRAFT_ARTIFACT_TYPES) {
+      expect(
+        schema.safeParse({
+          runId: "run_test_foo",
+          artifactType: type,
+          content: "{}",
+        }).success,
+      ).toBe(true);
+    }
+  });
+
+  it("P0-02: contrib_save_artifact rejects authoritative artifact types at runtime", async () => {
+    for (const type of AUTHORITATIVE_ARTIFACT_TYPES) {
+      const result = await tools["contrib_save_artifact"].handler({
+        runId: "run_test_foo",
+        artifactType: type as any,
+        content: "{}",
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("authoritative");
+    }
+  });
+
+  it("P0-02: contrib_save_artifact accepts all non-authoritative draft types (fails at run-not-found, not schema)", async () => {
+    for (const type of DRAFT_ARTIFACT_TYPES) {
+      const result = await tools["contrib_save_artifact"].handler({
+        runId: "run_test_foo",
+        artifactType: type,
+        content: "{}",
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).not.toContain("authoritative");
+      expect(result.content[0].text).toContain("does not exist");
+    }
   });
 });

@@ -1011,14 +1011,50 @@ export class EvidenceService {
       appliedPatchSha256,
     };
 
+    const executionCount =
+      Number.isFinite(rawResult.executionCount) && rawResult.executionCount >= 0
+        ? Math.floor(rawResult.executionCount)
+        : 0;
+    const workerValue =
+      rawResult.workersPerRound ?? rawResult.concurrencyWorkers;
+    const workersPerRound =
+      Number.isFinite(workerValue) && workerValue > 0
+        ? Math.max(1, Math.floor(workerValue))
+        : 1;
+    const requestedRounds = rawResult.roundsRequested;
+    const completedRounds = rawResult.roundsCompleted;
+    const roundsRequested =
+      typeof requestedRounds === "number" &&
+      Number.isFinite(requestedRounds) &&
+      requestedRounds > 0
+        ? Math.max(1, Math.floor(requestedRounds))
+        : Math.max(1, Math.ceil(executionCount / workersPerRound));
+    const roundsCompleted =
+      typeof completedRounds === "number" &&
+      Number.isFinite(completedRounds) &&
+      completedRounds >= 0
+        ? Math.min(roundsRequested, Math.floor(completedRounds))
+        : Math.min(
+            roundsRequested,
+            Math.ceil(executionCount / workersPerRound),
+          );
+    // Never trust a worker-reported expected count. It is derived from the
+    // normalized request dimensions so partial/legacy results cannot create
+    // contradictory evidence metadata.
+    const executionsExpected = roundsRequested * workersPerRound;
+
     let report: EvidenceReport = {
       baselineTestedAt: rawResult.capturedAt,
       baselineFlakyTests: [],
-      stressLoopRuns: rawResult.executionCount,
+      stressLoopRuns: roundsRequested,
+      roundsRequested,
+      roundsCompleted,
+      workersPerRound,
+      executionsExpected,
       stressLoopPassed: rawResult.passed,
-      executionCount: rawResult.executionCount,
+      executionCount,
       maxConcurrentObserved: rawResult.maxConcurrentObserved,
-      concurrencyWorkers: rawResult.concurrencyWorkers,
+      concurrencyWorkers: workersPerRound,
       concurrencyStampedePassed: rawResult.concurrencyStampedePassed,
       raceCollisionsDetected: rawResult.raceCollisionsDetected,
       latencyJitterMs: rawResult.latencyJitterMs,

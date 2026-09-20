@@ -307,12 +307,18 @@ export type FlakyTestRecord = z.infer<typeof FlakyTestRecordSchema>;
 export const MeasurementStatusSchema = z.enum(["PASS", "FAIL", "UNAVAILABLE"]);
 export type MeasurementStatus = z.infer<typeof MeasurementStatusSchema>;
 
-export const EvidenceReportSchema = z.object({
+const evidenceReportSchemaBase = z.object({
   baselineTestedAt: z.string(),
   baselineFlakyTests: z.array(FlakyTestRecordSchema),
+  // Stress semantics: one round starts workersPerRound workers; requested
+  // executions are roundsRequested * workersPerRound.
   stressLoopRuns: z.number().default(1),
+  roundsRequested: z.number().int().positive().optional(),
+  roundsCompleted: z.number().int().nonnegative().optional(),
+  workersPerRound: z.number().int().positive().optional(),
+  executionsExpected: z.number().int().positive().optional(),
   stressLoopPassed: z.boolean(),
-  executionCount: z.number().default(1),
+  executionCount: z.number().int().nonnegative().default(1),
   maxConcurrentObserved: z.number().default(1),
   concurrencyWorkers: z.number().default(1).optional(),
   concurrencyStampedePassed: z.boolean().default(true).optional(),
@@ -347,6 +353,58 @@ export const EvidenceReportSchema = z.object({
   benchmarkMetrics: z.record(z.string(), z.string()).optional(),
   rawExecutionLogs: z.string().optional(),
 });
+
+export const EvidenceReportSchema = evidenceReportSchemaBase.superRefine(
+  (report, ctx) => {
+    if (
+      report.roundsRequested !== undefined &&
+      report.workersPerRound !== undefined &&
+      report.executionsExpected !== undefined &&
+      report.executionsExpected !==
+        report.roundsRequested * report.workersPerRound
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["executionsExpected"],
+        message:
+          "executionsExpected must equal roundsRequested multiplied by workersPerRound",
+      });
+    }
+    if (
+      report.roundsRequested !== undefined &&
+      report.roundsCompleted !== undefined &&
+      report.roundsCompleted > report.roundsRequested
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["roundsCompleted"],
+        message: "roundsCompleted cannot exceed roundsRequested",
+      });
+    }
+    if (
+      report.roundsCompleted !== undefined &&
+      report.workersPerRound !== undefined &&
+      report.executionCount !== report.roundsCompleted * report.workersPerRound
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["executionCount"],
+        message:
+          "executionCount must equal roundsCompleted multiplied by workersPerRound",
+      });
+    }
+    if (
+      report.executionsExpected !== undefined &&
+      report.executionCount > report.executionsExpected
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["executionCount"],
+        message: "executionCount cannot exceed executionsExpected",
+      });
+    }
+  },
+);
 export type EvidenceReport = z.infer<typeof EvidenceReportSchema>;
 
 export const EvidenceBundleV2Schema = z.object({

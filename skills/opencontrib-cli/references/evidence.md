@@ -57,8 +57,8 @@ opencontrib evidence run \
 | :--- | :--- | :---: | :---: | :--- |
 | `--cwd` | string | — | Active Session | Workspace directory to run tests in (auto-resolved from active session) |
 | `--test-cmd` | string | ✓ | — | Targeted test command (e.g. `go test ./pkg/...`, `bun test ...`) |
-| `--concurrency` | number | — | `1` | Concurrent worker threads (use $>1$ only for race/concurrency tests) |
-| `--stress-loop` | number | — | `1` | Stress loop iterations (use $>1$ only for concurrency/flaky tests) |
+| `--concurrency` | number | — | `1` | Workers started concurrently in each stress round (use $>1$ only for race/concurrency tests) |
+| `--stress-loop` | number | — | `1` | Number of stress rounds (use $>1$ only for concurrency/flaky tests) |
 | `--pre-fix-cmd` | string | — | same as `--test-cmd` | Separate command to trigger pre-fix failure |
 | `--assertion` | string | — | — | Regex for expected failure before fix |
 | `--workspace-root` | string | — | — | Root workspace for security boundary |
@@ -67,6 +67,16 @@ opencontrib evidence run \
 | `--pretty` | flag | — | false | Pretty-print output |
 
 For `capture-red`, add `--assertion` to match the expected failure. For `verify-green`, the RED baseline is read from the same `--run-id`.
+
+### Stress execution semantics
+
+Each round starts exactly `--concurrency` workers together. The requested execution count is:
+
+```text
+executionsExpected = stressLoopCount × concurrencyWorkers
+```
+
+For example, `--stress-loop 3 --concurrency 5` requests 15 executions in three rounds, with a maximum expected concurrency of five. A failed round completes its workers and stops later rounds; the evidence reports both requested and actual counts.
 
 ---
 

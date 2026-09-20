@@ -70,21 +70,16 @@ export function registerRunTools(
   // -------------------------------------------------------------
   server.tool(
     "contrib_save_artifact",
-    "Save discrete stage artifact (opportunity, context, patch, evidence, governance, pr_draft, result) to run bundle. Use contrib_prepare_workspace to save workspace artifacts.",
+    "Save a non-authoritative draft or scratch artifact to the run bundle. Authoritative artifacts (workspace, evidence_red, evidence, validated_patch, governance, submission_intent, approval, submission, result) must only be written by canonical services. Use contrib_prepare_workspace for workspace, contrib_capture_red for RED baseline, and contrib_verify_green for GREEN evidence.",
     {
       runId: z.string().describe("Unique contribution run ID"),
       artifactType: z.enum([
         "opportunity",
         "probe",
         "context",
-        "workspace",
-        "evidence_red",
         "poc",
         "patch",
-        "evidence",
-        "governance",
         "pr_draft",
-        "result",
       ]),
       content: z
         .union([z.string(), z.record(z.unknown())])
