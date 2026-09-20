@@ -88,14 +88,19 @@ describe("runConcurrentRounds — rounds × workers contract", () => {
   });
 
   test("excessive dimensions fail before worker allocation", async () => {
+    let executed = false;
     await expect(
       runConcurrentRounds({
         rounds: 1,
         workersPerRound: 1000,
-        execute: async () => true,
+        execute: async () => {
+          executed = true;
+          return true;
+        },
         isSuccess: (value) => value,
       }),
     ).rejects.toThrow(/INVALID_STRESS_DIMENSION/);
+    expect(executed).toBe(false);
   });
 
   test("evidence schema rejects contradictory round metadata", () => {

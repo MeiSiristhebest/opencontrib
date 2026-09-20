@@ -247,7 +247,9 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
     const latencies: number[] = [];
     for (const result of scheduled.results) {
       latencies.push(result.elapsed);
-      if (!result.passed || lastOutput.length === 0) {
+      if (!result.passed) {
+        lastOutput = result.output || "[execution failed without output]";
+      } else if (lastOutput.length === 0) {
         lastOutput = result.output;
       }
       if (!result.passed) {
