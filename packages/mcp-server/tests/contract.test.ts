@@ -4,7 +4,20 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createOpenContribMcpServer } from "../src/server.js";
-import { PROTOCOL_CONTRACT_PHASES, WorktreeManager } from "@opencontrib/core";
+import {
+  AUTHORITATIVE_ARTIFACT_TYPES,
+  PROTOCOL_CONTRACT_PHASES,
+  WorktreeManager,
+} from "@opencontrib/core";
+
+const DRAFT_ARTIFACT_TYPES = [
+  "opportunity",
+  "probe",
+  "context",
+  "poc",
+  "patch",
+  "pr_draft",
+] as const;
 
 class LocalFetchWorktreeManager extends WorktreeManager {
   constructor(private readonly remotePath: string) {
@@ -380,26 +393,29 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(text).toContain("contrib_request_approval");
     expect(text).toContain("contrib_submit_pr");
     expect(text).toContain("SubmissionPort");
-    expect(text).toContain("diagnostic-only");
-    // Must NOT encourage direct GitHub API writes
-    expect(text).not.toMatch(/gh .*create.?pull.?request/i);
+    expect(text).not.toContain("contrib_collect_evidence");
+    expect(text).not.toContain("preFixAssertionProbe");
+    expect(text).toContain("allowed from `WORKSPACE_PREPARED`");
+    // Must prohibit, rather than prescribe, direct GitHub API writes.
+    expect(text).toContain("DO NOT call GitHub create_pull_request directly.");
+    expect(text).toContain("DO NOT call GitHub MCP or GitHub API");
+    const actionableText = text
+      .split("\n")
+      .filter((line) => !line.includes("DO NOT"))
+      .join("\n");
+    expect(actionableText).not.toMatch(
+      /(?:run|execute|use|call|invoke).*gh\s+pr\s+create/i,
+    );
+    expect(actionableText).not.toMatch(
+      /(?:run|execute|use|call|invoke).*create_pull_request/i,
+    );
+    expect(actionableText).not.toMatch(/POST\s+\/repos\/.*\/pulls/i);
   });
 
   // ---- P0-02: contrib_save_artifact schema restricts authoritative types ----
   it("P0-02: contrib_save_artifact input schema excludes authoritative artifact types", () => {
     const schema = tools["contrib_save_artifact"].inputSchema;
-    const authoritativeTypes = [
-      "workspace",
-      "validated_patch",
-      "evidence_red",
-      "evidence",
-      "governance",
-      "submission_intent",
-      "approval",
-      "submission",
-      "result",
-    ];
-    for (const type of authoritativeTypes) {
+    for (const type of AUTHORITATIVE_ARTIFACT_TYPES) {
       expect(
         schema.safeParse({
           runId: "run_test_foo",
@@ -408,14 +424,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
         }).success,
       ).toBe(false);
     }
-    for (const type of [
-      "opportunity",
-      "probe",
-      "context",
-      "poc",
-      "patch",
-      "pr_draft",
-    ]) {
+    for (const type of DRAFT_ARTIFACT_TYPES) {
       expect(
         schema.safeParse({
           runId: "run_test_foo",
@@ -427,18 +436,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
   });
 
   it("P0-02: contrib_save_artifact rejects authoritative artifact types at runtime", async () => {
-    const authoritativeTypes = [
-      "workspace",
-      "validated_patch",
-      "evidence_red",
-      "evidence",
-      "governance",
-      "submission_intent",
-      "approval",
-      "submission",
-      "result",
-    ];
-    for (const type of authoritativeTypes) {
+    for (const type of AUTHORITATIVE_ARTIFACT_TYPES) {
       const result = await tools["contrib_save_artifact"].handler({
         runId: "run_test_foo",
         artifactType: type as any,
@@ -450,15 +448,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
   });
 
   it("P0-02: contrib_save_artifact accepts all non-authoritative draft types (fails at run-not-found, not schema)", async () => {
-    const draftTypes = [
-      "opportunity",
-      "probe",
-      "context",
-      "poc",
-      "patch",
-      "pr_draft",
-    ];
-    for (const type of draftTypes) {
+    for (const type of DRAFT_ARTIFACT_TYPES) {
       const result = await tools["contrib_save_artifact"].handler({
         runId: "run_test_foo",
         artifactType: type,

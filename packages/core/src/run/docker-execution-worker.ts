@@ -233,6 +233,12 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       workersPerRound: job.concurrencyWorkers ?? 1,
       execute: executeOne,
       isSuccess: (result) => result.passed,
+      onError: (error) => ({
+        passed: false,
+        exitCode: 1,
+        output: error instanceof Error ? error.message : String(error),
+        elapsed: 0,
+      }),
     });
 
     let allPassed = true;

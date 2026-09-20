@@ -36,37 +36,66 @@ export function registerPrompts(server: McpServer): void {
 
       const steps = Object.values(PROTOCOL_CONTRACT_PHASES)
         .filter(({ phase }) => !GUIDE_EXCLUDED_PHASES.has(phase))
-        .map((definition, index) => {
+        .map((definition) => {
           const guidance = getProtocolGuidance(definition.phase);
+          const allowedFrom = definition.allowedFromPhases.length
+            ? definition.allowedFromPhases
+                .map((phase) => `\`${phase}\``)
+                .join(" or ")
+            : "the run anchor";
           const forbidden = definition.forbiddenActions.length
             ? ` Forbidden: ${definition.forbiddenActions.join("; ")}`
             : "";
           const invariants = definition.invariants.length
             ? ` Invariants: ${definition.invariants.join(" ")}`
             : "";
-          return `${index + 2}. **${definition.phase}: ${definition.name}** — call \`${definition.mcp.tool}\` to reach this phase; next canonical action is \`${guidance.mcpTool}\` (\`${guidance.suggestedNextAction}\`).${invariants}${forbidden}`;
+          return `- **${definition.phase}: ${definition.name}** — call \`${definition.mcp.tool}\`; allowed from ${allowedFrom}; next canonical action is \`${guidance.mcpTool}\` (\`${guidance.suggestedNextAction}\`).${invariants}${forbidden}`;
         });
+      const toolFor = (phase: ContributionRunPhase) =>
+        PROTOCOL_CONTRACT_PHASES[phase].mcp.tool;
+      const canonicalPath = [
+        toolFor("INITIALIZED"),
+        `${toolFor("OPPORTUNITY_SCOUTED")} or ${toolFor("PROBE_COMPLETED")}`,
+        toolFor("CONTEXT_ASSEMBLED"),
+        toolFor("WORKSPACE_PREPARED"),
+        `${toolFor("RED_CAPTURED")} or ${toolFor("POC_GENERATED")}`,
+        toolFor("PATCH_DRAFTED"),
+        toolFor("EVIDENCE_COLLECTED"),
+        getProtocolGuidance("EVIDENCE_COLLECTED").mcpTool,
+        toolFor("GOVERNANCE_AUDITED"),
+        getProtocolGuidance("GOVERNANCE_AUDITED").mcpTool,
+        toolFor("PR_SUBMITTED"),
+        toolFor("COMPLETED"),
+      ].join(" → ");
 
       const workflowText = [
         "# OpenContrib Phase-Gated Contribution Protocol",
         "",
-        "This guide is generated from `PROTOCOL_CONTRACT_PHASES`; follow it as the canonical MCP protocol.",
-        "The sequence is strictly ordered. Do not skip, reorder, or replace canonical services with direct provider calls.",
+        "This guide is generated from `PROTOCOL_CONTRACT_PHASES`; the state machine is authoritative.",
+        "The dependency graph below is not a mandatory linear checklist: optional branches are shown with `or`, and every transition must satisfy the listed allowed source phase.",
         "",
-        "## Required execution order",
+        "## Run anchor",
         "",
         `1. **${initialized.phase}: ${initialized.name} (MUST be first)** — call \`${initialized.mcp.tool}({ repoFullName: ${JSON.stringify(targetRepo)}${issueNumber} })\` to obtain \`runId\`. No discovery, probing, context assembly, workspace work, or source modification may begin before this run anchor exists.`,
+        "",
+        "## Canonical dependency path",
+        "",
+        `\`${canonicalPath}\``,
+        "",
+        "## Contract-derived phase graph",
+        "",
         ...steps,
         "",
         "## Evidence and submission invariants",
         "",
-        "- `contrib_capture_red` MUST run before any patch is drafted and records the immutable RED baseline.",
+        "- Capture authoritative RED before drafting a patch, then draft the patch and run authoritative GREEN verification.",
+        "- `contrib_capture_red` and `contrib_verify_poc` are alternative evidence-entry branches from `WORKSPACE_PREPARED`; do not call the POC branch after RED unless the contract explicitly permits it.",
         "- Modify source only inside the canonical workspace after `contrib_prepare_workspace`.",
-        "- `contrib_verify_green` MUST run after the patch draft; it binds GREEN to RED and advances the evidence gate.",
-        "- `contrib_collect_evidence` is diagnostic-only and deprecated for the canonical path. It cannot satisfy governance or advance the run in place of `contrib_capture_red` and `contrib_verify_green`.",
+        "- `contrib_verify_green` binds GREEN to RED and advances the evidence gate.",
         "- Approval is an artifact-level gate. Request approval through OpenContrib, then submit only through `contrib_submit_pr` and the trusted `SubmissionPort`.",
+        "- DO NOT call GitHub create_pull_request directly.",
         "- DO NOT call GitHub MCP or GitHub API create/update-pull-request operations directly. They bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.",
-        "- Call `contrib_sync_flywheel` only after a verified submission and completion artifact exist.",
+        "- Call `contrib_sync_flywheel` only after a verified submission; it creates the completion artifact as the final canonical step.",
       ].join("\n");
 
       return {

@@ -1,3 +1,6 @@
+export const MAX_STRESS_ROUNDS = 100;
+export const MAX_WORKERS_PER_ROUND = 32;
+
 export interface ConcurrentRoundsResult<T> {
   results: T[];
   roundsRequested: number;
@@ -11,10 +14,12 @@ export interface ConcurrentRoundsResult<T> {
 function normalizePositiveInteger(
   value: number | undefined,
   fallback: number,
+  maximum: number,
 ): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? Math.floor(value)
-    : fallback;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.min(maximum, Math.max(1, Math.floor(value)));
 }
 
 /**
@@ -28,9 +33,18 @@ export async function runConcurrentRounds<T>(input: {
   workersPerRound: number | undefined;
   execute: () => Promise<T>;
   isSuccess: (result: T) => boolean;
+  onError?: (error: unknown) => T;
 }): Promise<ConcurrentRoundsResult<T>> {
-  const roundsRequested = normalizePositiveInteger(input.rounds, 1);
-  const workersPerRound = normalizePositiveInteger(input.workersPerRound, 1);
+  const roundsRequested = normalizePositiveInteger(
+    input.rounds,
+    1,
+    MAX_STRESS_ROUNDS,
+  );
+  const workersPerRound = normalizePositiveInteger(
+    input.workersPerRound,
+    1,
+    MAX_WORKERS_PER_ROUND,
+  );
   const results: T[] = [];
   const executionsExpected = roundsRequested * workersPerRound;
   let roundsCompleted = 0;
@@ -56,7 +70,12 @@ export async function runConcurrentRounds<T>(input: {
     });
     const workers = Array.from({ length: workersPerRound }, async () => {
       await startBarrier;
-      return executeTracked();
+      try {
+        return await executeTracked();
+      } catch (error) {
+        if (!input.onError) throw error;
+        return input.onError(error);
+      }
     });
     releaseBarrier();
 

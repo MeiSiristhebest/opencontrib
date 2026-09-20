@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { runStressLoopAsync } from "../src/evidence/evidence-collector.js";
 import { runConcurrentRounds } from "../src/evidence/stress-runner.js";
+import { EvidenceReportSchema } from "../src/contracts/schemas.js";
 
 function pickCmd(win: string, posix: string): string {
   return process.platform === "win32" ? win : posix;
@@ -54,6 +55,57 @@ describe("runConcurrentRounds — rounds × workers contract", () => {
     expect(result.roundsCompleted).toBe(1);
     expect(result.executionsExpected).toBe(15);
   });
+
+  test("worker rejection is converted into a failed execution when requested", async () => {
+    const result = await runConcurrentRounds({
+      rounds: 2,
+      workersPerRound: 3,
+      execute: async () => {
+        throw new Error("sandbox unavailable");
+      },
+      isSuccess: (value) => value,
+      onError: () => false,
+    });
+
+    expect(result.executionCount).toBe(3);
+    expect(result.roundsCompleted).toBe(1);
+    expect(result.executionsExpected).toBe(6);
+    expect(result.results).toEqual([false, false, false]);
+  });
+
+  test("fractional and excessive dimensions are normalized safely", async () => {
+    const result = await runConcurrentRounds({
+      rounds: 0.5,
+      workersPerRound: 1000,
+      execute: async () => true,
+      isSuccess: (value) => value,
+    });
+
+    expect(result.roundsRequested).toBe(1);
+    expect(result.workersPerRound).toBe(32);
+    expect(result.executionCount).toBe(32);
+    expect(result.executionsExpected).toBe(32);
+  });
+
+  test("evidence schema rejects contradictory round metadata", () => {
+    const result = EvidenceReportSchema.safeParse({
+      baselineTestedAt: new Date().toISOString(),
+      baselineFlakyTests: [],
+      roundsRequested: 2,
+      roundsCompleted: 3,
+      workersPerRound: 3,
+      executionsExpected: 5,
+      stressLoopPassed: true,
+      executionCount: 5,
+      maxConcurrentObserved: 3,
+      handleLeakCheckPassed: "UNAVAILABLE",
+      passedUnitTestsCount: 1,
+      testCoverageStatus: "UNAVAILABLE",
+      changedCodeCoverageStatus: "UNAVAILABLE",
+    });
+
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("runStressLoopAsync — local backend parity", () => {
@@ -102,6 +154,5 @@ describe("runStressLoopAsync — local backend parity", () => {
 
     expect(result.executionCount).toBe(3);
     expect(result.maxConcurrentObserved).toBe(1);
-    expect(result.concurrencyStampedePassed).toBe(true);
   });
 });

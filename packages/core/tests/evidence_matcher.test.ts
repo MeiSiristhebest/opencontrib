@@ -73,6 +73,16 @@ describe("matchExpectedFailure — fail-closed regex assertion (P0-04)", () => {
     expect(r.matched).toBe(false);
   });
 
+  test("literal mode accepts patterns that are invalid regular expressions", () => {
+    expect(
+      matchExpectedFailure({
+        output: "[invalid(",
+        pattern: "[invalid(",
+        mode: "literal",
+      }).matched,
+    ).toBe(true);
+  });
+
   test("case-insensitive flag is applied by default", () => {
     const r = matchExpectedFailure({
       output: "ERROR: something broke",
@@ -93,6 +103,15 @@ describe("captureRedEvidence — propagates InvalidAssertionRegexError (P0-04)",
         testCommand: "echo FAIL",
         expectedAssertion: "[invalid(",
       }),
+    ).toThrow(/InvalidAssertionRegexError/);
+  });
+
+  test("rejects an invalid assertion even when the baseline is clean", () => {
+    const {
+      capturePreFixAssertion,
+    } = require("../src/evidence/evidence-collector.js");
+    expect(() =>
+      capturePreFixAssertion(process.cwd(), "echo ok", undefined, "[invalid("),
     ).toThrow(/InvalidAssertionRegexError/);
   });
 });

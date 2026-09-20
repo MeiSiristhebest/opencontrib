@@ -26,10 +26,16 @@ import type {
 import { defaultTestOutputParserRegistry } from "./parsers/registry.js";
 import { defaultVcsDeltaAdapter, type VcsDeltaPort } from "./vcs-delta.port.js";
 import type { TestCoverageAdapter } from "./coverage-adapter.js";
-import { matchExpectedFailure } from "./expected-failure-matcher.js";
+import {
+  matchExpectedFailure,
+  validateExpectedFailurePattern,
+} from "./expected-failure-matcher.js";
 import { runConcurrentRounds } from "./stress-runner.js";
 
-export { matchExpectedFailure } from "./expected-failure-matcher.js";
+export {
+  matchExpectedFailure,
+  validateExpectedFailurePattern,
+} from "./expected-failure-matcher.js";
 
 export interface EvidenceCollectionOptions {
   cwd: string;
@@ -216,6 +222,11 @@ export async function runStressLoopAsync(
       };
     },
     isSuccess: (result) => result.passed,
+    onError: (error) => ({
+      passed: false,
+      output: error instanceof Error ? error.message : String(error),
+      elapsed: 0,
+    }),
   });
 
   let completedRuns = 0;
@@ -339,6 +350,9 @@ export function capturePreFixAssertion(
   workspaceRoot?: string,
   expectedAssertion?: string,
 ) {
+  // Validate before executing so an invalid assertion cannot be hidden by a
+  // clean baseline that returns early without evaluating the matcher.
+  validateExpectedFailurePattern(expectedAssertion);
   const repro = verifyEmpiricalReproduction({
     cwd,
     testCommand,
