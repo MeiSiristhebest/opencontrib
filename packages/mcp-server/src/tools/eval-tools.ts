@@ -96,10 +96,11 @@ export function registerEvalTools(server: McpServer): void {
         };
       }
 
-      const { events, metrics } = parseTrajectoryFromJSONL(resolvedPath);
+      const { events, metrics, actions } = parseTrajectoryFromJSONL(resolvedPath);
       const { systemPrompt, userPrompt, trajectoryText } = buildJudgePrompt(
         events,
         metrics,
+        actions,
       );
 
       return {

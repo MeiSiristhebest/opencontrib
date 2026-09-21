@@ -81,7 +81,8 @@ export interface BenchmarkScenario {
   targetRepo: string;
   expectedDefectCwe?: string;
   maxAllowedSteps: number;
-  requiredPhaseSequence: string[];
+  /** Canonical MCP/CLI tool sequence expected for the scenario. */
+  requiredActionSequence: string[];
   /** True for built-in reference repos (e.g. 'mock/agent-memory-hub'); false for real evaluation targets. */
   isSynthetic?: boolean;
 }

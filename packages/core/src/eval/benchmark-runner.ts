@@ -2,7 +2,7 @@
  * Automated Benchmark Runner for Dual-Track Contribution Scenarios
  */
 
-import type { BenchmarkResult, BenchmarkScenario } from './types.js';
+import type { BenchmarkResult, BenchmarkScenario, ProtocolAction } from './types.js';
 
 export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
   {
@@ -13,14 +13,14 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
     targetRepo: 'mock/agent-memory-hub',
     expectedDefectCwe: 'CWE-918',
     maxAllowedSteps: 25,
-    requiredPhaseSequence: [
-      'PROBE_SCANNED',
-      'WORKSPACE_PREPARED',
-      'RED_REPRODUCED',
-      'GREEN_FIXED',
-      'EVIDENCE_COLLECTED',
-      'GOVERNANCE_AUDITED',
-      'PR_TEMPLATE_MERGED',
+    requiredActionSequence: [
+      'contrib_probe_run',
+      'contrib_prepare_workspace',
+      'contrib_capture_red',
+      'contrib_verify_green',
+      'contrib_audit_governance',
+      'contrib_render_pr_template',
+      'contrib_submit_pr',
     ],
   },
   {
@@ -31,52 +31,56 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
     targetRepo: 'mock/microservice-go',
     expectedDefectCwe: 'CWE-667',
     maxAllowedSteps: 25,
-    requiredPhaseSequence: [
-      'OPPORTUNITY_SCOUTED',
-      'CLAIM_QUALIFIED',
-      'CONTEXT_ASSEMBLED',
-      'WORKSPACE_PREPARED',
-      'RED_REPRODUCED',
-      'GREEN_FIXED',
-      'EVIDENCE_COLLECTED',
-      'GOVERNANCE_AUDITED',
-      'PR_OPENED',
+    requiredActionSequence: [
+      'contrib_scout',
+      'contrib_assemble_context',
+      'contrib_prepare_workspace',
+      'contrib_capture_red',
+      'contrib_verify_green',
+      'contrib_audit_governance',
+      'contrib_submit_pr',
     ],
   },
 ];
 
 export function executeBenchmarkScenario(
   scenario: BenchmarkScenario,
-  executedPhaseSequence: string[],
+  executedActions: ProtocolAction[],
   stepsCount: number,
-  durationMs: number
+  durationMs: number,
 ): BenchmarkResult {
   const errors: string[] = [];
 
-  // 1. Verify Phase Gating Sequence
+  // 1. Verify action gating sequence against observed protocol actions only.
   let currentIdx = 0;
-  for (const reqPhase of scenario.requiredPhaseSequence) {
-    const foundIdx = executedPhaseSequence.indexOf(reqPhase, currentIdx);
+  for (const reqAction of scenario.requiredActionSequence) {
+    const foundIdx = executedActions.findIndex(
+      (action, index) => index >= currentIdx && action.toolName === reqAction,
+    );
     if (foundIdx === -1) {
-      errors.push(`Missing required pipeline phase: ${reqPhase}`);
+      errors.push(`Missing required protocol action: ${reqAction}`);
     } else {
       currentIdx = foundIdx + 1;
     }
   }
 
-  // 2. Verify Step Economy
+  // 2. Verify step economy.
   if (stepsCount > scenario.maxAllowedSteps) {
-    errors.push(`Step count (${stepsCount}) exceeded maximum budget of ${scenario.maxAllowedSteps} steps.`);
+    errors.push(
+      `Step count (${stepsCount}) exceeded maximum budget of ${scenario.maxAllowedSteps} steps.`,
+    );
   }
 
-  const success = errors.length === 0;
+  const missingActionErrors = errors.filter((e) =>
+    e.startsWith('Missing required protocol action'),
+  );
 
   return {
     scenarioId: scenario.id,
-    success,
+    success: errors.length === 0,
     stepsTaken: stepsCount,
     durationMs,
-    phaseGatingVerified: errors.filter((e) => e.startsWith('Missing required')).length === 0,
+    phaseGatingVerified: missingActionErrors.length === 0,
     errors,
   };
 }

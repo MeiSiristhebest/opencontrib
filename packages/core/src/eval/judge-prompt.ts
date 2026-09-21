@@ -9,6 +9,7 @@
 
 import { z } from "zod";
 import type {
+  ProtocolAction,
   TrajectoryEvent,
   TrajectoryMetrics,
   JudgeDimensionScore,
@@ -112,13 +113,26 @@ export type JudgeRawOutput = z.infer<typeof JudgeOutputSchema>;
 export function compressTrajectory(
   events: TrajectoryEvent[],
   metrics: TrajectoryMetrics,
+  actions: ProtocolAction[] = [],
 ): string {
   const lines: string[] = [
     `=== AGENT EXECUTION TRAJECTORY ===`,
     `Steps: ${metrics.totalSteps} | Commands: ${metrics.totalCommandsRun} | view_file: ${metrics.viewFileCalls} | Max consecutive view_file: ${metrics.maxConsecutiveFileViews} | contrib_*: ${metrics.totalContribActions}`,
     ``,
-    `=== TOOL CALL SEQUENCE (chronological) ===`,
+    `=== PROTOCOL ACTIONS (chronological) ===`,
   ];
+
+  if (actions.length === 0) {
+    lines.push('(none observed)');
+    lines.push('');
+  }
+
+  for (const action of actions) {
+    const step = action.stepIndex ?? '?';
+    lines.push(`[Step ${step}] ${action.toolName} :: ${action.canonicalPhase}`);
+  }
+  lines.push('');
+  lines.push(`=== TOOL CALL SEQUENCE (chronological) ===`);
 
   for (const event of events) {
     if (!event.toolCalls?.length) continue;
@@ -171,11 +185,14 @@ export function compressTrajectory(
 export function buildJudgePrompt(
   events: TrajectoryEvent[],
   metrics: TrajectoryMetrics,
+  actions: ProtocolAction[] = [],
 ): { systemPrompt: string; userPrompt: string; trajectoryText: string } {
-  const trajectoryText = compressTrajectory(events, metrics);
+  const trajectoryText = compressTrajectory(events, metrics, actions);
 
   const userPrompt = [
     "Please evaluate the following AI agent execution trajectory using the G-Eval rubric provided in your system prompt.",
+    "",
+    "When comparing execution, rely on the protocol-action sequence below and treat it as the canonical ordering of observed MCP/CLI actions.",
     "",
     trajectoryText,
     "",
