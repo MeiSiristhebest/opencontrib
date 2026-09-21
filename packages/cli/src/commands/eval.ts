@@ -68,7 +68,7 @@ function readRunBundle(bundleDir: string): BenchmarkBundle {
       if (file === "manifest.json") continue;
       if (file.endsWith(".json")) {
         artifactTypes.push(file.replace(/\.json$/, ""));
-      } else if (file.endsWith(".diff")) {
+      } else if (file === "patch.diff") {
         // patch.diff is the canonical artifact for patch type
         artifactTypes.push("patch");
       }

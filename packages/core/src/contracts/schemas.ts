@@ -362,7 +362,7 @@ export type SubmissionIntentArtifact = z.infer<
  * maintainer LGTM before PR submission.
  */
 export const MaintainerGateEvidenceSchema = z.object({
-  actorAssociation: z.enum(["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR"]),
+  actorAssociation: z.enum(["OWNER", "MEMBER"]),
   providerEventId: z.string().min(1),
   providerVerified: z.literal(true),
   reviewState: z.literal("APPROVED"),

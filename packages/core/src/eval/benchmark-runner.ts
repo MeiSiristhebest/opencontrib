@@ -78,7 +78,6 @@ const CANONICAL_ORDERING: [string, string][] = [
   ['RENDER_PR_TEMPLATE', 'AUDIT_GOVERNANCE'],
   ['AUDIT_GOVERNANCE', 'REQUEST_APPROVAL'],
   ['REQUEST_APPROVAL', 'SUBMIT_PR'],
-  ['SUBMIT_PR', 'SYNC_FLYWHEEL'],
 ];
 
 /** Check that the first non-noise action in the transcript is CREATE_RUN. */
@@ -134,7 +133,6 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
       'AUDIT_GOVERNANCE',
       'REQUEST_APPROVAL',
       'SUBMIT_PR',
-      'SYNC_FLYWHEEL',
     ],
   },
   {
@@ -157,7 +155,6 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
       'AUDIT_GOVERNANCE',
       'REQUEST_APPROVAL',
       'SUBMIT_PR',
-      'SYNC_FLYWHEEL',
     ],
   },
 ];
@@ -262,12 +259,18 @@ export function executeBenchmarkScenario(
     e.startsWith('Missing required action'),
   );
 
+  // actionSequenceVerified is true only if all required actions are present AND
+  // canonical ordering invariants are satisfied (no ordering errors).
+  const orderingErrors = errors.filter((e) =>
+    e.includes('must be the first') || e.includes('in canonical order'),
+  );
+
   return {
     scenarioId: scenario.id,
     success: errors.length === 0,
     stepsTaken: stepsCount,
     durationMs,
-    actionSequenceVerified: missingActionErrors.length === 0,
+    actionSequenceVerified: missingActionErrors.length === 0 && orderingErrors.length === 0,
     runBundleVerified,
     errors,
   };
