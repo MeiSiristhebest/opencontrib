@@ -1,5 +1,10 @@
-export const MAX_STRESS_ROUNDS = 100;
-export const MAX_WORKERS_PER_ROUND = 32;
+import { validateStressDimensions } from "../contracts/stress.js";
+
+export {
+  MAX_STRESS_ROUNDS,
+  MAX_WORKERS_PER_ROUND,
+  validateStressDimensions,
+} from "../contracts/stress.js";
 
 export interface ConcurrentRoundsResult<T> {
   results: T[];
@@ -9,23 +14,6 @@ export interface ConcurrentRoundsResult<T> {
   executionsExpected: number;
   executionCount: number;
   maxConcurrentObserved: number;
-}
-
-function normalizePositiveInteger(
-  value: number | undefined,
-  fallback: number,
-  maximum: number,
-): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return fallback;
-  }
-  const normalized = Math.max(1, Math.floor(value));
-  if (normalized > maximum) {
-    throw new Error(
-      `INVALID_STRESS_DIMENSION: requested value ${value} exceeds maximum ${maximum}.`,
-    );
-  }
-  return normalized;
 }
 
 /**
@@ -41,16 +29,12 @@ export async function runConcurrentRounds<T>(input: {
   isSuccess: (result: T) => boolean;
   onError?: (error: unknown) => T;
 }): Promise<ConcurrentRoundsResult<T>> {
-  const roundsRequested = normalizePositiveInteger(
+  const dimensions = validateStressDimensions(
     input.rounds,
-    1,
-    MAX_STRESS_ROUNDS,
-  );
-  const workersPerRound = normalizePositiveInteger(
     input.workersPerRound,
-    1,
-    MAX_WORKERS_PER_ROUND,
   );
+  const roundsRequested = dimensions.rounds;
+  const workersPerRound = dimensions.workersPerRound;
   const results: T[] = [];
   const executionsExpected = roundsRequested * workersPerRound;
   let roundsCompleted = 0;

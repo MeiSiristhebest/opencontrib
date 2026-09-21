@@ -1,14 +1,26 @@
-import type { ProbeDescriptor, HostServices, PointerStub } from './contract.js';
-import type { SmartPointerStore } from './pointer-store.js';
-import { execWithSpawn, defaultBinaryProbe } from './process-runner.js';
+import type { ProbeDescriptor, HostServices, PointerStub } from "./contract.js";
+import type { SmartPointerStore } from "./pointer-store.js";
+import { execWithSpawn, defaultBinaryProbe } from "./process-runner.js";
 
 /** Credential-bearing env var keys stripped from probe subprocesses. */
 const CREDENTIAL_ENV_KEYS = new Set([
-  'GH_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'NPM_TOKEN', 'NPM_AUTH_TOKEN',
-  'AWS_SECRET_ACCESS_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SESSION_TOKEN',
-  'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID', 'GCP_SERVICE_ACCOUNT_KEY',
-  'GOOGLE_APPLICATION_CREDENTIALS', 'SLACK_TOKEN', 'DOCKER_TOKEN', 'DOCKER_PASSWORD',
-  'PRIVATE_KEY', 'SSH_AUTH_SOCK',
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GITLAB_TOKEN",
+  "NPM_TOKEN",
+  "NPM_AUTH_TOKEN",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SESSION_TOKEN",
+  "AZURE_CLIENT_SECRET",
+  "AZURE_TENANT_ID",
+  "GCP_SERVICE_ACCOUNT_KEY",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "SLACK_TOKEN",
+  "DOCKER_TOKEN",
+  "DOCKER_PASSWORD",
+  "PRIVATE_KEY",
+  "SSH_AUTH_SOCK",
 ]);
 
 function buildSanitizedEnv(): NodeJS.ProcessEnv {
@@ -40,17 +52,28 @@ export class ProbeScanScheduler {
     probesToRun: ProbeDescriptor[],
     store: SmartPointerStore,
   ): Promise<ScanSchedulerResult> {
-    const executed: Array<{ id: string; status: 'success' | 'error'; error?: string }> = [];
-    const beforeCount = store.list().length;
+    const executed: Array<{
+      id: string;
+      status: "success" | "error";
+      error?: string;
+    }> = [];
+    const beforeUris = new Set(store.list().map((pointer) => pointer.uri));
 
     const hostServices: HostServices = {
       workspacePath: targetPath,
       exec: async (cmd: string, opts = {}) => {
         const cwd = opts.cwd || targetPath;
-        return execWithSpawn(cmd, { cwd, timeout: opts.timeout, shell: false, env: SANITIZED_ENV });
+        return execWithSpawn(cmd, {
+          cwd,
+          timeout: opts.timeout,
+          shell: false,
+          env: SANITIZED_ENV,
+        });
       },
-      log: (msg, level = 'info') => {
-        console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](msg);
+      log: (msg, level = "info") => {
+        console[
+          level === "error" ? "error" : level === "warn" ? "warn" : "log"
+        ](msg);
       },
       isBinaryAvailable: (bin: string) => defaultBinaryProbe.isAvailable(bin),
     };
@@ -58,15 +81,20 @@ export class ProbeScanScheduler {
     for (const probe of probesToRun) {
       try {
         await probe.scan(targetPath, store, hostServices);
-        executed.push({ id: probe.id, status: 'success' });
+        executed.push({ id: probe.id, status: "success" });
       } catch (err: any) {
-        console.error(`[ProbeScanScheduler] Probe "${probe.id}" scan error:`, err.message);
-        executed.push({ id: probe.id, status: 'error', error: err.message });
+        console.error(
+          `[ProbeScanScheduler] Probe "${probe.id}" scan error:`,
+          err.message,
+        );
+        executed.push({ id: probe.id, status: "error", error: err.message });
       }
     }
 
     const allPointers = store.list();
-    const newPointers = allPointers.slice(beforeCount);
+    const newPointers = allPointers.filter(
+      (pointer) => !beforeUris.has(pointer.uri),
+    );
 
     return {
       target: targetPath,

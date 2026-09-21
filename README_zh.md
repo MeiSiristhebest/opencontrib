@@ -1,4 +1,4 @@
-<!-- 
+<!--
   Designed & Built with ❤️ by MeiSiristhebest (https://github.com/MeiSiristhebest)
   If this repository helps your learning or engineering, please consider dropping a ⭐ Star!
 -->
@@ -153,11 +153,11 @@ opencontrib pointer resolve ptr://findings/ast-ts-unhandled-promise-catch-foo-10
 
 ## ⚙️ 环境依赖
 
-| 工具链 | 最低版本要求 | 用途说明 |
-| :--- | :--- | :--- |
-| **Bun** | `v1.2.0+` | 核心单测运行与快速构建 |
-| **Node.js** | `v22.0.0+` | CLI 与 MCP 运行时环境 |
-| **Git** | `v2.38.0+` | 支持 `git worktree` 沙盒隔离 |
+| 工具链      | 最低版本要求 | 用途说明                     |
+| :---------- | :----------- | :--------------------------- |
+| **Bun**     | `v1.2.0+`    | 核心单测运行与快速构建       |
+| **Node.js** | `v22.0.0+`   | CLI 与 MCP 运行时环境        |
+| **Git**     | `v2.38.0+`   | 支持 `git worktree` 沙盒隔离 |
 
 ---
 
@@ -181,39 +181,44 @@ npx -y @opencontrib/cli doctor
 
 ## 🚀 5 分钟端到端快速上手
 
-### 第 1 步：主动探针扫描与 Top-K 收敛（Track A 主动模式）
+### 第 1 步：创建运行锚点
+
+```bash
+opencontrib run create --repo owner/repo --issue 0 --title "target defect"
+```
+
+### 第 2 步：主动探针扫描与 Top-K 收敛（Track A 主动模式）
 
 ```bash
 opencontrib probe run ./target-repo --pretty
 ```
 
-### 第 2 步：一键解引用目标缺陷黄金代码切片
+### 第 3 步：一键解引用目标缺陷黄金代码切片
 
 ```bash
 opencontrib pointer resolve ptr://findings/<pointer_id> --view slice
 ```
 
-### 第 3 步：建立 Clean-Room 隔离沙盒
+### 第 4 步：建立 Clean-Room 隔离沙盒
 
 ```bash
 opencontrib workspace prepare --repo owner/repo --issue 0 --run-id "$RUN_ID"
 # 获取返回的独立隔离 workspacePath
 ```
 
-### 第 4 步：编写失败用例 (RED) 并实施最小化修复 (GREEN)
+### 第 5 步：可选 PoC、捕获 RED 并实施最小化修复
 
-编写针对性复现测试并运行确认其**失败（RED）**；随后实施精简的符合项目风格的代码修复（严格 $\le 100$ 行），再次运行确认其**通过（GREEN）**。
+PoC 是可选步骤。必须先捕获权威 RED 基线，再实施精简的符合项目风格的代码修复（严格 $\le 100$ 行）；仅有通过测试不足以推进协议。
 
-### 第 5 步：收集自适应实证与验证物证
+### 第 6 步：验证 GREEN 物证
 
 ```bash
-opencontrib evidence \
-  --cwd "$WORKSPACE_PATH" \
-  --test-cmd "bun test src/specific.test.ts" \
-  --run-id "$RUN_ID"
+opencontrib evidence capture-red --cwd "$WORKSPACE_PATH" --test-cmd "bun test src/specific.test.ts" --assertion "<failure-marker>" --run-id "$RUN_ID"
+# 应用修复
+opencontrib evidence verify-green --cwd "$WORKSPACE_PATH" --test-cmd "bun test src/specific.test.ts" --run-id "$RUN_ID"
 ```
 
-### 第 6 步：治理审计与提交 PR
+### 第 7 步：治理审计与提交
 
 ```bash
 # 验证 RFC-100 行限制、反 AI 行话与 7 维质量得分 >= 90
@@ -234,7 +239,8 @@ opencontrib governance pr-template \
   --issue-title "Unhandled nil pointer in parser" \
   --summary "Add defensive boundary check to prevent parser panic" \
   | jq -r '.prBody' > pr-body.md
-gh pr create --repo owner/repo --title "fix: resolve unhandled nil pointer in parser" --body-file pr-body.md --draft
+opencontrib governance request-approval --run-id "$RUN_ID"
+opencontrib submission submit --run-id "$RUN_ID"
 ```
 
 ---
@@ -243,46 +249,46 @@ gh pr create --repo owner/repo --title "fix: resolve unhandled nil pointer in pa
 
 涵盖 16 大功能域的工业级命令集：
 
-| 领域 | 核心子命令 | 功能说明 |
-| :--- | :--- | :--- |
-| **Probe（探针）** | `probe run [target]` | Top-K 聚合多探针扫描（支持 `--limit`, `--min-confidence`） |
-| | `probe plan [target]` | 提取仓库指纹并协商探针执行规划 |
-| | `probe hotspot [target]` | 运行 Code as a Crime Scene 代码犯罪现场热点分析 |
-| | `probe fuzz [target]` | 自动生成针对特定缺陷类别的属性模糊测试脚手架 |
-| **Pointer（智能指针）** | `pointer resolve <uri>` | 3 级渐进式切片解引用（`--view stub&#124;slice&#124;evidence`） |
-| | `pointer list [namespace]` | 列出当前会话存储的智能指针清单 |
-| **Capability（微内核）** | `capability list` | 列出微内核已注册的能力领域与 Provider |
-| | `capability plan [target]` | 运行能力评分引擎生成最佳执行路由计划 |
-| **Evidence（物证）** | `evidence` | 并发抢占风暴混沌验证、延迟抖动与双阶段红绿断言物证收集 |
-| **Workspace（沙盒）** | `workspace prepare` | 创建 Clean-Room Git Worktree 物理隔离沙盒 |
-| | `workspace purge` | 安全销毁临时沙盒工作区与缓存 |
-| | `workspace list` | 列出当前活跃的沙盒工作区 |
-| **Governance（治理）** | `governance audit` | RFC-100 行限制审计、反 AI 噪音检测、7 维置信度评估 |
-| | `governance impact` | 360° 跨平台路径/换行符/姊妹模块风险检测 |
-| | `governance ci-diagnose` | GitHub Actions CI 原始日志根因诊断与失败用例提取 |
-| | `governance pr-template` | 合并贡献数据至目标仓库原生 PR 模板 |
-| | `governance claim` | 生成权威 Issue-First 认领声明与缺陷提案 |
-| | `governance lint-md` | Markdown 编码完整性与静态格式校验 |
-| **Discovery（发现）** | `scout <repo>` | 多源检索机会 Issue 与意图分析（顶级独立命令） |
-| | `discovery rank` | 多维机会概率信号加权排序 |
-| | `discovery qualify` | 防跟风抢占排他性认领资格判定 |
-| | `discovery feasibility` | 环境与工具链可行性评估 |
-| | `discovery context` | 跨文件上下文打包与最优阅读链提取 |
-| | `discovery manifests` | 诊断仓库依赖清单与 CI 配置缺陷 |
-| **Plugin（插件）** | `plugin list` / `status` | 列出已注册的 SAST 与 AST 扫描插件及其启停状态 |
-| | `plugin enable` / `disable` | 动态启用或禁用特定探针/工具 |
-| | `plugin install <id>` | 一键安装探针所需的宿主工具链与二进制依赖 |
-| | `plugin reset` / `info` | 重置插件状态或查看指定探针元数据 |
-| **Run（会话）** | `run create` / `get` / `list` | 在 `~/.opencontrib/runs/` 下创建、查看与列出会话 |
-| | `run resume <id>` | 恢复被中断的贡献流水线会话与推荐下一步 |
-| | `run save <id>` | 持久化阶段工件至审计会话 |
-| **Flywheel（飞轮）** | `flywheel sync` | 同步仓库贡献记忆账本与开发者技能飞轮 |
-| | `flywheel pr-track` | 追踪 PR 合入就绪度、CI Checks 与评审意见 |
-| **Eval（评测）** | `eval judge` / `parse-judgment` | G-Eval 轨迹压缩与 Agent 盲评判定解析 |
-| | `eval reflexion` / `benchmark` | 提取反思沉淀至记忆库，执行基准场景评测 |
-| **System（系统）** | `doctor` | 诊断本地环境、探针二进制可执行性与系统健康度 |
-| | `setup` | 自动配置 Claude Code、Cursor、Windsurf 的 MCP 契约 |
-| | `config` / `verify` | 查看工作区配置，执行双阶段经验物证校验 |
+| 领域                     | 核心子命令                      | 功能说明                                                       |
+| :----------------------- | :------------------------------ | :------------------------------------------------------------- |
+| **Probe（探针）**        | `probe run [target]`            | Top-K 聚合多探针扫描（支持 `--limit`, `--min-confidence`）     |
+|                          | `probe plan [target]`           | 提取仓库指纹并协商探针执行规划                                 |
+|                          | `probe hotspot [target]`        | 运行 Code as a Crime Scene 代码犯罪现场热点分析                |
+|                          | `probe fuzz [target]`           | 自动生成针对特定缺陷类别的属性模糊测试脚手架                   |
+| **Pointer（智能指针）**  | `pointer resolve <uri>`         | 3 级渐进式切片解引用（`--view stub&#124;slice&#124;evidence`） |
+|                          | `pointer list [namespace]`      | 列出当前会话存储的智能指针清单                                 |
+| **Capability（微内核）** | `capability list`               | 列出微内核已注册的能力领域与 Provider                          |
+|                          | `capability plan [target]`      | 运行能力评分引擎生成最佳执行路由计划                           |
+| **Evidence（物证）**     | `evidence`                      | 并发抢占风暴混沌验证、延迟抖动与双阶段红绿断言物证收集         |
+| **Workspace（沙盒）**    | `workspace prepare`             | 创建 Clean-Room Git Worktree 物理隔离沙盒                      |
+|                          | `workspace purge`               | 安全销毁临时沙盒工作区与缓存                                   |
+|                          | `workspace list`                | 列出当前活跃的沙盒工作区                                       |
+| **Governance（治理）**   | `governance audit`              | RFC-100 行限制审计、反 AI 噪音检测、7 维置信度评估             |
+|                          | `governance impact`             | 360° 跨平台路径/换行符/姊妹模块风险检测                        |
+|                          | `governance ci-diagnose`        | GitHub Actions CI 原始日志根因诊断与失败用例提取               |
+|                          | `governance pr-template`        | 合并贡献数据至目标仓库原生 PR 模板                             |
+|                          | `governance claim`              | 生成权威 Issue-First 认领声明与缺陷提案                        |
+|                          | `governance lint-md`            | Markdown 编码完整性与静态格式校验                              |
+| **Discovery（发现）**    | `scout <repo>`                  | 多源检索机会 Issue 与意图分析（顶级独立命令）                  |
+|                          | `discovery rank`                | 多维机会概率信号加权排序                                       |
+|                          | `discovery qualify`             | 防跟风抢占排他性认领资格判定                                   |
+|                          | `discovery feasibility`         | 环境与工具链可行性评估                                         |
+|                          | `discovery context`             | 跨文件上下文打包与最优阅读链提取                               |
+|                          | `discovery manifests`           | 诊断仓库依赖清单与 CI 配置缺陷                                 |
+| **Plugin（插件）**       | `plugin list` / `status`        | 列出已注册的 SAST 与 AST 扫描插件及其启停状态                  |
+|                          | `plugin enable` / `disable`     | 动态启用或禁用特定探针/工具                                    |
+|                          | `plugin install <id>`           | 一键安装探针所需的宿主工具链与二进制依赖                       |
+|                          | `plugin reset` / `info`         | 重置插件状态或查看指定探针元数据                               |
+| **Run（会话）**          | `run create` / `get` / `list`   | 在 `~/.opencontrib/runs/` 下创建、查看与列出会话               |
+|                          | `run resume <id>`               | 恢复被中断的贡献流水线会话与推荐下一步                         |
+|                          | `run save <id>`                 | 持久化阶段工件至审计会话                                       |
+| **Flywheel（飞轮）**     | `flywheel sync`                 | 同步仓库贡献记忆账本与开发者技能飞轮                           |
+|                          | `flywheel pr-track`             | 追踪 PR 合入就绪度、CI Checks 与评审意见                       |
+| **Eval（评测）**         | `eval judge` / `parse-judgment` | G-Eval 轨迹压缩与 Agent 盲评判定解析                           |
+|                          | `eval reflexion` / `benchmark`  | 提取反思沉淀至记忆库，执行基准场景评测                         |
+| **System（系统）**       | `doctor`                        | 诊断本地环境、探针二进制可执行性与系统健康度                   |
+|                          | `setup`                         | 自动配置 Claude Code、Cursor、Windsurf 的 MCP 契约             |
+|                          | `config` / `verify`             | 查看工作区配置，执行双阶段经验物证校验                         |
 
 ---
 
@@ -339,14 +345,24 @@ npx -y @opencontrib/cli setup
 }
 ```
 
-**MCP 能力清单**：35 个可组合领域工具（`contrib_scout`、`contrib_prepare_workspace`、`contrib_collect_evidence`、`contrib_audit_governance`、`contrib_run_pipeline` 等）、3 个资源（`opencontrib://doctor`、`opencontrib://memory`、`opencontrib://runs`）以及 1 个工作流指导 Prompt（`opencontrib_workflow_guide`）。
+**MCP 能力清单**：39 个可组合领域工具（`contrib_scout`、`contrib_prepare_workspace`、`contrib_capture_red`、`contrib_audit_governance`、`contrib_run_pipeline` 等）、3 个资源（`opencontrib://doctor`、`opencontrib://memory`、`opencontrib://runs`）以及 1 个工作流指导 Prompt（`opencontrib_workflow_guide`）。
 
 ---
+
+<!-- OPENCONTRIB:GENERATED protocol:start -->
+## OpenContrib 权威协议（自动生成）
+
+- **运行锚点（必须首先执行）**：`opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`；没有 runId 不得侦察、准备工作区或修改源码。
+- **工作区与证据**：`opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`；PoC（contrib_verify_poc）是可选复现步骤，不能替代 contrib_capture_red 的权威 RED。
+- **RED → PATCH → GREEN**：必须先执行 contrib_capture_red，再通过 contrib_save_artifact 保存补丁，最后执行 contrib_verify_green 验证 GREEN；没有 RED 不得进入 PATCH_DRAFTED。
+- **治理与提交**：先执行 contrib_render_pr_template 生成 PR 草稿，再执行 contrib_audit_governance，请求受信任审批（contrib_request_approval），最终只通过 contrib_submit_pr / SubmissionPort 提交。
+- 禁止使用原始 GitHub CLI、GitHub MCP 或 GitHub API 写入 Pull Request；它们会绕过 SubmissionIntent、ApprovalArtifact、SubmissionPermit 与提供方校验。
+<!-- OPENCONTRIB:GENERATED protocol:end -->
 
 ## 🛡️ 6 大绝对工程防线（零容忍红线）
 
 1. **CLI 优先与双通道就绪原则（CLI-First & Dual-Ingress）**：
-   在智能体协作流程中，优先推荐调用终端 CLI 命令（`opencontrib <command>`），以享受活跃会话继承与自驱状态机流转。同时 OpenContrib MCP 35 大工具集全面作为一等公民受支持，兼容 MCP 客户端。
+   在智能体协作流程中，优先推荐调用终端 CLI 命令（`opencontrib <command>`），以享受活跃会话继承与自驱状态机流转。同时 OpenContrib MCP 39 大工具集全面作为一等公民受支持，兼容 MCP 客户端。
 2. **防脱轨熔断机制（严禁超过 3 次盲目 view_file）**：
    杜绝连续盲读文件。定位代码必须通过 Smart Pointer 切片（`ptr://...`）或 `grep_search` 精准查找。
 3. **0-Day 漏洞 Issue-First 铁律（严禁裸提 PR）**：

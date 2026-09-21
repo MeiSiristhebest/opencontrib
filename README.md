@@ -1,4 +1,4 @@
-<!-- 
+<!--
   Designed & Built with ❤️ by MeiSiristhebest (https://github.com/MeiSiristhebest)
   If this repository helps your learning or engineering, please consider dropping a ⭐ Star!
 -->
@@ -153,11 +153,11 @@ When a defect is remediated in one module (e.g. `mongodb-adapter.ts`), the gover
 
 ## ⚙️ Requirements
 
-| Toolchain | Minimum Version | Note |
-| :--- | :--- | :--- |
-| **Bun** | `v1.2.0+` | Primary test & build runner |
-| **Node.js** | `v22.0.0+` | Runtime environment for CLI/MCP packages |
-| **Git** | `v2.38.0+` | Required for `git worktree` isolation |
+| Toolchain   | Minimum Version | Note                                     |
+| :---------- | :-------------- | :--------------------------------------- |
+| **Bun**     | `v1.2.0+`       | Primary test & build runner              |
+| **Node.js** | `v22.0.0+`      | Runtime environment for CLI/MCP packages |
+| **Git**     | `v2.38.0+`      | Required for `git worktree` isolation    |
 
 ---
 
@@ -181,39 +181,44 @@ npx -y @opencontrib/cli doctor
 
 ## 🚀 Quick Start (5-Minute End-to-End Walkthrough)
 
-### Step 1: Scan & Triage High-Value Defects (Proactive Track A)
+### Step 1: Create the run anchor
+
+```bash
+opencontrib run create --repo owner/repo --issue 0 --title "target defect"
+```
+
+### Step 2: Scan & Triage High-Value Defects (Proactive Track A)
 
 ```bash
 opencontrib probe run ./target-repo --pretty
 ```
 
-### Step 2: Dereference Top Smart Pointer Code Slice
+### Step 3: Dereference Top Smart Pointer Code Slice
 
 ```bash
 opencontrib pointer resolve ptr://findings/<pointer_id> --view slice
 ```
 
-### Step 3: Prepare Clean-Room Worktree Sandbox
+### Step 4: Prepare Clean-Room Worktree Sandbox
 
 ```bash
 opencontrib workspace prepare --repo owner/repo --issue 0 --run-id "$RUN_ID"
 # Captures isolated workspacePath
 ```
 
-### Step 4: Construct Red Reproduction Test & Apply Surgical Fix
+### Step 5: Construct Optional PoC, Capture RED, & Apply Surgical Fix
 
-Write targeted reproduction test, verify failure (RED), apply minimal idiomatic fix ($\le 100$ lines), and verify pass (GREEN).
+A PoC is optional. Capture the authoritative RED baseline before applying the minimal idiomatic fix ($\le 100$ lines); a passing test alone is not sufficient.
 
-### Step 5: Collect Empirical Verification Evidence
+### Step 6: Verify GREEN Evidence
 
 ```bash
-opencontrib evidence \
-  --cwd "$WORKSPACE_PATH" \
-  --test-cmd "bun test src/specific.test.ts" \
-  --run-id "$RUN_ID"
+opencontrib evidence capture-red --cwd "$WORKSPACE_PATH" --test-cmd "bun test src/specific.test.ts" --assertion "<failure-marker>" --run-id "$RUN_ID"
+# apply the fix
+opencontrib evidence verify-green --cwd "$WORKSPACE_PATH" --test-cmd "bun test src/specific.test.ts" --run-id "$RUN_ID"
 ```
 
-### Step 6: Governance Audit & PR Submission
+### Step 7: Governance Audit & Submission
 
 ```bash
 # Verify RFC-100 limit, anti-AI linting, and 7D quality score >= 90
@@ -234,7 +239,8 @@ opencontrib governance pr-template \
   --issue-title "Unhandled nil pointer in parser" \
   --summary "Add defensive boundary check to prevent parser panic" \
   | jq -r '.prBody' > pr-body.md
-gh pr create --repo owner/repo --title "fix: resolve unhandled nil pointer in parser" --body-file pr-body.md --draft
+opencontrib governance request-approval --run-id "$RUN_ID"
+opencontrib submission submit --run-id "$RUN_ID"
 ```
 
 ---
@@ -243,46 +249,46 @@ gh pr create --repo owner/repo --title "fix: resolve unhandled nil pointer in pa
 
 Industrial-grade command set spanning 16 core capability domains:
 
-| Domain | Command | Description |
-| :--- | :--- | :--- |
-| **Probe** | `probe run [target]` | Execute multi-probe SAST with Top-K triage |
-| | `probe plan [target]` | Extract repository fingerprint and probe negotiation plan |
-| | `probe hotspot [target]` | Run Code as a Crime Scene Git churn analysis |
-| | `probe fuzz [target]` | Generate property-based boundary fuzzing test harness |
-| **Pointer** | `pointer resolve <uri>` | 3-level progressive dereferencing (`--view stub&#124;slice&#124;evidence`) |
-| | `pointer list [namespace]` | List registered pointers in current session store |
-| **Capability** | `capability list` | List registered microkernel capability adapters & domains |
-| | `capability plan [target]` | Run capability scoring engine to derive optimal execution plan |
-| **Evidence** | `evidence` | Concurrency stampede chaos verification and dual-stage reproduction |
-| **Workspace** | `workspace prepare` | Create clean-room Git worktree sandbox |
-| | `workspace purge` | Safely destroy ephemeral sandbox directories & bare repo cache |
-| | `workspace list` | List all active and cached workspace sandboxes |
-| **Governance** | `governance audit` | 7-Dimensional quality rubric, RFC-100 diff, and anti-AI check |
-| | `governance impact` | 360° cross-platform filepath/CRLF/sister-module hazard detector |
-| | `governance ci-diagnose` | GitHub Actions CI raw log root cause diagnostics |
-| | `governance pr-template` | Merge contribution metadata into repository native PR template |
-| | `governance claim` | Generate authoritative Issue-First Claim statement or 0-day proposal |
-| | `governance lint-md` | Run static markdown encoding integrity and lint checks |
-| **Discovery** | `scout <repo>` | Multi-signal issue opportunity scouting (top-level command) |
-| | `discovery rank` | Multi-dimensional opportunity probability ranking |
-| | `discovery qualify` | Anti-bandwagoning claim qualification filter |
-| | `discovery feasibility` | Environment and toolchain feasibility assessment |
-| | `discovery context` | Assemble deterministic cross-file context bundles |
-| | `discovery manifests` | Diagnose repository package manifests and workflows |
-| **Plugin** | `plugin list` / `status` | List registered SAST and AST scanner plugins and active status |
-| | `plugin enable` / `disable` | Dynamically enable or disable specific probes/tools |
-| | `plugin install <id>` | Install toolchain and host binary dependencies |
-| | `plugin reset` / `info` | Reset plugin states to default or inspect specific probe metadata |
-| **Run** | `run create` / `get` / `list` | Create, retrieve, and list auditable runs under `~/.opencontrib/runs/` |
-| | `run resume <id>` | Resume interrupted contribution pipeline session |
-| | `run save <id>` | Persist stage artifact to auditable run session |
-| **Flywheel** | `flywheel sync` | Sync repository profile and contribution memory ledger |
-| | `flywheel pr-track` | Track PR merge readiness, CI checks, and review feedback |
-| **Eval** | `eval judge` / `parse-judgment` | G-Eval trajectory compression and agent blind judgment parser |
-| | `eval reflexion` / `benchmark` | Extract reflexion insights to memory and run benchmark suites |
-| **System** | `doctor` | Diagnose local toolchain, probe binaries, and environment health |
-| | `setup` | Auto-configure MCP servers across Claude Code, Cursor, Windsurf |
-| | `config` / `verify` | Inspect workspace config, execute dual-stage verification |
+| Domain         | Command                         | Description                                                                |
+| :------------- | :------------------------------ | :------------------------------------------------------------------------- |
+| **Probe**      | `probe run [target]`            | Execute multi-probe SAST with Top-K triage                                 |
+|                | `probe plan [target]`           | Extract repository fingerprint and probe negotiation plan                  |
+|                | `probe hotspot [target]`        | Run Code as a Crime Scene Git churn analysis                               |
+|                | `probe fuzz [target]`           | Generate property-based boundary fuzzing test harness                      |
+| **Pointer**    | `pointer resolve <uri>`         | 3-level progressive dereferencing (`--view stub&#124;slice&#124;evidence`) |
+|                | `pointer list [namespace]`      | List registered pointers in current session store                          |
+| **Capability** | `capability list`               | List registered microkernel capability adapters & domains                  |
+|                | `capability plan [target]`      | Run capability scoring engine to derive optimal execution plan             |
+| **Evidence**   | `evidence`                      | Concurrency stampede chaos verification and dual-stage reproduction        |
+| **Workspace**  | `workspace prepare`             | Create clean-room Git worktree sandbox                                     |
+|                | `workspace purge`               | Safely destroy ephemeral sandbox directories & bare repo cache             |
+|                | `workspace list`                | List all active and cached workspace sandboxes                             |
+| **Governance** | `governance audit`              | 7-Dimensional quality rubric, RFC-100 diff, and anti-AI check              |
+|                | `governance impact`             | 360° cross-platform filepath/CRLF/sister-module hazard detector            |
+|                | `governance ci-diagnose`        | GitHub Actions CI raw log root cause diagnostics                           |
+|                | `governance pr-template`        | Merge contribution metadata into repository native PR template             |
+|                | `governance claim`              | Generate authoritative Issue-First Claim statement or 0-day proposal       |
+|                | `governance lint-md`            | Run static markdown encoding integrity and lint checks                     |
+| **Discovery**  | `scout <repo>`                  | Multi-signal issue opportunity scouting (top-level command)                |
+|                | `discovery rank`                | Multi-dimensional opportunity probability ranking                          |
+|                | `discovery qualify`             | Anti-bandwagoning claim qualification filter                               |
+|                | `discovery feasibility`         | Environment and toolchain feasibility assessment                           |
+|                | `discovery context`             | Assemble deterministic cross-file context bundles                          |
+|                | `discovery manifests`           | Diagnose repository package manifests and workflows                        |
+| **Plugin**     | `plugin list` / `status`        | List registered SAST and AST scanner plugins and active status             |
+|                | `plugin enable` / `disable`     | Dynamically enable or disable specific probes/tools                        |
+|                | `plugin install <id>`           | Install toolchain and host binary dependencies                             |
+|                | `plugin reset` / `info`         | Reset plugin states to default or inspect specific probe metadata          |
+| **Run**        | `run create` / `get` / `list`   | Create, retrieve, and list auditable runs under `~/.opencontrib/runs/`     |
+|                | `run resume <id>`               | Resume interrupted contribution pipeline session                           |
+|                | `run save <id>`                 | Persist stage artifact to auditable run session                            |
+| **Flywheel**   | `flywheel sync`                 | Sync repository profile and contribution memory ledger                     |
+|                | `flywheel pr-track`             | Track PR merge readiness, CI checks, and review feedback                   |
+| **Eval**       | `eval judge` / `parse-judgment` | G-Eval trajectory compression and agent blind judgment parser              |
+|                | `eval reflexion` / `benchmark`  | Extract reflexion insights to memory and run benchmark suites              |
+| **System**     | `doctor`                        | Diagnose local toolchain, probe binaries, and environment health           |
+|                | `setup`                         | Auto-configure MCP servers across Claude Code, Cursor, Windsurf            |
+|                | `config` / `verify`             | Inspect workspace config, execute dual-stage verification                  |
 
 ---
 
@@ -339,14 +345,24 @@ Or add to client configuration:
 }
 ```
 
-**MCP Capabilities**: 35 Composable Tools across 9 domains (`contrib_scout`, `contrib_prepare_workspace`, `contrib_collect_evidence`, `contrib_audit_governance`, `contrib_run_pipeline`, etc.), 3 Resources (`opencontrib://doctor`, `opencontrib://memory`, `opencontrib://runs`), and 1 Prompt (`opencontrib_workflow_guide`).
+**MCP Capabilities**: 39 Composable Tools across 9 domains (`contrib_scout`, `contrib_prepare_workspace`, `contrib_capture_red`, `contrib_audit_governance`, `contrib_run_pipeline`, etc.), 3 Resources (`opencontrib://doctor`, `opencontrib://memory`, `opencontrib://runs`), and 1 Prompt (`opencontrib_workflow_guide`).
 
 ---
+
+<!-- OPENCONTRIB:GENERATED protocol:start -->
+## Canonical OpenContrib Protocol (generated)
+
+- **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
+- **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
+- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
+<!-- OPENCONTRIB:GENERATED protocol:end -->
 
 ## 🛡️ The 6 Absolute Engineering Invariants
 
 1. **CLI-First Execution Priority (Dual-Ingress Ready)**:
-   Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 35 composable tools of `@opencontrib/mcp` remain first-class supported for MCP-native agents.
+   Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 39 composable tools of `@opencontrib/mcp` remain first-class supported for MCP-native agents.
 2. **Anti-Drift Circuit Breaker (Max 3 `view_file` calls)**:
    Avoid blind sequential file reads (> 3 views). Pinpoint symbols strictly via Smart Pointer slices (`ptr://...`) or `grep_search`.
 3. **Mandatory Issue-First on 0-Days (No Blind PRs)**:

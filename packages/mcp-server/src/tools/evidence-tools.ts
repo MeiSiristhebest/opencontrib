@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as path from "path";
-import * as os from "os";
 import {
   capturePreFixAssertion,
   collectEvidence,
@@ -9,6 +8,10 @@ import {
   verifyDualStageReproduction,
   captureRedEvidence,
   EvidenceService,
+  resolveOpenContribPaths,
+  resolvePointerStoreLocation,
+  MAX_STRESS_ROUNDS,
+  MAX_WORKERS_PER_ROUND,
 } from "@opencontrib/core";
 
 export function registerEvidenceTools(
@@ -16,11 +19,11 @@ export function registerEvidenceTools(
   runManager: ContributionRunManager,
 ): void {
   // -------------------------------------------------------------
-  // Tool: contrib_collect_evidence (双阶段物证：Pre-Fix 失败断言 + Post-Fix 压测)
+  // Tool: contrib_collect_evidence (diagnostic compatibility only)
   // -------------------------------------------------------------
   server.tool(
     "contrib_collect_evidence",
-    "Execute dual-stage empirical verification (capturing pre-fix failing baseline assertion and post-fix stress loop pass)",
+    "Diagnostic-only evidence inspection; canonical runs must use contrib_capture_red followed by contrib_verify_green",
     {
       cwd: z
         .string()
@@ -54,6 +57,10 @@ export function registerEvidenceTools(
         ),
       stressLoopCount: z
         .number()
+        .finite()
+        .int()
+        .min(1)
+        .max(MAX_STRESS_ROUNDS)
         .optional()
         .default(1)
         .describe(
@@ -63,7 +70,7 @@ export function registerEvidenceTools(
         .string()
         .optional()
         .describe(
-          "Optional runId to automatically resolve workspaceRoot and save evidence.json artifact",
+          "Optional runId used only to resolve the diagnostic workspace; this deprecated tool never writes authoritative evidence.",
         ),
     },
     async (args) => {
@@ -123,12 +130,13 @@ export function registerEvidenceTools(
         }
       } else {
         // Validate cwd is within home directory
-        const home =
-          process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
-        if (
-          !resolvedCwd.startsWith(path.resolve(home) + path.sep) &&
-          resolvedCwd !== path.resolve(home)
-        ) {
+        const { baseDir, dataDir } = resolveOpenContribPaths();
+        const allowedRoots = [path.resolve(baseDir), path.resolve(dataDir)];
+        const isAllowed = allowedRoots.some(
+          (root) =>
+            resolvedCwd === root || resolvedCwd.startsWith(root + path.sep),
+        );
+        if (!isAllowed) {
           return {
             isError: true,
             content: [
@@ -146,11 +154,6 @@ export function registerEvidenceTools(
             ],
           };
         }
-      }
-
-      // Limit stress loop count
-      if (args.stressLoopCount > 100) {
-        args.stressLoopCount = 100;
       }
 
       let dualStageResult: any;
@@ -208,6 +211,13 @@ export function registerEvidenceTools(
             text: JSON.stringify(
               {
                 status: persistence.error ? "PARTIAL_SUCCESS" : "success",
+                deprecated: true,
+                mode: "diagnostic",
+                authoritative: false,
+                canonicalReplacements: [
+                  "contrib_capture_red",
+                  "contrib_verify_green",
+                ],
                 evidence: fullEvidenceReport,
                 persistence: args.runId ? persistence : undefined,
               },
@@ -324,14 +334,22 @@ export function registerEvidenceTools(
         .describe("Contribution run holding the captured RED artifact"),
       stressLoopCount: z
         .number()
+        .finite()
+        .int()
+        .min(1)
+        .max(MAX_STRESS_ROUNDS)
         .optional()
         .default(1)
-        .describe("Stress loop iterations"),
+        .describe("Stress loop iterations (integer 1..100)"),
       concurrencyWorkers: z
         .number()
+        .finite()
+        .int()
+        .min(1)
+        .max(MAX_WORKERS_PER_ROUND)
         .optional()
         .default(1)
-        .describe("Concurrent workers"),
+        .describe("Concurrent workers (integer 1..32)"),
       baselineCommitSha: z.string().optional().describe("Baseline commit SHA"),
       workspaceRoot: z.string().optional().describe("Root workspace directory"),
     },
@@ -416,19 +434,19 @@ export function registerEvidenceTools(
     },
     async (args) => {
       try {
-        const { AutonomousPoCVerifier, SmartPointerStore } = await import(
-          "@opencontrib/core"
-        );
+        const { AutonomousPoCVerifier, SmartPointerStore } =
+          await import("@opencontrib/core");
 
         // Validate repoPath against home directory boundary
         const resolvedRepoPath = path.resolve(args.repoPath);
-        const home =
-          process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
-        const allowedRoot = path.resolve(home);
-        if (
-          !resolvedRepoPath.startsWith(allowedRoot + path.sep) &&
-          resolvedRepoPath !== allowedRoot
-        ) {
+        const { baseDir, dataDir } = resolveOpenContribPaths();
+        const allowedRoots = [path.resolve(baseDir), path.resolve(dataDir)];
+        const isAllowed = allowedRoots.some(
+          (root) =>
+            resolvedRepoPath === root ||
+            resolvedRepoPath.startsWith(root + path.sep),
+        );
+        if (!isAllowed) {
           return {
             isError: true,
             content: [
@@ -447,9 +465,15 @@ export function registerEvidenceTools(
           };
         }
 
-        const store = new SmartPointerStore(
-          path.join(resolvedRepoPath, ".opencontrib", "pointers"),
-        );
+        const pointerDir = resolvePointerStoreLocation({
+          workspacePath: resolvedRepoPath,
+          cwd: resolvedRepoPath,
+          scope: resolvedRepoPath,
+        });
+        const store = new SmartPointerStore({
+          storageDir: pointerDir,
+          scope: resolvedRepoPath,
+        });
 
         let finding: any;
         try {
@@ -480,12 +504,7 @@ export function registerEvidenceTools(
 
         if (args.runId) {
           try {
-            runManager.saveArtifact(
-              args.runId,
-              "poc",
-              report as any,
-              "POC_GENERATED",
-            );
+            runManager.saveArtifact(args.runId, "poc", report as any);
           } catch (err: any) {
             console.warn(
               `[evidence-tools] Failed to auto-save poc artifact: ${err.message}`,

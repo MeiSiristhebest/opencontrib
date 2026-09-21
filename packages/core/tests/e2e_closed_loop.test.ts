@@ -163,17 +163,17 @@ export function resolveSafePath(baseDir: string, userPath: string): string {
     expect(scanResult.pointersCreated.length).toBeGreaterThan(0);
 
     const generatedPointer = scanResult.pointersCreated.find(
-      (p) => p.id === "sec-path-traversal-resolveSafePath",
+      (p) => p.legacyId === "sec-path-traversal-resolveSafePath",
     );
     expect(generatedPointer).toBeDefined();
-    expect(generatedPointer!.uri).toBe(
-      "ptr://findings/sec-path-traversal-resolveSafePath",
+    expect(generatedPointer!.uri).toMatch(
+      /^ptr:\/\/findings\/v2-[0-9a-f]{64}$/,
     );
     expect(generatedPointer!.affectedSymbol).toBe("resolveSafePath");
 
     // 6. Agent queries Level 1 Stub Metadata (~25 tokens)
     const level1Stub = host.pointers.resolve(
-      "ptr://findings/sec-path-traversal-resolveSafePath",
+      generatedPointer!.uri!,
       "stub",
     ) as PointerStub;
     expect(level1Stub.title).toContain("Path traversal");
@@ -183,7 +183,7 @@ export function resolveSafePath(baseDir: string, userPath: string): string {
 
     // 7. Agent resolves Level 2 Slice View (~150 tokens)
     const level2Slice = host.pointers.resolve(
-      "ptr://findings/sec-path-traversal-resolveSafePath",
+      generatedPointer!.uri!,
       "slice",
     ) as any;
     expect(level2Slice.slice.codeSnippet).toContain("path.join");
@@ -191,7 +191,7 @@ export function resolveSafePath(baseDir: string, userPath: string): string {
 
     // 8. Agent resolves Level 3 Deep Evidence & Executable Verification Steps
     const level3Evidence = host.pointers.resolve(
-      "ptr://findings/sec-path-traversal-resolveSafePath?view=evidence",
+      `${generatedPointer!.uri!}?view=evidence`,
     ) as any;
     expect(level3Evidence.evidence.verificationSteps.length).toBe(1);
     const step = level3Evidence.evidence.verificationSteps[0];

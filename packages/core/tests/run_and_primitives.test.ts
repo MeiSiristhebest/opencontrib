@@ -59,20 +59,16 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     });
 
     // 1. Save opportunity
-    manager.saveArtifact(
-      manifest.runId,
-      "opportunity",
-      { score: 92, signals: { skillMatch: 0.95 } },
-      "OPPORTUNITY_SCOUTED",
-    );
+    manager.saveArtifact(manifest.runId, "opportunity", {
+      score: 92,
+      signals: { skillMatch: 0.95 },
+    });
 
     // 2. Save context
-    manager.saveArtifact(
-      manifest.runId,
-      "context",
-      { repo: "cloudwego/kitex", primary: "go" },
-      "CONTEXT_ASSEMBLED",
-    );
+    manager.saveArtifact(manifest.runId, "context", {
+      repo: "cloudwego/kitex",
+      primary: "go",
+    });
 
     // 2.5 Save workspace sandbox
     saveCanonicalArtifact(
@@ -120,12 +116,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       ],
     });
     const patchSha256 = createHash("sha256").update(patchContent).digest("hex");
-    manager.saveArtifact(
-      manifest.runId,
-      "patch",
-      patchContent,
-      "PATCH_DRAFTED",
-    );
+    manager.saveArtifact(manifest.runId, "patch", patchContent);
 
     // 4. Save evidence (a verified RED→GREEN cycle is required to advance)
     const testIdentity = {
@@ -154,6 +145,23 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     };
     validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
     const evidenceReport = {
+      baselineTestedAt: "2026-07-01T00:00:00.000Z",
+      baselineFlakyTests: [],
+      stressLoopRuns: 1,
+      roundsRequested: 1,
+      roundsCompleted: 1,
+      workersPerRound: 1,
+      executionsExpected: 1,
+      stressLoopPassed: true,
+      executionCount: 1,
+      maxConcurrentObserved: 1,
+      concurrencyWorkers: 1,
+      concurrencyStampedePassed: true,
+      handleLeakCheckPassed: "PASS" as const,
+      passedUnitTestsCount: 1,
+      failedUnitTestsCount: 0,
+      testCoverageStatus: "UNAVAILABLE" as const,
+      changedCodeCoverageStatus: "UNAVAILABLE" as const,
       passed: true,
       stressLoopSuccessRate: 1.0,
       reproductionVerified: true,
@@ -179,6 +187,11 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
         treeChangedComparedToRed: true,
         treeHashMatchesRed: false,
         stressLoopPassed: true,
+        roundsRequested: 1,
+        roundsCompleted: 1,
+        workersPerRound: 1,
+        executionsExpected: 1,
+        executionCount: 1,
         allTestsPassing: true,
         appliedPatchSha256: patchSha256,
         validatedPatchArtifactSha256: validatedPatch.artifactSha256,
@@ -228,12 +241,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       issueNumber: 789,
     });
 
-    manager.saveArtifact(
-      manifest.runId,
-      "opportunity",
-      { score: 88 },
-      "OPPORTUNITY_SCOUTED",
-    );
+    manager.saveArtifact(manifest.runId, "opportunity", { score: 88 });
 
     // Crash simulation -> Agent B resumes
     const resumeInfo = manager.resumeRun(manifest.runId);

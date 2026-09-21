@@ -67,19 +67,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
    * Sensitive credential directories and files that must NEVER be readable by the sandbox.
    */
   getDeniedPaths(): string[] {
-    return [
-      join(this.home, ".ssh"),
-      join(this.home, ".aws"),
-      join(this.home, ".azure"),
-      join(this.home, ".config", "gh"),
-      join(this.home, ".config", "opencontrib"),
-      join(this.home, ".opencontrib"),
-      join(this.home, ".git-credentials"),
-      join(this.home, ".netrc"),
-      join(this.home, ".npmrc"),
-      join(this.home, ".pypirc"),
-      join(this.home, ".gnupg"),
-    ];
+    return sensitiveDeniedPaths(this.home);
   }
 
   /**

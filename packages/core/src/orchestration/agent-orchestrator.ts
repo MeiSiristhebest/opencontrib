@@ -2,7 +2,6 @@ import { buildProductionGitHubClient } from "../composition-root.js";
 import { RepoMemoryLedger } from "../memory/repo-memory.js";
 import { ProfileFlywheel } from "../flywheel/profile-sync.js";
 import { WorktreeManager } from "../workspace/worktree-manager.js";
-import { ContributionPrService } from "../github/contribution-pr-service.js";
 import { ContributionRunManager } from "../run/run-manager.js";
 import { LLMService } from "../llm/llm-service.js";
 import { ContextAssembler } from "../discovery/context-assembler.js";
@@ -122,10 +121,7 @@ export interface TelemetryRecord {
 
 export interface OrchestratorRunResult {
   status:
-    | "COMPLETED"
-    | "BLOCKED"
-    | "HUMAN_APPROVAL_REQUIRED"
-    | "DRY_RUN_COMPLETED";
+    "COMPLETED" | "BLOCKED" | "HUMAN_APPROVAL_REQUIRED" | "DRY_RUN_COMPLETED";
   stage: string;
   selectedOpportunity?: Opportunity;
   workspacePath?: string;
@@ -190,8 +186,10 @@ export class AgentOrchestrator {
     const flywheel = options.deps?.flywheel ?? new ProfileFlywheel();
     const worktreeManager =
       options.deps?.worktreeManager ?? new WorktreeManager();
-    const prService =
-      options.deps?.prService ?? new ContributionPrService(client);
+    // Provider-writing services are host-only.  Agent-facing orchestration
+    // reaches the provider exclusively through SubmissionPort; keep the
+    // optional legacy dependency only for trusted/test composition roots.
+    const prService = options.deps?.prService;
     const contextAssembler =
       options.deps?.contextAssembler ?? new ContextAssembler(memory);
     const stateMachine =

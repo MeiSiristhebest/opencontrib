@@ -8,6 +8,8 @@ import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import {
   ApprovalArtifactSchema,
+  CommunityGateSnapshotSchema,
+  GovernanceDecisionArtifactSchema,
   SubmissionArtifactSchema,
   SubmissionIntentArtifactSchema,
   type SubmissionArtifact,
@@ -15,6 +17,10 @@ import {
 } from "../contracts/schemas.js";
 import { ApprovalService } from "../governance/approval-service.js";
 import type { ApprovalArtifactVerifier } from "../governance/approval-authority.js";
+import {
+  communityPolicyRequiresExplicitApproval,
+  hashCommunityGateSnapshot,
+} from "../governance/community-gate.js";
 
 export class SubmissionVerificationError extends Error {
   constructor(message: string) {
@@ -55,6 +61,7 @@ export interface SubmissionPermit {
   evidenceSha256: string;
   governanceSha256: string;
   policySha256: string;
+  communityGateSha256: string;
   prBodySha256: string;
   approvalMode: "explicit_human" | "policy_waived";
 }
@@ -98,9 +105,13 @@ export class GitHubSubmissionService {
         `Contribution run ${runId} does not exist`,
       );
     }
-    if (run.manifest.currentPhase !== "GOVERNANCE_AUDITED") {
+    if (
+      run.manifest.currentPhase !== "GOVERNANCE_AUDITED" &&
+      run.manifest.currentPhase !== "PR_SUBMITTED" &&
+      run.manifest.currentPhase !== "COMPLETED"
+    ) {
       throw new SubmissionVerificationError(
-        `Cannot authorize submission: run is in phase "${run.manifest.currentPhase}", expected "GOVERNANCE_AUDITED".`,
+        `Cannot authorize submission: run is in phase "${run.manifest.currentPhase}", expected "GOVERNANCE_AUDITED" or an already-submitted terminal phase.`,
       );
     }
 
@@ -122,9 +133,56 @@ export class GitHubSubmissionService {
     }
     const intent = intentResult.data;
     const approval = approvalResult.data;
+    const governanceResult = GovernanceDecisionArtifactSchema.safeParse(
+      run.artifacts.governance,
+    );
+    const workspace = run.artifacts.workspace as
+      | {
+          baseCommitSha?: unknown;
+          communityGate?: unknown;
+          communityGateSha256?: unknown;
+        }
+      | undefined;
+    const workspaceGate = CommunityGateSnapshotSchema.safeParse(
+      workspace?.communityGate,
+    );
+    if (
+      !governanceResult.success ||
+      !workspaceGate.success ||
+      typeof workspace?.communityGateSha256 !== "string" ||
+      hashCommunityGateSnapshot(workspaceGate.data) !==
+        workspace.communityGateSha256 ||
+      typeof workspace?.baseCommitSha !== "string" ||
+      workspaceGate.data.sourceCommitSha !== workspace.baseCommitSha ||
+      governanceResult.data.communityGateSha256 !==
+        workspace.communityGateSha256 ||
+      JSON.stringify(governanceResult.data.communityGate) !==
+        JSON.stringify(workspaceGate.data)
+    ) {
+      throw new SubmissionVerificationError(
+        "Cannot authorize submission: community policy snapshot is missing, mutated, or not pinned to the canonical workspace base commit.",
+      );
+    }
+    if (
+      communityPolicyRequiresExplicitApproval(
+        governanceResult.data.communityGate.policy,
+      ) &&
+      approval.approvalMode !== "explicit_human"
+    ) {
+      throw new SubmissionVerificationError(
+        "Cannot authorize submission: detected community policy requires explicit human approval; policy waiver is not accepted.",
+      );
+    }
     if (intent.policySha256 !== approval.policySha256) {
       throw new SubmissionVerificationError(
         "Cannot authorize submission: approved policy hash does not match the canonical submission intent.",
+      );
+    }
+    if (
+      approval.communityGateSha256 !== governanceResult.data.communityGateSha256
+    ) {
+      throw new SubmissionVerificationError(
+        "Cannot authorize submission: approval is not directly bound to the canonical community policy snapshot.",
       );
     }
 
@@ -207,6 +265,37 @@ export class GitHubSubmissionService {
         }
       }
     }
+    const currentRun = this.runManager.getRun(options.runId);
+    if (
+      currentRun &&
+      (currentRun.manifest.currentPhase === "PR_SUBMITTED" ||
+        currentRun.manifest.currentPhase === "COMPLETED")
+    ) {
+      const existing = SubmissionArtifactSchema.safeParse(
+        currentRun.artifacts.submission,
+      );
+      if (
+        !existing.success ||
+        existing.data.intentSha256 !== permit.intentSha256 ||
+        existing.data.runId !== options.runId
+      ) {
+        throw new SubmissionVerificationError(
+          "SubmissionRetryIntegrityError: terminal run phase lacks a matching verified SubmissionArtifact.",
+        );
+      }
+      return {
+        submissionResult: {
+          prNumber: existing.data.prNumber,
+          prUrl: existing.data.prUrl,
+          branchUrl: `https://github.com/${existing.data.owner}/${existing.data.repo}/tree/${existing.data.branchName}`,
+          isDraft: permit.isDraft,
+          commitSha: existing.data.headSha,
+          status: "SUCCESS" as const,
+        },
+        submissionArtifact: existing.data,
+      };
+    }
+
     const effectiveOptions = this.optionsFromPermit(permit);
     const octokit = (this.client as any).octokit;
 
@@ -252,6 +341,18 @@ export class GitHubSubmissionService {
     } catch (err: any) {
       throw new SubmissionVerificationError(
         `Provider submission failed: ${err.message}`,
+      );
+    }
+
+    if (
+      !result ||
+      !Number.isInteger(result.prNumber) ||
+      result.prNumber <= 0 ||
+      !/^https:\/\/github\.com\//i.test(result.prUrl) ||
+      !result.commitSha
+    ) {
+      throw new SubmissionVerificationError(
+        "Provider returned an invalid submission result; refusing to persist lifecycle state.",
       );
     }
 
@@ -315,6 +416,7 @@ export class GitHubSubmissionService {
       evidenceSha256: permit.evidenceSha256,
       governanceSha256: permit.governanceSha256,
       policySha256: permit.policySha256,
+      communityGateSha256: permit.communityGateSha256,
       prNumber: result.prNumber,
       prUrl: result.prUrl,
       headSha,
@@ -355,6 +457,7 @@ export class GitHubSubmissionService {
       evidenceSha256: approval.evidenceSha256,
       governanceSha256: approval.governanceSha256,
       policySha256: approval.policySha256,
+      communityGateSha256: approval.communityGateSha256,
       prBodySha256: approval.prBodySha256,
       approvalMode: approval.approvalMode,
     };

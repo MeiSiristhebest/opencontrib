@@ -2,10 +2,7 @@ import { CliExitError } from "../utils/exit.js";
 /** `opencontrib plugin` — Manage microkernel plugins, probe extensions, and SAST adapters. */
 
 import { Command } from "commander";
-import {
-  createDefaultPluginHost,
-  defaultPluginManager,
-} from "@opencontrib/core";
+import { createDefaultPluginHost, PluginManager } from "@opencontrib/core";
 import {
   TOOL_REGISTRY,
   PROBE_TOOLS_MAP,
@@ -13,6 +10,8 @@ import {
   isBinaryOnPath,
 } from "@opencontrib/core";
 import { printJSON, printTable } from "../utils/output.js";
+
+const getPluginManager = (): PluginManager => new PluginManager();
 
 export const pluginCommand = new Command("plugin").description(
   "Manage OpenContrib microkernel plugins, probe extensions, and SAST adapters",
@@ -25,7 +24,7 @@ pluginCommand
   .action(async (opts) => {
     try {
       const host = await createDefaultPluginHost();
-      const pm = defaultPluginManager;
+      const pm = getPluginManager();
       const probes = host.listAll();
 
       const rows = probes.map((p) => {
@@ -56,7 +55,7 @@ pluginCommand
   .option("--pretty", "Pretty-print output as an ASCII table", false)
   .action(async (opts) => {
     try {
-      const pm = defaultPluginManager;
+      const pm = getPluginManager();
       const states = pm.getAllStates();
 
       const rows = TOOL_REGISTRY.map((tool) => {
@@ -103,7 +102,7 @@ pluginCommand
   .option("--pretty", "Pretty-print output", false)
   .action(async (toolId, opts) => {
     try {
-      const pm = defaultPluginManager;
+      const pm = getPluginManager();
       pm.enable(toolId);
       if (opts.pretty) {
         console.log(`  ✅ ${toolId} enabled`);
@@ -122,7 +121,7 @@ pluginCommand
   .option("--pretty", "Pretty-print output", false)
   .action(async (toolId, reason, opts) => {
     try {
-      const pm = defaultPluginManager;
+      const pm = getPluginManager();
       const r = reason || "user-disabled";
       pm.disable(toolId, r);
       if (opts.pretty) {
@@ -203,7 +202,7 @@ pluginCommand
   .option("--pretty", "Pretty-print output", false)
   .action(async (opts) => {
     try {
-      const pm = defaultPluginManager;
+      const pm = getPluginManager();
       pm.reset();
       if (opts.pretty) {
         console.log("  🔄 All plugins reset to default (enabled)");
@@ -271,7 +270,7 @@ pluginCommand
   .action(async (opts) => {
     try {
       const host = await createDefaultPluginHost();
-      const pm = defaultPluginManager;
+      const pm = getPluginManager();
       const probes = host.listAll();
 
       const diagnostics = probes.map((p) => {

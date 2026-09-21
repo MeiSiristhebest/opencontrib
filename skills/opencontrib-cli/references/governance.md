@@ -134,7 +134,7 @@ Please assign this issue to me, I will submit a PR shortly.
 
 - `governance audit` reads the patch diff as a file or inline string (`--patch diff.patch` or `--patch "$(cat diff.patch)"`).
 - `governance ci-diagnose` is designed for large raw logs — always pipe or use `--log-file` rather than inline content.
-- `governance pr-template` output is Markdown — pipe directly into a file for use with `gh pr create --body-file`:
+- `governance pr-template` output is Markdown — save it as the canonical `pr_draft`, then request trusted approval and submit through OpenContrib:
 
 ```bash
 opencontrib governance pr-template \
@@ -142,5 +142,16 @@ opencontrib governance pr-template \
   --issue-title "Fix null pointer in parser" \
   --summary "Add defensive boundary check to prevent parser panic" \
   | jq -r '.prBody' > pr-body.md
-gh pr create --body-file pr-body.md
+opencontrib governance request-approval --run-id "$RUN_ID"
+opencontrib submission submit --run-id "$RUN_ID"
 ```
+
+<!-- OPENCONTRIB:GENERATED protocol:start -->
+## Canonical OpenContrib Protocol (generated)
+
+- **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
+- **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
+- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
+<!-- OPENCONTRIB:GENERATED protocol:end -->

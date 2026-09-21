@@ -14,7 +14,7 @@ graph TD
 
     subgraph "OpenContrib 接入层"
         CLI[OpenContrib CLI - 16 大工业级命令域]
-        MCP[MCP 服务端 - 35 个 JSON-RPC 协议工具]
+        MCP[MCP 服务端 - 39 个 JSON-RPC 协议工具]
     end
 
     subgraph "确定性领域引擎核心"

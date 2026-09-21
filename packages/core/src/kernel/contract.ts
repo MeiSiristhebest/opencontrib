@@ -3,31 +3,34 @@
  * Unified capability hierarchy, runtime-enforced scoped permissions, typed KernelEventMap, and runtime verification steps.
  */
 
-import type { PluginHost } from './plugin-host.js';
+import type { PluginHost } from "./plugin-host.js";
 
 export type DefectCategory =
-  | 'protocol_drift'
-  | 'lifecycle_leak'
-  | 'distributed_cache'
-  | 'memory_abi'
-  | 'performance_backpressure'
-  | 'time_monotonicity'
-  | 'escape_analysis'
-  | 'numerical_bounds'
-  | 'security_cwe'
-  | 'ci_workflow'
-  | 'dead_code';
+  | "protocol_drift"
+  | "lifecycle_leak"
+  | "distributed_cache"
+  | "memory_abi"
+  | "performance_backpressure"
+  | "time_monotonicity"
+  | "escape_analysis"
+  | "numerical_bounds"
+  | "security_cwe"
+  | "ci_workflow"
+  | "dead_code";
 
-export type FindingSeverity = 'low' | 'medium' | 'high' | 'critical';
-export type PointerView = 'stub' | 'slice' | 'evidence' | 'all';
+export type FindingSeverity = "low" | "medium" | "high" | "critical";
+export type PointerView = "stub" | "slice" | "evidence" | "all";
 
 /**
  * Level 1: Minimal Metadata Stub (~25-30 tokens)
  * Structured symbols, call sites, and data flows (No heuristic title-guessing)
  */
 export interface PointerStub {
+  /** Content-addressed v2 identifier. */
   id: string;
-  uri?: string; // e.g. "ptr://findings/sec-path-traversal-42"
+  /** Original producer identifier retained for migration/display. */
+  legacyId?: string;
+  uri?: string; // e.g. "ptr://findings/v2-<sha256>"
   namespace?: string;
   title: string;
   category: DefectCategory;
@@ -64,7 +67,9 @@ export interface VerificationStep {
   expectedFailureAssertion: string;
   expectedPostFixAssertion: string;
   evaluator?: {
-    runExploit: (context?: unknown) => Promise<{ output: string; error?: Error }>;
+    runExploit: (
+      context?: unknown,
+    ) => Promise<{ output: string; error?: Error }>;
     isFailureConfirmed: (result: { output: string; error?: Error }) => boolean;
     isFixConfirmed: (result: { output: string; error?: Error }) => boolean;
   };
@@ -89,6 +94,12 @@ export interface SmartPointer {
   uri: string;
   namespace: string; // e.g. "findings", "poc", "hotspots", "rules"
   id: string;
+  /** Original producer identifier; never used as the storage identity. */
+  legacyId?: string;
+  /** Stable repository/workspace scope used in the content hash. */
+  scope?: string;
+  /** URI accepted during migration from pre-v2 pointer stores. */
+  legacyUri?: string;
   createdAt: string;
   stub: PointerStub;
   slice?: PointerSlice;
@@ -98,7 +109,11 @@ export interface SmartPointer {
 export interface RepoFingerprint {
   repoPath: string;
   primaryLanguage: string;
-  languages: Array<{ language: string; percentage: number; filesCount: number }>;
+  languages: Array<{
+    language: string;
+    percentage: number;
+    filesCount: number;
+  }>;
   manifests: string[];
   frameworks: string[];
   hasTests: boolean;
@@ -110,6 +125,7 @@ export interface RepoFingerprint {
 
 export interface PointerCreateOptions {
   namespace?: string;
+  /** Raw producer identifier; it is retained as legacyId and hashed verbatim. */
   id: string;
   title: string;
   category: DefectCategory;
@@ -133,14 +149,21 @@ export interface ProbeDescriptor {
   category: DefectCategory;
   description: string;
   match: (fingerprint: RepoFingerprint) => boolean;
-  scan: (targetPath: string, pointers: PointerStoreApi, host: HostServices) => Promise<void>;
+  scan: (
+    targetPath: string,
+    pointers: PointerStoreApi,
+    host: HostServices,
+  ) => Promise<void>;
 }
 
 export interface KernelToolDescriptor {
   name: string;
   description: string;
   parametersSchema: Record<string, unknown>;
-  execute: (args: Record<string, unknown>, host: HostServices) => Promise<unknown>;
+  execute: (
+    args: Record<string, unknown>,
+    host: HostServices,
+  ) => Promise<unknown>;
 }
 
 export interface PointerStoreApi {
@@ -166,23 +189,28 @@ export interface ProbeRegistryApi {
 export type PluginHostContract = PluginHost;
 
 export type PluginPermission =
-  | 'fs:read'
-  | 'fs:write'
-  | 'exec:git'
-  | 'exec:binary'
-  | 'network:github';
+  "fs:read" | "fs:write" | "exec:git" | "exec:binary" | "network:github";
 
 export class PluginPermissionError extends Error {
-  constructor(public pluginName: string, public requestedPermission: PluginPermission, public action: string) {
-    super(`[Security Sandbox] Plugin "${pluginName}" denied permission "${requestedPermission}" for action: ${action}`);
-    this.name = 'PluginPermissionError';
+  constructor(
+    public pluginName: string,
+    public requestedPermission: PluginPermission,
+    public action: string,
+  ) {
+    super(
+      `[Security Sandbox] Plugin "${pluginName}" denied permission "${requestedPermission}" for action: ${action}`,
+    );
+    this.name = "PluginPermissionError";
   }
 }
 
 export interface HostServices {
   workspacePath: string;
-  exec(cmd: string, opts?: { cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string }>;
-  log(message: string, level?: 'info' | 'warn' | 'error' | 'debug'): void;
+  exec(
+    cmd: string,
+    opts?: { cwd?: string; timeout?: number },
+  ): Promise<{ stdout: string; stderr: string }>;
+  log(message: string, level?: "info" | "warn" | "error" | "debug"): void;
   isBinaryAvailable(bin: string): boolean;
 }
 
@@ -190,12 +218,22 @@ export interface HostServices {
  * Type-Safe Kernel Event Map
  */
 export interface KernelEventMap {
-  'plugin:activated': { name: string; version: string; probesCount: number; toolsCount: number };
-  'plugin:deactivated': { name: string };
-  'finding:created': { uri: string; id: string; category: DefectCategory; severity: FindingSeverity };
-  'repo:fingerprint': RepoFingerprint;
-  'scout:opportunity': { target: string };
-  'evidence:verify': { findingUri: string };
+  "plugin:activated": {
+    name: string;
+    version: string;
+    probesCount: number;
+    toolsCount: number;
+  };
+  "plugin:deactivated": { name: string };
+  "finding:created": {
+    uri: string;
+    id: string;
+    category: DefectCategory;
+    severity: FindingSeverity;
+  };
+  "repo:fingerprint": RepoFingerprint;
+  "scout:opportunity": { target: string };
+  "evidence:verify": { findingUri: string };
 }
 
 export interface KernelEvent<T = unknown> {
@@ -212,9 +250,20 @@ export interface EventBusApi {
     eventType: K,
     handler: (event: KernelEvent<KernelEventMap[K]>) => Promise<void> | void,
   ): void;
-  on<T = unknown>(eventType: string, handler: (event: KernelEvent<T>) => Promise<void> | void): void;
-  emit<K extends keyof KernelEventMap>(eventType: K, payload: KernelEventMap[K], source?: string): Promise<void>;
-  emit<T = unknown>(eventType: string, payload: T, source?: string): Promise<void>;
+  on<T = unknown>(
+    eventType: string,
+    handler: (event: KernelEvent<T>) => Promise<void> | void,
+  ): void;
+  emit<K extends keyof KernelEventMap>(
+    eventType: K,
+    payload: KernelEventMap[K],
+    source?: string,
+  ): Promise<void>;
+  emit<T = unknown>(
+    eventType: string,
+    payload: T,
+    source?: string,
+  ): Promise<void>;
 }
 
 export interface PluginContext {

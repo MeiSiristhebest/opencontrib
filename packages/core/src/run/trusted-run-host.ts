@@ -4,8 +4,12 @@ import { SubmissionIntentService } from "../submission/submission-intent-service
 import { EvidenceService } from "../evidence/evidence-service.js";
 import { WorktreeManager } from "../workspace/worktree-manager.js";
 import type { ContributionRunManager } from "./run-manager.js";
-import { hydrateCanonicalRun } from "./canonical-writer.js";
+import {
+  hydrateCanonicalRun,
+  markCanonicalRunFailed,
+} from "./canonical-writer.js";
 import type { TrustedExecutionPort } from "./trusted-execution.port.js";
+import { validateStressDimensions } from "../contracts/stress.js";
 import {
   RunTransferBundleSchema,
   transferManifestToRunManifest,
@@ -120,9 +124,13 @@ export class TrustedRunMaterializer {
     executionPolicy?: Partial<EvidenceExecutionPolicy>,
   ) {
     this.executionPort = executionPort ?? new DevelopmentUnsafeExecutionPort();
+    const dimensions = validateStressDimensions(
+      executionPolicy?.stressLoopCount ?? 3,
+      executionPolicy?.concurrencyWorkers ?? 2,
+    );
     this.executionPolicy = {
-      stressLoopCount: executionPolicy?.stressLoopCount ?? 3,
-      concurrencyWorkers: executionPolicy?.concurrencyWorkers ?? 2,
+      stressLoopCount: dimensions.rounds,
+      concurrencyWorkers: dimensions.workersPerRound,
     };
   }
 
@@ -156,136 +164,173 @@ export class TrustedRunMaterializer {
       transferManifestToRunManifest(bundle.manifest),
     );
 
-    const workspace = new (
-      await import("../workspace/workspace-service.js")
-    ).WorkspaceService(this.runManager, this.worktreeManager).prepare({
-      runId: bundle.manifest.runId,
-      issueOrTaskId: bundle.manifest.issueNumber ?? "transfer",
-      repoFullName: bundle.manifest.repoFullName,
-    });
+    let allocatedWorkspace:
+      import("../workspace/worktree-manager.js").WorkspaceContext | undefined;
+    try {
+      const workspaceResult = new (
+        await import("../workspace/workspace-service.js")
+      ).WorkspaceService(this.runManager, this.worktreeManager).prepare({
+        runId: bundle.manifest.runId,
+        issueOrTaskId: bundle.manifest.issueNumber ?? "transfer",
+        repoFullName: bundle.manifest.repoFullName,
+      });
+      allocatedWorkspace = workspaceResult.context;
+      const workspace = workspaceResult;
 
-    const patch = this.parsePatch(bundle.patch);
-    // Patch and PR draft are proposals. They are stored only so host-side
-    // Evidence/Governance services can verify and bind them.
-    this.runManager.saveArtifact(
-      bundle.manifest.runId,
-      "patch",
-      JSON.stringify(patch),
-    );
+      const patch = this.parsePatch(bundle.patch);
+      // Patch and PR draft are proposals. Store the patch only after the
+      // host has captured RED; PATCH_DRAFTED is derived from RED_CAPTURED.
 
-    // If a reproduction patch is supplied, apply it to the clean workspace BEFORE capturing RED
-    const reproAppliedPaths = new Set<string>();
-    if (bundle.reproductionPatch && bundle.reproductionPatch.length > 0) {
-      const reproApply = this.worktreeManager.applySurgicalFilesSafely(
-        workspace.context.workspacePath,
-        bundle.reproductionPatch.map((file) => ({
-          path: file.path,
-          operation: file.operation,
-          content: file.content,
-          mode: file.mode,
-        })),
+      // If a reproduction patch is supplied, apply it to the clean workspace BEFORE capturing RED
+      const reproAppliedPaths = new Set<string>();
+      if (bundle.reproductionPatch && bundle.reproductionPatch.length > 0) {
+        const reproApply = this.worktreeManager.applySurgicalFilesSafely(
+          workspace.context.workspacePath,
+          bundle.reproductionPatch.map((file) => ({
+            path: file.path,
+            operation: file.operation,
+            content: file.content,
+            mode: file.mode,
+          })),
+        );
+        if (reproApply.errors.length > 0) {
+          throw new TrustedRunMaterializationError(
+            `host rejected reproduction patch application: ${reproApply.errors.join("; ")}`,
+          );
+        }
+        for (const applied of reproApply.appliedFiles) {
+          reproAppliedPaths.add(applied.path);
+        }
+      }
+
+      const rawRed = await this.executionPort.captureRed({
+        runId: bundle.manifest.runId,
+        workspace: {
+          repoFullName: bundle.manifest.repoFullName,
+          baseCommitSha: workspace.artifact.baseCommitSha,
+          workspacePath: workspace.context.workspacePath,
+        },
+        testCommand: bundle.redRecipe.command,
+        expectedAssertion: bundle.redRecipe.expectedAssertion,
+        testFiles: bundle.redRecipe.testFiles,
+      });
+      const evidenceService = new EvidenceService(this.runManager);
+      const red = evidenceService.recordRedExecution(
+        bundle.manifest.runId,
+        rawRed,
+        {
+          testCommand: bundle.redRecipe.command,
+          expectedAssertion: bundle.redRecipe.expectedAssertion,
+          testFiles: bundle.redRecipe.testFiles,
+        },
       );
-      if (reproApply.errors.length > 0) {
+
+      this.runManager.saveArtifact(
+        bundle.manifest.runId,
+        "patch",
+        JSON.stringify(patch),
+      );
+
+      // Deduplicate: files already applied by the reproduction patch must not
+      // be applied a second time. Under strict CREATE semantics a second
+      // CREATE of an existing file is a patch-semantic violation.
+      const applied = this.worktreeManager.applySurgicalFilesSafely(
+        workspace.context.workspacePath,
+        patch.files
+          .filter((file) => !reproAppliedPaths.has(file.path))
+          .map((file) => ({
+            path: file.path,
+            operation: file.operation,
+            content: file.content,
+            mode: file.mode,
+          })),
+      );
+      if (applied.errors.length > 0) {
         throw new TrustedRunMaterializationError(
-          `host rejected reproduction patch application: ${reproApply.errors.join("; ")}`,
+          `host rejected patch application: ${applied.errors.join("; ")}`,
         );
       }
-      for (const applied of reproApply.appliedFiles) {
-        reproAppliedPaths.add(applied.path);
+
+      const rawGreen = await this.executionPort.verifyGreen({
+        runId: bundle.manifest.runId,
+        workspace: {
+          repoFullName: bundle.manifest.repoFullName,
+          baseCommitSha: workspace.artifact.baseCommitSha,
+          workspacePath: workspace.context.workspacePath,
+        },
+        testCommand: bundle.redRecipe.command,
+        redEvidence: red,
+        stressLoopCount: this.executionPolicy.stressLoopCount,
+        concurrencyWorkers: this.executionPolicy.concurrencyWorkers,
+      });
+      await evidenceService.recordGreenExecution(
+        bundle.manifest.runId,
+        rawGreen,
+      );
+
+      this.runManager.saveArtifact(
+        bundle.manifest.runId,
+        "pr_draft",
+        bundle.prDraft,
+      );
+      const title =
+        patch.title || bundle.manifest.issueTitle || "chore: contribution";
+      new GovernanceService(this.runManager).audit(bundle.manifest.runId, {
+        prTitle: title,
+        prBody: bundle.prDraft,
+      });
+
+      const [owner, repo] = bundle.manifest.repoFullName.split("/");
+      new SubmissionIntentService(this.runManager).createIntent({
+        runId: bundle.manifest.runId,
+        upstreamOwner: owner,
+        upstreamRepo: repo,
+        title,
+        body: bundle.prDraft,
+        baseBranch: workspace.artifact.baseBranch,
+        branchName: workspace.artifact.branchName,
+        commitMessage: title,
+        isDraft: true,
+      });
+
+      const result = this.runManager.getRun(bundle.manifest.runId);
+      if (!result || result.manifest.currentPhase !== "GOVERNANCE_AUDITED") {
+        throw new TrustedRunMaterializationError(
+          "host materialization did not produce a governance-ready canonical run.",
+        );
       }
-    }
-
-    const rawRed = await this.executionPort.captureRed({
-      runId: bundle.manifest.runId,
-      workspace: {
-        repoFullName: bundle.manifest.repoFullName,
-        baseCommitSha: workspace.artifact.baseCommitSha,
-        workspacePath: workspace.context.workspacePath,
-      },
-      testCommand: bundle.redRecipe.command,
-      expectedAssertion: bundle.redRecipe.expectedAssertion,
-      testFiles: bundle.redRecipe.testFiles,
-    });
-    const evidenceService = new EvidenceService(this.runManager);
-    const red = evidenceService.recordRedExecution(
-      bundle.manifest.runId,
-      rawRed,
-      bundle.redRecipe.expectedAssertion,
-    );
-
-    this.runManager.saveArtifact(
-      bundle.manifest.runId,
-      "patch",
-      JSON.stringify(patch),
-      "PATCH_DRAFTED",
-    );
-
-    // Deduplicate: files already applied by the reproduction patch must not
-    // be applied a second time. Under strict CREATE semantics a second
-    // CREATE of an existing file is a patch-semantic violation.
-    const applied = this.worktreeManager.applySurgicalFilesSafely(
-      workspace.context.workspacePath,
-      patch.files
-        .filter((file) => !reproAppliedPaths.has(file.path))
-        .map((file) => ({
-          path: file.path,
-          operation: file.operation,
-          content: file.content,
-          mode: file.mode,
-        })),
-    );
-    if (applied.errors.length > 0) {
+      return result;
+    } catch (error) {
+      // Cleanup is deliberately limited to the pre-provider materialization
+      // boundary.  No GitHub PR is deleted or guessed at here; once a provider
+      // side effect is possible, reconciliation must use the stored identity.
+      if (allocatedWorkspace?.workspacePath) {
+        try {
+          this.worktreeManager.cleanupWorkspace(
+            allocatedWorkspace.workspacePath,
+            allocatedWorkspace.baseRepoPath,
+          );
+        } catch {
+          // Preserve the original materialization error.
+        }
+      }
+      try {
+        markCanonicalRunFailed(
+          this.runManager,
+          bundle.manifest.runId,
+          error instanceof Error ? error.message : String(error),
+          true,
+          false,
+        );
+      } catch {
+        // If failure recording itself is unavailable, the original exception
+        // is still returned and no success state is synthesized.
+      }
+      if (error instanceof TrustedRunMaterializationError) throw error;
       throw new TrustedRunMaterializationError(
-        `host rejected patch application: ${applied.errors.join("; ")}`,
+        error instanceof Error ? error.message : String(error),
       );
     }
-
-    const rawGreen = await this.executionPort.verifyGreen({
-      runId: bundle.manifest.runId,
-      workspace: {
-        repoFullName: bundle.manifest.repoFullName,
-        baseCommitSha: workspace.artifact.baseCommitSha,
-        workspacePath: workspace.context.workspacePath,
-      },
-      testCommand: bundle.redRecipe.command,
-      redEvidence: red,
-      stressLoopCount: this.executionPolicy.stressLoopCount,
-      concurrencyWorkers: this.executionPolicy.concurrencyWorkers,
-    });
-    await evidenceService.recordGreenExecution(bundle.manifest.runId, rawGreen);
-
-    this.runManager.saveArtifact(
-      bundle.manifest.runId,
-      "pr_draft",
-      bundle.prDraft,
-    );
-    const title =
-      patch.title || bundle.manifest.issueTitle || "chore: contribution";
-    new GovernanceService(this.runManager).audit(bundle.manifest.runId, {
-      prTitle: title,
-      prBody: bundle.prDraft,
-    });
-
-    const [owner, repo] = bundle.manifest.repoFullName.split("/");
-    new SubmissionIntentService(this.runManager).createIntent({
-      runId: bundle.manifest.runId,
-      upstreamOwner: owner,
-      upstreamRepo: repo,
-      title,
-      body: bundle.prDraft,
-      baseBranch: workspace.artifact.baseBranch,
-      branchName: workspace.artifact.branchName,
-      commitMessage: title,
-      isDraft: true,
-    });
-
-    const result = this.runManager.getRun(bundle.manifest.runId);
-    if (!result || result.manifest.currentPhase !== "GOVERNANCE_AUDITED") {
-      throw new TrustedRunMaterializationError(
-        "host materialization did not produce a governance-ready canonical run.",
-      );
-    }
-    return result;
   }
 
   private parsePatch(raw: RunTransferBundle["patch"]): PatchDraft {

@@ -1,8 +1,13 @@
-import type { ApprovalArtifact } from "../contracts/schemas.js";
+import type {
+  ApprovalArtifact,
+  CommunityGateSnapshot,
+} from "../contracts/schemas.js";
 
 export interface ApprovalAuthorityRequest {
   runId: string;
   intentSha256: string;
+  communityGate: CommunityGateSnapshot;
+  communityGateSha256: string;
 }
 
 export interface ApprovalAuthorityDecision {
@@ -55,8 +60,8 @@ export function isTrustedApprovalAuthority(
 ): value is TrustedApprovalAuthority {
   return Boolean(
     value &&
-      typeof (value as any).issueApproval === "function" &&
-      (value as any)[authorityBrand] === true,
+    typeof (value as any).issueApproval === "function" &&
+    (value as any)[authorityBrand] === true,
   );
 }
 

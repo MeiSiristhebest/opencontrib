@@ -195,14 +195,14 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "DO NOT modify production code while authoring reproduction PoC.",
     ],
     invariants: ["PoC must reliably fail against baseline code."],
-    suggestedNextAction: "draft_patch",
+    suggestedNextAction: "capture_red",
   },
   PATCH_DRAFTED: {
     phase: "PATCH_DRAFTED",
     name: "Patch Drafted",
     description:
       "Targeted code fix implemented in worktree, awaiting verification.",
-    allowedFromPhases: ["RED_CAPTURED", "POC_GENERATED"],
+    allowedFromPhases: ["RED_CAPTURED"],
     requiredArtifacts: ["workspace", "evidence_red"],
     cli: {
       command: "run",

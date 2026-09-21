@@ -10,22 +10,30 @@ You have access to the **OpenContrib Engine** via CLI and MCP tools. Follow thes
 
 ## 🛠️ Core Toolchain Primitives
 
+Create `runId` with `contrib_create_run` before any scouting, probing, or workspace work.
+
 ### 1. Code Navigation via Smart Pointers
+
 Avoid reading entire large files into context. Use OpenContrib smart pointers:
+
 ```bash
 opencontrib pointer list
 opencontrib pointer resolve "ptr://findings/<finding_id>" --view slice
 ```
 
 ### 2. Deep AST / SAST Defect Probing
+
 Scan target repos or directories for deep concurrency bugs, memory leaks, and protocol violations:
+
 ```bash
 opencontrib probe plan [target]
 opencontrib probe run [target] --limit 5
 ```
 
 ### 3. Isolated Workspace Management
+
 Always perform changes inside a clean git worktree sandbox:
+
 ```bash
 opencontrib workspace prepare --repo <owner/repo> --issue <issue_id>
 # To clean up:
@@ -33,7 +41,9 @@ opencontrib workspace purge
 ```
 
 ### 4. Empirical Evidence Collection (Fail-First + Dual-Stage, RED to GREEN)
+
 Before applying a fix, capture the failing baseline and bind the source tree; after the fix, verify GREEN against that baseline:
+
 ```bash
 # Before the fix: capture the failing baseline
 opencontrib evidence capture-red --test-cmd "<test_command>" --assertion "<expected_failure_regex>"
@@ -42,24 +52,40 @@ opencontrib evidence verify-green --test-cmd "<test_command>"
 ```
 
 ### 5. RFC-100 Governance Pre-Flight Check
+
 Before generating PRs, run automated anti-AI governance linting:
+
 ```bash
 opencontrib governance audit --patch <patch_file> --pr-title "<pr_title>"
 ```
 
 ### 6. PR Description Drafting
+
 Generate high-acceptance PR descriptions honoring maintainer conventions:
+
 ```bash
 opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"
 ```
 
 ## 🔌 MCP Tools Available
+
 When MCP is enabled in Cursor (`.cursor/mcp.json`):
+
 - `contrib_scout`: Scout issues with feasibility ranking
 - `contrib_probe_run`: Run deep AST/SAST probes and populate Smart Pointers
 - `contrib_assemble_context`: Gather minimal context bundle
 - `contrib_prepare_workspace`: Create clean worktree
-- `contrib_collect_evidence`: Record test assertion runs
+- `contrib_capture_red` / `contrib_verify_green`: Record the authoritative RED→GREEN evidence cycle
 - `contrib_audit_governance`: Enforce maintainer guidelines
 - `contrib_render_pr_template`: Generate high-acceptance PR bodies
 - `contrib_sync_flywheel`: Synchronize contribution memory ledger
+
+<!-- OPENCONTRIB:GENERATED protocol:start -->
+## Canonical OpenContrib Protocol (generated)
+
+- **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
+- **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
+- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
+<!-- OPENCONTRIB:GENERATED protocol:end -->

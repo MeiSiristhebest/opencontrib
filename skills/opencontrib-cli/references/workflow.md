@@ -131,11 +131,8 @@ opencontrib evidence capture-red --test-cmd "<targeted_test_command>" --assertio
 # ... apply the fix ...
 opencontrib evidence verify-green --test-cmd "<targeted_test_command>"
 
-# One-shot alternative (concurrency / race / flaky defects):
-opencontrib evidence run \
-  --test-cmd "<targeted_test_command>" \
-  --concurrency 5 \
-  --stress-loop 5
+# For concurrency / race / flaky defects, pass --concurrency and --stress-loop
+# to the canonical verify-green command; do not use diagnostic evidence run for a canonical phase transition.
 ```
 
 - **Auto-Sync**: `--cwd` and `--run-id` are automatically resolved from the active session.
@@ -187,10 +184,8 @@ opencontrib governance pr-template \
   --validation-cmd "<targeted_test_command>" \
   --validation-output "User-provided note only; canonical EvidenceReport is required for verified claims"
 
-gh pr create \
-  --repo <owner>/<repo> \
-  --title "fix(<subsystem>): <concise fix description>" \
-  --body-file pr_body.md
+opencontrib governance request-approval --run-id "$RUN_ID"
+opencontrib submission submit --run-id "$RUN_ID"
 ```
 
 ---
@@ -236,3 +231,13 @@ opencontrib workspace prepare --repo facebook/react --issue 42
 # If evidence was lost, re-run the RED→GREEN cycle from the patch phase
 opencontrib evidence capture-red --test-cmd "bun test" --assertion "<failure_regex>" && opencontrib evidence verify-green --test-cmd "bun test"
 ```
+
+<!-- OPENCONTRIB:GENERATED protocol:start -->
+## Canonical OpenContrib Protocol (generated)
+
+- **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
+- **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
+- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
+<!-- OPENCONTRIB:GENERATED protocol:end -->

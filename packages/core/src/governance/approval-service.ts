@@ -3,6 +3,7 @@ import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import {
   ApprovalArtifactSchema,
+  CommunityGateSnapshotSchema,
   GovernanceDecisionArtifactSchema,
   SubmissionIntentArtifactSchema,
   ValidatedPatchArtifactSchema,
@@ -15,6 +16,10 @@ import {
   type TrustedApprovalAuthority,
 } from "./approval-authority.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
+import {
+  hashCommunityGateSnapshot,
+  communityPolicyRequiresExplicitApproval,
+} from "./community-gate.js";
 
 export interface CreateApprovalInput {
   runId: string;
@@ -30,6 +35,8 @@ export interface ApprovalChallenge {
   governanceSha256: string;
   policySha256: string;
   prBodySha256: string;
+  communityGate: import("../contracts/schemas.js").CommunityGateSnapshot;
+  communityGateSha256: string;
   target: string;
   branchName: string;
 }
@@ -77,6 +84,8 @@ export class ApprovalService {
       governanceSha256: hashes.governanceSha256,
       policySha256: hashes.policySha256,
       prBodySha256: hash(intent.body),
+      communityGate: hashes.communityGate,
+      communityGateSha256: hashes.communityGateSha256,
       target: `${intent.upstreamOwner}/${intent.upstreamRepo}`,
       branchName: intent.branchName,
     };
@@ -107,6 +116,8 @@ export class ApprovalService {
     const authorityDecision = await this.authority.issueApproval({
       runId: input.runId,
       intentSha256: challenge.intentSha256,
+      communityGate: challenge.communityGate,
+      communityGateSha256: challenge.communityGateSha256,
     });
     if (
       !authorityDecision ||
@@ -121,6 +132,14 @@ export class ApprovalService {
         "ApprovalAuthorityError: trusted host returned an invalid approval decision.",
       );
     }
+    if (
+      communityPolicyRequiresExplicitApproval(challenge.communityGate.policy) &&
+      authorityDecision.approvalMode !== "explicit_human"
+    ) {
+      throw new Error(
+        "ApprovalPolicyViolationError: detected community policy requires explicit human approval; policy waiver is not accepted.",
+      );
+    }
 
     const artifact: ApprovalArtifact = {
       runId: input.runId,
@@ -129,6 +148,7 @@ export class ApprovalService {
       evidenceSha256: challenge.evidenceSha256,
       governanceSha256: challenge.governanceSha256,
       policySha256: challenge.policySha256,
+      communityGateSha256: challenge.communityGateSha256,
       prBodySha256: challenge.prBodySha256,
       approvedBy: authorityDecision.approvedBy,
       approvedAt: new Date().toISOString(),
@@ -227,6 +247,13 @@ export class ApprovalService {
           "TOCTOU violation: governance policy has changed since approval was recorded.",
       };
     }
+    if (hashes.communityGateSha256 !== approval.communityGateSha256) {
+      return {
+        valid: false,
+        reason:
+          "TOCTOU violation: community policy snapshot has changed since approval was recorded.",
+      };
+    }
     if (
       summary.artifacts.prDraft &&
       hash(summary.artifacts.prDraft) !== approval.prBodySha256
@@ -298,6 +325,8 @@ export class ApprovalService {
     evidenceSha256: string;
     governanceSha256: string;
     policySha256: string;
+    communityGate: import("../contracts/schemas.js").CommunityGateSnapshot;
+    communityGateSha256: string;
   } {
     if (
       !summary.artifacts.patch ||
@@ -317,6 +346,32 @@ export class ApprovalService {
         "ApprovalNotReadyError: the current GovernanceDecisionArtifact is invalid.",
       );
     }
+    const workspace = summary.artifacts.workspace as
+      | {
+          baseCommitSha?: unknown;
+          communityGate?: unknown;
+          communityGateSha256?: unknown;
+        }
+      | undefined;
+    const workspaceGate = CommunityGateSnapshotSchema.safeParse(
+      workspace?.communityGate,
+    );
+    if (
+      !workspaceGate.success ||
+      typeof workspace?.communityGateSha256 !== "string" ||
+      hashCommunityGateSnapshot(workspaceGate.data) !==
+        workspace.communityGateSha256 ||
+      typeof workspace?.baseCommitSha !== "string" ||
+      workspaceGate.data.sourceCommitSha !== workspace.baseCommitSha ||
+      governance.data.communityGateSha256 !== workspace.communityGateSha256 ||
+      JSON.stringify(governance.data.communityGate) !==
+        JSON.stringify(workspaceGate.data)
+    ) {
+      throw new Error(
+        "ApprovalNotReadyError: the canonical community policy snapshot is missing, mutated, or not bound to the workspace base commit.",
+      );
+    }
+
     const validatedPatch = ValidatedPatchArtifactSchema.safeParse(
       summary.artifacts.validatedPatch,
     );
@@ -335,6 +390,8 @@ export class ApprovalService {
       evidenceSha256: hash(summary.artifacts.evidence),
       governanceSha256: hash(summary.artifacts.governance),
       policySha256: governance.data.policySha256,
+      communityGate: governance.data.communityGate,
+      communityGateSha256: governance.data.communityGateSha256,
     };
   }
 }

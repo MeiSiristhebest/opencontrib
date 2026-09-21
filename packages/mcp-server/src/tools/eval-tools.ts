@@ -9,107 +9,130 @@
  * - Zero external API keys. Zero hardcoded scoring rules.
  */
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import { existsSync } from 'node:fs';
-import * as path from 'path';
-import * as os from 'os';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import { existsSync } from "node:fs";
+import * as path from "path";
 import {
   parseTrajectoryFromJSONL,
   buildJudgePrompt,
   parseJudgeResponse,
+  resolveOpenContribPaths,
   type JudgeEvaluationReport,
-} from '@opencontrib/core';
+} from "@opencontrib/core";
 
 export function registerEvalTools(server: McpServer): void {
   // ─── Tool: contrib_eval_prepare_judge ──────────────────────────────────────
   // Phase 1: Compress the transcript and return a structured judge prompt.
   // The Agent feeds this prompt to a neutral sub-agent or its own reasoning loop.
   server.tool(
-    'contrib_eval_prepare_judge',
+    "contrib_eval_prepare_judge",
     [
-      'Compress a conversation transcript JSONL into a structured G-Eval judge prompt.',
-      'Returns: (1) a compressed trajectory summary text, (2) a fully-formatted judge prompt',
-      'that you must feed to a **neutral, independent sub-agent** (not yourself) for blind evaluation.',
-      'The sub-agent should return a JSON evaluation report conforming to JudgeOutputSchema.',
-      'This tool performs ZERO scoring itself — all judgment comes from the LLM that reads the prompt.',
-    ].join('\n'),
+      "Compress a conversation transcript JSONL into a structured G-Eval judge prompt.",
+      "Returns: (1) a compressed trajectory summary text, (2) a fully-formatted judge prompt",
+      "that you must feed to a **neutral, independent sub-agent** (not yourself) for blind evaluation.",
+      "The sub-agent should return a JSON evaluation report conforming to JudgeOutputSchema.",
+      "This tool performs ZERO scoring itself — all judgment comes from the LLM that reads the prompt.",
+    ].join("\n"),
     {
       transcriptPath: z
         .string()
-        .describe('Absolute path to the transcript.jsonl file for the session to evaluate'),
+        .describe(
+          "Absolute path to the transcript.jsonl file for the session to evaluate",
+        ),
       conversationId: z
         .string()
         .optional()
-        .describe('Optional conversation ID (used to locate transcript automatically)'),
+        .describe(
+          "Optional conversation ID (used to locate transcript automatically)",
+        ),
     },
     async ({ transcriptPath, conversationId }) => {
       // Resolve path
       let resolvedPath = path.resolve(transcriptPath);
 
       // Validate resolvedPath against home directory boundary
-      const home = process.env.OPENCONTRIB_HOME || process.env.HOME || os.homedir();
-      const allowedRoot = path.resolve(home);
-      if (!resolvedPath.startsWith(allowedRoot + path.sep) && resolvedPath !== allowedRoot) {
+      const { baseDir, dataDir } = resolveOpenContribPaths();
+      const allowedRoots = [path.resolve(baseDir), path.resolve(dataDir)];
+      const isAllowed = allowedRoots.some(
+        (root) =>
+          resolvedPath === root || resolvedPath.startsWith(root + path.sep),
+      );
+      if (!isAllowed) {
         return {
           isError: true,
-          content: [{ type: 'text', text: `Transcript path "${resolvedPath}" is outside the allowed workspace boundary. Set OPENCONTRIB_HOME to allow it.` }],
+          content: [
+            {
+              type: "text",
+              text: `Transcript path "${resolvedPath}" is outside the allowed workspace boundary. Set OPENCONTRIB_HOME to allow it.`,
+            },
+          ],
         };
       }
 
       if (!existsSync(resolvedPath) && conversationId) {
-        const appData = process.env.APPDATA || process.env.HOME || '';
+        const appData = process.env.APPDATA || process.env.HOME || "";
         const candidates = [
           `${appData}/.gemini/antigravity/brain/${conversationId}/.system_generated/logs/transcript.jsonl`,
           `${appData}/antigravity/brain/${conversationId}/.system_generated/logs/transcript.jsonl`,
         ];
-        resolvedPath = candidates.find((c: string) => {
-          const r = path.resolve(c);
-          return r.startsWith(allowedRoot + path.sep) || r === allowedRoot ? existsSync(r) : false;
-        }) ?? resolvedPath;
+        resolvedPath =
+          candidates.find((c: string) => {
+            const r = path.resolve(c);
+            return allowedRoots.some(
+              (root) => r === root || r.startsWith(root + path.sep),
+            )
+              ? existsSync(r)
+              : false;
+          }) ?? resolvedPath;
       }
 
       if (!existsSync(resolvedPath)) {
         return {
           isError: true,
-          content: [{ type: 'text', text: `Transcript not found: ${resolvedPath}` }],
+          content: [
+            { type: "text", text: `Transcript not found: ${resolvedPath}` },
+          ],
         };
       }
 
       const { events, metrics } = parseTrajectoryFromJSONL(resolvedPath);
-      const { systemPrompt, userPrompt, trajectoryText } = buildJudgePrompt(events, metrics);
+      const { systemPrompt, userPrompt, trajectoryText } = buildJudgePrompt(
+        events,
+        metrics,
+      );
 
       return {
         content: [
           {
-            type: 'text',
+            type: "text",
             text: [
-              '## Trajectory Compressed Successfully',
-              '',
+              "## Trajectory Compressed Successfully",
+              "",
               `**Steps:** ${metrics.totalSteps} | **Commands:** ${metrics.totalCommandsRun} | **view_file calls:** ${metrics.viewFileCalls}`,
               `**Max consecutive view_file:** ${metrics.maxConsecutiveFileViews}`,
-              '',
-              '## Next Step: Spawn a Neutral Sub-Agent Judge',
-              '',
-              'You MUST hand the prompt below to a **separate, independent sub-agent**.',
-              'Do NOT evaluate this yourself — you have context bias.',
-              'The sub-agent must read the trajectory with fresh eyes and return JSON.',
-              '',
-              '### SYSTEM PROMPT FOR JUDGE SUB-AGENT',
-              '```',
+              "",
+              "## Next Step: Spawn a Neutral Sub-Agent Judge",
+              "",
+              "You MUST hand the prompt below to a **separate, independent sub-agent**.",
+              "Do NOT evaluate this yourself — you have context bias.",
+              "The sub-agent must read the trajectory with fresh eyes and return JSON.",
+              "",
+              "### SYSTEM PROMPT FOR JUDGE SUB-AGENT",
+              "```",
               systemPrompt,
-              '```',
-              '',
-              '### USER PROMPT FOR JUDGE SUB-AGENT',
-              '```',
+              "```",
+              "",
+              "### USER PROMPT FOR JUDGE SUB-AGENT",
+              "```",
               userPrompt,
-              '```',
-              '',
-              '### COMPRESSED TRAJECTORY (for your reference)',
-              '```',
+              "```",
+              "",
+              "### COMPRESSED TRAJECTORY (for your reference)",
+              "```",
               trajectoryText,
-              '```',
-            ].join('\n'),
+              "```",
+            ].join("\n"),
           },
         ],
       };
@@ -120,21 +143,21 @@ export function registerEvalTools(server: McpServer): void {
   // Phase 2: Once the neutral sub-agent returns its raw JSON evaluation,
   // this tool validates and structures it into a canonical JudgeEvaluationReport.
   server.tool(
-    'contrib_eval_parse_judgment',
+    "contrib_eval_parse_judgment",
     [
-      'Parse and validate the raw JSON response from the neutral judge sub-agent.',
-      'Input: the raw text output from the judge sub-agent.',
-      'Output: a validated, structured JudgeEvaluationReport with weighted overall score,',
-      'weakest-dimension gate applied, and reflexion directives ready for memory ledger ingestion.',
-    ].join('\n'),
+      "Parse and validate the raw JSON response from the neutral judge sub-agent.",
+      "Input: the raw text output from the judge sub-agent.",
+      "Output: a validated, structured JudgeEvaluationReport with weighted overall score,",
+      "weakest-dimension gate applied, and reflexion directives ready for memory ledger ingestion.",
+    ].join("\n"),
     {
       rawJudgeResponse: z
         .string()
-        .describe('The raw JSON text returned by the neutral judge sub-agent'),
+        .describe("The raw JSON text returned by the neutral judge sub-agent"),
       transcriptPath: z
         .string()
         .optional()
-        .describe('Original transcript path (included in report metadata)'),
+        .describe("Original transcript path (included in report metadata)"),
     },
     async ({ rawJudgeResponse, transcriptPath }) => {
       let report: JudgeEvaluationReport;
@@ -145,7 +168,7 @@ export function registerEvalTools(server: McpServer): void {
           isError: true,
           content: [
             {
-              type: 'text',
+              type: "text",
               text: `Failed to parse judge response: ${err.message}\n\nRaw response received:\n${rawJudgeResponse}`,
             },
           ],
@@ -153,48 +176,51 @@ export function registerEvalTools(server: McpServer): void {
       }
 
       const verdictEmoji = {
-        EXEMPLARY: '🏆',
-        PROFICIENT: '✅',
-        NEEDS_IMPROVEMENT: '⚠️',
-        UNSATISFACTORY: '❌',
+        EXEMPLARY: "🏆",
+        PROFICIENT: "✅",
+        NEEDS_IMPROVEMENT: "⚠️",
+        UNSATISFACTORY: "❌",
       }[report.verdict];
 
       const dimensionLines = report.dimensions
-        .map((d) => `  ${d.title}: **${d.score}/100** — ${d.reasoning.slice(0, 120)}`)
-        .join('\n');
+        .map(
+          (d) =>
+            `  ${d.title}: **${d.score}/100** — ${d.reasoning.slice(0, 120)}`,
+        )
+        .join("\n");
 
       return {
         content: [
           {
-            type: 'text',
+            type: "text",
             text: [
               `## ${verdictEmoji} Judge Evaluation Report`,
-              '',
+              "",
               `**Overall Score:** ${report.overallScore}/100 (${report.verdict})`,
-              transcriptPath ? `**Transcript:** ${transcriptPath}` : '',
-              '',
-              '### Dimension Scores',
+              transcriptPath ? `**Transcript:** ${transcriptPath}` : "",
+              "",
+              "### Dimension Scores",
               dimensionLines,
-              '',
-              '### Strengths',
-              report.strengths.map((s) => `- ${s}`).join('\n'),
-              '',
-              '### Critical Critiques',
-              report.criticalCritiques.map((c) => `- ${c}`).join('\n'),
-              '',
-              '### Actionable Directives (Reflexion)',
-              report.actionableDirectives.map((a) => `- ${a}`).join('\n'),
-              '',
-              '### Chain of Thought (Judge Reasoning)',
-              report.chainOfThought ?? '(not available)',
-              '',
-              '### Raw Structured Report (JSON)',
-              '```json',
+              "",
+              "### Strengths",
+              report.strengths.map((s) => `- ${s}`).join("\n"),
+              "",
+              "### Critical Critiques",
+              report.criticalCritiques.map((c) => `- ${c}`).join("\n"),
+              "",
+              "### Actionable Directives (Reflexion)",
+              report.actionableDirectives.map((a) => `- ${a}`).join("\n"),
+              "",
+              "### Chain of Thought (Judge Reasoning)",
+              report.chainOfThought ?? "(not available)",
+              "",
+              "### Raw Structured Report (JSON)",
+              "```json",
               JSON.stringify(report, null, 2),
-              '```',
+              "```",
             ]
               .filter((l) => l !== undefined)
-              .join('\n'),
+              .join("\n"),
           },
         ],
       };

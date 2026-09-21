@@ -13,10 +13,10 @@ OpenContrib is a deterministic, 9-phase contribution engine for open-source soft
 
 When an open-source task begins, identify the track and load the corresponding reference guide:
 
-| Track | Scenario & Trigger Context | Primary Reference |
-| :--- | :--- | :--- |
-| **Track A: Proactive 0-Day Scanner** | User requests code audit, bug hunting, 0-day discovery, or proactive contribution | Load [`references/workflow.md`](./references/workflow.md) |
-| **Track B: Reactive Issue Scouting** | User wants to scout open issues, pick a good first issue, or fix an existing bug | Load [`references/discovery.md`](./references/discovery.md) |
+| Track                                | Scenario & Trigger Context                                                        | Primary Reference                                           |
+| :----------------------------------- | :-------------------------------------------------------------------------------- | :---------------------------------------------------------- |
+| **Track A: Proactive 0-Day Scanner** | User requests code audit, bug hunting, 0-day discovery, or proactive contribution | Load [`references/workflow.md`](./references/workflow.md)   |
+| **Track B: Reactive Issue Scouting** | User wants to scout open issues, pick a good first issue, or fix an existing bug  | Load [`references/discovery.md`](./references/discovery.md) |
 
 ---
 
@@ -27,8 +27,8 @@ graph LR
     P1["1. Initialize"] --> P2["2. Probe (A) or Scout (B)"]
     P2 --> P3["3. Assemble Context"]
     P3 --> P4["4. Prepare Workspace"]
-    P4 --> P5["5. Fail-First PoC & Fix"]
-    P5 --> P6["6. Collect Evidence"]
+    P4 --> P5["5. Optional PoC / Capture RED & Fix"]
+    P5 --> P6["6. Capture RED / Verify GREEN"]
     P6 --> P7["7. Governance Audit"]
     P7 --> P8["8. Issue-First & PR"]
     P8 --> P9["9. Flywheel Sync"]
@@ -52,8 +52,8 @@ Load these modular references into context **only when entering that specific ph
 ## 🚫 The 9 Absolute Hard Invariants (Zero Tolerance)
 
 1. **CLI-First Execution Priority (Dual-Ingress Architecture)**:
-   - **CLI-First Priority**: Always prioritize executing `opencontrib <subcommand>` via terminal commands (`run_command`). The CLI provides automated active session inheritance, immediate log streaming, and deterministic `▶ NEXT RECOMMENDED COMMAND` prompts.
-   - **MCP First-Class Support**: The OpenContrib MCP Server (`@opencontrib/mcp`) provides 35 composable JSON-RPC tools and resources when operating in MCP-only client environments.
+   - **CLI-First Priority**: Always create the tracked run with `opencontrib run create` before executing any other lifecycle command, then prioritize executing `opencontrib <subcommand>` via terminal commands (`run_command`). The CLI provides automated active session inheritance, immediate log streaming, and deterministic `▶ NEXT RECOMMENDED COMMAND` prompts.
+   - **MCP First-Class Support**: The OpenContrib MCP Server (`@opencontrib/mcp`) provides 39 composable JSON-RPC tools and resources when operating in MCP-only client environments.
 
 2. **File-First Markdown Protocol (No Inline String Markdown)**:
    - **NEVER** pass Markdown, multi-line text, or quotes as inline string arguments in CLI/PowerShell (e.g. `-f body="..."` or `--body "..."`).
@@ -98,3 +98,13 @@ Pause and obtain user confirmation at these three gates:
 - **Checkpoint 1 (Post-Scout / Finding Selection):** Present the **Single Defect Summary Card** (`printDefectCard`) with file path, line numbers, core defect in plain language, and minimal fix scope before preparing workspaces.
 - **Checkpoint 2 (Empirical Reproduction):** Capture the RED baseline with `opencontrib evidence capture-red --test-cmd "<cmd>" --assertion "<pattern>"` and present the concrete failing test output proving the bug exists **before** modifying source code. After the fix, verify with `opencontrib evidence verify-green --test-cmd "<cmd>"` (a passing test alone is insufficient — a captured RED baseline is required).
 - **Checkpoint 3 (Governance & Pre-Flight Review):** Show the patch diff, governance audit score (0-100), and draft PR body before pushing to remotes.
+
+<!-- OPENCONTRIB:GENERATED protocol:start -->
+## Canonical OpenContrib Protocol (generated)
+
+- **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
+- **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
+- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
+<!-- OPENCONTRIB:GENERATED protocol:end -->

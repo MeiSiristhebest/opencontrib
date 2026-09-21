@@ -10,7 +10,11 @@
  * phase from the original method; no behavioral change is intended.
  */
 
-import { type Opportunity } from "../../contracts/schemas.js";
+import {
+  type Opportunity,
+  SubmissionArtifactSchema,
+  SubmissionIntentArtifactSchema,
+} from "../../contracts/schemas.js";
 import type { ApprovalChallenge } from "../../governance/approval-service.js";
 import {
   PatchDraftSchema,
@@ -37,6 +41,7 @@ import {
 } from "../../github/submission-broker-client.js";
 import { defaultRunManager } from "../../run/run-manager.js";
 import { saveCanonicalArtifact } from "../../run/canonical-writer.js";
+import { RemoteCompletionAttestationSchema } from "../../run/completion-attestation.js";
 import { WorkspaceService } from "../../workspace/workspace-service.js";
 import { buildTurnPrompt } from "../agent-orchestrator.js";
 import type {
@@ -211,13 +216,10 @@ export class ContextAssemblyStep implements PipelineStep {
     ctx.preFixReproductionCaptured = false;
     ctx.preFixOutput = "";
     ctx.evidenceReport = undefined;
-    if (ctx.runId) {
-      (deps.runManager ?? defaultRunManager).saveArtifact(
-        ctx.runId,
-        "context",
-        assembledContext as any,
-      );
-    }
+    // The legacy orchestration pipeline allocates its workspace before this
+    // step, while the canonical run contract records CONTEXT_ASSEMBLED before
+    // WORKSPACE_PREPARED. Keep the assembled context in the pipeline context;
+    // only the canonical CLI/MCP flow persists the phase-bound artifact here.
     return continuePipeline();
   }
 }
@@ -335,11 +337,6 @@ export class ReproductionDesignStep implements PipelineStep {
       ctx.preFixReproductionCaptured = red.assertionMatched;
       ctx.preFixOutput = red.observedOutputSnippet;
       ctx.evidenceReport = { redEvidence: red };
-      (deps.runManager ?? defaultRunManager).saveArtifact(
-        ctx.runId,
-        "context",
-        ctx.assembledContext as any,
-      );
       return continuePipeline();
     } catch (err: any) {
       deps.stateMachine.transition("BLOCKED", "RED assertion was not captured");
@@ -426,12 +423,12 @@ export class PatchGenerationStep implements PipelineStep {
     ctx.activePatch = fullPatchDraft;
     if (ctx.runId) {
       const runManager = deps.runManager ?? defaultRunManager;
-      runManager.saveArtifact(
-        ctx.runId,
-        "patch",
-        fullPatchDraft as any,
-        ctx.preFixReproductionCaptured ? "PATCH_DRAFTED" : undefined,
-      );
+      // PATCH_DRAFTED is evidence-gated. A dry-run without a target test may
+      // still return the in-memory patch for inspection, but must not persist
+      // it as a canonical lifecycle artifact.
+      if (runManager.getRun(ctx.runId)?.manifest.currentPhase === "RED_CAPTURED") {
+        runManager.saveArtifact(ctx.runId, "patch", fullPatchDraft as any);
+      }
     }
     return continuePipeline();
   }
@@ -1040,8 +1037,49 @@ export class PrSubmissionStep implements PipelineStep {
         throw err;
       }
 
-      prUrl = submission.submissionArtifact.prUrl;
-      prNumber = submission.submissionArtifact.prNumber;
+      const returnedArtifact = SubmissionArtifactSchema.safeParse(
+        submission?.submissionArtifact,
+      );
+      const canonicalRun = runManager.getRun(runId);
+      const canonicalIntent = SubmissionIntentArtifactSchema.safeParse(
+        canonicalRun?.artifacts.submissionIntent,
+      );
+      if (
+        !returnedArtifact.success ||
+        !canonicalIntent.success ||
+        returnedArtifact.data.runId !== runId ||
+        returnedArtifact.data.intentSha256 !== canonicalIntent.data.intentSha256
+      ) {
+        throw new Error(
+          "SubmissionPortIntegrityError: provider result is not bound to the canonical run and SubmissionIntent.",
+        );
+      }
+
+      // A successful pipeline run must carry the trusted host's completion
+      // attestation, not merely a PR-shaped response.  The broker client also
+      // checks these bindings at the transport boundary; repeat them here so
+      // injected SubmissionPort implementations cannot weaken the lifecycle.
+      const completion = RemoteCompletionAttestationSchema.safeParse(
+        submission?.completionAttestation,
+      );
+      if (
+        !completion.success ||
+        completion.data.runId !== runId ||
+        completion.data.hostIntentSha256 !==
+          returnedArtifact.data.intentSha256 ||
+        completion.data.prNumber !== returnedArtifact.data.prNumber ||
+        completion.data.prUrl !== returnedArtifact.data.prUrl ||
+        completion.data.headSha !== returnedArtifact.data.headSha ||
+        completion.data.submissionArtifact.intentSha256 !==
+          returnedArtifact.data.intentSha256
+      ) {
+        throw new Error(
+          "SubmissionPortIntegrityError: trusted completion attestation is missing or does not bind to the canonical submission.",
+        );
+      }
+
+      prUrl = returnedArtifact.data.prUrl;
+      prNumber = returnedArtifact.data.prNumber;
       if (ctx.telemetry) ctx.telemetry.prUrl = prUrl;
     } catch (err: any) {
       deps.stateMachine.transition(

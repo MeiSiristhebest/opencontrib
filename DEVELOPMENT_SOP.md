@@ -1,4 +1,5 @@
 # 🚀 Agent 自动化日常开发与 PR 闭环标准作业程序 (SOP)
+
 > **Agentic Development & PR Closed-Loop Standard Operating Procedure**  
 > **适用对象**：Google Antigravity, Claude Code, Cursor Composer, Aider, GitHub Copilot Agent 等自主编程智能体  
 > **版本**：v1.0.0 · 工业级开源工程规范
@@ -39,7 +40,7 @@ flowchart TD
 
     subgraph Phase 4 & 5: 语义化提交与提 PR
         E1[遵循 Conventional Commits 提交] --> E2[推送分支至 origin]
-        E2 --> E3[按照 PR Template 结构化提交 PR]
+        E2 --> E3[通过 OpenContrib 受信任提交协议提交 PR]
     end
 
     subgraph Phase 6 & 7: CI 观测与闭环合入
@@ -61,14 +62,16 @@ flowchart TD
 ## 🛠️ 三、 详细阶段执行指南与操作指令
 
 ### Phase 0: 需求对齐与任务溯源 (Triage)
+
 1. **确认目标里程碑**：
-   * 检查目标仓库的 GitHub Milestones（如 `M1: Core Architecture`, `M2: Domain Primitives`, `M3: Dashboard`）。
+   - 检查目标仓库的 GitHub Milestones（如 `M1: Core Architecture`, `M2: Domain Primitives`, `M3: Dashboard`）。
 2. **确认关联合约**：
-   * 找到对应 Milestone 下的 **Umbrella Issue**，明确本次任务的具体子项。
+   - 找到对应 Milestone 下的 **Umbrella Issue**，明确本次任务的具体子项。
 
 ---
 
 ### Phase 1: 分支策略与环境预检 (Branching)
+
 ```bash
 # 1. 确保工作区干净并同步主干
 git checkout main
@@ -82,28 +85,31 @@ git checkout -b feat/mcp-domain-primitives
 ---
 
 ### Phase 2: 规范驱动编码与单测先行 (Implementation & Tests)
-* **Bug 修复标准（Fail-First）**：
+
+- **Bug 修复标准（Fail-First）**：
   1. 先编写一个针对该 Bug 的单元测试，运行确认其**失败（Fail）**。
   2. 编写修复代码，再次运行确认该测试**通过（Pass）**。
-* **特性开发标准**：
+- **特性开发标准**：
   1. 接口与核心逻辑必须有对应的单元测试覆盖（边界值、空值、异常处理）。
   2. 纯函数测试严禁依赖不稳定的外部网络与未打桩的第三方接口。
 
 ---
 
 ### Phase 3: 本地多维质量门禁 (Local Quality Gate)
+
 提交代码前，AI 必须在当前仓库运行对应的全量质量门禁命令，确保 **0 Error、0 Warning**：
 
-| 技术栈 / 仓库 | 质量门禁执行命令 | 通过标准 |
-| :--- | :--- | :--- |
-| **Bun / TypeScript** (`opencontrib`) | `bun run lint && bun test` | 0 类型错误，测试用例 100% Pass |
-| **Next.js / React** (`mystic`, `youju`) | `npm run lint && npm test && npm run build` | 静态检查通过，构建顺利生成产物 |
-| **Golang** (`tiktok-backend-go`) | `go vet ./... && go test -v -race ./...` | 无内存竞态警告，单测全部通过 |
-| **Java 21 / Spring Boot** (`ningxiangshop`) | `mvn clean test` | 编译 0 警告，单元测试 100% Pass |
+| 技术栈 / 仓库                               | 质量门禁执行命令                            | 通过标准                        |
+| :------------------------------------------ | :------------------------------------------ | :------------------------------ |
+| **Bun / TypeScript** (`opencontrib`)        | `bun run lint && bun test`                  | 0 类型错误，测试用例 100% Pass  |
+| **Next.js / React** (`mystic`, `youju`)     | `npm run lint && npm test && npm run build` | 静态检查通过，构建顺利生成产物  |
+| **Golang** (`tiktok-backend-go`)            | `go vet ./... && go test -v -race ./...`    | 无内存竞态警告，单测全部通过    |
+| **Java 21 / Spring Boot** (`ningxiangshop`) | `mvn clean test`                            | 编译 0 警告，单元测试 100% Pass |
 
 ---
 
 ### Phase 4: Conventional Commits 语义化提交 (Commit Hygiene)
+
 ```bash
 # 暂存目标文件（严禁暂存 .env, node_modules, 编译临时文件）
 git add <target-files>
@@ -115,33 +121,39 @@ git commit -m "fix(diff): resolve CRLF line ending corruption in unified patch p
 ```
 
 #### 常用提交类型标识：
-* `feat`: 新增功能、接口或工具
-* `fix`: 修复 Bug 或异常行为
-* `docs`: 文档、注释或规范调整
-* `chore`: 构建配置、依赖项更新或辅助工具调整
-* `refactor`: 重构代码（不改变既有功能与接口）
-* `test`: 新增或重构测试套件
+
+- `feat`: 新增功能、接口或工具
+- `fix`: 修复 Bug 或异常行为
+- `docs`: 文档、注释或规范调整
+- `chore`: 构建配置、依赖项更新或辅助工具调整
+- `refactor`: 重构代码（不改变既有功能与接口）
+- `test`: 新增或重构测试套件
 
 ---
 
-### Phase 5: Pull Request 提报规范 (PR Creation)
+### Phase 5: OpenContrib 受信任提交规范 (Trusted Submission)
+
 ```bash
-# 推送特性分支到远端
-git push origin feat/mcp-domain-primitives
+# OpenContrib 负责受信任的提交边界；代理不得直接 push 或创建 PR
+opencontrib governance request-approval --run-id "$RUN_ID"
+opencontrib submission submit --run-id "$RUN_ID"
 ```
 
-在 GitHub 创建 PR 时，必须严格按照项目 `.github/pull_request_template.md` 输出，内容范例如下：
+PR 草稿必须先通过 OpenContrib 治理审计、受信任审批与 SubmissionPort 提交；不得直接调用 GitHub CLI、GitHub MCP 或 GitHub API 写入 PR。草稿内容仍须严格遵循项目 `.github/pull_request_template.md`：
 
-```markdown
+````markdown
 ## 🎯 Description / Summary
+
 - 在 `packages/mcp` 中实现了 18 个原子领域工具与 3 个运行时资源。
 - 完善了基于 stdio 与 SSE 协议的握手及参数强类型校验。
 
 ## 🔍 Root Cause / Architecture Rationale
+
 - 解决 Agent 过去直接操作本地裸 Git 容易出现凭据外泄与环境漂移的问题。
 - 提供结构化 MCP 契约，保证自治代理执行的确定性。
 
 ## 🧪 Verification & Empirical Evidence
+
 - [x] 新增单测覆盖 18 个 Primitives 调用链路
 - [x] 本地全量质量门禁验证通过：
 
@@ -153,11 +165,14 @@ $ bun test test/mcp.test.ts
 
 18 pass, 0 fail
 ```
+````
 
 ## 📋 PR Quality Checklist
+
 - [x] 遵循 Conventional Commits 规范
 - [x] 关联 Umbrella Issue #2
-```
+
+````
 
 ---
 
@@ -181,7 +196,7 @@ $ bun test test/mcp.test.ts
 当你需要指派 AI 智能体开发新功能或修复缺陷时，直接将以下 Prompt 复制给 AI：
 
 ```text
-你现在是当前项目的核心开源维护者。请严格遵守本仓库根目录下的《AGENT_DEVELOPMENT_PR_SOP.md》执行以下任务：
+你现在是当前项目的核心开源维护者。请严格遵守本仓库根目录下的《AGENT_DEVELOPMENT_PR_SOP.md》和 OpenContrib 权威协议执行以下任务：
 
 【任务目标】
 请阅读当前的 GitHub Milestone 与 Umbrella Issue，实现/修复以下内容：
@@ -192,22 +207,22 @@ $ bun test test/mcp.test.ts
 2. 践行 TDD：编写功能代码的同时必须附带确定性的单元测试，确保无既有功能退化。
 3. 本地必须运行全量门禁命令（Lint + Typecheck + Test），确认 0 Error、0 Warning。
 4. 采用 Conventional Commits 规范提交代码。
-5. 推送分支并按照仓库 pull_request_template.md 格式输出结构化 PR 内容（附带本地通过的测试命令行输出）。
+5. 通过 OpenContrib 治理审计、受信任审批与 SubmissionPort 提交结构化 PR 内容（附带本地通过的测试命令行输出）。
 6. 合并后同步更新对应 Umbrella Issue 的任务勾选状态。
-```
+````
 
 ---
 
 ## 🚫 五、 反模式与绝对禁令清单 (Anti-Patterns)
 
-| 禁令行为 | 危害 | 正确做法 |
-| :--- | :--- | :--- |
-| **直接 push 到 main** | 破坏主干稳定性，绕过 CI 门禁 | 从 main 切新分支，走完整 PR 流程 |
-| **无单元测试合并** | 导致后续迭代出现隐藏回归退化 | 必须附带单测验证逻辑正确性 |
-| **巨型单次 Commit** | 难以 Code Review 与 Git Bisect 定位 | 拆解为原子化提交，小步快跑 |
-| **混入格式化噪点** | 污染 Git Blame，增加审查心智负担 | 仅修改核心逻辑行，不随意大面积重排版 |
-| **AI 臆测外部 API** | 产生幻觉导致运行时崩溃 | 优先查阅官方文档与类型定义，本地实跑验证 |
-| **低信噪比刷分 PR** | 触发 ghfind/社区反作弊告警与封禁 | 聚焦深水区八大高价值缺陷 |
+| 禁令行为                                    | 危害                                | 正确做法                                            |
+| :------------------------------------------ | :---------------------------------- | :-------------------------------------------------- |
+| **直接 push 到 main / 绕过 SubmissionPort** | 破坏主干稳定性，绕过 CI 与审批门禁  | 从 main 切新分支，并通过 OpenContrib 受信任提交协议 |
+| **无单元测试合并**                          | 导致后续迭代出现隐藏回归退化        | 必须附带单测验证逻辑正确性                          |
+| **巨型单次 Commit**                         | 难以 Code Review 与 Git Bisect 定位 | 拆解为原子化提交，小步快跑                          |
+| **混入格式化噪点**                          | 污染 Git Blame，增加审查心智负担    | 仅修改核心逻辑行，不随意大面积重排版                |
+| **AI 臆测外部 API**                         | 产生幻觉导致运行时崩溃              | 优先查阅官方文档与类型定义，本地实跑验证            |
+| **低信噪比刷分贡献**                        | 触发 ghfind/社区反作弊告警与封禁    | 聚焦深水区八大高价值缺陷                            |
 
 ---
 
@@ -215,14 +230,23 @@ $ bun test test/mcp.test.ts
 
 Agent 在进行开源问题挖掘或自身架构审计时，优先识别并锁定以下 8 类深水区缺陷：
 
-| 序号 | 缺陷维度 | 核心隐患场景与识别特征 | 架构风险与工程影响 |
-| :---: | :--- | :--- | :--- |
-| **1** | **协议与序列化契约漂移** | `falsy value` / `0` / `false` 在 `omitempty` 下被隐式擦除；HTTP/2 Header 大小写不兼容；SSE 截断。 | 下游反序列化为默认值导致配置失效或缓存穿透 |
-| **2** | **生命周期与资源泄露** | 注册中心 Watcher 重连未注销导致监听翻倍膨胀；Context Cancellation 未传播产生孤儿协程；文件句柄 `lsof` 泄漏。 | 广播风暴击垮服务端、内存单调上涨直至 OOM |
-| **3** | **分布式缓存与一致性** | Falsy Value 缓存击穿；乱序双写导致的 Cache Stampede；重试机制破坏幂等性。 | 存储层瞬时击穿、脏数据永久驻留缓存 |
-| **4** | **内存布局与底层 ABI** | 非连续内存/跨步 Tensor (`permute`/`transpose`) 传入底层 C++/CUDA Kernel；FFI 跨语言边界悬垂指针。 | 底层内存段错误 (Segfault)、偶发性内存崩溃 |
-| **5** | **性能坍塌与反压失效** | ReDoS 正则灾难性回溯；缺乏 Full Jitter 指数退避引发雷鸣群涌 (Thundering Herd)；背压丢失导致队列积压。 | 单核 CPU 100% 挂死、下游自愈失败、内存雪崩 |
-| **6** | **时间单调性与时钟回拨** | 使用 Wall Clock 计算耗时在 NTP 校时下产生负数；夏令时 (DST) / 闰秒导致调度跨日跳过或重复触发。 | 定时器永久阻塞、定时调度任务异常跳过 |
-| **7** | **编译器优化假设破坏** | 高频热路径参数使用动态接口断言破坏逃逸分析导致栈上分配失效；GC STW 停顿剧增。 | 高 QPS 网关吞吐骤降、GC 停顿从 1ms 飙升至 50ms |
-| **8** | **数值边界与跨平台破坏** | `NaN`/`+Inf` 及负数超时导致调度器挂死；Windows/Linux CRLF 换行符破坏 Patch 解析与 `filepath.ToSlash` 路径遍历。 | 跨平台 CI 崩溃、统一 Diff 解析损坏、路径越权 |
+| 序号  | 缺陷维度                 | 核心隐患场景与识别特征                                                                                          | 架构风险与工程影响                             |
+| :---: | :----------------------- | :-------------------------------------------------------------------------------------------------------------- | :--------------------------------------------- |
+| **1** | **协议与序列化契约漂移** | `falsy value` / `0` / `false` 在 `omitempty` 下被隐式擦除；HTTP/2 Header 大小写不兼容；SSE 截断。               | 下游反序列化为默认值导致配置失效或缓存穿透     |
+| **2** | **生命周期与资源泄露**   | 注册中心 Watcher 重连未注销导致监听翻倍膨胀；Context Cancellation 未传播产生孤儿协程；文件句柄 `lsof` 泄漏。    | 广播风暴击垮服务端、内存单调上涨直至 OOM       |
+| **3** | **分布式缓存与一致性**   | Falsy Value 缓存击穿；乱序双写导致的 Cache Stampede；重试机制破坏幂等性。                                       | 存储层瞬时击穿、脏数据永久驻留缓存             |
+| **4** | **内存布局与底层 ABI**   | 非连续内存/跨步 Tensor (`permute`/`transpose`) 传入底层 C++/CUDA Kernel；FFI 跨语言边界悬垂指针。               | 底层内存段错误 (Segfault)、偶发性内存崩溃      |
+| **5** | **性能坍塌与反压失效**   | ReDoS 正则灾难性回溯；缺乏 Full Jitter 指数退避引发雷鸣群涌 (Thundering Herd)；背压丢失导致队列积压。           | 单核 CPU 100% 挂死、下游自愈失败、内存雪崩     |
+| **6** | **时间单调性与时钟回拨** | 使用 Wall Clock 计算耗时在 NTP 校时下产生负数；夏令时 (DST) / 闰秒导致调度跨日跳过或重复触发。                  | 定时器永久阻塞、定时调度任务异常跳过           |
+| **7** | **编译器优化假设破坏**   | 高频热路径参数使用动态接口断言破坏逃逸分析导致栈上分配失效；GC STW 停顿剧增。                                   | 高 QPS 网关吞吐骤降、GC 停顿从 1ms 飙升至 50ms |
+| **8** | **数值边界与跨平台破坏** | `NaN`/`+Inf` 及负数超时导致调度器挂死；Windows/Linux CRLF 换行符破坏 Patch 解析与 `filepath.ToSlash` 路径遍历。 | 跨平台 CI 崩溃、统一 Diff 解析损坏、路径越权   |
 
+<!-- OPENCONTRIB:GENERATED protocol:start -->
+## OpenContrib 权威协议（自动生成）
+
+- **运行锚点（必须首先执行）**：`opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`；没有 runId 不得侦察、准备工作区或修改源码。
+- **工作区与证据**：`opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`；PoC（contrib_verify_poc）是可选复现步骤，不能替代 contrib_capture_red 的权威 RED。
+- **RED → PATCH → GREEN**：必须先执行 contrib_capture_red，再通过 contrib_save_artifact 保存补丁，最后执行 contrib_verify_green 验证 GREEN；没有 RED 不得进入 PATCH_DRAFTED。
+- **治理与提交**：先执行 contrib_render_pr_template 生成 PR 草稿，再执行 contrib_audit_governance，请求受信任审批（contrib_request_approval），最终只通过 contrib_submit_pr / SubmissionPort 提交。
+- 禁止使用原始 GitHub CLI、GitHub MCP 或 GitHub API 写入 Pull Request；它们会绕过 SubmissionIntent、ApprovalArtifact、SubmissionPermit 与提供方校验。
+<!-- OPENCONTRIB:GENERATED protocol:end -->

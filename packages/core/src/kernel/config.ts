@@ -3,7 +3,7 @@ import { load as loadYaml } from "js-yaml";
 import * as fs from "fs";
 import * as path from "path";
 import type { CapabilityType } from "./capability.js";
-import { getOpenContribDataDir, getOpenContribHome } from "./home.js";
+import { getOpenContribDataDir } from "./home.js";
 
 export interface OpenContribPolicy {
   network: "allowed" | "denied";
@@ -264,15 +264,11 @@ export function parsePolicyConfig(raw: string): OpenContribPolicy {
 /** Load only host-owned policy; never inspect a contribution worktree. */
 export function loadHostPolicy(): OpenContribPolicy {
   const dataDir = getOpenContribDataDir();
-  const homeConfigDir = path.join(getOpenContribHome(), ".opencontrib");
   const candidates = [
     path.join(dataDir, "config.json"),
     path.join(dataDir, "config.yaml"),
     path.join(dataDir, "config.yml"),
-    path.join(homeConfigDir, "config.json"),
-    path.join(homeConfigDir, "config.yaml"),
-    path.join(homeConfigDir, "config.yml"),
-  ].filter((candidate, index, all) => all.indexOf(candidate) === index);
+  ];
   for (const candidate of candidates) {
     if (!fs.existsSync(candidate)) continue;
     try {
@@ -404,9 +400,9 @@ export function loadWorkspaceConfig(
     path.join(workspacePath, ".opencontrib", "config.yaml"),
     path.join(workspacePath, ".opencontrib", "config.yml"),
     path.join(workspacePath, ".opencontrib", "config.json"),
-    path.join(getOpenContribHome(), ".opencontrib", "config.yaml"),
-    path.join(getOpenContribHome(), ".opencontrib", "config.yml"),
-    path.join(getOpenContribHome(), ".opencontrib", "config.json"),
+    path.join(getOpenContribDataDir(), "config.yaml"),
+    path.join(getOpenContribDataDir(), "config.yml"),
+    path.join(getOpenContribDataDir(), "config.json"),
   ];
 
   for (const candidate of candidates) {

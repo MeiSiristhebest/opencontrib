@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import {
+  CommunityGateSnapshotSchema,
   GovernanceDecisionArtifactSchema,
   ValidatedPatchArtifactSchema,
   type GovernanceDecisionArtifact,
@@ -14,6 +15,7 @@ import {
   mergeTrustedPolicySnapshots,
   type TrustedPolicySnapshot,
 } from "../kernel/config.js";
+import { hashCommunityGateSnapshot } from "./community-gate.js";
 
 export interface GovernanceAuditRunOptions {
   /** Human-readable title to audit and bind to the later SubmissionIntent. */
@@ -113,8 +115,11 @@ export class GovernanceService {
 
     const workspaceArtifact = run.artifacts.workspace as
       | {
+          baseCommitSha?: unknown;
           policySnapshot?: unknown;
           policySha256?: unknown;
+          communityGate?: unknown;
+          communityGateSha256?: unknown;
         }
       | undefined;
     let trustedPolicySnapshot: TrustedPolicySnapshot;
@@ -138,6 +143,24 @@ export class GovernanceService {
         `GovernancePolicySnapshotError: run ${runId} has no canonical trusted policy snapshot. Re-prepare the workspace before governance audit.`,
       );
     }
+
+    const communityGateResult = CommunityGateSnapshotSchema.safeParse(
+      workspaceArtifact?.communityGate,
+    );
+    if (
+      !communityGateResult.success ||
+      typeof workspaceArtifact?.communityGateSha256 !== "string" ||
+      hashCommunityGateSnapshot(communityGateResult.data) !==
+        workspaceArtifact?.communityGateSha256 ||
+      typeof workspaceArtifact?.baseCommitSha !== "string" ||
+      communityGateResult.data.sourceCommitSha !==
+        workspaceArtifact.baseCommitSha
+    ) {
+      throw new Error(
+        `GovernanceCommunityGateError: run ${runId} has no valid immutable community policy snapshot pinned to the canonical workspace base commit.`,
+      );
+    }
+    const communityGate = communityGateResult.data;
 
     const requestedCoverageMinimum =
       options.coveragePolicy?.minimumChangedLineCoverage;
@@ -190,6 +213,10 @@ export class GovernanceService {
       // by an external trusted authority and is not inferred from this audit.
       coveragePolicy: effectiveCoveragePolicy,
       resourceLeakPolicy: effectiveResourceLeakPolicy,
+      maxDiffLines:
+        communityGate.policy.maxDiffCeiling === undefined
+          ? undefined
+          : Math.min(100, communityGate.policy.maxDiffCeiling),
       subagentQualityScore: options.subagentScore,
     });
 
@@ -201,6 +228,8 @@ export class GovernanceService {
       prDraftSha256,
       prTitle,
       prTitleSha256: hash(prTitle),
+      communityGate,
+      communityGateSha256: hashCommunityGateSnapshot(communityGate),
       auditResult,
       coveragePolicy: effectiveCoveragePolicy,
       resourceLeakPolicy: effectiveResourceLeakPolicy,

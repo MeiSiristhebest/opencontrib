@@ -1,14 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import { detectCommunityGate } from '../src/governance/community-gate.js';
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import {
+  detectCommunityGate,
+  detectCommunityGateFromContents,
+  hashCommunityGateSnapshot,
+  readCommunityGateAtCommit,
+} from "../src/governance/community-gate.js";
 
-describe('Community Gate Detector', () => {
+describe("Community Gate Detector", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-test-"));
   });
 
   afterEach(() => {
@@ -17,7 +22,7 @@ describe('Community Gate Detector', () => {
     } catch {}
   });
 
-  it('detects auto-close and lgtmi approval requirements from CONTRIBUTING.md', async () => {
+  it("detects auto-close and lgtmi approval requirements from CONTRIBUTING.md", async () => {
     const contributingContent = `
 # Contributing Guidelines
 
@@ -29,7 +34,11 @@ Approval happens through maintainer replies on issues:
 - \`lgtm\`: your future issues and PRs will not be auto-closed
 `;
 
-    fs.writeFileSync(path.join(tmpDir, 'CONTRIBUTING.md'), contributingContent, 'utf8');
+    fs.writeFileSync(
+      path.join(tmpDir, "CONTRIBUTING.md"),
+      contributingContent,
+      "utf8",
+    );
 
     const gate = await detectCommunityGate(tmpDir);
 
@@ -37,24 +46,93 @@ Approval happens through maintainer replies on issues:
     expect(gate.autoClosesNewIssues).toBe(true);
     expect(gate.hasLgtmApprovalProtocol).toBe(true);
     expect(gate.requiresIssueApprovalBeforePr).toBe(true);
-    expect(gate.suggestedContributorAction).toContain('PAUSE pipeline');
+    expect(gate.suggestedContributorAction).toContain("PAUSE pipeline");
   });
 
-  it('detects weekend restricted triage hours', async () => {
+  it("detects weekend restricted triage hours", async () => {
     const contributingContent = `
 # Contributing
 Issues submitted Friday through Sunday are not guaranteed to be reviewed until the next working week.
 `;
 
-    fs.writeFileSync(path.join(tmpDir, 'CONTRIBUTING.md'), contributingContent, 'utf8');
+    fs.writeFileSync(
+      path.join(tmpDir, "CONTRIBUTING.md"),
+      contributingContent,
+      "utf8",
+    );
 
     const gate = await detectCommunityGate(tmpDir);
 
     expect(gate.restrictedTriageHours).toBe(true);
-    expect(gate.reasons.some((r) => r.includes('Weekend'))).toBe(true);
+    expect(gate.reasons.some((r) => r.includes("Weekend"))).toBe(true);
   });
 
-  it('returns permissive policy when no governance files exist', async () => {
+  it("does not treat issue-first wording alone as maintainer approval", () => {
+    const gate = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content: "Please open an issue first so work is coordinated.",
+      },
+    ]);
+
+    expect(gate.requiresIssueApprovalBeforePr).toBe(false);
+    expect(gate.hasGatingRules).toBe(false);
+  });
+
+  it("captures diff ceilings and preserves restricted-hours policy", () => {
+    const gate = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "PRs have a 60 lines max. Reviews are not guaranteed Friday through Sunday.",
+      },
+    ]);
+
+    expect(gate.maxDiffCeiling).toBe(60);
+    expect(gate.restrictedTriageHours).toBe(true);
+    expect(gate.hasGatingRules).toBe(false);
+  });
+
+  it("fails closed when a baseline community policy read fails", () => {
+    expect(() =>
+      readCommunityGateAtCommit(
+        {
+          listTree: () => ({
+            success: true,
+            stdout: "CONTRIBUTING.md\n",
+            stderr: "",
+          }),
+          show: () => ({
+            success: false,
+            stdout: "",
+            stderr: "permission denied",
+          }),
+        },
+        "a".repeat(40),
+      ),
+    ).toThrow(
+      /CommunityGateSnapshotError: cannot read baseline community policy/,
+    );
+  });
+
+  it("pins the detected policy to the source commit and a stable hash", () => {
+    const snapshot = readCommunityGateAtCommit(
+      {
+        listTree: () => ({
+          success: true,
+          stdout: "",
+          stderr: "",
+        }),
+        show: () => ({ success: true, stdout: "", stderr: "" }),
+      },
+      "a".repeat(40),
+    );
+
+    expect(snapshot.sourceCommitSha).toBe("a".repeat(40));
+    expect(hashCommunityGateSnapshot(snapshot)).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("returns permissive policy when no governance files exist", async () => {
     const gate = await detectCommunityGate(tmpDir);
 
     expect(gate.hasGatingRules).toBe(false);

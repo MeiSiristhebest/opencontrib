@@ -62,7 +62,7 @@ export function registerGovernanceTools(
       prTitle: z.string().optional().describe("Proposed PR title"),
       prBody: z.string().optional().describe("Proposed PR body text"),
       evidence: EvidenceReportSchema.optional().describe(
-        "Empirical evidence report (EvidenceReport) from contrib_collect_evidence",
+        "Diagnostic evidence report; canonical runs use contrib_capture_red followed by contrib_verify_green",
       ),
       subagentQualityScore: z
         .number()
@@ -294,25 +294,46 @@ export function registerGovernanceTools(
         ),
     },
     wrapHandler(async (args) => {
+      const resolvedRunId = runManager.resolveRunId(args.runId);
+      const canonicalRun = resolvedRunId
+        ? runManager.getRun(resolvedRunId)
+        : undefined;
+      if (resolvedRunId && !canonicalRun) {
+        throw new Error(`Contribution run "${resolvedRunId}" not found.`);
+      }
+      let evidence: import("@opencontrib/core").EvidenceReport | undefined;
+      if (canonicalRun) {
+        const parsed = EvidenceReportSchema.safeParse(
+          canonicalRun.artifacts.evidence,
+        );
+        if (parsed.success) evidence = parsed.data;
+      }
       const prBody = renderMasterPrTemplate({
         nativeTemplateContent: args.nativeTemplateContent,
         issueNumber:
-          typeof args.issueNumber === "string"
+          canonicalRun?.manifest.issueNumber ??
+          (typeof args.issueNumber === "string"
             ? parseInt(args.issueNumber, 10) || 1
-            : args.issueNumber,
-        issueTitle: args.issueTitle,
+            : args.issueNumber),
+        issueTitle: canonicalRun?.manifest.issueTitle ?? args.issueTitle,
         summary: args.summary,
-        validationCommand: args.validationCommand,
-        validationOutputSnippet: args.validationOutputSnippet,
+        // Canonical runs may only render verification facts from the
+        // host-owned EvidenceReport. Caller-supplied validation text is
+        // diagnostic-only and is never persisted into the PR draft.
+        validationCommand: resolvedRunId ? undefined : args.validationCommand,
+        validationOutputSnippet: resolvedRunId
+          ? undefined
+          : args.validationOutputSnippet,
         confidenceScore: args.confidenceScore,
         riskLevel: args.riskLevel,
         isDocumentationOnly: args.isDocumentationOnly,
         aiDisclosureRequired: args.aiDisclosureRequired,
+        evidence,
       });
 
       let savedArtifact = false;
-      if (args.runId) {
-        runManager.saveArtifact(args.runId, "pr_draft", prBody);
+      if (resolvedRunId && canonicalRun) {
+        runManager.saveArtifact(resolvedRunId, "pr_draft", prBody);
         savedArtifact = true;
       }
 
@@ -324,7 +345,7 @@ export function registerGovernanceTools(
               {
                 status: "success",
                 prBody,
-                savedToRun: savedArtifact ? args.runId : undefined,
+                savedToRun: savedArtifact ? resolvedRunId : undefined,
               },
               null,
               2,

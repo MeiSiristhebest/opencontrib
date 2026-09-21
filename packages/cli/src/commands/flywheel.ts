@@ -15,8 +15,9 @@ import {
 } from "../utils/output.js";
 import * as fs from "fs";
 
-const flywheel = new ProfileFlywheel();
-// Lazy factory: constructed on first use, not at module load time.
+// Storage-bound collaborators are constructed after Commander preAction
+// applies --home, never while command modules are imported.
+const getFlywheel = (): ProfileFlywheel => new ProfileFlywheel();
 let _runManager: ContributionRunManager | null = null;
 const getRunManager = (): ContributionRunManager =>
   (_runManager ??= buildContributionRunManager());
@@ -74,7 +75,7 @@ const flywheelSync = new Command("sync")
           );
         }
 
-        const result = flywheel.syncFromRun(runManager, runId);
+        const result = getFlywheel().syncFromRun(runManager, runId);
         const effectivePhase =
           runManager.getRun(runId)?.manifest.currentPhase || "COMPLETED";
         printJSON({ status: "success", flywheelResult: result }, opts.pretty);

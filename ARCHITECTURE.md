@@ -14,7 +14,7 @@ graph TD
 
     subgraph "OpenContrib Ingress Layer"
         CLI[OpenContrib CLI - 16 Command Domains]
-        MCP[MCP Server - 35 JSON-RPC Tools]
+        MCP[MCP Server - 39 JSON-RPC Tools]
     end
 
     subgraph "Deterministic Domain Engine"

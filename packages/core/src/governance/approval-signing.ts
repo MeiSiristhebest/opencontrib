@@ -19,6 +19,7 @@ export interface ApprovalSigningPayload {
   evidenceSha256: string;
   governanceSha256: string;
   policySha256: string;
+  communityGateSha256: string;
   prBodySha256: string;
   approvedBy: string;
   approvalMode: ApprovalArtifact["approvalMode"];
@@ -26,12 +27,13 @@ export interface ApprovalSigningPayload {
 
 /** Stable detached-signature payload; approvedAt is intentionally metadata only. */
 export function getApprovalSigningPayload(
-  request: ApprovalAuthorityRequest &
+  request: Omit<ApprovalAuthorityRequest, "communityGate"> &
     Omit<ApprovalAuthorityDecision, "signature" | "signingKeyId"> & {
       patchSha256: string;
       evidenceSha256: string;
       governanceSha256: string;
       policySha256: string;
+      communityGateSha256: string;
       prBodySha256: string;
     },
 ): string {
@@ -42,6 +44,7 @@ export function getApprovalSigningPayload(
     evidenceSha256: request.evidenceSha256,
     governanceSha256: request.governanceSha256,
     policySha256: request.policySha256,
+    communityGateSha256: request.communityGateSha256,
     prBodySha256: request.prBodySha256,
     approvedBy: request.approvedBy,
     approvalMode: request.approvalMode,
@@ -102,6 +105,7 @@ export class Ed25519ApprovalVerifier implements ApprovalArtifactVerifier {
       evidenceSha256: artifact.evidenceSha256,
       governanceSha256: artifact.governanceSha256,
       policySha256: artifact.policySha256,
+      communityGateSha256: artifact.communityGateSha256,
       prBodySha256: artifact.prBodySha256,
       approvedBy: artifact.approvedBy,
       approvalMode: artifact.approvalMode,

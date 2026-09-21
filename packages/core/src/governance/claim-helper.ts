@@ -1,4 +1,4 @@
-import type { PointerStub } from '../kernel/contract.js';
+import type { PointerStub } from "../kernel/contract.js";
 
 export interface IssueClaimPayload {
   issueNumber: number;
@@ -14,8 +14,9 @@ export interface IssueClaimPayload {
  */
 export class ClaimProtocol {
   /**
-   * Generates the authoritative Proactive Issue Claim Statement:
-   * "I have investigated this issue and have a reproducible test case and fix ready. Please assign this issue to me, I will submit a PR shortly."
+   * Generates a conservative Issue-First claim.  This helper has no access to
+   * canonical RED/GREEN evidence, so it must not claim that a fix is ready or
+   * that a PR is ready for submission.
    */
   public static generateClaimPayload(
     issueNumber: number,
@@ -26,14 +27,14 @@ export class ClaimProtocol {
       ? `Identified root cause in ${finding.file}:${finding.line} (${finding.title})`
       : `Investigated ${issueTitle}`;
 
-    const claimComment = `Hi @maintainers, I have investigated this issue and have a reproducible test case and fix ready. Please assign this issue to me, I will submit a PR shortly.\n\n* **Root Cause**: ${summary}\n* **Reproduction**: Verified in clean-room sandbox with automated test case.`;
+    const claimComment = `Hi @maintainers, I am investigating this issue and will share a reproduction once it is verified. Please assign this issue to me if appropriate; no fix or PR submission is being claimed yet.\n\n* **Root Cause**: ${summary}\n* **Reproduction**: Pending trusted RED capture; this claim is not verification evidence.`;
 
     return {
       issueNumber,
       issueTitle,
       claimComment,
       findingSummary: summary,
-      isReadyForPR: true,
+      isReadyForPR: false,
     };
   }
 
@@ -42,24 +43,21 @@ export class ClaimProtocol {
    * Aligns with GitHub's native bot detection (GET /users/{username} → type === "Bot").
    * No hardcoded suffix lists — the API is authoritative.
    */
-  public static isBotAuthor(
-    authorName: string,
-    authorType?: string,
-  ): boolean {
+  public static isBotAuthor(authorName: string, authorType?: string): boolean {
     if (authorType) {
       const typeLower = authorType.toLowerCase();
-      if (typeLower === 'bot') return true;
-      if (typeLower === 'user') return false;
+      if (typeLower === "bot") return true;
+      if (typeLower === "user") return false;
     }
     if (authorName) {
       const lower = authorName.toLowerCase();
       if (
-        lower.endsWith('[bot]') ||
-        lower.endsWith('-bot') ||
-        lower === 'stale' ||
-        lower.includes('github-actions') ||
-        lower.includes('dependabot') ||
-        lower.includes('codecov')
+        lower.endsWith("[bot]") ||
+        lower.endsWith("-bot") ||
+        lower === "stale" ||
+        lower.includes("github-actions") ||
+        lower.includes("dependabot") ||
+        lower.includes("codecov")
       ) {
         return true;
       }

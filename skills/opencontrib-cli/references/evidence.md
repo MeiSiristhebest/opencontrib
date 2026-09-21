@@ -4,10 +4,10 @@ Dual-stage empirical verification: a mandatory RED baseline (failing test + fail
 
 The `evidence` command exposes three subcommands:
 
-| Subcommand | Purpose |
-| :--- | :--- |
-| `evidence run` | One-shot dual-stage verification (baseline + post-fix stress loop) in a single invocation |
-| `evidence capture-red` | Capture an immutable RED baseline (failing test + source-tree hash) **before** applying the fix |
+| Subcommand              | Purpose                                                                                                  |
+| :---------------------- | :------------------------------------------------------------------------------------------------------- |
+| `evidence run`          | **Diagnostic-only compatibility mode**; it does not persist canonical Evidence V2 or advance a run       |
+| `evidence capture-red`  | Capture an immutable RED baseline (failing test + source-tree hash) **before** applying the fix          |
 | `evidence verify-green` | Run the GREEN check, bind it to the captured RED, and advance to `EVIDENCE_COLLECTED` only when verified |
 
 ---
@@ -35,38 +35,27 @@ opencontrib evidence verify-green \
 
 ---
 
-## One-shot: `evidence run`
+## Diagnostic compatibility: `evidence run`
 
-```bash
-# Standard empirical verification (targeted 1x clean run)
-opencontrib evidence run \
-  --cwd /path/to/workspace \
-  --test-cmd "bun test src/specific.test.ts" \
-  --run-id "$RUN_ID"
+`evidence run` is retained for inspection and stress diagnostics only. It cannot
+create the canonical Evidence V2 artifact or advance a contribution run. For a
+canonical run, always use `capture-red` before the fix and `verify-green` after
+the fix.
 
-# For concurrency / race condition / flaky bug fixes (optional stress loop & parallel workers)
-opencontrib evidence run \
-  --cwd /path/to/workspace \
-  --test-cmd "go test -v ./pkg/redis/..." \
-  --concurrency 5 \
-  --stress-loop 5 \
-  --run-id "$RUN_ID"
-```
+| Flag               | Type   | Required |       Default        | Description                                                                                  |
+| :----------------- | :----- | :------: | :------------------: | :------------------------------------------------------------------------------------------- |
+| `--cwd`            | string |    —     |    Active Session    | Workspace directory to run tests in (auto-resolved from active session)                      |
+| `--test-cmd`       | string |    ✓     |          —           | Targeted test command (e.g. `go test ./pkg/...`, `bun test ...`)                             |
+| `--concurrency`    | number |    —     |         `1`          | Workers started concurrently in each stress round (use $>1$ only for race/concurrency tests) |
+| `--stress-loop`    | number |    —     |         `1`          | Number of stress rounds (use $>1$ only for concurrency/flaky tests)                          |
+| `--pre-fix-cmd`    | string |    —     | same as `--test-cmd` | Separate command to trigger pre-fix failure                                                  |
+| `--assertion`      | string |    —     |          —           | Regex for expected failure before fix                                                        |
+| `--workspace-root` | string |    —     |          —           | Root workspace for security boundary                                                         |
+| `--baseline-sha`   | string |    —     |          —           | Baseline commit SHA before changes                                                           |
+| `--run-id`         | string |    —     |    Active Session    | Auto-resolved from active session if omitted                                                 |
+| `--pretty`         | flag   |    —     |        false         | Pretty-print output                                                                          |
 
-| Flag | Type | Required | Default | Description |
-| :--- | :--- | :---: | :---: | :--- |
-| `--cwd` | string | — | Active Session | Workspace directory to run tests in (auto-resolved from active session) |
-| `--test-cmd` | string | ✓ | — | Targeted test command (e.g. `go test ./pkg/...`, `bun test ...`) |
-| `--concurrency` | number | — | `1` | Workers started concurrently in each stress round (use $>1$ only for race/concurrency tests) |
-| `--stress-loop` | number | — | `1` | Number of stress rounds (use $>1$ only for concurrency/flaky tests) |
-| `--pre-fix-cmd` | string | — | same as `--test-cmd` | Separate command to trigger pre-fix failure |
-| `--assertion` | string | — | — | Regex for expected failure before fix |
-| `--workspace-root` | string | — | — | Root workspace for security boundary |
-| `--baseline-sha` | string | — | — | Baseline commit SHA before changes |
-| `--run-id` | string | — | Active Session | Auto-resolved from active session if omitted |
-| `--pretty` | flag | — | false | Pretty-print output |
-
-For `capture-red`, add `--assertion` to match the expected failure. For `verify-green`, the RED baseline is read from the same `--run-id`.
+For `capture-red`, add `--assertion` to match the expected failure. For `verify-green`, the RED baseline is read from the same `--run-id`. The compatibility `evidence run` command is diagnostic-only and is not a substitute for this sequence.
 
 ### Stress execution semantics
 
@@ -85,3 +74,13 @@ For example, `--stress-loop 3 --concurrency 5` requests 15 executions in three r
 - **Deterministic Bug (Logic/Types/Bounds/Null)**: A single targeted regression test run (`--stress-loop 1`) is standard and sufficient. Do NOT run unnecessary 20x loops for simple bug fixes.
 - **Concurrency & Race Conditions**: For mutex, goroutine leak, or cache stampede fixes, pass `--concurrency 5` and `--stress-loop 5` to prove stability under contention.
 - **Dual-Stage Anchoring**: Use `--assertion` to mathematically prove pre-fix failure (RED) $\rightarrow$ post-fix pass (GREEN).
+
+<!-- OPENCONTRIB:GENERATED protocol:start -->
+## Canonical OpenContrib Protocol (generated)
+
+- **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
+- **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
+- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
+<!-- OPENCONTRIB:GENERATED protocol:end -->

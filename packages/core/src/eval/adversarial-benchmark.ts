@@ -38,6 +38,10 @@ import {
   type TrustedPolicyGitReader,
 } from "../kernel/config.js";
 import {
+  hashCommunityGateSnapshot,
+  readCommunityGateAtCommit,
+} from "../governance/community-gate.js";
+import {
   buildRunTransferBundle,
   type RunTransferBundle,
 } from "../run/run-transfer.js";
@@ -461,6 +465,7 @@ export class InMemoryTrustHost {
           evidenceSha256: challenge.evidenceSha256,
           governanceSha256: challenge.governanceSha256,
           policySha256: challenge.policySha256,
+          communityGateSha256: challenge.communityGateSha256,
           prBodySha256: challenge.prBodySha256,
           approvedBy: "benchmark-trusted-human",
           approvalMode: "explicit_human",
@@ -607,7 +612,7 @@ export interface SeedAgentOptions {
   fullAgentChain?: boolean;
   /**
    * Override the agent-side run store location. For the Pi CLI/MCP axes the
-   * spawned processes resolve runs via OPENCONTRIB_HOME/.opencontrib/runs,
+   * spawned processes resolve runs via the canonical resolver's dataDir/runs,
    * so the seeder must write there for the CLI to find the seeded run.
    */
   agentRunsBaseDir?: string;
@@ -645,6 +650,23 @@ export async function seedScriptedAgent(
     loadHostPolicy(),
     readBenchmarkBasePolicy(fixture),
   );
+  const agentCommunityGate = readCommunityGateAtCommit(
+    {
+      listTree: (policyPath) =>
+        runBenchmarkGit(fixture, [
+          "ls-tree",
+          "-r",
+          "--name-only",
+          fixture.baseSha,
+          "--",
+          policyPath,
+        ]),
+      show: (policyPath) =>
+        runBenchmarkGit(fixture, ["show", `${fixture.baseSha}:${policyPath}`]),
+    },
+    fixture.baseSha,
+    "BenchmarkCommunityGateSnapshotError",
+  );
   const manifest = agentRunManager.createRun({
     repoFullName: fixture.repoFullName,
     issueNumber: fixture.issueNumber,
@@ -663,6 +685,8 @@ export async function seedScriptedAgent(
       repoFullName: fixture.repoFullName,
       policySnapshot: agentPolicySnapshot,
       policySha256: hashTrustedPolicySnapshot(agentPolicySnapshot),
+      communityGate: agentCommunityGate,
+      communityGateSha256: hashCommunityGateSnapshot(agentCommunityGate),
       createdAt: new Date().toISOString(),
     },
     "WORKSPACE_PREPARED",
@@ -711,7 +735,6 @@ export async function seedScriptedAgent(
     manifest.runId,
     "patch",
     JSON.stringify(patch),
-    "PATCH_DRAFTED",
   );
   agentRunManager.saveArtifact(manifest.runId, "pr_draft", fixture.prDraft);
 
@@ -1032,6 +1055,7 @@ async function scenarioForgedApproval(ctx: ScenarioContextFull): Promise<void> {
     evidenceSha256: challenge.evidenceSha256,
     governanceSha256: challenge.governanceSha256,
     policySha256: challenge.policySha256,
+    communityGateSha256: challenge.communityGateSha256,
     prBodySha256: challenge.prBodySha256,
     approvedBy: "attacker",
     approvalMode: "explicit_human",
@@ -1050,6 +1074,7 @@ async function scenarioForgedApproval(ctx: ScenarioContextFull): Promise<void> {
       evidenceSha256: challenge.evidenceSha256,
       governanceSha256: challenge.governanceSha256,
       policySha256: challenge.policySha256,
+      communityGateSha256: challenge.communityGateSha256,
       prBodySha256: challenge.prBodySha256,
       approvedBy: "attacker",
       approvedAt: new Date().toISOString(),
@@ -1230,7 +1255,7 @@ export async function runAdversarialBenchmark(
   mkdirSync(baseRoot, { recursive: true });
 
   // Isolate the profile flywheel ledger (ProfileFlywheel writes to the
-  // OpenContrib home) so the benchmark never touches user state.
+  // resolver's canonical dataDir) so the benchmark never touches user state.
   const previousHome = process.env.OPENCONTRIB_HOME;
   const benchHome = join(baseRoot, "home");
   process.env.OPENCONTRIB_HOME = benchHome;

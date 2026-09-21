@@ -1,14 +1,23 @@
 import { createHash } from "node:crypto";
 import {
   ApprovalArtifactSchema,
+  ResultArtifactSchema,
+  SubmissionArtifactSchema,
   SubmissionIntentArtifactSchema,
   type SubmissionArtifact,
 } from "../contracts/schemas.js";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { ApprovalService } from "../governance/approval-service.js";
 import { ProfileFlywheel } from "../flywheel/profile-sync.js";
-import type { RemoteCompletionAttestation } from "../run/completion-attestation.js";
+import {
+  RemoteCompletionAttestationSchema,
+  type RemoteCompletionAttestation,
+} from "../run/completion-attestation.js";
 import { TrustedRunMaterializer } from "../run/trusted-run-host.js";
+import {
+  markCanonicalRunFailed,
+  recordCanonicalRunFailure,
+} from "../run/canonical-writer.js";
 import {
   RunTransferBundleSchema,
   type RunTransferBundle,
@@ -42,6 +51,12 @@ export class SubmissionApprovalRequiredError extends Error {
  * re-reads canonical artifacts; callers cannot supply provider options or a
  * GitHub credential.
  */
+function isRetryableProviderFailure(message: string): boolean {
+  return /\b5\d\d\b|transient|temporar(?:y|ily)|rate[- ]?limit|timeout/i.test(
+    message,
+  );
+}
+
 export class TrustedSubmissionBroker {
   constructor(
     private readonly runManager: ContributionRunManager,
@@ -145,6 +160,29 @@ export class TrustedSubmissionBroker {
         "SubmissionIntentMismatchError: requested intent does not match the canonical run.",
       );
     }
+    // A provider write may have succeeded just before a response, cleanup, or
+    // completion failure. Reconcile the canonical verified artifact instead of
+    // attempting a second provider write or rolling the lifecycle backward.
+    if (
+      run &&
+      (run.manifest.currentPhase === "PR_SUBMITTED" ||
+        run.manifest.currentPhase === "COMPLETED")
+    ) {
+      const existingSubmission = SubmissionArtifactSchema.safeParse(
+        run.artifacts.submission,
+      );
+      if (
+        !existingSubmission.success ||
+        existingSubmission.data.runId !== request.runId ||
+        existingSubmission.data.intentSha256 !== intent.data.intentSha256
+      ) {
+        throw new Error(
+          "SubmissionBrokerIntegrityError: terminal submission phase lacks a matching verified SubmissionArtifact.",
+        );
+      }
+      this.submissionService.authorizeSubmission(request.runId);
+      return existingSubmission.data;
+    }
     const approval = ApprovalArtifactSchema.safeParse(run?.artifacts.approval);
     if (!approval.success) {
       const challenge = new ApprovalService(this.runManager).requestApproval(
@@ -153,8 +191,44 @@ export class TrustedSubmissionBroker {
       throw new SubmissionApprovalRequiredError(challenge);
     }
 
-    const result = await this.submissionService.submit(request.runId);
-    if (result.submissionArtifact.intentSha256 !== intent.data.intentSha256) {
+    let result: Awaited<ReturnType<GitHubSubmissionService["submit"]>>;
+    try {
+      result = await this.submissionService.submit(request.runId);
+    } catch (error) {
+      // Preserve the approved phase for explicitly retryable provider
+      // outages. A retry is still re-authorized from canonical artifacts; no
+      // lifecycle rollback or automatic PR deletion is attempted. Non-retryable
+      // verification/provider failures remain terminally FAILED for
+      // reconciliation.
+      try {
+        const reason = error instanceof Error ? error.message : String(error);
+        if (isRetryableProviderFailure(reason)) {
+          recordCanonicalRunFailure(
+            this.runManager,
+            request.runId,
+            reason,
+            true,
+            true,
+          );
+        } else {
+          markCanonicalRunFailed(
+            this.runManager,
+            request.runId,
+            reason,
+            false,
+            true,
+          );
+        }
+      } catch {
+        // Preserve the provider error if the failure marker cannot be sealed.
+      }
+      throw error;
+    }
+    if (
+      result.submissionArtifact.runId !== request.runId ||
+      result.submissionArtifact.intentSha256 !== intent.data.intentSha256 ||
+      result.submissionArtifact.verified !== true
+    ) {
       throw new Error(
         "SubmissionBrokerIntegrityError: provider result is not bound to the canonical intent.",
       );
@@ -170,24 +244,41 @@ export class TrustedSubmissionBroker {
     runId: string,
     submission: SubmissionArtifact,
   ): RemoteCompletionAttestation {
+    const parsedSubmission = SubmissionArtifactSchema.safeParse(submission);
+    if (
+      !parsedSubmission.success ||
+      parsedSubmission.data.runId !== runId ||
+      parsedSubmission.data.verified !== true
+    ) {
+      throw new Error(
+        "SubmissionBrokerIntegrityError: completion requires a verified canonical SubmissionArtifact for the requested run.",
+      );
+    }
     const flywheel = new ProfileFlywheel();
     flywheel.syncFromRun(this.runManager, runId);
     const run = this.runManager.getRun(runId);
-    const resultArtifact = run?.artifacts.result;
+    const resultResult = ResultArtifactSchema.safeParse(run?.artifacts.result);
+    if (!resultResult.success) {
+      throw new Error(
+        "SubmissionBrokerIntegrityError: host did not persist a verified ResultArtifact before issuing completion.",
+      );
+    }
+    const resultArtifact = resultResult.data;
     const resultSha256 = createHash("sha256")
-      .update(JSON.stringify(resultArtifact || ""))
+      .update(JSON.stringify(resultArtifact))
       .digest("hex");
-    return {
+    const attestation = {
       runId,
-      hostIntentSha256: submission.intentSha256,
-      prNumber: submission.prNumber,
-      prUrl: submission.prUrl,
-      headSha: submission.headSha,
+      hostIntentSha256: parsedSubmission.data.intentSha256,
+      prNumber: parsedSubmission.data.prNumber,
+      prUrl: parsedSubmission.data.prUrl,
+      headSha: parsedSubmission.data.headSha,
       resultSha256,
-      verified: true,
-      completedAt: submission.submittedAt,
-      submissionArtifact: submission,
-      resultArtifact: resultArtifact as any,
+      verified: true as const,
+      completedAt: parsedSubmission.data.submittedAt,
+      submissionArtifact: parsedSubmission.data,
+      resultArtifact,
     };
+    return RemoteCompletionAttestationSchema.parse(attestation);
   }
 }

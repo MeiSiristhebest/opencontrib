@@ -48,6 +48,10 @@ function buildDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
     memory: { recordSuccess: () => {} } as any,
     flywheel: { saveRecord: () => {} } as any,
     worktreeManager: {
+      // The canonical workspace snapshot now inspects repository policy at the
+      // verified base commit. This offline double represents a clean baseline
+      // with no community-policy files.
+      runGit: () => ({ success: true, stdout: "", stderr: "" }),
       createIsolatedWorkspace: () => ({
         workspacePath,
         branchName: "fix/branch",
@@ -98,9 +102,8 @@ function profile() {
 
 describe("AgentOrchestrator pipeline (injected, offline)", () => {
   it("runs the full pipeline to DRY_RUN_COMPLETED", async () => {
-    const { AgentOrchestrator } = await import(
-      "../src/orchestration/agent-orchestrator.js"
-    );
+    const { AgentOrchestrator } =
+      await import("../src/orchestration/agent-orchestrator.js");
     const orchestrator = new AgentOrchestrator({ deps: buildDeps() });
 
     const result = await orchestrator.runPipeline({ profile: profile() });
@@ -116,9 +119,8 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
   });
 
   it("halts at HUMAN_GATE in interactive mode when not approved", async () => {
-    const { AgentOrchestrator } = await import(
-      "../src/orchestration/agent-orchestrator.js"
-    );
+    const { AgentOrchestrator } =
+      await import("../src/orchestration/agent-orchestrator.js");
     const deps = buildDeps({
       stateMachine: new ContributionStateMachine({
         mode: "interactive",
@@ -136,9 +138,8 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
   });
 
   it("blocks at PATCH_DESIGN when no LLM provider is configured", async () => {
-    const { AgentOrchestrator } = await import(
-      "../src/orchestration/agent-orchestrator.js"
-    );
+    const { AgentOrchestrator } =
+      await import("../src/orchestration/agent-orchestrator.js");
     const deps = buildDeps({ llmService: undefined });
     const orchestrator = new AgentOrchestrator({ deps });
 

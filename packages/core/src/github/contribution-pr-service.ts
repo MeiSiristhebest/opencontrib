@@ -41,6 +41,11 @@ function isSafeGitPath(path: string): boolean {
     .every((part) => part.length > 0 && part !== "." && part !== "..");
 }
 
+/**
+ * Trusted provider writer.  This module is intentionally not exported from
+ * the public `@opencontrib/core` GitHub barrel; only the trusted submission
+ * composition root should construct it.
+ */
 export class ContributionPrService {
   private client: GitHubClient;
   private octokit: Octokit;
