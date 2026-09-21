@@ -60,7 +60,7 @@ Does the agent produce clean, professional open-source artifacts?
 ## Output Format
 Respond ONLY with a valid JSON object. No markdown fences, no preamble.
 {
-  "chainOfThought": "<step-by-step reasoning before scoring>",
+  "evaluationRationale": "<brief evaluation rationale>",
   "dimensions": {
     "problemFormulation": { "score": <0–100>, "reasoning": "<evidence from trajectory>", "evidenceQuotes": ["<exact step text>"] },
     "contextEconomy":     { "score": <0–100>, "reasoning": "<evidence from trajectory>", "evidenceQuotes": ["<exact step text>"] },
@@ -81,7 +81,7 @@ const JudgeDimOutputSchema = z.object({
 });
 
 export const JudgeOutputSchema = z.object({
-  chainOfThought: z.string().optional().default(""),
+  evaluationRationale: z.string().optional().default(""),
   dimensions: z.object({
     problemFormulation: JudgeDimOutputSchema,
     contextEconomy: JudgeDimOutputSchema,
@@ -90,12 +90,6 @@ export const JudgeOutputSchema = z.object({
     verificationQuality: JudgeDimOutputSchema.optional(),
     communityCraftsmanship: JudgeDimOutputSchema,
   }),
-  overallVerdict: z.enum([
-    "EXEMPLARY",
-    "PROFICIENT",
-    "NEEDS_IMPROVEMENT",
-    "UNSATISFACTORY",
-  ]),
   strengths: z.array(z.string()),
   criticalCritiques: z.array(z.string()),
   actionableDirectives: z.array(z.string()),
@@ -312,6 +306,6 @@ export function parseJudgeResponse(
     criticalCritiques: judgeOutput.criticalCritiques,
     actionableDirectives: judgeOutput.actionableDirectives,
     metrics: metrics ?? defaultMetrics,
-    chainOfThought: judgeOutput.chainOfThought,
+    evaluationRationale: judgeOutput.evaluationRationale,
   };
 }

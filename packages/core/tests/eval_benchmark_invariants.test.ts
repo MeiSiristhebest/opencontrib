@@ -11,11 +11,11 @@ import {
 } from '../src/eval/benchmark-runner.js';
 import type { BenchmarkBundle, ProtocolAction } from '../src/eval/types.js';
 
-function makeAction(action: string, stepIndex: number): ProtocolAction {
+function makeAction(action: string, stepIndex: number, runId?: string): ProtocolAction {
   const toolName = Object.entries(TOOL_TO_ACTION).find(
     ([, verb]) => verb === action,
   )?.[0] ?? `unknown_${action}`;
-  return { action, ingress: "mcp", toolName, stepIndex };
+  return { action, ingress: "mcp", toolName, stepIndex, runId };
 }
 
 describe("Benchmark canonical invariants", () => {

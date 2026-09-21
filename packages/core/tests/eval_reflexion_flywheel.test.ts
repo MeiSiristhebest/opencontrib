@@ -47,7 +47,7 @@ function makeReport(overrides: Partial<JudgeEvaluationReport> = {}): JudgeEvalua
       'Add concurrency stress with --concurrency 8 before submitting PR.',
     ],
     metrics: MOCK_METRICS,
-    chainOfThought: 'The agent showed some targeted navigation but violated context economy rules...',
+    evaluationRationale: 'The agent showed some targeted navigation but violated context economy rules...',
     ...overrides,
   };
 }

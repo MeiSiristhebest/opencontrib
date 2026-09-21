@@ -178,9 +178,21 @@ export function crossValidateWithBundle(
 
   const phases = new Set(bundle.eventPhases);
   const artifacts = new Set(bundle.artifactTypes ?? []);
+  const bundleRunId = bundle.manifest?.runId;
 
   for (const action of actions) {
     if (action.action === 'UNKNOWN') continue;
+    if (bundleRunId) {
+      if (!action.runId) {
+        errors.push(
+          `Transcript action ${action.action} is missing runId and cannot be bound to the canonical run bundle.`,
+        );
+      } else if (action.runId !== bundleRunId) {
+        errors.push(
+          `Transcript action runId (${action.runId}) does not match bundle manifest runId (${bundleRunId}).`,
+        );
+      }
+    }
 
     // Check that the corresponding phase event exists
     const expectedPhase = ACTION_TO_PHASE[action.action];

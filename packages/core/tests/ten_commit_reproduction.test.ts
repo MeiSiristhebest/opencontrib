@@ -167,7 +167,7 @@ describe('Commit 6 (091d670): Eval v2 Module — 4 subcommands, Agent-Native', (
 
   it('parseJudgeResponse scores a valid JSON response', () => {
     const rawJson = JSON.stringify({
-      chainOfThought: 'Step by step reasoning',
+      evaluationRationale: 'Step by step reasoning',
       dimensions: {
         problemFormulation: { score: 85, reasoning: 'Good' },
         contextEconomy: { score: 90, reasoning: 'Good' },
@@ -175,7 +175,6 @@ describe('Commit 6 (091d670): Eval v2 Module — 4 subcommands, Agent-Native', (
         concurrencyStress: { score: 85, reasoning: 'Good' },
         communityCraftsmanship: { score: 88, reasoning: 'Good' },
       },
-      overallVerdict: 'PROFICIENT',
       strengths: ['Targeted'],
       criticalCritiques: [],
       actionableDirectives: [],
@@ -198,9 +197,9 @@ describe('Commit 6 (091d670): Eval v2 Module — 4 subcommands, Agent-Native', (
 // ─── Commit 5: 7b77a6f — 6-Dimension Checkpoint Contracts ─────────────────────
 
 describe('Commit 5 (7b77a6f): 6-Dimension Checkpoint Contracts', () => {
-  it('JudgeOutputSchema validates 5 dimensions + overallVerdict (6 checkpoints)', () => {
+  it('JudgeOutputSchema validates 5 dimensions + evaluationRationale', () => {
     const validOutput = {
-      chainOfThought: 'Reasoning',
+      evaluationRationale: 'Reasoning',
       dimensions: {
         problemFormulation: { score: 80, reasoning: 'Good' },
         contextEconomy: { score: 85, reasoning: 'Good' },
@@ -208,7 +207,6 @@ describe('Commit 5 (7b77a6f): 6-Dimension Checkpoint Contracts', () => {
         concurrencyStress: { score: 88, reasoning: 'Good' },
         communityCraftsmanship: { score: 84, reasoning: 'Good' },
       },
-      overallVerdict: 'PROFICIENT',
       strengths: ['A'],
       criticalCritiques: [],
       actionableDirectives: [],
@@ -217,27 +215,9 @@ describe('Commit 5 (7b77a6f): 6-Dimension Checkpoint Contracts', () => {
     expect(result.success).toBe(true);
   });
 
-  it('JudgeOutputSchema rejects missing overallVerdict', () => {
-    const invalidOutput = {
-      chainOfThought: 'Reasoning',
-      dimensions: {
-        problemFormulation: { score: 80, reasoning: 'Good' },
-        contextEconomy: { score: 85, reasoning: 'Good' },
-        empiricalRigor: { score: 82, reasoning: 'Good' },
-        concurrencyStress: { score: 88, reasoning: 'Good' },
-        communityCraftsmanship: { score: 84, reasoning: 'Good' },
-      },
-      strengths: ['A'],
-      criticalCritiques: [],
-      actionableDirectives: [],
-    };
-    const result = JudgeOutputSchema.safeParse(invalidOutput);
-    expect(result.success).toBe(false);
-  });
-
   it('JudgeOutputSchema rejects out-of-range scores', () => {
     const invalidOutput = {
-      chainOfThought: 'Reasoning',
+      evaluationRationale: 'Reasoning',
       dimensions: {
         problemFormulation: { score: 101, reasoning: 'Too high' },
         contextEconomy: { score: 85, reasoning: 'Good' },
@@ -245,7 +225,6 @@ describe('Commit 5 (7b77a6f): 6-Dimension Checkpoint Contracts', () => {
         concurrencyStress: { score: 88, reasoning: 'Good' },
         communityCraftsmanship: { score: 84, reasoning: 'Good' },
       },
-      overallVerdict: 'PROFICIENT',
       strengths: ['A'],
       criticalCritiques: [],
       actionableDirectives: [],

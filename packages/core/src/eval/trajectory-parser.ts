@@ -94,12 +94,19 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
         const extracted = extractProtocolToolName(name, parsedArgs);
         if (extracted) {
           totalContribActions++;
-          actions.push({
-            action: TOOL_TO_ACTION[extracted.toolName] ?? 'UNKNOWN',
-            ingress: extracted.ingress,
-            toolName: extracted.toolName,
-            stepIndex: raw.step_index ?? idx,
-          });
+        actions.push({
+          action: TOOL_TO_ACTION[extracted.toolName] ?? 'UNKNOWN',
+          ingress: extracted.ingress,
+          toolName: extracted.toolName,
+          stepIndex: raw.step_index ?? idx,
+          runId: typeof (parsedArgs as Record<string, unknown> | undefined)?.runId === 'string'
+            ? (parsedArgs as Record<string, unknown>).runId as string
+            : typeof raw.runId === 'string'
+              ? raw.runId
+              : typeof raw.run_id === 'string'
+                ? raw.run_id
+                : undefined,
+        });
         }
       }
 
@@ -187,7 +194,7 @@ function extractProtocolToolName(
 
 function normalizeProtocolToolName(rawName: string): string | undefined {
   const candidate = rawName.split('__').pop()?.split('.').pop() ?? rawName;
-  if (!Object.hasOwn(TOOL_TO_ACTION, candidate)) return undefined;
+  if (!Object.prototype.hasOwnProperty.call(TOOL_TO_ACTION, candidate)) return undefined;
   return candidate;
 }
 
