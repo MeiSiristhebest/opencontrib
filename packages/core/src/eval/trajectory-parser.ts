@@ -187,7 +187,7 @@ function extractProtocolToolName(
 
 function normalizeProtocolToolName(rawName: string): string | undefined {
   const candidate = rawName.split('__').pop()?.split('.').pop() ?? rawName;
-  if (!(candidate in TOOL_TO_ACTION)) return undefined;
+  if (!Object.hasOwn(TOOL_TO_ACTION, candidate)) return undefined;
   return candidate;
 }
 
@@ -205,28 +205,7 @@ function commandToProtocolToolName(cmd: string): string | undefined {
   return OPENCONTRIB_COMMAND_ACTIONS[tokens[0]] ?? undefined;
 }
 
-/**
- * Maps canonical tool names to canonical action verbs.
- * The action verb is what the benchmark and judge reason about.
- * The phase is NOT derived from the tool name — it comes from the run manifest.
- */
-const TOOL_TO_ACTION: Record<string, string> = {
-  contrib_create_run: 'CREATE_RUN',
-  contrib_scout: 'SCOUT',
-  contrib_probe_run: 'PROBE_RUN',
-  contrib_assemble_context: 'ASSEMBLE_CONTEXT',
-  contrib_prepare_workspace: 'PREPARE_WORKSPACE',
-  contrib_capture_red: 'CAPTURE_RED',
-  contrib_verify_poc: 'VERIFY_POC',
-  contrib_save_artifact: 'SAVE_ARTIFACT',
-  contrib_verify_green: 'VERIFY_GREEN',
-  contrib_render_pr_template: 'RENDER_PR_TEMPLATE',
-  contrib_audit_governance: 'AUDIT_GOVERNANCE',
-  contrib_request_approval: 'REQUEST_APPROVAL',
-  contrib_submit_pr: 'SUBMIT_PR',
-  contrib_sync_flywheel: 'SYNC_FLYWHEEL',
-  contrib_resume_run: 'RESUME_RUN',
-};
+import { TOOL_TO_ACTION } from './benchmark-runner.js';
 
 function safeParseJson(str: string): Record<string, unknown> {
   try {

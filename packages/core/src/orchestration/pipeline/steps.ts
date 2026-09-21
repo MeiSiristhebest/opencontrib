@@ -986,32 +986,6 @@ export class PrSubmissionStep implements PipelineStep {
       );
     }
 
-    // Use issue_binding artifact for provider-verified issue number.
-    // Falls back to run manifest issueNumber, then selectedOpp.issueNumber.
-    const persistedRun = ctx.runId ? runManager.getRun(ctx.runId) : null;
-    const issueBindingArtifact = persistedRun?.artifacts.issueBinding as
-      | Record<string, unknown>
-      | undefined;
-    const effectiveIssueNumber = (
-      (issueBindingArtifact?.providerIssueId as number)
-      ?? persistedRun?.manifest.issueNumber
-      ?? selectedOpp.issueNumber
-    ) as number;
-
-    const prDraftText = buildPrDescription({
-      issueNumber: effectiveIssueNumber,
-      problemSummary: activePatch?.summary || selectedOpp.title,
-      rootCause:
-        activePatch?.rationale || "Unavailable (root cause not recorded)",
-      keyChanges: derivedKeyChanges,
-      verificationCommand: ctx.evidenceReport
-        ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
-          ctx.testCmd ||
-          ""
-        : "",
-      evidence: ctx.evidenceReport,
-    });
-
     let prUrl: string;
     let prNumber: number;
 
@@ -1029,7 +1003,7 @@ export class PrSubmissionStep implements PipelineStep {
       }
 
       // Save issue_binding artifact for provider-verified issue provenance.
-      // This prevents "Fixes #0" when the issue number is discovered late.
+      // Must be written BEFORE reading for PR description to prevent "Fixes #0".
       if (selectedOpp.issueNumber > 0) {
         runManager.saveArtifact(runId, "issue_binding", {
           providerIssueId: selectedOpp.issueNumber,
@@ -1040,6 +1014,32 @@ export class PrSubmissionStep implements PipelineStep {
           createdAt: new Date().toISOString(),
         } as any);
       }
+
+      // Use issue_binding artifact for provider-verified issue number.
+      // Falls back to run manifest issueNumber, then selectedOpp.issueNumber.
+      const persistedRun = runManager.getRun(runId);
+      const issueBindingArtifact = persistedRun?.artifacts.issueBinding as
+        | Record<string, unknown>
+        | undefined;
+      const effectiveIssueNumber = (
+        (issueBindingArtifact?.providerIssueId as number)
+        ?? persistedRun?.manifest.issueNumber
+        ?? selectedOpp.issueNumber
+      ) as number;
+
+      const prDraftText = buildPrDescription({
+        issueNumber: effectiveIssueNumber,
+        problemSummary: activePatch?.summary || selectedOpp.title,
+        rootCause:
+          activePatch?.rationale || "Unavailable (root cause not recorded)",
+        keyChanges: derivedKeyChanges,
+        verificationCommand: ctx.evidenceReport
+          ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
+            ctx.testCmd ||
+            ""
+          : "",
+        evidence: ctx.evidenceReport,
+      });
 
       // Ensure only non-authoritative stage artifacts are written generically;
       // evidence must already have been produced by EvidenceService.
@@ -1055,8 +1055,8 @@ export class PrSubmissionStep implements PipelineStep {
       if (ctx.activePatch) {
         runManager.saveArtifact(runId, "patch", ctx.activePatch as any);
       }
-      const persistedRun = runManager.getRun(runId);
-      if (!persistedRun?.artifacts.evidence) {
+      const refreshedRun = runManager.getRun(runId);
+      if (!refreshedRun?.artifacts.evidence) {
         throw new Error(
           "CanonicalEvidenceRequiredError: submission cannot proceed without EvidenceService output.",
         );

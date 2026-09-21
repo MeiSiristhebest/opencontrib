@@ -32,6 +32,7 @@ describe("Benchmark canonical invariants", () => {
       makeAction("AUDIT_GOVERNANCE", 7),
       makeAction("REQUEST_APPROVAL", 8),
       makeAction("SUBMIT_PR", 9),
+      makeAction("SYNC_FLYWHEEL", 10),
     ];
 
     const result = executeBenchmarkScenario(
@@ -58,6 +59,7 @@ describe("Benchmark canonical invariants", () => {
       makeAction("AUDIT_GOVERNANCE", 7),
       makeAction("REQUEST_APPROVAL", 8),
       makeAction("SUBMIT_PR", 9),
+      makeAction("SYNC_FLYWHEEL", 10),
     ];
 
     const result = executeBenchmarkScenario(
@@ -198,6 +200,7 @@ describe("Benchmark canonical invariants", () => {
       makeAction("AUDIT_GOVERNANCE", 7),
       makeAction("REQUEST_APPROVAL", 8),
       makeAction("SUBMIT_PR", 9),
+      makeAction("SYNC_FLYWHEEL", 10),
     ];
 
     const result = executeBenchmarkScenario(
@@ -335,6 +338,7 @@ describe("Run bundle cross-validation", () => {
       makeAction("AUDIT_GOVERNANCE", 7),
       makeAction("REQUEST_APPROVAL", 8),
       makeAction("SUBMIT_PR", 9),
+      makeAction("SYNC_FLYWHEEL", 10),
     ];
 
     // Bundle missing RED_CAPTURED phase and evidence_red artifact

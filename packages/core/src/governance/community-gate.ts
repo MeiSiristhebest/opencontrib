@@ -311,7 +311,8 @@ export function communityPolicyRequiresExplicitApproval(
     policy.hasGatingRules ||
     policy.requiresIssueApprovalBeforePr ||
     policy.autoClosesNewIssues ||
-    policy.hasLgtmApprovalProtocol,
+    policy.hasLgtmApprovalProtocol ||
+    policy.privateVulnerabilityDisclosure,
   );
 }
 

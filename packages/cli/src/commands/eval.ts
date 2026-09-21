@@ -61,12 +61,16 @@ function readRunBundle(bundleDir: string): BenchmarkBundle {
     }
   }
 
-  // Discover artifact files by filename convention (e.g. evidence_red.json, patch.json)
+  // Discover artifact files by filename convention (e.g. evidence_red.json, patch.diff)
   try {
     const files = fs.readdirSync(bundleDir);
     for (const file of files) {
-      if (file.endsWith(".json") && file !== "manifest.json") {
+      if (file === "manifest.json") continue;
+      if (file.endsWith(".json")) {
         artifactTypes.push(file.replace(/\.json$/, ""));
+      } else if (file.endsWith(".diff")) {
+        // patch.diff is the canonical artifact for patch type
+        artifactTypes.push("patch");
       }
     }
   } catch {

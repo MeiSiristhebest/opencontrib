@@ -362,9 +362,9 @@ export type SubmissionIntentArtifact = z.infer<
  * maintainer LGTM before PR submission.
  */
 export const MaintainerGateEvidenceSchema = z.object({
-  actorAssociation: z.literal("MEMBER"),
+  actorAssociation: z.enum(["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR"]),
   providerEventId: z.string().min(1),
-  providerVerified: z.boolean(),
+  providerVerified: z.literal(true),
   reviewState: z.literal("APPROVED"),
   reviewerLogin: z.string().min(1),
   reviewerType: z.enum(["User", "Bot"]),
@@ -388,6 +388,21 @@ export const ApprovalArtifactSchema = z.object({
   maintainerGateEvidence: MaintainerGateEvidenceSchema.optional(),
   signingKeyId: z.string().min(1),
   signature: z.string().min(1),
+}).superRefine((val, ctx) => {
+  if (val.approvalMode === 'maintainer_evidence' && !val.maintainerGateEvidence) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'maintainerGateEvidence is required when approvalMode is "maintainer_evidence"',
+      path: ['maintainerGateEvidence'],
+    });
+  }
+  if (val.approvalMode !== 'maintainer_evidence' && val.maintainerGateEvidence) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'maintainerGateEvidence must be omitted when approvalMode is not "maintainer_evidence"',
+      path: ['maintainerGateEvidence'],
+    });
+  }
 });
 export type ApprovalArtifact = z.infer<typeof ApprovalArtifactSchema>;
 

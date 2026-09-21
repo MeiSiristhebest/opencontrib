@@ -78,6 +78,7 @@ const CANONICAL_ORDERING: [string, string][] = [
   ['RENDER_PR_TEMPLATE', 'AUDIT_GOVERNANCE'],
   ['AUDIT_GOVERNANCE', 'REQUEST_APPROVAL'],
   ['REQUEST_APPROVAL', 'SUBMIT_PR'],
+  ['SUBMIT_PR', 'SYNC_FLYWHEEL'],
 ];
 
 /** Check that the first non-noise action in the transcript is CREATE_RUN. */
@@ -133,6 +134,7 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
       'AUDIT_GOVERNANCE',
       'REQUEST_APPROVAL',
       'SUBMIT_PR',
+      'SYNC_FLYWHEEL',
     ],
   },
   {
@@ -155,6 +157,7 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
       'AUDIT_GOVERNANCE',
       'REQUEST_APPROVAL',
       'SUBMIT_PR',
+      'SYNC_FLYWHEEL',
     ],
   },
 ];

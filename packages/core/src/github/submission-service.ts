@@ -167,7 +167,8 @@ export class GitHubSubmissionService {
       communityPolicyRequiresExplicitApproval(
         governanceResult.data.communityGate.policy,
       ) &&
-      approval.approvalMode !== "explicit_human"
+      approval.approvalMode !== "explicit_human" &&
+      approval.approvalMode !== "maintainer_evidence"
     ) {
       throw new SubmissionVerificationError(
         "Cannot authorize submission: detected community policy requires explicit human approval; policy waiver is not accepted.",
