@@ -42,6 +42,9 @@ export type ArtifactType =
   | "poc"
   | "patch"
   | "validated_patch"
+  | "patch_attempt"
+  | "issue_binding"
+  | "security_disclosure"
   | "evidence_red"
   | "evidence"
   | "governance"
@@ -78,6 +81,9 @@ export interface ContributionRunSummary {
     poc?: Record<string, unknown>;
     patch?: string;
     validatedPatch?: Record<string, unknown>;
+    patchAttempt?: Record<string, unknown>;
+    issueBinding?: Record<string, unknown>;
+    securityDisclosure?: Record<string, unknown>;
     evidenceRed?: Record<string, unknown>;
     evidence?: Record<string, unknown>;
     governance?: Record<string, unknown>;

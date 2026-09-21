@@ -63,7 +63,7 @@ export interface SubmissionPermit {
   policySha256: string;
   communityGateSha256: string;
   prBodySha256: string;
-  approvalMode: "explicit_human" | "policy_waived";
+  approvalMode: "explicit_human" | "policy_waived" | "maintainer_evidence";
 }
 
 function sameJson(a: unknown, b: unknown): boolean {

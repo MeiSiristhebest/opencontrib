@@ -353,6 +353,10 @@ export class ArtifactBundleManager {
         patch: this.readArtifact(runId, "patch") ?? undefined,
         validatedPatch:
           this.readArtifact(runId, "validated_patch") ?? undefined,
+        patchAttempt: this.readArtifact(runId, "patch_attempt") ?? undefined,
+        issueBinding: this.readArtifact(runId, "issue_binding") ?? undefined,
+        securityDisclosure:
+          this.readArtifact(runId, "security_disclosure") ?? undefined,
         evidenceRed: this.readArtifact(runId, "evidence_red") ?? undefined,
         evidence: this.readArtifact(runId, "evidence") ?? undefined,
         governance: this.readArtifact(runId, "governance") ?? undefined,

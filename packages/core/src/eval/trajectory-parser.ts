@@ -91,13 +91,13 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
         }
 
         // 3. Metric: canonical OpenContrib actions (MCP/CLI protocol verbs)
-        const canonicalToolName = extractProtocolToolName(name, parsedArgs);
-        if (canonicalToolName) {
+        const extracted = extractProtocolToolName(name, parsedArgs);
+        if (extracted) {
           totalContribActions++;
           actions.push({
-            kind: 'contrib',
-            canonicalPhase: PROTOCOL_ACTION_PHASES[canonicalToolName] ?? 'OTHER',
-            toolName: canonicalToolName,
+            action: TOOL_TO_ACTION[extracted.toolName] ?? 'UNKNOWN',
+            ingress: extracted.ingress,
+            toolName: extracted.toolName,
             stepIndex: raw.step_index ?? idx,
           });
         }
@@ -168,14 +168,18 @@ const OPENCONTRIB_COMMAND_ACTIONS: Record<string, string> = {
   'run resume': 'contrib_resume_run',
 };
 
-function extractProtocolToolName(rawName: string, args: unknown): string | undefined {
+function extractProtocolToolName(
+  rawName: string,
+  args: unknown,
+): { toolName: string; ingress: 'mcp' | 'cli' } | undefined {
   const name = normalizeProtocolToolName(rawName);
-  if (name) return name;
+  if (name) return { toolName: name, ingress: 'mcp' };
 
   if (rawName === 'run_command') {
     const record = args as Record<string, unknown> | undefined;
     const cmd = unwrapCommandString(record?.CommandLine ?? record?.command ?? '');
-    return commandToProtocolToolName(cmd);
+    const mapped = commandToProtocolToolName(cmd);
+    if (mapped) return { toolName: mapped, ingress: 'cli' };
   }
 
   return undefined;
@@ -183,7 +187,8 @@ function extractProtocolToolName(rawName: string, args: unknown): string | undef
 
 function normalizeProtocolToolName(rawName: string): string | undefined {
   const candidate = rawName.split('__').pop()?.split('.').pop() ?? rawName;
-  return candidate.startsWith('contrib_') ? candidate : undefined;
+  if (!(candidate in TOOL_TO_ACTION)) return undefined;
+  return candidate;
 }
 
 function commandToProtocolToolName(cmd: string): string | undefined {
@@ -200,22 +205,27 @@ function commandToProtocolToolName(cmd: string): string | undefined {
   return OPENCONTRIB_COMMAND_ACTIONS[tokens[0]] ?? undefined;
 }
 
-const PROTOCOL_ACTION_PHASES: Record<string, string> = {
-  contrib_create_run: 'INITIALIZED',
-  contrib_scout: 'OPPORTUNITY_SCOUTED',
-  contrib_probe_run: 'PROBE_COMPLETED',
-  contrib_assemble_context: 'CONTEXT_ASSEMBLED',
-  contrib_prepare_workspace: 'WORKSPACE_PREPARED',
-  contrib_capture_red: 'RED_CAPTURED',
-  contrib_verify_poc: 'POC_GENERATED',
-  contrib_save_artifact: 'PATCH_DRAFTED',
-  contrib_verify_green: 'EVIDENCE_COLLECTED',
-  contrib_audit_governance: 'GOVERNANCE_AUDITED',
-  contrib_request_approval: 'GOVERNANCE_AUDITED',
-  contrib_submit_pr: 'PR_SUBMITTED',
-  contrib_sync_flywheel: 'COMPLETED',
-  contrib_resume_run: 'FAILED',
-  contrib_run_pipeline: 'PR_SUBMITTED',
+/**
+ * Maps canonical tool names to canonical action verbs.
+ * The action verb is what the benchmark and judge reason about.
+ * The phase is NOT derived from the tool name — it comes from the run manifest.
+ */
+const TOOL_TO_ACTION: Record<string, string> = {
+  contrib_create_run: 'CREATE_RUN',
+  contrib_scout: 'SCOUT',
+  contrib_probe_run: 'PROBE_RUN',
+  contrib_assemble_context: 'ASSEMBLE_CONTEXT',
+  contrib_prepare_workspace: 'PREPARE_WORKSPACE',
+  contrib_capture_red: 'CAPTURE_RED',
+  contrib_verify_poc: 'VERIFY_POC',
+  contrib_save_artifact: 'SAVE_ARTIFACT',
+  contrib_verify_green: 'VERIFY_GREEN',
+  contrib_render_pr_template: 'RENDER_PR_TEMPLATE',
+  contrib_audit_governance: 'AUDIT_GOVERNANCE',
+  contrib_request_approval: 'REQUEST_APPROVAL',
+  contrib_submit_pr: 'SUBMIT_PR',
+  contrib_sync_flywheel: 'SYNC_FLYWHEEL',
+  contrib_resume_run: 'RESUME_RUN',
 };
 
 function safeParseJson(str: string): Record<string, unknown> {
