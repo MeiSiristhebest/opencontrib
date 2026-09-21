@@ -27,6 +27,8 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
   let wholeFileRgDumps = 0;
   let shellScriptWriteHacks = 0;
   let totalContribActions = 0;
+  let toolCallDurationMs = 0;
+  const eventTimestamps: number[] = [];
 
   const rgDumpRegex = /rg\s+.*?(?:-n\s+)?["']?(?:\.\*|\^)["']?\s+[A-Za-z0-9_\-\.\/\\:]+/i;
   const writeHackRegex = /(?:node\s+-e|python\s+-c)\s+.*?(?:fs\.(?:writeFileSync|writeFile)|Buffer\.from|open\(.*['"]w['"]\)|b64|create_clean_md)/i;
@@ -45,6 +47,10 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
         const duration = tc.durationMs || tc.duration;
         const exitCode = tc.exitCode;
         const output = tc.output || tc.result;
+
+        if (typeof duration === 'number' && duration > 0) {
+          toolCallDurationMs += duration;
+        }
 
         toolCalls.push({
           name,
@@ -85,15 +91,28 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
         }
 
         // 3. Metric: canonical OpenContrib actions (MCP/CLI protocol verbs)
-        if (name.startsWith('contrib_')) {
+        const canonicalToolName = extractProtocolToolName(name, parsedArgs);
+        if (canonicalToolName) {
           totalContribActions++;
           actions.push({
             kind: 'contrib',
-            canonicalPhase: PROTOCOL_ACTION_PHASES[name] ?? 'OTHER',
-            toolName: name,
+            canonicalPhase: PROTOCOL_ACTION_PHASES[canonicalToolName] ?? 'OTHER',
+            toolName: canonicalToolName,
             stepIndex: raw.step_index ?? idx,
           });
         }
+      }
+
+      const eventTimestamp = raw.timestamp || raw.created_at;
+      const parsedEventTimestamp = typeof eventTimestamp === 'number'
+        ? Number.isFinite(eventTimestamp)
+          ? eventTimestamp
+          : Number.NaN
+        : typeof eventTimestamp === 'string'
+          ? Date.parse(eventTimestamp)
+          : Number.NaN;
+      if (Number.isFinite(parsedEventTimestamp)) {
+        eventTimestamps.push(parsedEventTimestamp);
       }
 
       events.push({
@@ -101,12 +120,20 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
         type: eventType,
         content: raw.content || '',
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        timestamp: raw.timestamp || raw.created_at,
+        timestamp: eventTimestamp,
       });
     } catch {
       // Ignore unparseable lines
     }
   }
+
+  const durationMs = (() => {
+    if (toolCallDurationMs > 0) return toolCallDurationMs;
+    const first = eventTimestamps[0];
+    const last = eventTimestamps[eventTimestamps.length - 1];
+    if (first === undefined || last === undefined || last < first) return 0;
+    return last - first;
+  })();
 
   const metrics: TrajectoryMetrics = {
     totalSteps: events.length,
@@ -117,9 +144,60 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
     wholeFileRgDumpsDetected: wholeFileRgDumps,
     shellScriptWriteHacksDetected: shellScriptWriteHacks,
     totalContribActions,
+    totalDurationMs: durationMs,
   };
 
   return { events, metrics, actions };
+}
+
+const OPENCONTRIB_COMMAND_ACTIONS: Record<string, string> = {
+  'run create': 'contrib_create_run',
+  scout: 'contrib_scout',
+  'probe run': 'contrib_probe_run',
+  'discovery context': 'contrib_assemble_context',
+  'workspace prepare': 'contrib_prepare_workspace',
+  'evidence capture-red': 'contrib_capture_red',
+  'evidence verify-green': 'contrib_verify_green',
+  'verify': 'contrib_verify_poc',
+  'run save': 'contrib_save_artifact',
+  'governance audit': 'contrib_audit_governance',
+  'governance pr-template': 'contrib_render_pr_template',
+  'governance request-approval': 'contrib_request_approval',
+  submission: 'contrib_submit_pr',
+  'flywheel sync': 'contrib_sync_flywheel',
+  'run resume': 'contrib_resume_run',
+};
+
+function extractProtocolToolName(rawName: string, args: unknown): string | undefined {
+  const name = normalizeProtocolToolName(rawName);
+  if (name) return name;
+
+  if (rawName === 'run_command') {
+    const record = args as Record<string, unknown> | undefined;
+    const cmd = unwrapCommandString(record?.CommandLine ?? record?.command ?? '');
+    return commandToProtocolToolName(cmd);
+  }
+
+  return undefined;
+}
+
+function normalizeProtocolToolName(rawName: string): string | undefined {
+  const candidate = rawName.split('__').pop()?.split('.').pop() ?? rawName;
+  return candidate.startsWith('contrib_') ? candidate : undefined;
+}
+
+function commandToProtocolToolName(cmd: string): string | undefined {
+  const trimmed = cmd.trim();
+  const opencontribMatch = trimmed.match(/\bopencontrib\s+(.+)/);
+  const tokens = (opencontribMatch?.[1] ?? '').split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return undefined;
+
+  if (tokens.length >= 2) {
+    const twoToken = OPENCONTRIB_COMMAND_ACTIONS[`${tokens[0]} ${tokens[1]}`];
+    if (twoToken) return twoToken;
+  }
+
+  return OPENCONTRIB_COMMAND_ACTIONS[tokens[0]] ?? undefined;
 }
 
 const PROTOCOL_ACTION_PHASES: Record<string, string> = {
