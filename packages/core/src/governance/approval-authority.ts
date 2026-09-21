@@ -12,7 +12,7 @@ export interface ApprovalAuthorityRequest {
 
 export interface ApprovalAuthorityDecision {
   approvedBy: string;
-  approvalMode: "explicit_human" | "policy_waived";
+  approvalMode: "explicit_human" | "policy_waived" | "maintainer_evidence";
   signingKeyId: string;
   signature: string;
 }

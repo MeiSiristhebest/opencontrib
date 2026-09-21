@@ -32,8 +32,64 @@ import {
   PiAgentRunner,
   type AdversarialScenarioId,
 } from "@opencontrib/core";
+import type { BenchmarkBundle } from "@opencontrib/core";
 import { printJSON } from "../utils/output.js";
 import { CliExitError } from "../utils/exit.js";
+
+/**
+ * Read a run bundle directory (containing events.jsonl + artifact files)
+ * into a BenchmarkBundle for cross-validation against transcript actions.
+ */
+function readRunBundle(bundleDir: string): BenchmarkBundle {
+  const eventsPath = path.join(bundleDir, "events.jsonl");
+  const artifactTypes: string[] = [];
+  const eventPhases: string[] = [];
+
+  if (fs.existsSync(eventsPath)) {
+    const lines = fs
+      .readFileSync(eventsPath, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line) as { phase?: string };
+        if (event.phase) eventPhases.push(event.phase);
+      } catch {
+        /* skip malformed event */
+      }
+    }
+  }
+
+  // Discover artifact files by filename convention (e.g. evidence_red.json, patch.diff)
+  try {
+    const files = fs.readdirSync(bundleDir);
+    for (const file of files) {
+      if (file === "manifest.json") continue;
+      if (file.endsWith(".json")) {
+        artifactTypes.push(file.replace(/\.json$/, ""));
+      } else if (file === "patch.diff") {
+        // patch.diff is the canonical artifact for patch type
+        artifactTypes.push("patch");
+      }
+    }
+  } catch {
+    /* dir not readable */
+  }
+
+  let manifest: { runId: string; currentPhase: string } | undefined;
+  const manifestPath = path.join(bundleDir, "manifest.json");
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      manifest = { runId: m.runId, currentPhase: m.currentPhase };
+    } catch {
+      /* skip malformed manifest */
+    }
+  }
+
+  return { manifest, eventPhases, artifactTypes };
+}
 
 // ─── eval judge ───────────────────────────────────────────────────────────────
 // Phase 1: Compress trajectory and emit the judge prompt for a neutral sub-agent.
@@ -266,6 +322,10 @@ const benchmarkCommand = new Command("benchmark")
     "Trajectory JSONL for real execution evidence",
   )
   .option(
+    "--run-bundle <dir>",
+    "Run bundle directory (contains events.jsonl + artifact files) for cross-validation",
+  )
+  .option(
     "-v, --v2",
     "Output per-test verdicts in schema-v2 format with resolved_ids",
     false,
@@ -279,6 +339,7 @@ const benchmarkCommand = new Command("benchmark")
         patchFile?: string;
         fixtures?: string;
         transcript?: string;
+        runBundle?: string;
         v2?: boolean;
       },
     ) => {
@@ -360,12 +421,25 @@ const benchmarkCommand = new Command("benchmark")
           throw new CliExitError(1);
         }
 
+        // ── Read run bundle for cross-validation ──
+        let bundle: BenchmarkBundle | undefined;
+        if (opts.runBundle) {
+          if (!fs.existsSync(opts.runBundle)) {
+            printJSON(
+              { status: "error", message: `Run bundle not found: ${opts.runBundle}` },
+              opts?.pretty,
+            );
+            throw new CliExitError(1);
+          }
+          bundle = readRunBundle(opts.runBundle);
+        }
+
         const { metrics, actions } = parseTrajectoryFromJSONL(opts.transcript);
         const stepsCount = metrics.totalSteps;
         const durationMs = metrics.totalDurationMs ?? 0;
 
         const results = scenarioInstances.map((s) =>
-          executeBenchmarkScenario(s, actions, stepsCount, durationMs),
+          executeBenchmarkScenario(s, actions, stepsCount, durationMs, bundle),
         );
 
         const aggregate: {
@@ -376,7 +450,8 @@ const benchmarkCommand = new Command("benchmark")
             success: boolean;
             stepsTaken: number;
             durationMs: number;
-            phaseGatingVerified: boolean;
+            actionSequenceVerified: boolean;
+            runBundleVerified?: boolean;
             errors: string[];
           }[];
           appliedPatch?: string;

@@ -356,6 +356,21 @@ export type SubmissionIntentArtifact = z.infer<
   typeof SubmissionIntentArtifactSchema
 >;
 
+/**
+ * Provider-backed evidence that an upstream maintainer (not a local user)
+ * approved the contribution. Required when the community gate mandates
+ * maintainer LGTM before PR submission.
+ */
+export const MaintainerGateEvidenceSchema = z.object({
+  actorAssociation: z.enum(["OWNER", "MEMBER"]),
+  providerEventId: z.string().min(1),
+  providerVerified: z.literal(true),
+  reviewState: z.literal("APPROVED"),
+  reviewerLogin: z.string().min(1),
+  reviewerType: z.enum(["User", "Bot"]),
+});
+export type MaintainerGateEvidence = z.infer<typeof MaintainerGateEvidenceSchema>;
+
 export const ApprovalArtifactSchema = z.object({
   runId: z.string(),
   intentSha256: z.string(),
@@ -368,9 +383,26 @@ export const ApprovalArtifactSchema = z.object({
   prBodySha256: z.string(),
   approvedBy: z.string().min(1),
   approvedAt: z.string(),
-  approvalMode: z.enum(["explicit_human", "policy_waived"]),
+  approvalMode: z.enum(["explicit_human", "policy_waived", "maintainer_evidence"]),
+  /** Present when approvalMode is "maintainer_evidence". */
+  maintainerGateEvidence: MaintainerGateEvidenceSchema.optional(),
   signingKeyId: z.string().min(1),
   signature: z.string().min(1),
+}).superRefine((val, ctx) => {
+  if (val.approvalMode === 'maintainer_evidence' && !val.maintainerGateEvidence) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'maintainerGateEvidence is required when approvalMode is "maintainer_evidence"',
+      path: ['maintainerGateEvidence'],
+    });
+  }
+  if (val.approvalMode !== 'maintainer_evidence' && val.maintainerGateEvidence) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'maintainerGateEvidence must be omitted when approvalMode is not "maintainer_evidence"',
+      path: ['maintainerGateEvidence'],
+    });
+  }
 });
 export type ApprovalArtifact = z.infer<typeof ApprovalArtifactSchema>;
 
@@ -852,6 +884,7 @@ export const CommunityGatePolicySchema = z.object({
   autoClosesNewIssues: z.boolean(),
   hasLgtmApprovalProtocol: z.boolean(),
   restrictedTriageHours: z.boolean(),
+  privateVulnerabilityDisclosure: z.boolean().optional(),
   maxDiffCeiling: z.number().int().positive().optional(),
   reasons: z.array(z.string()),
   suggestedContributorAction: z.string(),

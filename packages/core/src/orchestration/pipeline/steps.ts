@@ -52,6 +52,38 @@ import type {
   OrchestratorSubagentReview,
 } from "./types.js";
 import { halt, continuePipeline } from "./types.js";
+import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
+
+// ── Phase -1: Run Creation (Run-First — must precede all scouting/workspace work) ──
+
+export class RunCreationStep implements PipelineStep {
+  readonly name = "RunCreation";
+  async execute(
+    ctx: PipelineContext,
+    deps: PipelineDeps,
+  ): Promise<StepOutcome> {
+    if (!ctx.targetRepo) {
+      deps.stateMachine.transition(
+        "BLOCKED",
+        "targetRepo is required for Run-First pipeline",
+      );
+      return halt({
+        status: "BLOCKED",
+        stage: "INITIALIZATION",
+        reportSummary:
+          "Pipeline requires a target repository (targetRepo) to create a contribution run. Provide targetRepo in the pipeline input.",
+      });
+    }
+
+    const runManager = deps.runManager ?? defaultRunManager;
+    ctx.runId = runManager.createRun({
+      repoFullName: ctx.targetRepo,
+    }).runId;
+
+    return continuePipeline();
+  }
+}
 
 // ── Phase 0: Discovery & Scout ──────────────────────────────────────────────
 
@@ -155,13 +187,6 @@ export class WorkspaceAllocationStep implements PipelineStep {
   ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
     const runManager = deps.runManager ?? defaultRunManager;
-    if (!ctx.runId) {
-      ctx.runId = runManager.createRun({
-        repoFullName: selectedOpp.repoFullName,
-        issueNumber: selectedOpp.issueNumber,
-        issueTitle: selectedOpp.title,
-      }).runId;
-    }
     deps.stateMachine.transition(
       "ONBOARDING",
       `Preparing clean-room worktree for ${selectedOpp.repoFullName}`,
@@ -171,7 +196,7 @@ export class WorkspaceAllocationStep implements PipelineStep {
       deps.worktreeManager,
     );
     const { context } = workspaceService.prepare({
-      runId: ctx.runId,
+      runId: ctx.runId!,
       issueOrTaskId: selectedOpp.issueNumber,
       repoFullName: selectedOpp.repoFullName,
     });
@@ -202,7 +227,7 @@ export class ContextAssemblyStep implements PipelineStep {
       issueNumber: selectedOpp.issueNumber,
       issueTitle: selectedOpp.title,
       issueBody: selectedOpp.body,
-      workspacePath: ctx.workspace!.workspacePath,
+      workspacePath: ctx.workspace?.workspacePath,
     });
     const prompt = deps.contextAssembler.formatContextPrompt(assembledContext);
 
@@ -216,10 +241,6 @@ export class ContextAssemblyStep implements PipelineStep {
     ctx.preFixReproductionCaptured = false;
     ctx.preFixOutput = "";
     ctx.evidenceReport = undefined;
-    // The legacy orchestration pipeline allocates its workspace before this
-    // step, while the canonical run contract records CONTEXT_ASSEMBLED before
-    // WORKSPACE_PREPARED. Keep the assembled context in the pipeline context;
-    // only the canonical CLI/MCP flow persists the phase-bound artifact here.
     return continuePipeline();
   }
 }
@@ -496,6 +517,43 @@ export class ImplementValidateLoopStep implements PipelineStep {
               (repairResult.data as any).files &&
               (repairResult.data as any).files.length > 0
             ) {
+              // Restore RED tree before applying repair patch — prevents
+              // canonical/workspace/memory active-patch divergence.
+              try {
+                execSync("git checkout .", {
+                  cwd: workspacePath,
+                  stdio: "pipe",
+                  timeout: 10000,
+                });
+              } catch (restoreErr: any) {
+                lastFailureOutput = `Failed to restore RED tree: ${restoreErr.message}`;
+                toolFeedback.push({
+                  turn: implementationAttempts,
+                  toolName: "restoreRedTree",
+                  output: lastFailureOutput,
+                  success: false,
+                });
+                validationStatus = "VALIDATION_FAILED";
+                continue;
+              }
+
+              // Create PatchAttempt artifact for provenance tracking.
+              const parentPatchHash = createHash("sha256")
+                .update(JSON.stringify(ctx.activePatch))
+                .digest("hex");
+              const patchAttempt = {
+                attemptNumber: implementationAttempts,
+                parentPatchSha256: parentPatchHash,
+                appliedFiles: accumulatedAppliedFiles,
+                failureOutput: lastFailureOutput,
+                createdAt: new Date().toISOString(),
+              };
+              (deps.runManager ?? defaultRunManager).saveArtifact(
+                ctx.runId!,
+                "patch_attempt",
+                patchAttempt as any,
+              );
+
               // SAFETY: PatchDraftSchema (Zod) validated repairResult.data at
               // runtime; the schema's output type is structurally identical to
               // PatchDraft. Guard above already checked `.files.length > 0`.
@@ -928,20 +986,6 @@ export class PrSubmissionStep implements PipelineStep {
       );
     }
 
-    const prDraftText = buildPrDescription({
-      issueNumber: selectedOpp.issueNumber,
-      problemSummary: activePatch?.summary || selectedOpp.title,
-      rootCause:
-        activePatch?.rationale || "Unavailable (root cause not recorded)",
-      keyChanges: derivedKeyChanges,
-      verificationCommand: ctx.evidenceReport
-        ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
-          ctx.testCmd ||
-          ""
-        : "",
-      evidence: ctx.evidenceReport,
-    });
-
     let prUrl: string;
     let prNumber: number;
 
@@ -958,6 +1002,45 @@ export class PrSubmissionStep implements PipelineStep {
         ctx.runId = runId;
       }
 
+      // Save issue_binding artifact for provider-verified issue provenance.
+      // Must be written BEFORE reading for PR description to prevent "Fixes #0".
+      if (selectedOpp.issueNumber > 0) {
+        runManager.saveArtifact(runId, "issue_binding", {
+          providerIssueId: selectedOpp.issueNumber,
+          providerVerified: true,
+          repoFullName: selectedOpp.repoFullName,
+          title: selectedOpp.title,
+          issueUrl: `https://github.com/${selectedOpp.repoFullName}/issues/${selectedOpp.issueNumber}`,
+          createdAt: new Date().toISOString(),
+        } as any);
+      }
+
+      // Use issue_binding artifact for provider-verified issue number.
+      // Falls back to run manifest issueNumber, then selectedOpp.issueNumber.
+      const persistedRun = runManager.getRun(runId);
+      const issueBindingArtifact = persistedRun?.artifacts.issueBinding as
+        | Record<string, unknown>
+        | undefined;
+      const effectiveIssueNumber = (
+        (issueBindingArtifact?.providerIssueId as number)
+        ?? persistedRun?.manifest.issueNumber
+        ?? selectedOpp.issueNumber
+      ) as number;
+
+      const prDraftText = buildPrDescription({
+        issueNumber: effectiveIssueNumber,
+        problemSummary: activePatch?.summary || selectedOpp.title,
+        rootCause:
+          activePatch?.rationale || "Unavailable (root cause not recorded)",
+        keyChanges: derivedKeyChanges,
+        verificationCommand: ctx.evidenceReport
+          ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
+            ctx.testCmd ||
+            ""
+          : "",
+        evidence: ctx.evidenceReport,
+      });
+
       // Ensure only non-authoritative stage artifacts are written generically;
       // evidence must already have been produced by EvidenceService.
       if (ctx.workspace && !runManager.getRun(runId)?.artifacts.workspace) {
@@ -972,8 +1055,8 @@ export class PrSubmissionStep implements PipelineStep {
       if (ctx.activePatch) {
         runManager.saveArtifact(runId, "patch", ctx.activePatch as any);
       }
-      const persistedRun = runManager.getRun(runId);
-      if (!persistedRun?.artifacts.evidence) {
+      const refreshedRun = runManager.getRun(runId);
+      if (!refreshedRun?.artifacts.evidence) {
         throw new Error(
           "CanonicalEvidenceRequiredError: submission cannot proceed without EvidenceService output.",
         );
@@ -1161,10 +1244,11 @@ export class PrSubmissionStep implements PipelineStep {
 
 /** Ordered pipeline. Each step runs until one halts the pipeline. */
 export const PIPELINE_STEPS: PipelineStep[] = [
+  new RunCreationStep(),
   new DiscoveryScoutStep(),
   new RankingStep(),
-  new WorkspaceAllocationStep(),
   new ContextAssemblyStep(),
+  new WorkspaceAllocationStep(),
   new ReproductionDesignStep(),
   new PatchGenerationStep(),
   new ImplementValidateLoopStep(),

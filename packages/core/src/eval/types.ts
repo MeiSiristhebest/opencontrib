@@ -19,10 +19,17 @@ export interface TrajectoryEvent {
 }
 
 export interface ProtocolAction {
-  kind: 'contrib' | 'shell' | 'file' | 'subagent' | 'other';
-  canonicalPhase: string;
+  /** Canonical action verb, e.g. 'CREATE_RUN', 'CAPTURE_RED'. Derived from
+   *  the tool name, not the phase — tool name ≠ phase (contrib_save_artifact
+   *  can save opportunity, probe, context, poc, patch, or pr_draft). */
+  action: string;
+  /** How the action was invoked: 'mcp' for direct MCP tool calls, 'cli' for
+   *  CLI commands wrapped by run_command. */
+  ingress: 'mcp' | 'cli';
+  /** Canonical tool name after namespace/CLI normalization. */
   toolName: string;
-  stepIndex?: number;
+  /** Step index in the transcript. */
+  stepIndex: number;
 }
 
 export interface TrajectoryMetrics {
@@ -81,10 +88,19 @@ export interface BenchmarkScenario {
   targetRepo: string;
   expectedDefectCwe?: string;
   maxAllowedSteps: number;
-  /** Canonical MCP/CLI tool sequence expected for the scenario. */
-  requiredActionSequence: string[];
+  /** Canonical action verbs expected for the scenario, derived from PROTOCOL_CONTRACT_PHASES. */
+  requiredActions: string[];
   /** True for built-in reference repos (e.g. 'mock/agent-memory-hub'); false for real evaluation targets. */
   isSynthetic?: boolean;
+}
+
+export interface BenchmarkBundle {
+  /** Run manifest from the run bundle (events.jsonl or manifest.json). */
+  manifest?: { runId: string; currentPhase: string };
+  /** Event types observed in the run's events.jsonl, keyed by phase. */
+  eventPhases?: string[];
+  /** Artifact types present in the run bundle directory. */
+  artifactTypes?: string[];
 }
 
 export interface BenchmarkResult {
@@ -93,6 +109,11 @@ export interface BenchmarkResult {
   stepsTaken: number;
   durationMs: number;
   judgeScore?: number;
-  phaseGatingVerified: boolean;
+  /** True when the required action sequence and canonical invariants are satisfied.
+   *  Renamed from `phaseGatingVerified` — it only proves action ordering, not
+   *  that canonical phase gates were truly enforced. */
+  actionSequenceVerified: boolean;
+  /** True when transcript actions are cross-validated against run events/artifacts. */
+  runBundleVerified?: boolean;
   errors: string[];
 }

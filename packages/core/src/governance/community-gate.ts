@@ -59,6 +59,17 @@ const AUTO_CLOSE_PATTERNS = [
   /will be closed automatically/i,
 ];
 
+const PRIVATE_DISCLOSURE_PATTERNS = [
+  /do not open.*public.*issue/i,
+  /do not.*submit.*public.*issue/i,
+  /do not.*create.*public.*issue/i,
+  /private.*vulnerability.*disclosure/i,
+  /report.*vulnerabilit.*privately/i,
+  /security.*report.*private/i,
+  /contact.*security.*maintainer/i,
+  /private.*security.*channel/i,
+];
+
 const LGTM_PROTOCOL_PATTERNS = [
   /\blgtmi\b/i,
   /\blgtm\b.*approved/i,
@@ -111,6 +122,7 @@ export function detectCommunityGateFromContents(
   let autoClosesNewIssues = false;
   let hasLgtmApprovalProtocol = false;
   let restrictedTriageHours = false;
+  let privateVulnerabilityDisclosure = false;
   let maxDiffCeiling: number | undefined;
 
   for (const pattern of ISSUE_APPROVAL_PATTERNS) {
@@ -141,6 +153,14 @@ export function detectCommunityGateFromContents(
     const match = combinedContent.match(pattern);
     if (match) {
       restrictedTriageHours = true;
+      matchedKeywords.push(match[0]);
+    }
+  }
+
+  for (const pattern of PRIVATE_DISCLOSURE_PATTERNS) {
+    const match = combinedContent.match(pattern);
+    if (match) {
+      privateVulnerabilityDisclosure = true;
       matchedKeywords.push(match[0]);
     }
   }
@@ -183,6 +203,12 @@ export function detectCommunityGateFromContents(
     );
   }
 
+  if (privateVulnerabilityDisclosure) {
+    reasons.push(
+      "Repository requires private vulnerability disclosure (SECURITY.md DO-NOT-OPEN-PUBLIC-ISSUE). Issue-First protocol is overridden.",
+    );
+  }
+
   const hasGatingRules =
     requiresIssueApprovalBeforePr ||
     autoClosesNewIssues ||
@@ -190,7 +216,10 @@ export function detectCommunityGateFromContents(
 
   let suggestedContributorAction =
     "Proceed with standard Issue creation and PR submission.";
-  if (requiresIssueApprovalBeforePr || autoClosesNewIssues) {
+  if (privateVulnerabilityDisclosure) {
+    suggestedContributorAction =
+      'Repository requires PRIVATE vulnerability disclosure. DO NOT open a public issue. Contact security maintainer via private channel before any public submission.';
+  } else if (requiresIssueApprovalBeforePr || autoClosesNewIssues) {
     suggestedContributorAction =
       'Create GitHub Issue first. PAUSE pipeline and wait for maintainer to reopen or comment "lgtmi" before submitting PR.';
   }
@@ -201,6 +230,7 @@ export function detectCommunityGateFromContents(
     autoClosesNewIssues,
     hasLgtmApprovalProtocol,
     restrictedTriageHours,
+    privateVulnerabilityDisclosure,
     maxDiffCeiling,
     reasons,
     suggestedContributorAction,
@@ -281,7 +311,8 @@ export function communityPolicyRequiresExplicitApproval(
     policy.hasGatingRules ||
     policy.requiresIssueApprovalBeforePr ||
     policy.autoClosesNewIssues ||
-    policy.hasLgtmApprovalProtocol,
+    policy.hasLgtmApprovalProtocol ||
+    policy.privateVulnerabilityDisclosure,
   );
 }
 

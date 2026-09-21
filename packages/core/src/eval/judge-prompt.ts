@@ -129,7 +129,7 @@ export function compressTrajectory(
 
   for (const action of actions) {
     const step = action.stepIndex ?? '?';
-    lines.push(`[Step ${step}] ${action.toolName} :: ${action.canonicalPhase}`);
+    lines.push(`[Step ${step}] ${action.action} (${action.ingress}) :: ${action.toolName}`);
   }
   lines.push('');
   lines.push(`=== TOOL CALL SEQUENCE (chronological) ===`);

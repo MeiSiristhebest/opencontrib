@@ -106,7 +106,7 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
       await import("../src/orchestration/agent-orchestrator.js");
     const orchestrator = new AgentOrchestrator({ deps: buildDeps() });
 
-    const result = await orchestrator.runPipeline({ profile: profile() });
+    const result = await orchestrator.runPipeline({ profile: profile(), targetRepo: "octocat/hello-world" });
 
     expect(result.status).toBe("DRY_RUN_COMPLETED");
     expect(result.stage).toBe("COMPLETED");
@@ -130,7 +130,7 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
     });
     const orchestrator = new AgentOrchestrator({ deps });
 
-    const result = await orchestrator.runPipeline({ profile: profile() });
+    const result = await orchestrator.runPipeline({ profile: profile(), targetRepo: "octocat/hello-world" });
 
     expect(result.status).toBe("HUMAN_APPROVAL_REQUIRED");
     expect(result.stage).toBe("HUMAN_GATE");
@@ -143,7 +143,7 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
     const deps = buildDeps({ llmService: undefined });
     const orchestrator = new AgentOrchestrator({ deps });
 
-    const result = await orchestrator.runPipeline({ profile: profile() });
+    const result = await orchestrator.runPipeline({ profile: profile(), targetRepo: "octocat/hello-world" });
 
     expect(result.status).toBe("BLOCKED");
     expect(result.stage).toBe("PATCH_DESIGN");
