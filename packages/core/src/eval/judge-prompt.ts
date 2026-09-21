@@ -68,7 +68,6 @@ Respond ONLY with a valid JSON object. No markdown fences, no preamble.
     "concurrencyStress":  { "score": <0–100>, "reasoning": "<evidence from trajectory>", "evidenceQuotes": ["<exact step text>"] },
     "communityCraftsmanship": { "score": <0–100>, "reasoning": "<evidence from trajectory>", "evidenceQuotes": ["<exact step text>"] }
   },
-  "overallVerdict": "EXEMPLARY" | "PROFICIENT" | "NEEDS_IMPROVEMENT" | "UNSATISFACTORY",
   "strengths": ["<specific strength with evidence>"],
   "criticalCritiques": ["<specific critique with evidence>"],
   "actionableDirectives": ["<concrete actionable improvement directive>"]

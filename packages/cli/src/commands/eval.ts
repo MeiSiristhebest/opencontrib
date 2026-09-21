@@ -32,7 +32,7 @@ import {
   PiAgentRunner,
   type AdversarialScenarioId,
 } from "@opencontrib/core";
-import type { BenchmarkBundle } from "@opencontrib/core";
+import type { BenchmarkBundle, TrajectoryEvent } from "@opencontrib/core";
 import { printJSON } from "../utils/output.js";
 import { CliExitError } from "../utils/exit.js";
 
@@ -234,6 +234,10 @@ const reflectCommand = new Command("reflect")
   .option("--repo <name>", "Target repository full name (e.g. owner/repo)")
   .option("--run-id <id>", "Contribution Run ID")
   .option(
+    "--trajectory <file>",
+    "Path to trajectory JSON file (enables golden action sequence extraction)",
+  )
+  .option(
     "--persist",
     "Persist distilled lessons to local repo memory ledger",
     false,
@@ -245,6 +249,7 @@ const reflectCommand = new Command("reflect")
       opts: {
         repo?: string;
         runId?: string;
+        trajectory?: string;
         persist?: boolean;
         pretty?: boolean;
       },
@@ -274,7 +279,21 @@ const reflectCommand = new Command("reflect")
           throw new CliExitError(1);
         }
 
-        const insight = synthesizeReflexionInsights(report, [], {
+        let events: TrajectoryEvent[] = [];
+        if (opts.trajectory) {
+          if (!fs.existsSync(opts.trajectory)) {
+            printJSON(
+              { status: "error", message: `Trajectory file not found: ${opts.trajectory}` },
+              opts.pretty,
+            );
+            throw new CliExitError(1);
+          }
+          const trajRaw = fs.readFileSync(opts.trajectory, "utf8");
+          const trajParsed = JSON.parse(trajRaw);
+          events = trajParsed.events ?? trajParsed;
+        }
+
+        const insight = synthesizeReflexionInsights(report, events, {
           runId: opts.runId,
           repoFullName: opts.repo,
         });

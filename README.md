@@ -125,7 +125,7 @@ When a contribution run starts via `opencontrib run create`, OpenContrib creates
 
 ### 4. Hard-Gated Governance & Non-Zero Exit Code 2 Barrier
 
-`opencontrib governance audit` enforces strict industrial quality thresholds ($\ge 90\%$ composite score, $\ge 80\%$ on all sub-dimensions, zero anti-AI conversational prose, and $\le 100$-line diffs). If any criteria fail, the CLI outputs a detailed `🛑 GATED_BLOCKED` terminal block and terminates with **Exit Code 2**, physically preventing AI agents from opening unverified or non-compliant PRs.
+`opencontrib governance audit` enforces strict industrial quality thresholds ($\ge 90\%$ composite score, $\ge 80\%$ on all sub-dimensions, zero anti-AI conversational prose, and $\le 100$-line diffs). If any criteria fail, the CLI outputs a detailed `🛑 GATED_BLOCKED` terminal block and terminates with **Exit Code 2**, automatically gating unverified or non-compliant PR submissions.
 
 ### 5. Self-Guiding State Machine Terminal Output
 
@@ -323,7 +323,7 @@ OpenContrib includes pre-configured `.cursor/rules/opencontrib.mdc` and `.cursor
 
 ### 3. OpenAI Codex / Custom Assistants
 
-OpenContrib includes standard `AGENTS.md` directives to orchestrate the 9-phase contribution pipeline deterministically.
+OpenContrib includes standard `AGENTS.md` directives to orchestrate the canonical contribution pipeline deterministically.
 
 ### 4. 1-Click Multi-Agent Setup
 

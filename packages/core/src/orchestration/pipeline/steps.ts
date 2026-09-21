@@ -828,7 +828,7 @@ export class TelemetryStep implements PipelineStep {
 
     const durationMs = deps.clock.now().getTime() - ctx.startTime;
     ctx.telemetry = {
-      runId: `run_${deps.clock.now().getTime()}`,
+      runId: ctx.runId ?? `run_${deps.clock.now().getTime()}`,
       repoFullName: selectedOpp.repoFullName,
       issueNumber: selectedOpp.issueNumber,
       attempts: ctx.implementationAttempts ?? 0,
@@ -858,13 +858,13 @@ export class HumanGateStep implements PipelineStep {
     const riskAssessment = ctx.riskAssessment!;
 
     // Dry-run/local-artifacts modes have no external side effect and therefore
-    // do not need an approval checkpoint. Real execution always pauses here
-    // when policy, risk, or missing validation requires a human decision.
+    // do not need an approval checkpoint. Real execution pauses when risk or
+    // missing validation requires a human decision. Community-policy approval
+    // is enforced by the submission broker, not here.
     const requiresHumanGate =
       policy.mode !== "dry_run" &&
       policy.mode !== "local_artifacts_only" &&
-      (policy.mode === "interactive" ||
-        riskAssessment.riskLevel !== "LOW" ||
+      (riskAssessment.riskLevel !== "LOW" ||
         validationStatus === "NO_TEST_AVAILABLE");
 
     if (requiresHumanGate) {
