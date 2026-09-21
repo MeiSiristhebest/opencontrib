@@ -55,8 +55,8 @@ const judgeCommand = new Command("judge")
         throw new CliExitError(1);
       }
 
-      const { events, metrics } = parseTrajectoryFromJSONL(transcriptFile);
-      const { systemPrompt, userPrompt } = buildJudgePrompt(events, metrics);
+      const { events, metrics, actions } = parseTrajectoryFromJSONL(transcriptFile);
+      const { systemPrompt, userPrompt } = buildJudgePrompt(events, metrics, actions);
 
       // Print a human-readable guide for the Agent to follow
       console.log(
@@ -262,6 +262,10 @@ const benchmarkCommand = new Command("benchmark")
     "SWE-bench fixtures directory (instance IDs loaded from fixtures/)",
   )
   .option(
+    "--transcript <file>",
+    "Trajectory JSONL for real execution evidence",
+  )
+  .option(
     "-v, --v2",
     "Output per-test verdicts in schema-v2 format with resolved_ids",
     false,
@@ -274,6 +278,7 @@ const benchmarkCommand = new Command("benchmark")
         reportDir?: string;
         patchFile?: string;
         fixtures?: string;
+        transcript?: string;
         v2?: boolean;
       },
     ) => {
@@ -335,8 +340,32 @@ const benchmarkCommand = new Command("benchmark")
           );
         }
 
+        if (!opts?.transcript) {
+          printJSON(
+            {
+              status: "error",
+              message:
+                "Benchmark requires --transcript <file> so it can evaluate real execution evidence instead of self-certifying expected phases.",
+            },
+            opts?.pretty,
+          );
+          throw new CliExitError(1);
+        }
+
+        if (!fs.existsSync(opts.transcript)) {
+          printJSON(
+            { status: "error", message: `File not found: ${opts.transcript}` },
+            opts?.pretty,
+          );
+          throw new CliExitError(1);
+        }
+
+        const { metrics, actions } = parseTrajectoryFromJSONL(opts.transcript);
+        const stepsCount = metrics.totalSteps;
+        const durationMs = metrics.totalDurationMs ?? 0;
+
         const results = scenarioInstances.map((s) =>
-          executeBenchmarkScenario(s, s.requiredPhaseSequence, 14, 18500),
+          executeBenchmarkScenario(s, actions, stepsCount, durationMs),
         );
 
         const aggregate: {
