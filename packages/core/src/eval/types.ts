@@ -4,7 +4,7 @@
 
 export interface TrajectoryToolCall {
   name: string;
-  args: Record<string, any>;
+  args: Record<string, unknown>;
   outputSnippet?: string;
   exitCode?: number;
   durationMs?: number;
@@ -18,6 +18,13 @@ export interface TrajectoryEvent {
   timestamp?: string;
 }
 
+export interface ProtocolAction {
+  kind: 'contrib' | 'shell' | 'file' | 'subagent' | 'other';
+  canonicalPhase: string;
+  toolName: string;
+  stepIndex?: number;
+}
+
 export interface TrajectoryMetrics {
   totalSteps: number;
   totalCommandsRun: number;
@@ -26,6 +33,7 @@ export interface TrajectoryMetrics {
   maxConsecutiveFileViews: number;
   wholeFileRgDumpsDetected: number;
   shellScriptWriteHacksDetected: number;
+  totalContribActions: number;
   totalDurationMs?: number;
 }
 

@@ -81,12 +81,13 @@ const JudgeDimOutputSchema = z.object({
 });
 
 export const JudgeOutputSchema = z.object({
-  chainOfThought: z.string(),
+  chainOfThought: z.string().optional().default(""),
   dimensions: z.object({
     problemFormulation: JudgeDimOutputSchema,
     contextEconomy: JudgeDimOutputSchema,
     empiricalRigor: JudgeDimOutputSchema,
     concurrencyStress: JudgeDimOutputSchema,
+    verificationQuality: JudgeDimOutputSchema.optional(),
     communityCraftsmanship: JudgeDimOutputSchema,
   }),
   overallVerdict: z.enum([
@@ -114,7 +115,7 @@ export function compressTrajectory(
 ): string {
   const lines: string[] = [
     `=== AGENT EXECUTION TRAJECTORY ===`,
-    `Steps: ${metrics.totalSteps} | Commands: ${metrics.totalCommandsRun} | view_file: ${metrics.viewFileCalls} | Max consecutive view_file: ${metrics.maxConsecutiveFileViews}`,
+    `Steps: ${metrics.totalSteps} | Commands: ${metrics.totalCommandsRun} | view_file: ${metrics.viewFileCalls} | Max consecutive view_file: ${metrics.maxConsecutiveFileViews} | contrib_*: ${metrics.totalContribActions}`,
     ``,
     `=== TOOL CALL SEQUENCE (chronological) ===`,
   ];
@@ -214,34 +215,47 @@ export function parseJudgeResponse(
 
   const judgeOutput = JudgeOutputSchema.parse(parsed);
 
-  const weights: Record<string, number> = {
+  const weights = {
     problemFormulation: 0.2,
     contextEconomy: 0.2,
     empiricalRigor: 0.25,
     concurrencyStress: 0.15,
     communityCraftsmanship: 0.2,
-  };
+  } satisfies Record<
+    'problemFormulation' | 'contextEconomy' | 'empiricalRigor' | 'concurrencyStress' | 'communityCraftsmanship',
+    number
+  >;
 
-  const titles: Record<string, string> = {
+  const titles = {
     problemFormulation: "Problem Formulation & Defect Convergence",
     contextEconomy: "Context Economy & Anti-Drift",
     empiricalRigor: "Empirical Rigor & Dual-Stage Reproduction",
-    concurrencyStress: "Concurrency & Chaos Stress Testing",
+    concurrencyStress: "Adaptive Verification & Edge-Case Defense",
     communityCraftsmanship: "Community Craftsmanship & Zero-Mojibake Protocol",
-  };
-
-  const dimKeys = Object.keys(weights) as Array<
-    keyof typeof judgeOutput.dimensions
+  } satisfies Record<
+    'problemFormulation' | 'contextEconomy' | 'empiricalRigor' | 'concurrencyStress' | 'communityCraftsmanship',
+    string
   >;
 
-  const dimensions: JudgeDimensionScore[] = dimKeys.map((k) => ({
-    dimension: k as JudgeDimensionScore["dimension"],
-    title: titles[k],
-    weight: weights[k],
-    score: judgeOutput.dimensions[k].score,
-    reasoning: judgeOutput.dimensions[k].reasoning,
-    evidenceQuotes: judgeOutput.dimensions[k].evidenceQuotes,
-  }));
+  const effectiveDimensions = {
+    problemFormulation: judgeOutput.dimensions.problemFormulation,
+    contextEconomy: judgeOutput.dimensions.contextEconomy,
+    empiricalRigor: judgeOutput.dimensions.empiricalRigor,
+    concurrencyStress:
+      judgeOutput.dimensions.verificationQuality ?? judgeOutput.dimensions.concurrencyStress,
+    communityCraftsmanship: judgeOutput.dimensions.communityCraftsmanship,
+  };
+
+  const dimensions: JudgeDimensionScore[] = Object.entries(effectiveDimensions).map(
+    ([k, dim]) => ({
+      dimension: k as JudgeDimensionScore["dimension"],
+      title: titles[k as keyof typeof titles],
+      weight: weights[k as keyof typeof weights],
+      score: dim.score,
+      reasoning: dim.reasoning,
+      evidenceQuotes: dim.evidenceQuotes,
+    }),
+  );
 
   const rawOverall = dimensions.reduce((acc, d) => acc + d.score * d.weight, 0);
 
@@ -259,12 +273,24 @@ export function parseJudgeResponse(
     maxConsecutiveFileViews: 0,
     wholeFileRgDumpsDetected: 0,
     shellScriptWriteHacksDetected: 0,
+    totalContribActions: 0,
   };
+
+  let verdict: JudgeEvaluationReport["verdict"];
+  if (overallScore >= 85) {
+    verdict = "EXEMPLARY";
+  } else if (overallScore >= 65) {
+    verdict = "PROFICIENT";
+  } else if (overallScore >= 40) {
+    verdict = "NEEDS_IMPROVEMENT";
+  } else {
+    verdict = "UNSATISFACTORY";
+  }
 
   return {
     overallScore,
-    verdict: judgeOutput.overallVerdict,
-    summary: `LLM Judge (neutral sub-agent): ${overallScore}/100 (${judgeOutput.overallVerdict}).`,
+    verdict,
+    summary: `LLM Judge (neutral sub-agent): ${overallScore}/100 (${verdict}).`,
     dimensions,
     strengths: judgeOutput.strengths,
     criticalCritiques: judgeOutput.criticalCritiques,

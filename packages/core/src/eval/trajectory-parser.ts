@@ -3,11 +3,12 @@
  */
 
 import fs from 'node:fs';
-import type { TrajectoryEvent, TrajectoryMetrics, TrajectoryToolCall } from './types.js';
+import type { ProtocolAction, TrajectoryEvent, TrajectoryMetrics, TrajectoryToolCall } from './types.js';
 
 export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
   events: TrajectoryEvent[];
   metrics: TrajectoryMetrics;
+  actions: ProtocolAction[];
 } {
   let content = jsonlContentOrPath;
   if (fs.existsSync(jsonlContentOrPath)) {
@@ -16,6 +17,7 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
 
   const lines = content.split('\n').filter((l) => l.trim().length > 0);
   const events: TrajectoryEvent[] = [];
+  const actions: ProtocolAction[] = [];
 
   let totalCommands = 0;
   let failedCommands = 0;
@@ -24,6 +26,7 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
   let maxConsecutiveViews = 0;
   let wholeFileRgDumps = 0;
   let shellScriptWriteHacks = 0;
+  let totalContribActions = 0;
 
   const rgDumpRegex = /rg\s+.*?(?:-n\s+)?["']?(?:\.\*|\^)["']?\s+[A-Za-z0-9_\-\.\/\\:]+/i;
   const writeHackRegex = /(?:node\s+-e|python\s+-c)\s+.*?(?:fs\.(?:writeFileSync|writeFile)|Buffer\.from|open\(.*['"]w['"]\)|b64|create_clean_md)/i;
@@ -80,6 +83,17 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
         } else if (name !== 'view_file' && name !== 'grep_search' && name !== 'find_by_name') {
           currentConsecutiveViews = 0;
         }
+
+        // 3. Metric: canonical OpenContrib actions (MCP/CLI protocol verbs)
+        if (name.startsWith('contrib_')) {
+          totalContribActions++;
+          actions.push({
+            kind: 'contrib',
+            canonicalPhase: PROTOCOL_ACTION_PHASES[name] ?? 'OTHER',
+            toolName: name,
+            stepIndex: raw.step_index ?? idx,
+          });
+        }
       }
 
       events.push({
@@ -102,14 +116,36 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
     maxConsecutiveFileViews: maxConsecutiveViews,
     wholeFileRgDumpsDetected: wholeFileRgDumps,
     shellScriptWriteHacksDetected: shellScriptWriteHacks,
+    totalContribActions,
   };
 
-  return { events, metrics };
+  return { events, metrics, actions };
 }
 
-function safeParseJson(str: string): Record<string, any> {
+const PROTOCOL_ACTION_PHASES: Record<string, string> = {
+  contrib_create_run: 'INITIALIZED',
+  contrib_scout: 'OPPORTUNITY_SCOUTED',
+  contrib_probe_run: 'PROBE_COMPLETED',
+  contrib_assemble_context: 'CONTEXT_ASSEMBLED',
+  contrib_prepare_workspace: 'WORKSPACE_PREPARED',
+  contrib_capture_red: 'RED_CAPTURED',
+  contrib_verify_poc: 'POC_GENERATED',
+  contrib_save_artifact: 'PATCH_DRAFTED',
+  contrib_verify_green: 'EVIDENCE_COLLECTED',
+  contrib_audit_governance: 'GOVERNANCE_AUDITED',
+  contrib_request_approval: 'GOVERNANCE_AUDITED',
+  contrib_submit_pr: 'PR_SUBMITTED',
+  contrib_sync_flywheel: 'COMPLETED',
+  contrib_resume_run: 'FAILED',
+  contrib_run_pipeline: 'PR_SUBMITTED',
+};
+
+function safeParseJson(str: string): Record<string, unknown> {
   try {
-    return JSON.parse(str);
+    const parsed = JSON.parse(str);
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : { raw: parsed };
   } catch {
     console.warn(`[TrajectoryParser] Failed to parse tool call args, discarding: ${str.slice(0, 100)}`);
     return { raw: str };
