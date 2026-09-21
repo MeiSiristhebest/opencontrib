@@ -453,6 +453,18 @@ const benchmarkCommand = new Command("benchmark")
           bundle = readRunBundle(opts.runBundle);
         }
 
+        if (!bundle) {
+          printJSON(
+            {
+              status: "error",
+              message:
+                "Benchmark requires --run-bundle <dir> so it can cross-validate transcript actions against the canonical run bundle.",
+            },
+            opts?.pretty,
+          );
+          throw new CliExitError(1);
+        }
+
         const { metrics, actions } = parseTrajectoryFromJSONL(opts.transcript);
         const stepsCount = metrics.totalSteps;
         const durationMs = metrics.totalDurationMs ?? 0;

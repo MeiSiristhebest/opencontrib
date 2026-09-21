@@ -213,7 +213,7 @@ export function registerEvalTools(server: McpServer): void {
               report.actionableDirectives.map((a) => `- ${a}`).join("\n"),
               "",
               "### Chain of Thought (Judge Reasoning)",
-              report.chainOfThought ?? "(not available)",
+              report.evaluationRationale ?? "(not available)",
               "",
               "### Raw Structured Report (JSON)",
               "```json",

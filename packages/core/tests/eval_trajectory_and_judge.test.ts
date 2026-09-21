@@ -91,7 +91,7 @@ describe('buildJudgePrompt — prompt construction (pure function, zero LLM call
 
 describe('parseJudgeResponse — validates neutral sub-agent JSON, applies scoring math', () => {
   const buildMockJudgeJson = (overrides: Record<string, number> = {}) => JSON.stringify({
-    chainOfThought: 'Step-by-step reasoning: The agent used targeted searches and converged quickly.',
+    evaluationRationale: 'Step-by-step reasoning: The agent used targeted searches and converged quickly.',
     dimensions: {
       problemFormulation:   { score: overrides.pf  ?? 80, reasoning: 'Targeted probe run.', evidenceQuotes: [] },
       contextEconomy:       { score: overrides.ce  ?? 85, reasoning: 'No whole-file dumps.', evidenceQuotes: [] },
@@ -99,7 +99,6 @@ describe('parseJudgeResponse — validates neutral sub-agent JSON, applies scori
       concurrencyStress:    { score: overrides.cs  ?? 88, reasoning: 'Concurrency flag used.', evidenceQuotes: [] },
       communityCraftsmanship: { score: overrides.cc ?? 82, reasoning: 'write_to_file used.', evidenceQuotes: [] },
     },
-    overallVerdict: overrides.pf === 0 ? 'UNSATISFACTORY' : 'PROFICIENT',
     strengths: ['Used write_to_file', 'Applied concurrency testing'],
     criticalCritiques: [],
     actionableDirectives: ['Continue using Smart Pointer slices'],
@@ -112,7 +111,7 @@ describe('parseJudgeResponse — validates neutral sub-agent JSON, applies scori
     expect(report.overallScore).toBeLessThanOrEqual(100);
     expect(['EXEMPLARY', 'PROFICIENT', 'NEEDS_IMPROVEMENT', 'UNSATISFACTORY']).toContain(report.verdict);
     expect(report.dimensions).toHaveLength(5);
-    expect(report.chainOfThought).toBeDefined();
+    expect(report.evaluationRationale).toBeDefined();
     expect(report.strengths.length).toBeGreaterThan(0);
     expect(report.actionableDirectives.length).toBeGreaterThan(0);
 

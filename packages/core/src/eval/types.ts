@@ -30,6 +30,8 @@ export interface ProtocolAction {
   toolName: string;
   /** Step index in the transcript. */
   stepIndex: number;
+  /** Canonical run id, when present in the transcript or parsed arguments. */
+  runId?: string;
 }
 
 export interface TrajectoryMetrics {
@@ -67,7 +69,7 @@ export interface JudgeEvaluationReport {
   criticalCritiques: string[];
   actionableDirectives: string[];
   metrics: TrajectoryMetrics;
-  chainOfThought?: string; // Full LLM Judge reasoning chain
+  evaluationRationale?: string; // Brief LLM Judge rationale
 }
 
 export interface ReflexionInsight {
