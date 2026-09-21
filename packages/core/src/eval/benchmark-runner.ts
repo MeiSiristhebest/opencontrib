@@ -18,8 +18,8 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
       'contrib_prepare_workspace',
       'contrib_capture_red',
       'contrib_verify_green',
-      'contrib_audit_governance',
       'contrib_render_pr_template',
+      'contrib_audit_governance',
       'contrib_submit_pr',
     ],
   },
@@ -37,6 +37,7 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
       'contrib_prepare_workspace',
       'contrib_capture_red',
       'contrib_verify_green',
+      'contrib_render_pr_template',
       'contrib_audit_governance',
       'contrib_submit_pr',
     ],
@@ -55,7 +56,7 @@ export function executeBenchmarkScenario(
   let currentIdx = 0;
   for (const reqAction of scenario.requiredActionSequence) {
     const foundIdx = executedActions.findIndex(
-      (action, index) => index >= currentIdx && action.toolName === reqAction,
+      (action, index) => index >= currentIdx && normalizeProtocolToolName(action.toolName) === reqAction,
     );
     if (foundIdx === -1) {
       errors.push(`Missing required protocol action: ${reqAction}`);
@@ -83,4 +84,9 @@ export function executeBenchmarkScenario(
     phaseGatingVerified: missingActionErrors.length === 0,
     errors,
   };
+}
+
+function normalizeProtocolToolName(name: string): string {
+  const candidate = name.split('__').pop()?.split('.').pop() ?? name;
+  return candidate.startsWith('contrib_') ? candidate : '';
 }
