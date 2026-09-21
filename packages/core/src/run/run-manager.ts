@@ -257,21 +257,36 @@ export class ContributionRunManager {
       throw new Error(`Contribution run ${runId} does not exist`);
     }
 
-    // Once governance or submission has bound the exact PR body, the draft is
-    // no longer mutable. Re-rendering it would invalidate the audited hash and
-    // must fail before touching the WORM run bundle.
-    if (
-      type === "pr_draft" &&
-      new Set<ContributionRunPhase>([
-        "GOVERNANCE_AUDITED",
-        "PR_SUBMITTED",
-        "COMPLETED",
-        "FAILED",
-      ]).has(summary.manifest.currentPhase)
-    ) {
-      throw new Error(
-        `ImmutableArtifactViolationError: pr_draft is immutable after governance binding in phase '${summary.manifest.currentPhase}'.`,
-      );
+    // pr_draft must only be saved after a patch exists and governance has audited.
+    // Reject early-phase saves to prevent INITIALIZED runs from accumulating drafts.
+    if (type === "pr_draft") {
+      const earlyPhases = new Set<ContributionRunPhase>([
+        "INITIALIZED",
+        "OPPORTUNITY_SCOUTED",
+        "PROBE_COMPLETED",
+        "CONTEXT_ASSEMBLED",
+        "WORKSPACE_PREPARED",
+      ]);
+      if (earlyPhases.has(summary.manifest.currentPhase)) {
+        throw new Error(
+          `ArtifactPhaseViolationError: pr_draft cannot be saved in phase '${summary.manifest.currentPhase}'. A pr_draft requires a validated patch and governance audit. Use the canonical pipeline to produce pr_draft artifacts.`,
+        );
+      }
+      // Once governance or submission has bound the exact PR body, the draft is
+      // no longer mutable. Re-rendering it would invalidate the audited hash and
+      // must fail before touching the WORM run bundle.
+      if (
+        new Set<ContributionRunPhase>([
+          "GOVERNANCE_AUDITED",
+          "PR_SUBMITTED",
+          "COMPLETED",
+          "FAILED",
+        ]).has(summary.manifest.currentPhase)
+      ) {
+        throw new Error(
+          `ImmutableArtifactViolationError: pr_draft is immutable after governance binding in phase '${summary.manifest.currentPhase}'.`,
+        );
+      }
     }
 
     // A phase-bound draft cannot be written from an unrelated or later phase.
@@ -471,6 +486,7 @@ export class ContributionRunManager {
     if (artifacts.poc) availableArtifacts.push("poc");
     if (artifacts.patch) availableArtifacts.push("patch");
     if (artifacts.validatedPatch) availableArtifacts.push("validated_patch");
+    if (artifacts.evidenceRed) availableArtifacts.push("evidence_red");
     if (artifacts.evidence) availableArtifacts.push("evidence");
     if (artifacts.governance) availableArtifacts.push("governance");
     if (artifacts.submissionIntent)
@@ -479,6 +495,7 @@ export class ContributionRunManager {
     if (artifacts.submission) availableArtifacts.push("submission");
     if (artifacts.prDraft) availableArtifacts.push("pr_draft");
     if (artifacts.result) availableArtifacts.push("result");
+    if (artifacts.securityDisclosure) availableArtifacts.push("security_disclosure");
 
     const latestSummary = {
       hasOpportunity: !!artifacts.opportunity,

@@ -315,7 +315,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     phase: "COMPLETED",
     name: "Contribution Completed",
     description:
-      "All 9 phases completed, memory ledger and developer heuristics synchronized.",
+      "All canonical phases completed, memory ledger and developer heuristics synchronized.",
     allowedFromPhases: ["PR_SUBMITTED"],
     requiredArtifacts: ["workspace", "submission", "result"],
     cli: {
