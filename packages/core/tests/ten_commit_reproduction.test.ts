@@ -158,6 +158,7 @@ describe('Commit 6 (091d670): Eval v2 Module — 4 subcommands, Agent-Native', (
       maxConsecutiveFileViews: 1,
       wholeFileRgDumpsDetected: 0,
       shellScriptWriteHacksDetected: 0,
+      totalContribActions: 0,
     });
     expect(systemPrompt).toContain('G-Eval');
     expect(userPrompt).toContain('trajectory');
@@ -187,6 +188,7 @@ describe('Commit 6 (091d670): Eval v2 Module — 4 subcommands, Agent-Native', (
       maxConsecutiveFileViews: 1,
       wholeFileRgDumpsDetected: 0,
       shellScriptWriteHacksDetected: 0,
+      totalContribActions: 0,
     });
     expect(report.overallScore).toBeGreaterThan(0);
     expect(report.dimensions).toHaveLength(5);

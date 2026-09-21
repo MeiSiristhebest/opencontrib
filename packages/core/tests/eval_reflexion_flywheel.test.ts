@@ -21,6 +21,7 @@ const MOCK_METRICS: TrajectoryMetrics = {
   maxConsecutiveFileViews: 3,
   wholeFileRgDumpsDetected: 2,
   shellScriptWriteHacksDetected: 1,
+  totalContribActions: 0,
 };
 
 function makeReport(overrides: Partial<JudgeEvaluationReport> = {}): JudgeEvaluationReport {

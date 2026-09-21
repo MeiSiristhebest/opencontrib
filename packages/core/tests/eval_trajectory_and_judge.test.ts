@@ -81,7 +81,7 @@ describe('buildJudgePrompt — prompt construction (pure function, zero LLM call
     const metrics: TrajectoryMetrics = {
       totalSteps: 500, totalCommandsRun: 500, failedCommandsCount: 0,
       viewFileCalls: 0, maxConsecutiveFileViews: 0,
-      wholeFileRgDumpsDetected: 0, shellScriptWriteHacksDetected: 0,
+      wholeFileRgDumpsDetected: 0, shellScriptWriteHacksDetected: 0, totalContribActions: 0,
     };
     const text = compressTrajectory(bigEvents, metrics);
     expect(text.length).toBeLessThanOrEqual(6100); // allows for truncation marker
