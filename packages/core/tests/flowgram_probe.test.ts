@@ -80,7 +80,7 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
 
     // 3. Render Master PR Template with ByteDance / CloudWeGo formatting & DCO
     const renderedPr = renderMasterPrTemplate({
-      issueNumber: 0,
+      issueNumber: 999,
       problemSummary:
         "Upgrade deprecated actions/checkout and actions/setup-node to v4 across CI workflows",
       rootCause:

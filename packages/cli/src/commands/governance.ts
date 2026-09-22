@@ -28,8 +28,19 @@ import path from "node:path";
 
 // Lazy factory: constructed on first use, not at module load time.
 let _runManager: ContributionRunManager | null = null;
-const getRunManager = (): ContributionRunManager =>
-  (_runManager ??= buildContributionRunManager());
+let _runManagerHome = "";
+const getRunManager = (): ContributionRunManager => {
+  // Test harnesses and the global --home option can change the storage root
+  // after this command module has been imported. Never reuse a manager bound
+  // to a different home, or an active session from that home can leak into a
+  // diagnostic-only command.
+  const currentHome = process.env.OPENCONTRIB_HOME ?? "";
+  if (!_runManager || _runManagerHome !== currentHome) {
+    _runManager = buildContributionRunManager();
+    _runManagerHome = currentHome;
+  }
+  return _runManager;
+};
 
 // ─── governance audit ─────────────────────────────────────────────────────────
 const auditCommand = new Command("audit")

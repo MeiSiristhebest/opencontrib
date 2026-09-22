@@ -156,6 +156,8 @@ export function buildTrustedSubmissionBroker(options: {
     runManager,
     new WorktreeManager(),
     options.executionPort,
+    undefined,
+    githubClient,
   );
   return {
     githubClient,

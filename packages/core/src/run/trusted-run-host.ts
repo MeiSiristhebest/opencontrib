@@ -1,6 +1,10 @@
 import { PatchDraftSchema, type PatchDraft } from "../contracts/llm-schemas.js";
 import { GovernanceService } from "../governance/governance-service.js";
 import { SubmissionIntentService } from "../submission/submission-intent-service.js";
+import {
+  IssueBindingService,
+  type IssueBindingProvider,
+} from "../github/issue-binding-service.js";
 import { EvidenceService } from "../evidence/evidence-service.js";
 import { WorktreeManager } from "../workspace/worktree-manager.js";
 import type { ContributionRunManager } from "./run-manager.js";
@@ -122,6 +126,7 @@ export class TrustedRunMaterializer {
     private readonly worktreeManager: WorktreeManager = new WorktreeManager(),
     executionPort?: TrustedExecutionPort,
     executionPolicy?: Partial<EvidenceExecutionPolicy>,
+    private readonly issueBindingProvider?: IssueBindingProvider,
   ) {
     this.executionPort = executionPort ?? new DevelopmentUnsafeExecutionPort();
     const dimensions = validateStressDimensions(
@@ -267,6 +272,22 @@ export class TrustedRunMaterializer {
         bundle.manifest.runId,
         rawGreen,
       );
+
+      if (bundle.manifest.issueNumber !== undefined) {
+        if (!this.issueBindingProvider) {
+          throw new TrustedRunMaterializationError(
+            "IssueBindingProviderRequiredError: public transfer requires a trusted provider issue lookup.",
+          );
+        }
+        await new IssueBindingService(
+          this.runManager,
+          this.issueBindingProvider,
+        ).bind({
+          runId: bundle.manifest.runId,
+          repoFullName: bundle.manifest.repoFullName,
+          issueNumber: bundle.manifest.issueNumber,
+        });
+      }
 
       this.runManager.saveArtifact(
         bundle.manifest.runId,

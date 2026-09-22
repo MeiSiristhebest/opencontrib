@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import { buildRunTransferBundle } from "../src/run/run-transfer.js";
 import { TrustedRunMaterializer } from "../src/run/trusted-run-host.js";
+import { IssueBindingService } from "../src/github/issue-binding-service.js";
 
 describe("Autonomous Regression-Test Generation & Transfer Host Integration", () => {
   it("transfers reproduction files and reproduces RED->GREEN on trusted host", async () => {
@@ -65,6 +66,22 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         baseDir: agentRuns,
       });
       const manifest = agentRunManager.createRun({
+        repoFullName: "test-org/math-repo",
+        issueNumber: 42,
+      });
+      const issueProvider = {
+        getIssue: async () => ({
+          status: "OK" as const,
+          data: {
+            number: 42,
+            title: "mul always returns 0",
+            state: "open" as const,
+            htmlUrl: "https://github.com/test-org/math-repo/issues/42",
+          },
+        }),
+      };
+      await new IssueBindingService(agentRunManager, issueProvider).bind({
+        runId: manifest.runId,
         repoFullName: "test-org/math-repo",
         issueNumber: 42,
       });
@@ -135,6 +152,13 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         "patch",
         JSON.stringify(fullPatch),
       );
+      await agentEvidence.verifyGreen({
+        runId: manifest.runId,
+        cwd: agentWorkspace,
+        testCommand: testCmd,
+        stressLoopCount: 1,
+        concurrencyWorkers: 1,
+      });
       agentRunManager.saveArtifact(
         manifest.runId,
         "pr_draft",
@@ -180,6 +204,9 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
       const materializer = new TrustedRunMaterializer(
         hostRunManager,
         new TestWorktreeManager(),
+        undefined,
+        undefined,
+        issueProvider,
       );
       const hostRun = await materializer.materialize(transferBundle);
 
