@@ -76,8 +76,11 @@ export const DRAFT_PHASE_BY_ARTIFACT: Partial<
 export const AUTHORITATIVE_ARTIFACT_TYPES = new Set<ArtifactType>([
   "workspace",
   "validated_patch",
+  "patch_attempt",
   "evidence_red",
   "evidence",
+  "issue_binding",
+  "security_disclosure",
   "governance",
   "submission_intent",
   "approval",

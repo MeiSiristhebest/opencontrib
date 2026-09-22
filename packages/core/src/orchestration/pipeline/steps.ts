@@ -12,6 +12,8 @@
 
 import {
   type Opportunity,
+  IssueBindingArtifactSchema,
+  PatchAttemptArtifactSchema,
   SubmissionArtifactSchema,
   SubmissionIntentArtifactSchema,
 } from "../../contracts/schemas.js";
@@ -27,6 +29,7 @@ import { scoutOpportunities } from "../../discovery/scout.js";
 import { MultiSignalHeuristicRanker } from "../../discovery/ranking.js";
 import { detectSystemCapabilities } from "../../discovery/feasibility.js";
 import { EvidenceService } from "../../evidence/evidence-service.js";
+import { computeSourceTreeHash } from "../../evidence/evidence-collector.js";
 import { generateSubagentReviewPrompt } from "../../governance/subagent-reviewer.js";
 import { deriveEvidenceBackedQualityRubric } from "../../governance/governance-auditor.js";
 import { buildPrDescription } from "../../governance/template-merger.js";
@@ -43,6 +46,8 @@ import { defaultRunManager } from "../../run/run-manager.js";
 import { saveCanonicalArtifact } from "../../run/canonical-writer.js";
 import { RemoteCompletionAttestationSchema } from "../../run/completion-attestation.js";
 import { WorkspaceService } from "../../workspace/workspace-service.js";
+import { IssueBindingService } from "../../github/issue-binding-service.js";
+import { SecurityDisclosureService } from "../../github/security-disclosure-service.js";
 import { buildTurnPrompt } from "../agent-orchestrator.js";
 import type {
   PipelineContext,
@@ -52,7 +57,7 @@ import type {
   OrchestratorSubagentReview,
 } from "./types.js";
 import { halt, continuePipeline } from "./types.js";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
 // ── Phase -1: Run Creation (Run-First — must precede all scouting/workspace work) ──
@@ -173,6 +178,13 @@ export class RankingStep implements PipelineStep {
     ctx.selectedOpp = selectedOpp;
     ctx.owner = owner;
     ctx.repo = repo;
+    const runManager = deps.runManager ?? defaultRunManager;
+    if (!ctx.runId || !runManager.getRun(ctx.runId)) {
+      throw new Error(
+        "CanonicalRunMissingError: ranking cannot persist an opportunity without the Run-First canonical run.",
+      );
+    }
+    runManager.saveArtifact(ctx.runId, "opportunity", selectedOpp as any);
     return continuePipeline();
   }
 }
@@ -238,6 +250,13 @@ export class ContextAssemblyStep implements PipelineStep {
     ctx.assembledContext = assembledContext;
     ctx.prompt = prompt;
     ctx.testCmd = testCmd;
+    const runManager = deps.runManager ?? defaultRunManager;
+    if (!ctx.runId || !runManager.getRun(ctx.runId)) {
+      throw new Error(
+        "CanonicalRunMissingError: context assembly cannot persist context without the Run-First canonical run.",
+      );
+    }
+    runManager.saveArtifact(ctx.runId, "context", assembledContext as any);
     ctx.preFixReproductionCaptured = false;
     ctx.preFixOutput = "";
     ctx.evidenceReport = undefined;
@@ -517,14 +536,59 @@ export class ImplementValidateLoopStep implements PipelineStep {
               (repairResult.data as any).files &&
               (repairResult.data as any).files.length > 0
             ) {
-              // Restore RED tree before applying repair patch — prevents
-              // canonical/workspace/memory active-patch divergence.
+              // Restore the exact RED tree before applying a repair patch.
+              // This removes untracked files from the failed turn and then
+              // replays only the trusted reproduction files.
               try {
-                execSync("git checkout .", {
+                const baselineCommitSha =
+                  ctx.evidenceReport?.redEvidence?.baselineCommitSha;
+                if (!baselineCommitSha) {
+                  throw new Error(
+                    "RedRestoreBaselineMissingError: canonical RED evidence has no baseline commit SHA.",
+                  );
+                }
+                execFileSync("git", [
+                  "reset",
+                  "--hard",
+                  baselineCommitSha,
+                ], {
                   cwd: workspacePath,
                   stdio: "pipe",
                   timeout: 10000,
                 });
+                execFileSync("git", ["clean", "-fd"], {
+                  cwd: workspacePath,
+                  stdio: "pipe",
+                  timeout: 10000,
+                });
+                const reproductionFiles =
+                  ctx.reproductionDesign?.reproductionFiles ?? [];
+                if (reproductionFiles.length > 0) {
+                  const replay = deps.worktreeManager.applySurgicalFilesSafely(
+                    workspacePath,
+                    reproductionFiles.map((file) => ({
+                      path: file.path,
+                      operation: file.operation,
+                      content: file.content,
+                    })),
+                  );
+                  if (replay.errors.length > 0) {
+                    throw new Error(
+                      `Failed to replay RED reproduction files: ${replay.errors.join("; ")}`,
+                    );
+                  }
+                }
+                const restoredRedTreeSha256 = computeSourceTreeHash(workspacePath);
+                const expectedRedTreeSha256 =
+                  ctx.evidenceReport?.redEvidence?.sourceTreeSha256;
+                if (
+                  !expectedRedTreeSha256 ||
+                  restoredRedTreeSha256 !== expectedRedTreeSha256
+                ) {
+                  throw new Error(
+                    `RedRestoreTreeMismatchError: restored RED tree hash ${restoredRedTreeSha256} does not match canonical RED hash ${expectedRedTreeSha256 ?? "missing"}.`,
+                  );
+                }
               } catch (restoreErr: any) {
                 lastFailureOutput = `Failed to restore RED tree: ${restoreErr.message}`;
                 toolFeedback.push({
@@ -541,14 +605,21 @@ export class ImplementValidateLoopStep implements PipelineStep {
               const parentPatchHash = createHash("sha256")
                 .update(JSON.stringify(ctx.activePatch))
                 .digest("hex");
-              const patchAttempt = {
+              const patchAttempt = PatchAttemptArtifactSchema.parse({
+                runId: ctx.runId!,
                 attemptNumber: implementationAttempts,
                 parentPatchSha256: parentPatchHash,
+                patchSha256: createHash("sha256")
+                  .update(JSON.stringify(repairResult.data))
+                  .digest("hex"),
                 appliedFiles: accumulatedAppliedFiles,
                 failureOutput: lastFailureOutput,
+                baselineCommitSha:
+                  ctx.evidenceReport?.redEvidence?.baselineCommitSha,
                 createdAt: new Date().toISOString(),
-              };
-              (deps.runManager ?? defaultRunManager).saveArtifact(
+              });
+              saveCanonicalArtifact(
+                runManager,
                 ctx.runId!,
                 "patch_attempt",
                 patchAttempt as any,
@@ -558,6 +629,11 @@ export class ImplementValidateLoopStep implements PipelineStep {
               // runtime; the schema's output type is structurally identical to
               // PatchDraft. Guard above already checked `.files.length > 0`.
               activePatchRef.patch = repairResult.data as unknown as PatchDraft;
+              runManager.saveArtifact(
+                ctx.runId!,
+                "patch",
+                activePatchRef.patch as any,
+              );
             }
           } catch {
             // Repair LLM call failed — keep the previous patch draft and retry.
@@ -991,41 +1067,47 @@ export class PrSubmissionStep implements PipelineStep {
 
     try {
       // Unify autonomous orchestration with the trusted run-scoped protocol.
-      let runId = ctx.runId;
+      const runId = ctx.runId;
       if (!runId || !runManager.getRun(runId)) {
-        const created = runManager.createRun({
-          repoFullName: `${owner}/${repo}`,
-          issueNumber: selectedOpp.issueNumber,
-          issueTitle: selectedOpp.title,
-        });
-        runId = created.runId;
-        ctx.runId = runId;
+        throw new Error(
+          "CanonicalRunMissingError: submission cannot create a replacement run after discovery; the Run-First run is required.",
+        );
       }
 
-      // Save issue_binding artifact for provider-verified issue provenance.
-      // Must be written BEFORE reading for PR description to prevent "Fixes #0".
-      if (selectedOpp.issueNumber > 0) {
-        runManager.saveArtifact(runId, "issue_binding", {
-          providerIssueId: selectedOpp.issueNumber,
-          providerVerified: true,
+      const issueBinding = await new IssueBindingService(
+        runManager,
+        deps.client,
+      ).bind({
+        runId,
+        repoFullName: selectedOpp.repoFullName,
+        issueNumber: selectedOpp.issueNumber,
+      });
+
+      const canonicalBeforeDisclosure = runManager.getRun(runId);
+      const privateDisclosureRequired = Boolean(
+        (canonicalBeforeDisclosure?.artifacts.workspace as any)?.communityGate
+          ?.policy?.privateVulnerabilityDisclosure,
+      );
+      const disclosureService = new SecurityDisclosureService(
+        runManager,
+        deps.client,
+      );
+      if (privateDisclosureRequired) {
+        await disclosureService.verifyPrivateChannel({
+          runId,
           repoFullName: selectedOpp.repoFullName,
-          title: selectedOpp.title,
-          issueUrl: `https://github.com/${selectedOpp.repoFullName}/issues/${selectedOpp.issueNumber}`,
-          createdAt: new Date().toISOString(),
-        } as any);
+        });
       }
+      disclosureService.assertPublicSubmissionAllowed(runId);
 
       // Use issue_binding artifact for provider-verified issue number.
-      // Falls back to run manifest issueNumber, then selectedOpp.issueNumber.
-      const persistedRun = runManager.getRun(runId);
-      const issueBindingArtifact = persistedRun?.artifacts.issueBinding as
-        | Record<string, unknown>
-        | undefined;
-      const effectiveIssueNumber = (
-        (issueBindingArtifact?.providerIssueId as number)
-        ?? persistedRun?.manifest.issueNumber
-        ?? selectedOpp.issueNumber
-      ) as number;
+      const issueBindingResult = IssueBindingArtifactSchema.safeParse(issueBinding);
+      if (!issueBindingResult.success) {
+        throw new Error(
+          "IssueBindingIntegrityError: provider issue binding is not canonical.",
+        );
+      }
+      const effectiveIssueNumber = issueBindingResult.data.providerIssueId;
 
       const prDraftText = buildPrDescription({
         issueNumber: effectiveIssueNumber,

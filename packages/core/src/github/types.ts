@@ -31,6 +31,13 @@ export interface SearchIssuesResult {
   error?: string;
 }
 
+export interface ProviderIssue {
+  number: number;
+  title: string;
+  state: 'open' | 'closed';
+  htmlUrl: string;
+}
+
 export interface RepoDetails {
   stars: number;
   defaultBranch: string;

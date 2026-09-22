@@ -19,6 +19,7 @@ import {
   ApprovalArtifactSchema,
   ResultArtifactSchema,
   ValidatedPatchArtifactSchema,
+  SecurityDisclosureArtifactSchema,
   type EvidenceBundleV2,
 } from "../contracts/schemas.js";
 
@@ -346,7 +347,8 @@ export function validatePhaseGate(
       communityPolicyRequiresExplicitApproval(
         governanceResult.data.communityGate.policy,
       ) &&
-      approval.approvalMode !== "explicit_human"
+      approval.approvalMode !== "explicit_human" &&
+      approval.approvalMode !== "maintainer_evidence"
     ) {
       return gateError(
         runSummary,
@@ -356,6 +358,25 @@ export function validatePhaseGate(
         ],
         "Obtain explicit trusted maintainer approval after reviewing the pinned community policy snapshot.",
       );
+    }
+    if (governanceResult.data.communityGate.policy.privateVulnerabilityDisclosure) {
+      const disclosure = SecurityDisclosureArtifactSchema.safeParse(
+        runSummary.artifacts.securityDisclosure,
+      );
+      if (
+        !disclosure.success ||
+        disclosure.data.providerVerified !== true ||
+        disclosure.data.publicDisclosureAllowed !== true
+      ) {
+        return gateError(
+          runSummary,
+          targetPhase,
+          [
+            "Private vulnerability disclosure requires provider-verified evidence and explicit publicDisclosureAllowed authorization.",
+          ],
+          "Obtain trusted security-channel authorization before public submission.",
+        );
+      }
     }
     const submission = submissionResult.success
       ? submissionResult.data

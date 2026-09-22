@@ -15,6 +15,7 @@ export type {
   HostApprovalPort,
   TrustedApprovalAuthority,
   ApprovalAuthorityArtifact,
+  MaintainerEvidenceProvider,
 } from "./approval-authority.js";
 export { isTrustedApprovalAuthority } from "./approval-authority.js";
 export type { ApprovalArtifactVerifier } from "./approval-authority.js";

@@ -15,6 +15,15 @@ export interface ProtocolContractPhase {
   mcp: {
     tool: string;
   };
+  /** Optional benchmark metadata derived by the evaluator from this contract. */
+  benchmark?: {
+    requiredArtifacts?: ArtifactType[];
+    actions?: Array<{
+      action: string;
+      tool: string;
+      requiredArtifacts?: ArtifactType[];
+    }>;
+  };
   forbiddenActions: string[];
   invariants: string[];
   suggestedNextAction: string;
@@ -44,6 +53,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_create_run",
     },
+    benchmark: { requiredArtifacts: [] },
     forbiddenActions: [
       "DO NOT modify source files or create git commits before scoping and qualifying the issue/target.",
     ],
@@ -65,6 +75,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_scout",
     },
+    benchmark: { requiredArtifacts: ["opportunity"] },
     forbiddenActions: [
       "DO NOT claim issues that already have active linked pull requests.",
     ],
@@ -87,6 +98,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_probe_run",
     },
+    benchmark: { requiredArtifacts: ["probe"] },
     forbiddenActions: [
       "DO NOT perform blind sequential file reads (> 3 views) across the repository.",
     ],
@@ -114,6 +126,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_assemble_context",
     },
+    benchmark: { requiredArtifacts: ["context"] },
     forbiddenActions: [
       "DO NOT dump raw multi-megabyte source trees into model context.",
     ],
@@ -142,6 +155,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_prepare_workspace",
     },
+    benchmark: { requiredArtifacts: ["workspace"] },
     forbiddenActions: [
       "DO NOT edit source code files before reproducing a failing unit test (RED Phase).",
       "DO NOT run wide root tests (npm test / go test ./...) without scoping to the subpackage.",
@@ -167,6 +181,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_capture_red",
     },
+    benchmark: { requiredArtifacts: ["evidence_red"] },
     forbiddenActions: [
       "DO NOT edit production code before the target RED assertion is captured.",
       "DO NOT accept an unrelated failing suite as the target reproduction.",
@@ -191,6 +206,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_verify_poc",
     },
+    benchmark: { requiredArtifacts: ["poc"] },
     forbiddenActions: [
       "DO NOT modify production code while authoring reproduction PoC.",
     ],
@@ -212,6 +228,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_save_artifact",
     },
+    benchmark: { requiredArtifacts: ["patch"] },
     forbiddenActions: [
       "DO NOT edit production files directly from INITIALIZED without workspace preparation.",
       "DO NOT exceed 100 modified lines without prior RFC issue discussion.",
@@ -237,6 +254,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_verify_green",
     },
+    benchmark: { requiredArtifacts: ["evidence", "validated_patch"] },
     forbiddenActions: [
       "DO NOT skip pre-fix failure verification.",
       "DO NOT enter this phase on a passing test alone — a captured RED baseline is required.",
@@ -271,6 +289,25 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_audit_governance",
     },
+    benchmark: {
+      actions: [
+        {
+          action: "RENDER_PR_TEMPLATE",
+          tool: "contrib_render_pr_template",
+          requiredArtifacts: ["pr_draft"],
+        },
+        {
+          action: "AUDIT_GOVERNANCE",
+          tool: "contrib_audit_governance",
+          requiredArtifacts: ["governance"],
+        },
+        {
+          action: "REQUEST_APPROVAL",
+          tool: "contrib_request_approval",
+          requiredArtifacts: ["approval"],
+        },
+      ],
+    },
     forbiddenActions: [
       "DO NOT commit or open a PR with failing governance audit score (<90 overall, <80 weakest).",
     ],
@@ -303,6 +340,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_submit_pr",
     },
+    benchmark: { requiredArtifacts: ["submission", "issue_binding"] },
     forbiddenActions: [
       'DO NOT submit PR without linking issue ("Fixes #<id>").',
     ],
@@ -326,6 +364,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_sync_flywheel",
     },
+    benchmark: { requiredArtifacts: ["result"] },
     forbiddenActions: [],
     invariants: [
       "Flywheel sync records contribution heuristics into persistent memory.",
@@ -358,6 +397,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_resume_run",
     },
+    benchmark: { requiredArtifacts: [] },
     forbiddenActions: [],
     invariants: [],
     suggestedNextAction: "inspect_failure_and_replan",

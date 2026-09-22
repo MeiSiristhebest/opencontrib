@@ -12,6 +12,7 @@ import {
   GovernanceDecisionArtifactSchema,
   SubmissionArtifactSchema,
   SubmissionIntentArtifactSchema,
+  SecurityDisclosureArtifactSchema,
   type SubmissionArtifact,
   type SubmissionIntentArtifact,
 } from "../contracts/schemas.js";
@@ -173,6 +174,20 @@ export class GitHubSubmissionService {
       throw new SubmissionVerificationError(
         "Cannot authorize submission: detected community policy requires explicit human approval; policy waiver is not accepted.",
       );
+    }
+    if (governanceResult.data.communityGate.policy.privateVulnerabilityDisclosure) {
+      const disclosure = SecurityDisclosureArtifactSchema.safeParse(
+        run.artifacts.securityDisclosure,
+      );
+      if (
+        !disclosure.success ||
+        disclosure.data.providerVerified !== true ||
+        disclosure.data.publicDisclosureAllowed !== true
+      ) {
+        throw new SubmissionVerificationError(
+          "Cannot authorize submission: private vulnerability disclosure requires provider-verified evidence and explicit publicDisclosureAllowed authorization.",
+        );
+      }
     }
     if (intent.policySha256 !== approval.policySha256) {
       throw new SubmissionVerificationError(

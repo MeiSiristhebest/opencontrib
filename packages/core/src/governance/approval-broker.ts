@@ -7,13 +7,17 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { ApprovalArtifact } from "../contracts/schemas.js";
+import type {
+  ApprovalArtifact,
+  MaintainerGateEvidence,
+} from "../contracts/schemas.js";
 import { ApprovalService, type ApprovalChallenge } from "./approval-service.js";
 import {
   createTrustedApprovalAuthority,
   type ApprovalArtifactVerifier,
   type ApprovalAuthorityDecision,
   type HostApprovalPort,
+  type MaintainerEvidenceProvider,
 } from "./approval-authority.js";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import type { ApprovalSigner } from "./approval-signing.js";
@@ -89,7 +93,8 @@ export class JsonApprovalBrokerStore implements ApprovalBrokerStore {
 
 export interface HumanApprovalDecision {
   approvedBy: string;
-  approvalMode: "explicit_human" | "policy_waived";
+  approvalMode: "explicit_human" | "policy_waived" | "maintainer_evidence";
+  maintainerGateEvidence?: MaintainerGateEvidence;
 }
 
 export interface ApprovalBrokerClock {
@@ -114,6 +119,7 @@ export class TrustedApprovalBroker {
     private readonly verifier: ApprovalArtifactVerifier,
     private readonly store: ApprovalBrokerStore = new InMemoryApprovalBrokerStore(),
     clock: ApprovalBrokerClock = systemClock,
+    private readonly maintainerEvidenceProvider?: MaintainerEvidenceProvider,
   ) {
     this.clock = clock;
   }
@@ -157,8 +163,18 @@ export class TrustedApprovalBroker {
       throw new Error("ApprovalBrokerError: approvedBy is required.");
     }
     if (
+      decision.approvalMode === "maintainer_evidence" &&
+      !decision.maintainerGateEvidence
+    ) {
+      throw new Error(
+        "ApprovalBrokerError: maintainer_evidence requires provider-backed evidence.",
+      );
+    }
+    if (
       communityPolicyRequiresExplicitApproval(request.communityGate.policy) &&
-      decision.approvalMode !== "explicit_human"
+      !["explicit_human", "maintainer_evidence"].includes(
+        decision.approvalMode,
+      )
     ) {
       throw new Error(
         "ApprovalBrokerError: detected community policy requires explicit human approval; policy waiver is not accepted.",
@@ -169,6 +185,7 @@ export class TrustedApprovalBroker {
       issueApproval: (): ApprovalAuthorityDecision => ({
         approvedBy: decision.approvedBy,
         approvalMode: decision.approvalMode,
+        maintainerGateEvidence: decision.maintainerGateEvidence,
         signingKeyId: this.signer.signingKeyId,
         signature: this.signer.signApproval(
           getApprovalSigningPayload({
@@ -182,10 +199,15 @@ export class TrustedApprovalBroker {
             prBodySha256: request.prBodySha256,
             approvedBy: decision.approvedBy,
             approvalMode: decision.approvalMode,
+            maintainerGateEvidence: decision.maintainerGateEvidence,
           }),
         ),
       }),
       verifyApproval: (artifact) => this.verifier.verifyApproval(artifact),
+      verifyMaintainerEvidence: this.maintainerEvidenceProvider
+        ? (evidence) =>
+            this.maintainerEvidenceProvider!.verifyMaintainerEvidence(evidence)
+        : undefined,
     };
     const authority = createTrustedApprovalAuthority(authorityHost);
     const approvalService = new ApprovalService(

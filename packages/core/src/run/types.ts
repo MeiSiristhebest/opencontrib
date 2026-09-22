@@ -82,6 +82,7 @@ export interface ContributionRunSummary {
     patch?: string;
     validatedPatch?: Record<string, unknown>;
     patchAttempt?: Record<string, unknown>;
+    patchAttempts?: Record<string, unknown>[];
     issueBinding?: Record<string, unknown>;
     securityDisclosure?: Record<string, unknown>;
     evidenceRed?: Record<string, unknown>;

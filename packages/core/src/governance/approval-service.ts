@@ -5,6 +5,7 @@ import {
   ApprovalArtifactSchema,
   CommunityGateSnapshotSchema,
   GovernanceDecisionArtifactSchema,
+  MaintainerGateEvidenceSchema,
   SubmissionIntentArtifactSchema,
   ValidatedPatchArtifactSchema,
   type ApprovalArtifact,
@@ -124,7 +125,7 @@ export class ApprovalService {
       !authorityDecision.approvedBy ||
       !authorityDecision.signingKeyId ||
       !authorityDecision.signature ||
-      !["explicit_human", "policy_waived"].includes(
+      !["explicit_human", "policy_waived", "maintainer_evidence"].includes(
         authorityDecision.approvalMode,
       )
     ) {
@@ -134,11 +135,31 @@ export class ApprovalService {
     }
     if (
       communityPolicyRequiresExplicitApproval(challenge.communityGate.policy) &&
-      authorityDecision.approvalMode !== "explicit_human"
+      !["explicit_human", "maintainer_evidence"].includes(
+        authorityDecision.approvalMode,
+      )
     ) {
       throw new Error(
         "ApprovalPolicyViolationError: detected community policy requires explicit human approval; policy waiver is not accepted.",
       );
+    }
+    if (authorityDecision.approvalMode === "maintainer_evidence") {
+      const evidence = MaintainerGateEvidenceSchema.safeParse(
+        authorityDecision.maintainerGateEvidence,
+      );
+      if (!evidence.success) {
+        throw new Error(
+          "ApprovalAuthorityError: maintainer_evidence requires canonical provider-backed evidence.",
+        );
+      }
+      if (
+        !this.authority?.verifyMaintainerEvidence ||
+        !(await this.authority.verifyMaintainerEvidence(evidence.data))
+      ) {
+        throw new Error(
+          "ApprovalAuthorityError: maintainer evidence was not verified by the trusted provider host.",
+        );
+      }
     }
 
     const artifact: ApprovalArtifact = {
@@ -153,6 +174,10 @@ export class ApprovalService {
       approvedBy: authorityDecision.approvedBy,
       approvedAt: new Date().toISOString(),
       approvalMode: authorityDecision.approvalMode,
+      maintainerGateEvidence:
+        authorityDecision.approvalMode === "maintainer_evidence"
+          ? authorityDecision.maintainerGateEvidence
+          : undefined,
       signingKeyId: authorityDecision.signingKeyId,
       signature: authorityDecision.signature,
     };

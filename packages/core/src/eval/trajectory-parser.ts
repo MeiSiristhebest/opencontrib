@@ -47,6 +47,8 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
         const duration = tc.durationMs || tc.duration;
         const exitCode = tc.exitCode;
         const output = tc.output || tc.result;
+        const inputRunId = extractRunId(parsedArgs);
+        const outputRunId = extractRunId(output);
 
         if (typeof duration === 'number' && duration > 0) {
           toolCallDurationMs += duration;
@@ -99,13 +101,9 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
           ingress: extracted.ingress,
           toolName: extracted.toolName,
           stepIndex: raw.step_index ?? idx,
-          runId: typeof (parsedArgs as Record<string, unknown> | undefined)?.runId === 'string'
-            ? (parsedArgs as Record<string, unknown>).runId as string
-            : typeof raw.runId === 'string'
-              ? raw.runId
-              : typeof raw.run_id === 'string'
-                ? raw.run_id
-                : undefined,
+          inputRunId,
+          outputRunId,
+          runId: inputRunId,
         });
         }
       }
@@ -224,6 +222,44 @@ function safeParseJson(str: string): Record<string, unknown> {
     console.warn(`[TrajectoryParser] Failed to parse tool call args, discarding: ${str.slice(0, 100)}`);
     return { raw: str };
   }
+}
+
+/**
+ * Read a run identity from a protocol input or tool result without treating
+ * the CREATE_RUN input as if it already knew the id it is about to create.
+ */
+function extractRunId(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    try {
+      return extractRunId(JSON.parse(trimmed));
+    } catch {
+      const match = trimmed.match(/(?:createdRunId|runId|run_id)\s*[:=]\s*["']?([A-Za-z0-9_-]+)/i);
+      return match?.[1];
+    }
+  }
+  if (!value || typeof value !== 'object') return undefined;
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = extractRunId(item);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of ['inputRunId', 'runId', 'run_id', 'createdRunId']) {
+    if (typeof record[key] === 'string' && record[key].trim()) {
+      return record[key].trim();
+    }
+  }
+  for (const key of ['data', 'result', 'manifest', 'run', 'structuredContent', 'content']) {
+    const nested = extractRunId(record[key]);
+    if (nested) return nested;
+  }
+  return undefined;
 }
 
 function unwrapCommandString(raw: any): string {
