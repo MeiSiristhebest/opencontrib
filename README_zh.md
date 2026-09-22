@@ -230,12 +230,16 @@ opencontrib governance audit \
   --subagent-score 95 \
   --pretty
 
-# 0-Day 缺陷必须先创建带有认领声明的 GitHub Issue
-gh issue create --repo owner/repo --title "[Bug]: Unhandled nil pointer in parser" --body-file issue_body.md
+# 生成 Claim 物证。随后由受信任宿主创建或复用提供方 Issue，并封存提供方校验的 IssueBindingArtifact。
+# 私有漏洞策略改用提供方安全披露生命周期，不创建公开 Issue。
+opencontrib governance claim \
+  --title "[Bug]: Unhandled nil pointer in parser" \
+  --finding "Root cause in parser.ts:42" \
+  --pretty > issue_body.md
 
 # 渲染原生 PR 模板并提交 Draft PR
 opencontrib governance pr-template \
-  --issue 42 \
+  --run-id "$RUN_ID" \
   --issue-title "Unhandled nil pointer in parser" \
   --summary "Add defensive boundary check to prevent parser panic" \
   | jq -r '.prBody' > pr-body.md
@@ -267,7 +271,7 @@ opencontrib submission submit --run-id "$RUN_ID"
 |                          | `governance impact`             | 360° 跨平台路径/换行符/姊妹模块风险检测                        |
 |                          | `governance ci-diagnose`        | GitHub Actions CI 原始日志根因诊断与失败用例提取               |
 |                          | `governance pr-template`        | 合并贡献数据至目标仓库原生 PR 模板                             |
-|                          | `governance claim`              | 生成权威 Issue-First 认领声明与缺陷提案                        |
+|                          | `governance claim`              | 为运行选定的提交路由生成 Claim 物证                           |
 |                          | `governance lint-md`            | Markdown 编码完整性与静态格式校验                              |
 | **Discovery（发现）**    | `scout <repo>`                  | 多源检索机会 Issue 与意图分析（顶级独立命令）                  |
 |                          | `discovery rank`                | 多维机会概率信号加权排序                                       |
@@ -355,7 +359,8 @@ npx -y @opencontrib/cli setup
 - **运行锚点（必须首先执行）**：`opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`；没有 runId 不得侦察、准备工作区或修改源码。
 - **工作区与证据**：`opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`；PoC（contrib_verify_poc）是可选复现步骤，不能替代 contrib_capture_red 的权威 RED。
 - **RED → PATCH → GREEN**：必须先执行 contrib_capture_red，再通过 contrib_save_artifact 保存补丁，最后执行 contrib_verify_green 验证 GREEN；没有 RED 不得进入 PATCH_DRAFTED。
-- **治理与提交**：先执行 contrib_render_pr_template 生成 PR 草稿，再执行 contrib_audit_governance，请求受信任审批（contrib_request_approval），最终只通过 contrib_submit_pr / SubmissionPort 提交。
+- **路由与治理**：公开漏洞必须先绑定提供方校验的 IssueBindingArtifact；私有漏洞必须绑定提供方校验的 SecurityDisclosureArtifact 并获得公开修复授权，不能创建公开 Issue。
+- **PR 草稿**：只能在 EVIDENCE_COLLECTED 首次写入 pr_draft；进入治理后不可变。随后执行 contrib_audit_governance，请求受信任审批（contrib_request_approval），最终只通过 contrib_submit_pr / SubmissionPort 提交。
 - 禁止使用原始 GitHub CLI、GitHub MCP 或 GitHub API 写入 Pull Request；它们会绕过 SubmissionIntent、ApprovalArtifact、SubmissionPermit 与提供方校验。
 <!-- OPENCONTRIB:GENERATED protocol:end -->
 
@@ -365,14 +370,14 @@ npx -y @opencontrib/cli setup
    在智能体协作流程中，优先推荐调用终端 CLI 命令（`opencontrib <command>`），以享受活跃会话继承与自驱状态机流转。同时 OpenContrib MCP 39 大工具集全面作为一等公民受支持，兼容 MCP 客户端。
 2. **防脱轨熔断机制（严禁超过 3 次盲目 view_file）**：
    杜绝连续盲读文件。定位代码必须通过 Smart Pointer 切片（`ptr://...`）或 `grep_search` 精准查找。
-3. **0-Day 漏洞 Issue-First 铁律（严禁裸提 PR）**：
-   对于主动挖掘的缺陷，**必须先创建带有 Claim 认领声明的 GitHub Issue**（`gh issue create --body-file ...`），并在随后的 PR 中强绑定 `Fixes #<id>`。
+3. **提交路由铁律（严禁裸提 PR）**：
+   公开提交必须先绑定提供方校验的 `IssueBindingArtifact`，PR 只能引用其中的规范 Issue ID。私有漏洞提交必须绑定提供方校验的 `SecurityDisclosureArtifact` 并获得生命周期授权，不能创建公开 Issue。
 4. **单测子包精准隔离（严禁全仓盲跑 Flaky 测试）**：
    严禁在仓库根目录下运行宽泛的全局测试（如 `go test ./...` 或 `npm test`）。测试必须严格限定在修改的最小子包路径内。
 5. **终端防卡死路径规约**：
    执行 `rg` 或 `fd` 搜索时**必须显式提供搜索目标目录**（如 `rg "pattern" .`），严禁缺省路径导致 stdin 永久阻塞。
-6. **GitHub CLI 本地 Markdown 规约**：
-   Issue 与 PR 正文必须先写入本地 `.md` 文件并使用 `--body-file <file>` 传入，杜绝 PowerShell 转义字符导致的乱码或中断。
+6. **提供方操作本地 Markdown 规约**：
+   Claim 与 PR 正文必须先写入本地 `.md` 文件，再交给受信任提供方适配器，杜绝 PowerShell 转义字符导致的乱码或中断。
 
 ---
 

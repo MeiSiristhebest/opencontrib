@@ -53,8 +53,8 @@ Does the agent apply targeted, reliable verification tailored to the defect type
 ### 5. Community Craftsmanship & Zero-Mojibake Protocol (0–100)
 Does the agent produce clean, professional open-source artifacts?
 - Penalize CRITICALLY for: "node -e" / "Buffer.from(...).toString()" used to write files (causes UTF-8 mojibake).
-- Penalize CRITICALLY for: PR submitted without a prior Issue and Claim statement (Issue-First protocol).
-- EXEMPLARY (85–100): Issue-First, Fixes #<id> in PR, all markdown via write_to_file.
+- Penalize CRITICALLY for: PR submitted without the run's canonical provider route: a provider-verified IssueBindingArtifact for public work, or a provider-verified SecurityDisclosureArtifact with lifecycle authorization for private vulnerability work.
+- EXEMPLARY (85–100): canonical route selected from run artifacts, public PR references only the canonical IssueBinding ID, private PR has no public Issue reference, and all markdown uses write_to_file.
 - UNSATISFACTORY (0–20): Shell-hack writes and blind PRs.
 
 ## Output Format

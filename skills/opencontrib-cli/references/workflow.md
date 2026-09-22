@@ -28,7 +28,7 @@ Use Track A when the user asks to "audit", "find deep-water bugs", "scan reposit
 [Phase 7: Governance Quality & Markdown Audit]
         │
         ▼
-[Phase 8: Issue-First Registration & PR Submission]
+[Phase 8: Canonical Submission Route & PR Submission]
         │
         ▼
 [Phase 9: Sync Profile & Memory Flywheel]
@@ -158,27 +158,24 @@ opencontrib governance audit \
 
 ---
 
-### Phase 8: Mandatory Issue-First Registration & PR Submission
+### Phase 8: Canonical Submission Route & PR Submission
 
-Before opening a PR, publicly register the bug in GitHub Issues with an idiomatic Claim statement:
+Before opening a PR, select the route pinned by the run's community policy:
 
 ```bash
-# 1. Generate Claim statement / Issue draft
+# 1. Generate Claim statement / Issue draft when the selected route is public
 opencontrib governance claim \
-  --issue <issue_number> \
   --title "[Bug]: <Precise Defect Title>" \
   --finding "Root cause in <file>:<line>" \
   --pretty
 
-# 2. Use native write_to_file tool to create issue_body.md, then create GitHub issue
-gh issue create \
-  --repo <owner>/<repo> \
-  --title "[Bug]: <Precise Defect Title>" \
-  --body-file issue_body.md
+# 2. A trusted host creates or re-reads the provider Issue and seals IssueBindingArtifact.
+#    For private vulnerability policy, the trusted host instead records the provider
+#    security-disclosure lifecycle and its public-fix authorization.
 
-# 3. Render PR template and submit PR (auto-saves pr_draft to active run)
+# 3. Render PR template and submit PR (the run selects the canonical route)
 opencontrib governance pr-template \
-  --issue <new_issue_id> \
+  --run-id "$RUN_ID" \
   --issue-title "<Precise Defect Title>" \
   --summary "<Concise explanation of the surgical fix>" \
   --validation-cmd "<targeted_test_command>" \
@@ -238,6 +235,7 @@ opencontrib evidence capture-red --test-cmd "bun test" --assertion "<failure_reg
 - **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
 - **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
-- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route.
+- **PR draft**: first write is restricted to EVIDENCE_COLLECTED; governance and later phases seal it. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
 - Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
 <!-- OPENCONTRIB:GENERATED protocol:end -->

@@ -8,6 +8,7 @@ import {
   parseCiRawLogs,
   ProfileFlywheel,
   renderMasterPrTemplate,
+  resolveCanonicalSubmissionRoute,
   RepoMemoryLedger,
   type ContributionRunManager,
 } from "@opencontrib/core";
@@ -251,7 +252,8 @@ export function registerGovernanceTools(
         ),
       issueNumber: z
         .union([z.string(), z.number()])
-        .describe("Fixed issue number or task id"),
+        .optional()
+        .describe("Fixed issue number; ignored when a canonical run is supplied"),
       issueTitle: z.string().describe("Title of the issue being solved"),
       summary: z
         .string()
@@ -301,6 +303,24 @@ export function registerGovernanceTools(
       if (resolvedRunId && !canonicalRun) {
         throw new Error(`Contribution run "${resolvedRunId}" not found.`);
       }
+      const canonicalRoute = canonicalRun
+        ? resolveCanonicalSubmissionRoute(canonicalRun)
+        : undefined;
+      const issueNumber = canonicalRoute
+        ? canonicalRoute.route === "PUBLIC_ISSUE"
+          ? canonicalRoute.issueBinding!.providerIssueId
+          : undefined
+        : typeof args.issueNumber === "string"
+          ? Number(args.issueNumber)
+          : args.issueNumber;
+      if (
+        !canonicalRoute &&
+        (!Number.isInteger(issueNumber) || (issueNumber ?? 0) <= 0)
+      ) {
+        throw new Error(
+          "CanonicalIssueBindingRequiredError: issueNumber must be a positive integer when rendering without a canonical run.",
+        );
+      }
       let evidence: import("@opencontrib/core").EvidenceReport | undefined;
       if (canonicalRun) {
         const parsed = EvidenceReportSchema.safeParse(
@@ -310,12 +330,12 @@ export function registerGovernanceTools(
       }
       const prBody = renderMasterPrTemplate({
         nativeTemplateContent: args.nativeTemplateContent,
-        issueNumber:
-          canonicalRun?.manifest.issueNumber ??
-          (typeof args.issueNumber === "string"
-            ? parseInt(args.issueNumber, 10) || 1
-            : args.issueNumber),
-        issueTitle: canonicalRun?.manifest.issueTitle ?? args.issueTitle,
+        issueNumber,
+        submissionRoute: canonicalRoute?.route,
+        issueTitle:
+          canonicalRoute?.issueBinding?.title ??
+          canonicalRun?.manifest.issueTitle ??
+          args.issueTitle,
         summary: args.summary,
         // Canonical runs may only render verification facts from the
         // host-owned EvidenceReport. Caller-supplied validation text is
@@ -327,7 +347,10 @@ export function registerGovernanceTools(
         confidenceScore: args.confidenceScore,
         riskLevel: args.riskLevel,
         isDocumentationOnly: args.isDocumentationOnly,
-        aiDisclosureRequired: args.aiDisclosureRequired,
+        aiDisclosureRequired: canonicalRoute
+          ? canonicalRoute.policy.requiresAiDisclosure === true
+          : false,
+        dcoRequired: canonicalRoute?.policy.requiresDco === true,
         evidence,
       });
 
@@ -357,11 +380,11 @@ export function registerGovernanceTools(
   );
 
   // -------------------------------------------------------------
-  // Tool: contrib_render_issue_claim (Issue-First 认领声明与 Issue 模板生成)
+  // Tool: contrib_render_issue_claim (Claim 认领声明与 Issue 模板生成)
   // -------------------------------------------------------------
   server.tool(
     "contrib_render_issue_claim",
-    "Generate an authoritative Issue-First Claim statement or 0-day issue proposal with reproduction proof before submitting a PR",
+    "Generate an authoritative Claim statement or 0-day issue proposal for the selected submission route before submitting a PR",
     {
       issueNumber: z
         .union([z.string(), z.number()])

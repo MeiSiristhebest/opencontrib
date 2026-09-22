@@ -1,5 +1,10 @@
 import type { ArtifactType, ContributionRunPhase } from "../run/types.js";
 
+export interface ProtocolArtifactRoute {
+  id: "PUBLIC_ISSUE" | "PRIVATE_SECURITY";
+  requiredArtifacts: ArtifactType[];
+}
+
 export interface ProtocolContractPhase {
   phase: ContributionRunPhase;
   name: string;
@@ -18,10 +23,12 @@ export interface ProtocolContractPhase {
   /** Optional benchmark metadata derived by the evaluator from this contract. */
   benchmark?: {
     requiredArtifacts?: ArtifactType[];
+    requiredArtifactRoutes?: ProtocolArtifactRoute[];
     actions?: Array<{
       action: string;
       tool: string;
       requiredArtifacts?: ArtifactType[];
+      requiredArtifactRoutes?: ProtocolArtifactRoute[];
     }>;
   };
   forbiddenActions: string[];
@@ -263,6 +270,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "A RED baseline (failing test + matching assertion) must be captured before the fix.",
       "The source tree must have changed between the RED capture and the GREEN run.",
       "Ensure unit test passed cleanly with 0 regressions before proceeding.",
+      "The first pr_draft may be written only in EVIDENCE_COLLECTED and is immutable after governance binds it.",
     ],
     suggestedNextAction: "prepare_pr_draft",
   },
@@ -340,9 +348,20 @@ export const PROTOCOL_CONTRACT_PHASES = {
     mcp: {
       tool: "contrib_submit_pr",
     },
-    benchmark: { requiredArtifacts: ["submission", "issue_binding"] },
+    benchmark: {
+      requiredArtifactRoutes: [
+        {
+          id: "PUBLIC_ISSUE",
+          requiredArtifacts: ["submission", "issue_binding"],
+        },
+        {
+          id: "PRIVATE_SECURITY",
+          requiredArtifacts: ["submission", "security_disclosure"],
+        },
+      ],
+    },
     forbiddenActions: [
-      'DO NOT submit PR without linking issue ("Fixes #<id>").',
+      "DO NOT submit PR without a provider-bound public Issue route or a provider-authorized private security-disclosure route.",
     ],
     invariants: [
       "PR must record actual reproduction command and verification result.",
@@ -434,7 +453,7 @@ const NEXT_ACTION_GUIDANCE: Record<
   },
   prepare_pr_draft: {
     cliExample:
-      'opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"',
+      'opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>"',
     mcpTool: "contrib_render_pr_template",
   },
   request_approval: {

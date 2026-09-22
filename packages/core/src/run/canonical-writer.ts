@@ -6,7 +6,10 @@ import type {
 } from "./types.js";
 import type { ContributionRunManager } from "./run-manager.js";
 import { validatePhaseGate } from "./state-machine.js";
-import { PatchAttemptArtifactSchema } from "../contracts/schemas.js";
+import {
+  PatchAttemptArtifactSchema,
+  SecurityDisclosureEventArtifactSchema,
+} from "../contracts/schemas.js";
 
 /**
  * Private application-layer capability used by canonical artifact services.
@@ -75,6 +78,7 @@ export function saveCanonicalArtifact(
     "evidence",
     "issue_binding",
     "security_disclosure",
+    "security_disclosure_event",
     "governance",
     "submission_intent",
     "approval",
@@ -91,6 +95,15 @@ export function saveCanonicalArtifact(
     if (!parsed.success) {
       throw new Error(
         `PatchAttemptIntegrityError: invalid patch attempt artifact (${parsed.error.issues[0]?.message ?? "invalid schema"}).`,
+      );
+    }
+    content = parsed.data;
+  }
+  if (type === "security_disclosure_event") {
+    const parsed = SecurityDisclosureEventArtifactSchema.safeParse(content);
+    if (!parsed.success) {
+      throw new Error(
+        `SecurityDisclosureEventIntegrityError: invalid disclosure lifecycle event (${parsed.error.issues[0]?.message ?? "invalid schema"}).`,
       );
     }
     content = parsed.data;

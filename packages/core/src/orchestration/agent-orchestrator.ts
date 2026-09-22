@@ -212,6 +212,7 @@ export class AgentOrchestrator {
       llmService,
       runManager,
       submissionPort: options.deps?.submissionPort,
+      issueCreationService: options.deps?.issueCreationService,
       approvalAuthority: options.deps?.approvalAuthority,
       approvalVerifier: options.deps?.approvalVerifier,
     };

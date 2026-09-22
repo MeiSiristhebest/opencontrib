@@ -53,7 +53,7 @@ describe("Audit Fixes: Doctor & Environment Diagnostics", () => {
   });
 });
 
-describe("Audit Fixes: ClaimProtocol & Issue-First Automation", () => {
+describe("Audit Fixes: ClaimProtocol & Canonical Submission Routes", () => {
   it("generateClaimPayload creates clean Authoritative Claim comments", () => {
     const payload = ClaimProtocol.generateClaimPayload(
       42,

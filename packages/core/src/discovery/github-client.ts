@@ -107,6 +107,15 @@ export class GitHubClient {
     return this.source.getIssue(owner, repo, issue_number);
   }
 
+  /** Trusted-host-only provider write; agent paths must use IssueCreationService. */
+  createIssue(
+    owner: string,
+    repo: string,
+    input: { title: string; body: string },
+  ): Promise<ApiResult<ProviderIssue>> {
+    return this.source.createIssue(owner, repo, input);
+  }
+
   getRepoTextFile(
     owner: string,
     repo: string,

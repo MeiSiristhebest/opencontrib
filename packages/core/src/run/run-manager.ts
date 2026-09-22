@@ -81,6 +81,7 @@ export const AUTHORITATIVE_ARTIFACT_TYPES = new Set<ArtifactType>([
   "evidence",
   "issue_binding",
   "security_disclosure",
+  "security_disclosure_event",
   "governance",
   "submission_intent",
   "approval",
@@ -260,34 +261,25 @@ export class ContributionRunManager {
       throw new Error(`Contribution run ${runId} does not exist`);
     }
 
-    // pr_draft must only be saved after a patch exists and governance has audited.
-    // Reject early-phase saves to prevent INITIALIZED runs from accumulating drafts.
+    // A PR body is a proposal over the collected evidence. It may first be
+    // written only after EVIDENCE_COLLECTED and becomes immutable once
+    // governance binds its hash.
     if (type === "pr_draft") {
-      const earlyPhases = new Set<ContributionRunPhase>([
-        "INITIALIZED",
-        "OPPORTUNITY_SCOUTED",
-        "PROBE_COMPLETED",
-        "CONTEXT_ASSEMBLED",
-        "WORKSPACE_PREPARED",
-      ]);
-      if (earlyPhases.has(summary.manifest.currentPhase)) {
-        throw new Error(
-          `ArtifactPhaseViolationError: pr_draft cannot be saved in phase '${summary.manifest.currentPhase}'. A pr_draft requires a validated patch and governance audit. Use the canonical pipeline to produce pr_draft artifacts.`,
-        );
-      }
-      // Once governance or submission has bound the exact PR body, the draft is
-      // no longer mutable. Re-rendering it would invalidate the audited hash and
-      // must fail before touching the WORM run bundle.
-      if (
-        new Set<ContributionRunPhase>([
+      if (summary.manifest.currentPhase !== "EVIDENCE_COLLECTED") {
+        const phase = summary.manifest.currentPhase;
+        const immutablePhase = new Set<ContributionRunPhase>([
           "GOVERNANCE_AUDITED",
           "PR_SUBMITTED",
           "COMPLETED",
           "FAILED",
-        ]).has(summary.manifest.currentPhase)
-      ) {
+        ]);
+        if (immutablePhase.has(phase)) {
+          throw new Error(
+            `ImmutableArtifactViolationError: pr_draft is immutable after governance binding in phase '${phase}'.`,
+          );
+        }
         throw new Error(
-          `ImmutableArtifactViolationError: pr_draft is immutable after governance binding in phase '${summary.manifest.currentPhase}'.`,
+          `ArtifactPhaseViolationError: pr_draft cannot be saved in phase '${phase}'. The first PR draft must be created in EVIDENCE_COLLECTED after RED/GREEN evidence is canonical.`,
         );
       }
     }
@@ -499,6 +491,8 @@ export class ContributionRunManager {
     if (artifacts.prDraft) availableArtifacts.push("pr_draft");
     if (artifacts.result) availableArtifacts.push("result");
     if (artifacts.securityDisclosure) availableArtifacts.push("security_disclosure");
+    if (artifacts.securityDisclosureEvents?.length)
+      availableArtifacts.push("security_disclosure_event");
 
     const latestSummary = {
       hasOpportunity: !!artifacts.opportunity,

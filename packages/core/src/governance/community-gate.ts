@@ -83,6 +83,20 @@ const RESTRICTED_HOURS_PATTERNS = [
   /review queue.*monday/i,
 ];
 
+const DCO_PATTERNS = [
+  /developer certificate of origin/i,
+  /signed-off-by/i,
+  /sign[- ]off (?:your )?commits/i,
+  /dco (?:required|sign[- ]off)/i,
+];
+
+const AI_DISCLOSURE_PATTERNS = [
+  /(?:ai|automated|copilot)[ -]?(?:assisted|generated) disclosure/i,
+  /disclose (?:the use of )?(?:ai|automated|copilot)/i,
+  /ai disclosure is required/i,
+  /generated with (?:ai|copilot)/i,
+];
+
 function permissivePolicy(reason: string): CommunityGatePolicy {
   return {
     hasGatingRules: false,
@@ -92,7 +106,7 @@ function permissivePolicy(reason: string): CommunityGatePolicy {
     restrictedTriageHours: false,
     reasons: [reason],
     suggestedContributorAction:
-      "Follow standard Issue-First workflow and create PR with linked issue.",
+      "Use the provider-verified public IssueBinding route, or the private security-disclosure route when policy requires it.",
     matchedKeywords: [],
   };
 }
@@ -123,6 +137,8 @@ export function detectCommunityGateFromContents(
   let hasLgtmApprovalProtocol = false;
   let restrictedTriageHours = false;
   let privateVulnerabilityDisclosure = false;
+  let requiresDco = false;
+  let requiresAiDisclosure = false;
   let maxDiffCeiling: number | undefined;
 
   for (const pattern of ISSUE_APPROVAL_PATTERNS) {
@@ -165,6 +181,22 @@ export function detectCommunityGateFromContents(
     }
   }
 
+  for (const pattern of DCO_PATTERNS) {
+    const match = combinedContent.match(pattern);
+    if (match) {
+      requiresDco = true;
+      matchedKeywords.push(match[0]);
+    }
+  }
+
+  for (const pattern of AI_DISCLOSURE_PATTERNS) {
+    const match = combinedContent.match(pattern);
+    if (match) {
+      requiresAiDisclosure = true;
+      matchedKeywords.push(match[0]);
+    }
+  }
+
   const diffPatterns = [
     /(\d+)\s*(?:lines|loc)\s*(?:limit|ceiling|max)/i,
     /(?:max(?:imum)?|limit|ceiling|over|more than)\D{0,20}(\d+)\s*(?:lines|loc)/i,
@@ -203,9 +235,20 @@ export function detectCommunityGateFromContents(
     );
   }
 
+  if (requiresDco) {
+    reasons.push(
+      "Repository requires Developer Certificate of Origin sign-off on contribution commits.",
+    );
+  }
+  if (requiresAiDisclosure) {
+    reasons.push(
+      "Repository requires explicit disclosure of AI or automated assistance.",
+    );
+  }
+
   if (privateVulnerabilityDisclosure) {
     reasons.push(
-      "Repository requires private vulnerability disclosure (SECURITY.md DO-NOT-OPEN-PUBLIC-ISSUE). Issue-First protocol is overridden.",
+      "Repository requires private vulnerability disclosure (SECURITY.md DO-NOT-OPEN-PUBLIC-ISSUE); the private security route replaces the public Issue route.",
     );
   }
 
@@ -215,13 +258,16 @@ export function detectCommunityGateFromContents(
     hasLgtmApprovalProtocol;
 
   let suggestedContributorAction =
-    "Proceed with standard Issue creation and PR submission.";
+    "Use the provider-backed public Issue route and bind the resulting Issue before PR submission.";
   if (privateVulnerabilityDisclosure) {
     suggestedContributorAction =
       'Repository requires PRIVATE vulnerability disclosure. DO NOT open a public issue. Contact security maintainer via private channel before any public submission.';
   } else if (requiresIssueApprovalBeforePr || autoClosesNewIssues) {
     suggestedContributorAction =
-      'Create GitHub Issue first. PAUSE pipeline and wait for maintainer to reopen or comment "lgtmi" before submitting PR.';
+      'Create and bind the provider-backed Issue first. PAUSE pipeline and wait for maintainer to reopen or comment "lgtmi" before submitting PR.';
+  } else if (requiresDco || requiresAiDisclosure) {
+    suggestedContributorAction =
+      "Follow the pinned commit sign-off and AI disclosure requirements before requesting approval.";
   }
 
   return CommunityGatePolicySchema.parse({
@@ -231,6 +277,8 @@ export function detectCommunityGateFromContents(
     hasLgtmApprovalProtocol,
     restrictedTriageHours,
     privateVulnerabilityDisclosure,
+    requiresDco,
+    requiresAiDisclosure,
     maxDiffCeiling,
     reasons,
     suggestedContributorAction,

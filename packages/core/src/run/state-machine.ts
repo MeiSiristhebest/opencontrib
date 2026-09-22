@@ -19,9 +19,13 @@ import {
   ApprovalArtifactSchema,
   ResultArtifactSchema,
   ValidatedPatchArtifactSchema,
-  SecurityDisclosureArtifactSchema,
   type EvidenceBundleV2,
 } from "../contracts/schemas.js";
+import {
+  hasPublicSecurityDisclosureAuthorization,
+  hashSubmissionArtifact,
+  resolveCanonicalSubmissionRoute,
+} from "../submission/submission-route.js";
 
 export class PhaseGateViolationError extends Error {
   constructor(
@@ -359,24 +363,50 @@ export function validatePhaseGate(
         "Obtain explicit trusted maintainer approval after reviewing the pinned community policy snapshot.",
       );
     }
-    if (governanceResult.data.communityGate.policy.privateVulnerabilityDisclosure) {
-      const disclosure = SecurityDisclosureArtifactSchema.safeParse(
-        runSummary.artifacts.securityDisclosure,
+    let canonicalRoute;
+    try {
+      canonicalRoute = resolveCanonicalSubmissionRoute(runSummary);
+    } catch (error) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [error instanceof Error ? error.message : String(error)],
+        "Bind the run to a provider-verified open Issue or the repository's private security disclosure lifecycle before submission.",
       );
-      if (
-        !disclosure.success ||
-        disclosure.data.providerVerified !== true ||
-        disclosure.data.publicDisclosureAllowed !== true
-      ) {
-        return gateError(
-          runSummary,
-          targetPhase,
-          [
-            "Private vulnerability disclosure requires provider-verified evidence and explicit publicDisclosureAllowed authorization.",
-          ],
-          "Obtain trusted security-channel authorization before public submission.",
-        );
-      }
+    }
+    const expectedRouteHash =
+      canonicalRoute.route === "PUBLIC_ISSUE"
+        ? hashSubmissionArtifact(canonicalRoute.issueBinding)
+        : hashSubmissionArtifact(canonicalRoute.securityDisclosure);
+    const suppliedRouteHash =
+      canonicalRoute.route === "PUBLIC_ISSUE"
+        ? intentResult.data.issueBindingSha256
+        : intentResult.data.securityDisclosureSha256;
+    if (
+      intentResult.data.submissionRoute !== canonicalRoute.route ||
+      suppliedRouteHash !== expectedRouteHash
+    ) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [
+          "SubmissionIntentArtifact is not bound to the provider-verified canonical submission route.",
+        ],
+        "Recreate the immutable SubmissionIntent only after binding the canonical Issue or security disclosure artifact.",
+      );
+    }
+    if (
+      canonicalRoute.route === "PRIVATE_SECURITY" &&
+      !hasPublicSecurityDisclosureAuthorization(runSummary)
+    ) {
+      return gateError(
+        runSummary,
+        targetPhase,
+        [
+          "Private vulnerability disclosure requires append-only DISCLOSED -> ACKNOWLEDGED -> PUBLIC_FIX_AUTHORIZED provider events with publicDisclosureAllowed authorization.",
+        ],
+        "Obtain trusted security-channel authorization before public submission.",
+      );
     }
     const submission = submissionResult.success
       ? submissionResult.data
@@ -399,6 +429,11 @@ export function validatePhaseGate(
       intent.governanceSha256 === expectedHashes.governanceSha256 &&
       intent.policySha256 === governanceResult.data.policySha256 &&
       intent.bodySha256 === hashArtifact(intent.body);
+    const intentRouteBound =
+      intent.submissionRoute === canonicalRoute.route &&
+      (canonicalRoute.route === "PUBLIC_ISSUE"
+        ? intent.issueBindingSha256 === expectedRouteHash
+        : intent.securityDisclosureSha256 === expectedRouteHash);
     const submissionBound =
       !!submission &&
       submission.verified === true &&
@@ -414,14 +449,23 @@ export function validatePhaseGate(
       submission.owner.toLowerCase() === intent.upstreamOwner.toLowerCase() &&
       submission.repo.toLowerCase() === intent.upstreamRepo.toLowerCase() &&
       submission.baseBranch === intent.baseBranch &&
-      submission.branchName === intent.branchName;
+      submission.branchName === intent.branchName &&
+      submission.submissionRoute === intent.submissionRoute &&
+      submission.issueBindingSha256 === intent.issueBindingSha256 &&
+      submission.securityDisclosureSha256 === intent.securityDisclosureSha256;
     const validPrUrl =
       !!submission &&
       /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9][0-9]*$/i.test(
         submission.prUrl,
       );
 
-    if (!approvalBound || !intentBound || !submissionBound || !validPrUrl) {
+    if (
+      !approvalBound ||
+      !intentBound ||
+      !intentRouteBound ||
+      !submissionBound ||
+      !validPrUrl
+    ) {
       return gateError(
         runSummary,
         targetPhase,
@@ -432,6 +476,9 @@ export function validatePhaseGate(
           intentBound
             ? undefined
             : "SubmissionIntentArtifact hashes do not bind the current run artifacts.",
+          intentRouteBound
+            ? undefined
+            : "SubmissionIntentArtifact does not bind the canonical Issue or private security disclosure route.",
           submissionResult.success
             ? submissionBound
               ? undefined

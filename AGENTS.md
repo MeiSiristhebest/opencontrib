@@ -14,14 +14,14 @@ Execute open-source contribution tasks adhering to the 9-Phase OpenContrib Lifec
 - **Sandbox Workspace:** `opencontrib workspace prepare --repo <owner/repo> --issue <id>`
 - **Evidence Verification (RED→GREEN):** capture the failing baseline with `opencontrib evidence capture-red --test-cmd "<test_cmd>" --assertion "<pattern>"`, apply the fix, then verify with `opencontrib evidence verify-green --test-cmd "<test_cmd>"`
 - **Governance Audit:** `opencontrib governance audit --patch <file> --pr-title "<title>"`
-- **PR Description:** `opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"`
+- **PR Description:** `opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>"` (the run selects the canonical public Issue or private security route)
 - **Flywheel Sync:** `opencontrib flywheel sync --repo <owner/repo>`
 
 ### 2. Constraints & Quality Invariants
 
 - **No Hallucinated PRs:** Never write code or tests without running local verification inside the worktree sandbox.
 - **RFC-100 Adherence:** Ensure all contributions pass anti-AI governance linting with a score >= 90 overall and >= 80 on all dimensions.
-- **Issue-First Policy:** Always associate PRs with qualified issues (`Fixes #<id>`).
+- **Submission Route Policy:** Public submissions require a provider-verified `IssueBindingArtifact`; private vulnerability submissions require a provider-verified `SecurityDisclosureArtifact` and lifecycle authorization, with no public Issue route.
 
 <!-- OPENCONTRIB:GENERATED protocol:start -->
 ## Canonical OpenContrib Protocol (generated)
@@ -29,6 +29,7 @@ Execute open-source contribution tasks adhering to the 9-Phase OpenContrib Lifec
 - **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
 - **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
-- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route.
+- **PR draft**: first write is restricted to EVIDENCE_COLLECTED; governance and later phases seal it. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
 - Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
 <!-- OPENCONTRIB:GENERATED protocol:end -->

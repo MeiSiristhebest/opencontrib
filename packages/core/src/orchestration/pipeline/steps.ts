@@ -12,7 +12,6 @@
 
 import {
   type Opportunity,
-  IssueBindingArtifactSchema,
   PatchAttemptArtifactSchema,
   SubmissionArtifactSchema,
   SubmissionIntentArtifactSchema,
@@ -48,6 +47,7 @@ import { RemoteCompletionAttestationSchema } from "../../run/completion-attestat
 import { WorkspaceService } from "../../workspace/workspace-service.js";
 import { IssueBindingService } from "../../github/issue-binding-service.js";
 import { SecurityDisclosureService } from "../../github/security-disclosure-service.js";
+import { resolveCanonicalSubmissionRoute } from "../../submission/submission-route.js";
 import { buildTurnPrompt } from "../agent-orchestrator.js";
 import type {
   PipelineContext,
@@ -1074,18 +1074,14 @@ export class PrSubmissionStep implements PipelineStep {
         );
       }
 
-      const issueBinding = await new IssueBindingService(
-        runManager,
-        deps.client,
-      ).bind({
-        runId,
-        repoFullName: selectedOpp.repoFullName,
-        issueNumber: selectedOpp.issueNumber,
-      });
-
       const canonicalBeforeDisclosure = runManager.getRun(runId);
+      if (!canonicalBeforeDisclosure?.artifacts.workspace) {
+        throw new Error(
+          "CanonicalWorkspaceRequiredError: submission requires the immutable workspace artifact; context fallback data is not authoritative.",
+        );
+      }
       const privateDisclosureRequired = Boolean(
-        (canonicalBeforeDisclosure?.artifacts.workspace as any)?.communityGate
+        (canonicalBeforeDisclosure.artifacts.workspace as any)?.communityGate
           ?.policy?.privateVulnerabilityDisclosure,
       );
       const disclosureService = new SecurityDisclosureService(
@@ -1097,20 +1093,38 @@ export class PrSubmissionStep implements PipelineStep {
           runId,
           repoFullName: selectedOpp.repoFullName,
         });
+      } else if (Number.isInteger(selectedOpp.issueNumber) && selectedOpp.issueNumber > 0) {
+        await new IssueBindingService(runManager, deps.client).bind({
+          runId,
+          repoFullName: selectedOpp.repoFullName,
+          issueNumber: selectedOpp.issueNumber,
+        });
+      } else if (deps.issueCreationService) {
+        await deps.issueCreationService.createAndBind({
+          runId,
+          repoFullName: selectedOpp.repoFullName,
+          title: selectedOpp.title,
+          body:
+            activePatch?.summary ||
+            "OpenContrib discovered a reproducible defect and requires maintainer triage before public submission.",
+        });
+      } else {
+        throw new Error(
+          "IssueCreationRequiredError: no existing issue identity was supplied and no trusted IssueCreationService is configured.",
+        );
       }
       disclosureService.assertPublicSubmissionAllowed(runId);
 
-      // Use issue_binding artifact for provider-verified issue number.
-      const issueBindingResult = IssueBindingArtifactSchema.safeParse(issueBinding);
-      if (!issueBindingResult.success) {
-        throw new Error(
-          "IssueBindingIntegrityError: provider issue binding is not canonical.",
-        );
-      }
-      const effectiveIssueNumber = issueBindingResult.data.providerIssueId;
+      const canonicalRoute = resolveCanonicalSubmissionRoute(
+        runManager.getRun(runId)!,
+      );
+      const effectiveIssueNumber = canonicalRoute.issueBinding?.providerIssueId;
 
       const prDraftText = buildPrDescription({
         issueNumber: effectiveIssueNumber,
+        submissionRoute: canonicalRoute.route,
+        aiDisclosureRequired: canonicalRoute.policy.requiresAiDisclosure === true,
+        dcoRequired: canonicalRoute.policy.requiresDco === true,
         problemSummary: activePatch?.summary || selectedOpp.title,
         rootCause:
           activePatch?.rationale || "Unavailable (root cause not recorded)",
@@ -1125,15 +1139,6 @@ export class PrSubmissionStep implements PipelineStep {
 
       // Ensure only non-authoritative stage artifacts are written generically;
       // evidence must already have been produced by EvidenceService.
-      if (ctx.workspace && !runManager.getRun(runId)?.artifacts.workspace) {
-        saveCanonicalArtifact(
-          runManager,
-          runId,
-          "workspace",
-          ctx.workspace as any,
-          "WORKSPACE_PREPARED",
-        );
-      }
       if (ctx.activePatch) {
         runManager.saveArtifact(runId, "patch", ctx.activePatch as any);
       }

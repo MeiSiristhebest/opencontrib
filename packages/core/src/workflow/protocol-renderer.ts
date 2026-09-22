@@ -99,6 +99,8 @@ export function renderWorkflowGuide(
     "- Capture authoritative RED before drafting a patch, then draft the patch and run authoritative GREEN verification.",
     "- `contrib_capture_red` is mandatory before `contrib_save_artifact` advances to `PATCH_DRAFTED`, whether or not a PoC exists.",
     "- `contrib_verify_green` binds GREEN to RED and advances the evidence gate.",
+    "- Before public submission, bind a provider-verified open `IssueBindingArtifact`; a private vulnerability policy instead requires a provider-verified `SecurityDisclosureArtifact` and public-fix authorization, with no public Issue route.",
+    "- Create `pr_draft` exactly once in `EVIDENCE_COLLECTED`; governance and later phases treat it as immutable.",
     "- Approval is an artifact-level gate. Request approval through OpenContrib, then submit only through `contrib_submit_pr` and the trusted `SubmissionPort`.",
     "- DO NOT call GitHub create_pull_request directly.",
     "- DO NOT call GitHub MCP or GitHub API create/update-pull-request operations directly. They bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.",
@@ -131,7 +133,8 @@ export function renderProtocolDocumentationBlock(
       `- **运行锚点（必须首先执行）**：${docCommand("INITIALIZED")}；没有 runId 不得侦察、准备工作区或修改源码。`,
       `- **工作区与证据**：${docCommand("WORKSPACE_PREPARED")}；PoC（${poc.mcp.tool}）是可选复现步骤，不能替代 ${red.mcp.tool} 的权威 RED。`,
       `- **RED → PATCH → GREEN**：必须先执行 ${red.mcp.tool}，再通过 ${patch.mcp.tool} 保存补丁，最后执行 ${evidence.mcp.tool} 验证 GREEN；没有 RED 不得进入 PATCH_DRAFTED。`,
-      `- **治理与提交**：先执行 ${prDraftGuidance.mcpTool} 生成 PR 草稿，再执行 ${governance.mcp.tool}，请求受信任审批（${approvalGuidance.mcpTool}），最终只通过 ${submission.mcp.tool} / SubmissionPort 提交。`,
+      `- **路由与治理**：公开漏洞必须先绑定提供方校验的 IssueBindingArtifact；私有漏洞必须绑定提供方校验的 SecurityDisclosureArtifact 并获得公开修复授权，不能创建公开 Issue。`,
+      `- **PR 草稿**：只能在 ${evidence.phase} 首次写入 pr_draft；进入治理后不可变。随后执行 ${governance.mcp.tool}，请求受信任审批（${approvalGuidance.mcpTool}），最终只通过 ${submission.mcp.tool} / SubmissionPort 提交。`,
       "- 禁止使用原始 GitHub CLI、GitHub MCP 或 GitHub API 写入 Pull Request；它们会绕过 SubmissionIntent、ApprovalArtifact、SubmissionPermit 与提供方校验。",
     ].join("\n");
   }
@@ -142,7 +145,8 @@ export function renderProtocolDocumentationBlock(
     `- **Run anchor (first)**: ${docCommand("INITIALIZED")}; no scouting, workspace preparation, or source edits before a runId exists.`,
     `- **Workspace and evidence**: ${docCommand("WORKSPACE_PREPARED")}; PoC (${poc.mcp.tool}) is optional and never replaces authoritative RED via ${red.mcp.tool}.`,
     `- **RED → PATCH → GREEN**: run ${red.mcp.tool} first, then save the patch through ${patch.mcp.tool}, and verify GREEN through ${evidence.mcp.tool}; PATCH_DRAFTED is invalid without RED.`,
-    `- **Governance and submission**: ${prDraftGuidance.cliExample} → ${governance.cli.example} → ${approvalGuidance.cliExample} → opencontrib submission submit; MCP equivalents end at ${submission.mcp.tool} / SubmissionPort.`,
+    `- **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route.`,
+    `- **PR draft**: first write is restricted to ${evidence.phase}; governance and later phases seal it. Then run ${governance.cli.example} → ${approvalGuidance.cliExample} → opencontrib submission submit; MCP equivalents end at ${submission.mcp.tool} / SubmissionPort.`,
     "- Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.",
   ].join("\n");
 }

@@ -126,6 +126,8 @@ export class ArtifactBundleManager {
         return "approval.json";
       case "submission":
         return "submission.json";
+      case "security_disclosure_event":
+        return "security_disclosure_event.json";
       case "pr_draft":
         return "pr_draft.md";
       case "result":
@@ -141,13 +143,19 @@ export class ArtifactBundleManager {
     content: string | Record<string, unknown>,
   ): SavedArtifactResult {
     const runDir = this.ensureRunDir(runId);
-    if (type === "patch_attempt") {
+    if (type === "patch_attempt" || type === "security_disclosure_event") {
+      const pattern =
+        type === "patch_attempt"
+          ? /^patch_attempt_(\d+)\.json$/
+          : /^security_disclosure_event_(\d+)\.json$/;
       const nextIndex =
         readdirSync(runDir)
-          .map((name) => /^patch_attempt_(\d+)\.json$/.exec(name)?.[1])
+          .map((name) => pattern.exec(name)?.[1])
           .filter((value): value is string => value !== undefined)
           .reduce((max, value) => Math.max(max, Number(value)), 0) + 1;
-      const filename = `patch_attempt_${String(nextIndex).padStart(4, "0")}.json`;
+      const prefix =
+        type === "patch_attempt" ? "patch_attempt" : "security_disclosure_event";
+      const filename = `${prefix}_${String(nextIndex).padStart(4, "0")}.json`;
       const filePath = join(runDir, filename);
       const stringContent =
         typeof content === "string" ? content : JSON.stringify(content, null, 2);
@@ -223,9 +231,13 @@ export class ArtifactBundleManager {
   readArtifact<T = unknown>(runId: string, type: ArtifactType): T | null {
     const runDir = this.getRunDir(runId);
     let filePath: string;
-    if (type === "patch_attempt") {
+    if (type === "patch_attempt" || type === "security_disclosure_event") {
+      const pattern =
+        type === "patch_attempt"
+          ? /^patch_attempt_\d+\.json$/
+          : /^security_disclosure_event_\d+\.json$/;
       const latest = readdirSync(runDir)
-        .filter((name) => /^patch_attempt_\d+\.json$/.test(name))
+        .filter((name) => pattern.test(name))
         .sort()
         .pop();
       if (!latest) return null;
@@ -390,6 +402,7 @@ export class ArtifactBundleManager {
         issueBinding: this.readArtifact(runId, "issue_binding") ?? undefined,
         securityDisclosure:
           this.readArtifact(runId, "security_disclosure") ?? undefined,
+        securityDisclosureEvents: this.readSecurityDisclosureEvents(runId),
         evidenceRed: this.readArtifact(runId, "evidence_red") ?? undefined,
         evidence: this.readArtifact(runId, "evidence") ?? undefined,
         governance: this.readArtifact(runId, "governance") ?? undefined,
@@ -409,6 +422,24 @@ export class ArtifactBundleManager {
     const runDir = this.getRunDir(runId);
     return readdirSync(runDir)
       .filter((name) => /^patch_attempt_\d+\.json$/.test(name))
+      .sort()
+      .flatMap((name) => {
+        try {
+          const value = JSON.parse(readFileSync(join(runDir, name), "utf-8"));
+          return value && typeof value === "object"
+            ? [value as Record<string, unknown>]
+            : [];
+        } catch {
+          return [];
+        }
+      });
+  }
+
+  private readSecurityDisclosureEvents(runId: string): Record<string, unknown>[] {
+    const runDir = this.getRunDir(runId);
+    if (!existsSync(runDir)) return [];
+    return readdirSync(runDir)
+      .filter((name) => /^security_disclosure_event_\d+\.json$/.test(name))
       .sort()
       .flatMap((name) => {
         try {

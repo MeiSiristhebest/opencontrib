@@ -2,13 +2,16 @@ import type { PrTemplateEvidence } from "./governance-auditor.js";
 import { renderMasterPrTemplate } from "./governance-auditor.js";
 
 export interface PrData {
-  issueNumber: number;
+  issueNumber?: number;
+  submissionRoute?: "PUBLIC_ISSUE" | "PRIVATE_SECURITY";
   problemSummary: string;
   rootCause: string;
   keyChanges: string[];
   verificationCommand?: string;
   stressLoopCount?: number;
   conditionalAiRequired?: boolean;
+  aiDisclosureRequired?: boolean;
+  dcoRequired?: boolean;
   evidence?: PrTemplateEvidence;
 }
 

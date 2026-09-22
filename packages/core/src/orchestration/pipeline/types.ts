@@ -37,6 +37,7 @@ import type { RepoMemoryLedger } from "../../memory/repo-memory.js";
 import type { ProfileFlywheel } from "../../flywheel/profile-sync.js";
 import type { ContributionPrService } from "../../github/contribution-pr-service.js";
 import type { SubmissionPort } from "../../github/submission-port.js";
+import type { IssueCreationService } from "../../github/issue-creation-service.js";
 import type { ContributionRunManager } from "../../run/run-manager.js";
 import type {
   ApprovalArtifactVerifier,
@@ -71,6 +72,8 @@ export interface PipelineDeps {
   prService?: ContributionPrService;
   /** Agent-facing submission port; implementations must not expose provider credentials. */
   submissionPort?: SubmissionPort;
+  /** Trusted host capability used only when no existing provider issue exists. */
+  issueCreationService?: IssueCreationService;
   contextAssembler: ContextAssembler;
   stateMachine: ContributionStateMachine;
   clock: Clock;

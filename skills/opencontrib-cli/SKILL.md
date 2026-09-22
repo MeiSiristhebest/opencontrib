@@ -30,7 +30,7 @@ graph LR
     P4 --> P5["5. Optional PoC / Capture RED & Fix"]
     P5 --> P6["6. Capture RED / Verify GREEN"]
     P6 --> P7["7. Governance Audit"]
-    P7 --> P8["8. Issue-First & PR"]
+    P7 --> P8["8. Canonical Route & PR"]
     P8 --> P9["9. Flywheel Sync"]
 ```
 
@@ -77,9 +77,10 @@ Load these modular references into context **only when entering that specific ph
    - **NEVER** perform blind sequential file reads (> 3 views).
    - Pinpoint symbols strictly via Smart Pointer slices (`ptr://...`) or `grep_search`. If you find yourself viewing files more than 3 times without progress, **execute `opencontrib probe run` immediately**.
 
-7. **Mandatory Issue-First on 0-Days (No Blind PRs)**:
-   - For proactive 0-day fixes, **ALWAYS create a GitHub Issue first** (`gh issue create --body-file ...`) with an authoritative Claim statement.
-   - The subsequent PR description **MUST anchor `Fixes #<issue_number>`**. Unlinked PRs are strictly rejected.
+7. **Canonical Submission Route (No Blind PRs)**:
+   - Public 0-day fixes require a provider-created or provider-re-read `IssueBindingArtifact` sealed to the run.
+   - Private vulnerability fixes require a provider-verified `SecurityDisclosureArtifact` and lifecycle authorization; they must not create a public Issue.
+   - Public PR descriptions may reference only the canonical Issue ID from the binding. Caller-supplied Issue numbers are not authoritative.
 
 8. **Targeted Subsystem Test Isolation (No Global Flaky Runs)**:
    - **NEVER** run broad root tests (`go test ./...` or `npm test` at repo root) without isolation.
@@ -105,6 +106,7 @@ Pause and obtain user confirmation at these three gates:
 - **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
 - **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
-- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route.
+- **PR draft**: first write is restricted to EVIDENCE_COLLECTED; governance and later phases seal it. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
 - Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
 <!-- OPENCONTRIB:GENERATED protocol:end -->

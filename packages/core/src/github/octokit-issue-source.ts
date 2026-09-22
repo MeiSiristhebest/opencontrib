@@ -167,6 +167,40 @@ export class OctokitIssueSource {
     };
   }
 
+  /** Provider-backed issue creation. Used only by a trusted host service. */
+  async createIssue(
+    owner: string,
+    repo: string,
+    input: { title: string; body: string },
+  ): Promise<ApiResult<ProviderIssue>> {
+    const res = await this.request(async () =>
+      this.octokit.rest.issues.create({
+        owner,
+        repo,
+        title: input.title,
+        body: input.body,
+      }),
+    );
+    if (res.status !== "OK" || !res.data) {
+      return {
+        status: res.status,
+        data: null as any,
+        error: res.error,
+        statusCode: res.statusCode,
+      };
+    }
+    const issue = res.data.data as any;
+    return {
+      status: "OK",
+      data: {
+        number: issue.number,
+        title: String(issue.title || ""),
+        state: issue.state === "open" ? "open" : "closed",
+        htmlUrl: String(issue.html_url || ""),
+      },
+    };
+  }
+
   async getRepoTextFile(owner: string, repo: string, path: string): Promise<string | null> {
     const res = await this.request(async () => {
       return await this.octokit.rest.repos.getContent({

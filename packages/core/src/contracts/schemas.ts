@@ -350,6 +350,12 @@ export const SubmissionIntentFileSchema = z.object({
 });
 export type SubmissionIntentFile = z.infer<typeof SubmissionIntentFileSchema>;
 
+export const SubmissionRouteSchema = z.enum([
+  "PUBLIC_ISSUE",
+  "PRIVATE_SECURITY",
+]);
+export type SubmissionRoute = z.infer<typeof SubmissionRouteSchema>;
+
 export const SubmissionIntentArtifactSchema = z.object({
   runId: z.string(),
   upstreamOwner: z.string(),
@@ -367,6 +373,17 @@ export const SubmissionIntentArtifactSchema = z.object({
   evidenceSha256: z.string(),
   governanceSha256: z.string(),
   policySha256: z.string(),
+  /** Canonical provider route selected from the pinned community policy. */
+  submissionRoute: SubmissionRouteSchema.default("PUBLIC_ISSUE"),
+  /** Hash of the provider-verified route artifact bound into this intent. */
+  issueBindingSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/i)
+    .optional(),
+  securityDisclosureSha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/i)
+    .optional(),
   intentSha256: z.string(),
   createdAt: z.string(),
 });
@@ -401,10 +418,37 @@ export const SecurityDisclosureArtifactSchema = z.object({
   channelUrl: z.string().url(),
   providerVerified: z.literal(true),
   publicDisclosureAllowed: z.boolean(),
+  stage: z
+    .enum([
+      "CHANNEL_DISCOVERED",
+      "DISCLOSED",
+      "ACKNOWLEDGED",
+      "PUBLIC_FIX_AUTHORIZED",
+    ])
+    .default("CHANNEL_DISCOVERED"),
   verifiedAt: z.string().min(1),
 });
 export type SecurityDisclosureArtifact = z.infer<
   typeof SecurityDisclosureArtifactSchema
+>;
+
+/** Append-only provider event advancing a private disclosure lifecycle. */
+export const SecurityDisclosureEventArtifactSchema = z.object({
+  runId: z.string().min(1),
+  provider: z.literal("github"),
+  repoFullName: z.string().min(1),
+  stage: z.enum([
+    "DISCLOSED",
+    "ACKNOWLEDGED",
+    "PUBLIC_FIX_AUTHORIZED",
+  ]),
+  providerEventId: z.string().min(1),
+  providerVerified: z.literal(true),
+  publicDisclosureAllowed: z.boolean(),
+  recordedAt: z.string().min(1),
+});
+export type SecurityDisclosureEventArtifact = z.infer<
+  typeof SecurityDisclosureEventArtifactSchema
 >;
 
 /**
@@ -471,6 +515,9 @@ export const SubmissionArtifactSchema = z.object({
   governanceSha256: z.string(),
   policySha256: z.string(),
   communityGateSha256: Sha256HexSchema,
+  submissionRoute: SubmissionRouteSchema.optional(),
+  issueBindingSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+  securityDisclosureSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
   prNumber: z.number().finite().int().positive(),
   prUrl: z.string().url(),
   headSha: z.string().min(1),
@@ -936,6 +983,10 @@ export const CommunityGatePolicySchema = z.object({
   hasLgtmApprovalProtocol: z.boolean(),
   restrictedTriageHours: z.boolean(),
   privateVulnerabilityDisclosure: z.boolean().optional(),
+  /** DCO/sign-off is a commit-level community requirement. */
+  requiresDco: z.boolean().optional(),
+  /** Repository policy requires explicit AI/automation disclosure. */
+  requiresAiDisclosure: z.boolean().optional(),
   maxDiffCeiling: z.number().int().positive().optional(),
   reasons: z.array(z.string()),
   suggestedContributorAction: z.string(),

@@ -45,6 +45,7 @@ export type ArtifactType =
   | "patch_attempt"
   | "issue_binding"
   | "security_disclosure"
+  | "security_disclosure_event"
   | "evidence_red"
   | "evidence"
   | "governance"
@@ -85,6 +86,7 @@ export interface ContributionRunSummary {
     patchAttempts?: Record<string, unknown>[];
     issueBinding?: Record<string, unknown>;
     securityDisclosure?: Record<string, unknown>;
+    securityDisclosureEvents?: Record<string, unknown>[];
     evidenceRed?: Record<string, unknown>;
     evidence?: Record<string, unknown>;
     governance?: Record<string, unknown>;

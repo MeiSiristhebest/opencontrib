@@ -10,6 +10,10 @@ import {
   type SubmissionIntentFile,
 } from "../contracts/schemas.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
+import {
+  hashSubmissionArtifact,
+  resolveCanonicalSubmissionRoute,
+} from "./submission-route.js";
 
 export interface CreateSubmissionIntentInput {
   runId: string;
@@ -63,6 +67,14 @@ export class SubmissionIntentService {
       );
     }
 
+    const submissionRoute = resolveCanonicalSubmissionRoute(run);
+    const issueBindingSha256 = submissionRoute.issueBinding
+      ? hashSubmissionArtifact(submissionRoute.issueBinding)
+      : undefined;
+    const securityDisclosureSha256 = submissionRoute.securityDisclosure
+      ? hashSubmissionArtifact(submissionRoute.securityDisclosure)
+      : undefined;
+
     const existingRaw = run.artifacts.submissionIntent;
     if (existingRaw) {
       const existing = SubmissionIntentArtifactSchema.safeParse(existingRaw);
@@ -82,7 +94,11 @@ export class SubmissionIntentService {
         (input.body !== undefined && input.body !== existing.data.body) ||
         (input.commitMessage &&
           input.commitMessage !== existing.data.commitMessage) ||
-        (input.isDraft !== undefined && input.isDraft !== existing.data.isDraft)
+        (input.isDraft !== undefined &&
+          input.isDraft !== existing.data.isDraft) ||
+        existing.data.submissionRoute !== submissionRoute.route ||
+        existing.data.issueBindingSha256 !== issueBindingSha256 ||
+        existing.data.securityDisclosureSha256 !== securityDisclosureSha256
       ) {
         throw new Error(
           "SubmissionIntentImmutableError: a run already has an immutable intent; requested submission parameters differ.",
@@ -301,6 +317,9 @@ export class SubmissionIntentService {
       evidenceSha256,
       governanceSha256,
       policySha256: governanceResult.data.policySha256,
+      submissionRoute: submissionRoute.route,
+      issueBindingSha256,
+      securityDisclosureSha256,
     });
 
     const intent: SubmissionIntentArtifact = {
@@ -320,6 +339,9 @@ export class SubmissionIntentService {
       evidenceSha256,
       governanceSha256,
       policySha256: governanceResult.data.policySha256,
+      submissionRoute: submissionRoute.route,
+      issueBindingSha256,
+      securityDisclosureSha256,
       intentSha256: sha256(intentPayload),
       createdAt: new Date().toISOString(),
     };

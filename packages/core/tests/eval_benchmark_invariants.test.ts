@@ -113,6 +113,7 @@ describe("Benchmark canonical invariants", () => {
         e.includes("REQUEST_APPROVAL") && e.includes("SUBMIT_PR"),
       ),
     ).toBe(true);
+    expect(result.actionSequenceVerified).toBe(false);
   });
 
   it("Missing CREATE_RUN fails even with otherwise valid sequence", () => {
@@ -323,6 +324,44 @@ describe("Run bundle cross-validation", () => {
     expect(errors).toHaveLength(0);
   });
 
+  it("accepts the private security route for PR submission benchmarks", () => {
+    const result = crossValidateWithBundle(
+      [makeAction("SUBMIT_PR", 0, "run_private")],
+      {
+        manifest: { runId: "run_private", currentPhase: "PR_SUBMITTED" },
+        events: [
+          {
+            eventId: "private-event-1",
+            runId: "run_private",
+            timestamp: new Date(0).toISOString(),
+            phase: "PR_SUBMITTED",
+            eventType: "ARTIFACT_SAVED",
+            payload: { artifactType: "submission" },
+          },
+          {
+            eventId: "private-event-2",
+            runId: "run_private",
+            timestamp: new Date(1).toISOString(),
+            phase: "PR_SUBMITTED",
+            eventType: "ARTIFACT_SAVED",
+            payload: { artifactType: "security_disclosure" },
+          },
+        ],
+        artifacts: {
+          workspace: {
+            communityGate: {
+              policy: { privateVulnerabilityDisclosure: true },
+            },
+          },
+        },
+        artifactTypes: ["workspace", "submission", "security_disclosure"],
+      },
+    );
+
+    expect(result.verified).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
   it("Empty bundle fails with clear message", () => {
     const actions: ProtocolAction[] = [makeAction("CREATE_RUN", 0)];
 
@@ -479,5 +518,75 @@ describe("Canonical run identity", () => {
 
     expect(result.verified).toBe(false);
     expect(result.errors.some((error) => error.includes("missing the runId returned"))).toBe(true);
+  });
+
+  it("validates phase transitions against the protocol DAG, including the PoC branch", () => {
+    const validEvents = [
+      {
+        eventId: "event-1",
+        runId: "run_dag",
+        timestamp: new Date(0).toISOString(),
+        phase: "INITIALIZED",
+        eventType: "RUN_CREATED",
+      },
+      {
+        eventId: "event-2",
+        runId: "run_dag",
+        timestamp: new Date(1).toISOString(),
+        phase: "WORKSPACE_PREPARED",
+        eventType: "PHASE_TRANSITION",
+        payload: { fromPhase: "INITIALIZED", toPhase: "WORKSPACE_PREPARED" },
+      },
+      {
+        eventId: "event-3",
+        runId: "run_dag",
+        timestamp: new Date(2).toISOString(),
+        phase: "POC_GENERATED",
+        eventType: "PHASE_TRANSITION",
+        payload: { fromPhase: "WORKSPACE_PREPARED", toPhase: "POC_GENERATED" },
+      },
+      {
+        eventId: "event-4",
+        runId: "run_dag",
+        timestamp: new Date(3).toISOString(),
+        phase: "RED_CAPTURED",
+        eventType: "PHASE_TRANSITION",
+        payload: { fromPhase: "POC_GENERATED", toPhase: "RED_CAPTURED" },
+      },
+    ];
+    const valid = crossValidateWithBundle(
+      [makeAction("CREATE_RUN", 0, "run_dag")],
+      {
+        manifest: { runId: "run_dag", currentPhase: "RED_CAPTURED" },
+        events: validEvents,
+        artifactTypes: ["workspace"],
+      },
+    );
+    expect(valid.verified).toBe(true);
+
+    const invalid = crossValidateWithBundle(
+      [makeAction("CREATE_RUN", 0, "run_dag")],
+      {
+        manifest: { runId: "run_dag", currentPhase: "POC_GENERATED" },
+        events: [
+          ...validEvents.slice(0, 2),
+          {
+            ...validEvents[3],
+            eventId: "event-invalid-red",
+            phase: "RED_CAPTURED",
+            payload: { fromPhase: "WORKSPACE_PREPARED", toPhase: "RED_CAPTURED" },
+          },
+          {
+            ...validEvents[2],
+            eventId: "event-invalid-poc",
+            timestamp: new Date(4).toISOString(),
+            payload: { fromPhase: "RED_CAPTURED", toPhase: "POC_GENERATED" },
+          },
+        ],
+        artifactTypes: ["workspace"],
+      },
+    );
+    expect(invalid.verified).toBe(false);
+    expect(invalid.errors.some((error) => error.includes("protocol DAG"))).toBe(true);
   });
 });

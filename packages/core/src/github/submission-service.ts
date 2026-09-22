@@ -12,7 +12,6 @@ import {
   GovernanceDecisionArtifactSchema,
   SubmissionArtifactSchema,
   SubmissionIntentArtifactSchema,
-  SecurityDisclosureArtifactSchema,
   type SubmissionArtifact,
   type SubmissionIntentArtifact,
 } from "../contracts/schemas.js";
@@ -22,6 +21,11 @@ import {
   communityPolicyRequiresExplicitApproval,
   hashCommunityGateSnapshot,
 } from "../governance/community-gate.js";
+import {
+  hasPublicSecurityDisclosureAuthorization,
+  hashSubmissionArtifact,
+  resolveCanonicalSubmissionRoute,
+} from "../submission/submission-route.js";
 
 export class SubmissionVerificationError extends Error {
   constructor(message: string) {
@@ -65,6 +69,9 @@ export interface SubmissionPermit {
   communityGateSha256: string;
   prBodySha256: string;
   approvalMode: "explicit_human" | "policy_waived" | "maintainer_evidence";
+  submissionRoute: "PUBLIC_ISSUE" | "PRIVATE_SECURITY";
+  issueBindingSha256?: string;
+  securityDisclosureSha256?: string;
 }
 
 function sameJson(a: unknown, b: unknown): boolean {
@@ -134,6 +141,30 @@ export class GitHubSubmissionService {
     }
     const intent = intentResult.data;
     const approval = approvalResult.data;
+    let canonicalRoute;
+    try {
+      canonicalRoute = resolveCanonicalSubmissionRoute(run);
+    } catch (error) {
+      throw new SubmissionVerificationError(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    const expectedRouteHash =
+      canonicalRoute.route === "PUBLIC_ISSUE"
+        ? hashSubmissionArtifact(canonicalRoute.issueBinding)
+        : hashSubmissionArtifact(canonicalRoute.securityDisclosure);
+    const suppliedRouteHash =
+      canonicalRoute.route === "PUBLIC_ISSUE"
+        ? intent.issueBindingSha256
+        : intent.securityDisclosureSha256;
+    if (
+      intent.submissionRoute !== canonicalRoute.route ||
+      suppliedRouteHash !== expectedRouteHash
+    ) {
+      throw new SubmissionVerificationError(
+        "SubmissionRouteBindingError: SubmissionIntentArtifact is not bound to the provider-verified canonical Issue or security disclosure route.",
+      );
+    }
     const governanceResult = GovernanceDecisionArtifactSchema.safeParse(
       run.artifacts.governance,
     );
@@ -176,16 +207,9 @@ export class GitHubSubmissionService {
       );
     }
     if (governanceResult.data.communityGate.policy.privateVulnerabilityDisclosure) {
-      const disclosure = SecurityDisclosureArtifactSchema.safeParse(
-        run.artifacts.securityDisclosure,
-      );
-      if (
-        !disclosure.success ||
-        disclosure.data.providerVerified !== true ||
-        disclosure.data.publicDisclosureAllowed !== true
-      ) {
+      if (!hasPublicSecurityDisclosureAuthorization(run)) {
         throw new SubmissionVerificationError(
-          "Cannot authorize submission: private vulnerability disclosure requires provider-verified evidence and explicit publicDisclosureAllowed authorization.",
+          "Cannot authorize submission: private vulnerability disclosure requires provider-verified lifecycle evidence and explicit publicDisclosureAllowed authorization.",
         );
       }
     }
@@ -438,6 +462,9 @@ export class GitHubSubmissionService {
       headSha,
       submittedAt: new Date().toISOString(),
       verified: true,
+      submissionRoute: permit.submissionRoute,
+      issueBindingSha256: permit.issueBindingSha256,
+      securityDisclosureSha256: permit.securityDisclosureSha256,
     };
     SubmissionArtifactSchema.parse(artifact);
 
@@ -476,6 +503,9 @@ export class GitHubSubmissionService {
       communityGateSha256: approval.communityGateSha256,
       prBodySha256: approval.prBodySha256,
       approvalMode: approval.approvalMode,
+      submissionRoute: intent.submissionRoute,
+      issueBindingSha256: intent.issueBindingSha256,
+      securityDisclosureSha256: intent.securityDisclosureSha256,
     };
   }
 

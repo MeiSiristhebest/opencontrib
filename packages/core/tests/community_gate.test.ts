@@ -93,6 +93,21 @@ Issues submitted Friday through Sunday are not guaranteed to be reviewed until t
     expect(gate.hasGatingRules).toBe(false);
   });
 
+  it("pins DCO and AI disclosure requirements in the community policy snapshot", () => {
+    const gate = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "Every commit must include Signed-off-by. Disclose the use of AI-assisted tooling in the PR.",
+      },
+    ]);
+
+    expect(gate.requiresDco).toBe(true);
+    expect(gate.requiresAiDisclosure).toBe(true);
+    expect(gate.reasons.join(" ")).toContain("Developer Certificate of Origin");
+    expect(gate.reasons.join(" ")).toContain("AI");
+  });
+
   it("fails closed when a baseline community policy read fails", () => {
     expect(() =>
       readCommunityGateAtCommit(

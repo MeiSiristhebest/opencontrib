@@ -22,6 +22,7 @@ import {
   IssueBindingArtifactSchema,
   ResultArtifactSchema,
   SecurityDisclosureArtifactSchema,
+  SecurityDisclosureEventArtifactSchema,
   SubmissionArtifactSchema,
   SubmissionIntentArtifactSchema,
   ValidatedPatchArtifactSchema,
@@ -38,6 +39,10 @@ interface ContractActionDefinition {
   tool: string;
   phase: string;
   requiredArtifacts: string[];
+  requiredArtifactRoutes: Array<{
+    id: "PUBLIC_ISSUE" | "PRIVATE_SECURITY";
+    requiredArtifacts: string[];
+  }>;
 }
 
 function actionFromTool(tool: string): string {
@@ -55,6 +60,10 @@ function actionsForContractPhase(
       tool: entry.tool,
       phase,
       requiredArtifacts: [...(entry.requiredArtifacts ?? [])],
+      requiredArtifactRoutes: (entry.requiredArtifactRoutes ?? []).map((route) => ({
+        id: route.id,
+        requiredArtifacts: [...route.requiredArtifacts],
+      })),
     }));
   }
   return [
@@ -63,6 +72,12 @@ function actionsForContractPhase(
       tool: definition.mcp.tool,
       phase,
       requiredArtifacts: [...(definition.benchmark?.requiredArtifacts ?? [])],
+      requiredArtifactRoutes: (definition.benchmark?.requiredArtifactRoutes ?? []).map(
+        (route) => ({
+          id: route.id,
+          requiredArtifacts: [...route.requiredArtifacts],
+        }),
+      ),
     },
   ];
 }
@@ -96,6 +111,17 @@ const ACTION_TO_ARTIFACTS: Record<string, string[]> = Object.fromEntries(
   ]),
 );
 
+/** Action verb → policy-dependent artifact alternatives. */
+const ACTION_TO_ARTIFACT_ROUTES: Record<
+  string,
+  ContractActionDefinition["requiredArtifactRoutes"]
+> = Object.fromEntries(
+  CONTRACT_ACTIONS.map(({ action, requiredArtifactRoutes }) => [
+    action,
+    requiredArtifactRoutes,
+  ]),
+);
+
 // ─── Canonical invariants ────────────────────────────────────────────────────
 
 /** Ordering pairs that must hold for any valid run: first < second. */
@@ -108,12 +134,22 @@ const CANONICAL_ORDERING: [string, string][] = [
 ];
 
 /** Check that the first non-noise action in the transcript is CREATE_RUN. */
-function checkCreateRunFirst(actions: ProtocolAction[]): string | null {
+interface BenchmarkInvariantIssue {
+  code: "CREATE_RUN_ORDER" | "CANONICAL_ORDER";
+  message: string;
+}
+
+function checkCreateRunFirst(
+  actions: ProtocolAction[],
+): BenchmarkInvariantIssue | null {
   const contribActions = actions.filter((a) => a.action in ACTION_TO_TOOL);
   if (contribActions.length === 0) return null;
   const first = contribActions[0];
   if (first.action !== 'CREATE_RUN') {
-    return `CREATE_RUN must be the first protocol action (found ${first.action} at step ${first.stepIndex}).`;
+    return {
+      code: "CREATE_RUN_ORDER",
+      message: `CREATE_RUN must be the first protocol action (found ${first.action} at step ${first.stepIndex}).`,
+    };
   }
   return null;
 }
@@ -122,17 +158,18 @@ function checkCreateRunFirst(actions: ProtocolAction[]): string | null {
 function checkOrdering(
   actions: ProtocolAction[],
   required: string[],
-): string[] {
-  const errors: string[] = [];
+): BenchmarkInvariantIssue[] {
+  const errors: BenchmarkInvariantIssue[] = [];
   for (const [first, second] of CANONICAL_ORDERING) {
     if (!required.includes(first) || !required.includes(second)) continue;
     const firstIdx = actions.findIndex((a) => a.action === first);
     const secondIdx = actions.findIndex((a) => a.action === second);
     if (firstIdx === -1 || secondIdx === -1) continue; // missing is checked separately
     if (firstIdx >= secondIdx) {
-      errors.push(
-        `Ordering violation: ${first} (step ${firstIdx}) must precede ${second} (step ${secondIdx}).`,
-      );
+      errors.push({
+        code: "CANONICAL_ORDER",
+        message: `Ordering violation: ${first} (step ${firstIdx}) must precede ${second} (step ${secondIdx}).`,
+      });
     }
   }
   return errors;
@@ -203,8 +240,12 @@ function hashBundleArtifact(value: unknown): string {
 
 function hasBundleArtifact(bundle: BenchmarkBundle, type: string): boolean {
   if (bundle.artifacts) {
-    return Object.prototype.hasOwnProperty.call(bundle.artifacts, type) &&
-      bundle.artifacts[type] !== undefined;
+    if (
+      Object.prototype.hasOwnProperty.call(bundle.artifacts, type) &&
+      bundle.artifacts[type] !== undefined
+    ) {
+      return true;
+    }
   }
   return new Set(bundle.artifactTypes ?? []).has(type);
 }
@@ -223,10 +264,17 @@ function validateBundleArtifacts(bundle: BenchmarkBundle): string[] {
     result: ResultArtifactSchema,
     issue_binding: IssueBindingArtifactSchema,
     security_disclosure: SecurityDisclosureArtifactSchema,
+    security_disclosure_event: SecurityDisclosureEventArtifactSchema,
   };
 
   for (const [type, schema] of Object.entries(schemas)) {
-    if (!hasBundleArtifact(bundle, type)) continue;
+    if (
+      !bundle.artifacts ||
+      !Object.prototype.hasOwnProperty.call(bundle.artifacts, type) ||
+      bundle.artifacts[type] === undefined
+    ) {
+      continue;
+    }
     const result = schema.safeParse(bundle.artifacts[type]);
     if (!result.success) {
       errors.push(
@@ -346,11 +394,8 @@ function validateBundleEvents(bundle: BenchmarkBundle): string[] {
 
   const errors: string[] = [];
   const eventIds = new Set<string>();
-  const phaseOrder = new Map(
-    Object.keys(PROTOCOL_CONTRACT_PHASES).map((phase, index) => [phase, index]),
-  );
   let previousTimestamp = Number.NEGATIVE_INFINITY;
-  let previousPhaseIndex = -1;
+  let previousPhase: string | undefined;
 
   for (const event of bundle.events) {
     if (eventIds.has(event.eventId)) {
@@ -370,13 +415,19 @@ function validateBundleEvents(bundle: BenchmarkBundle): string[] {
       previousTimestamp = timestamp;
     }
 
-    const currentPhaseIndex = phaseOrder.get(event.phase);
-    if (currentPhaseIndex === undefined) {
+    const definition = PROTOCOL_CONTRACT_PHASES[
+      event.phase as keyof typeof PROTOCOL_CONTRACT_PHASES
+    ];
+    if (!definition) {
       errors.push(`Run event ${event.eventId} has an unknown phase ${event.phase}.`);
-    } else if (currentPhaseIndex < previousPhaseIndex) {
-      errors.push(`Run events move backwards from phase index ${previousPhaseIndex} to ${event.phase}.`);
-    } else {
-      previousPhaseIndex = currentPhaseIndex;
+    } else if (
+      previousPhase &&
+      previousPhase !== event.phase &&
+      !(definition.allowedFromPhases as readonly string[]).includes(previousPhase)
+    ) {
+      errors.push(
+        `Run event ${event.eventId} moves from ${previousPhase} to ${event.phase}, which is not allowed by the protocol DAG.`,
+      );
     }
 
     if (typeof event.eventType !== "string" || !event.eventType.trim()) {
@@ -396,6 +447,10 @@ function validateBundleEvents(bundle: BenchmarkBundle): string[] {
         errors.push(
           `PHASE_TRANSITION event ${event.eventId} must bind fromPhase/toPhase to its phase.`,
         );
+      } else if (previousPhase && payload.fromPhase !== previousPhase) {
+        errors.push(
+          `PHASE_TRANSITION event ${event.eventId} claims fromPhase ${payload.fromPhase}, but the previous canonical phase is ${previousPhase}.`,
+        );
       }
     }
     if (event.eventType === "ARTIFACT_SAVED") {
@@ -405,6 +460,7 @@ function validateBundleEvents(bundle: BenchmarkBundle): string[] {
         );
       }
     }
+    if (definition) previousPhase = event.phase;
   }
 
   return errors;
@@ -526,7 +582,44 @@ export function crossValidateWithBundle(
       }
     }
 
-    // Check that required artifacts exist
+    // Check policy-dependent artifact routes before ordinary requirements.
+    const artifactRoutes = ACTION_TO_ARTIFACT_ROUTES[action.action] ?? [];
+    if (artifactRoutes.length > 0) {
+      const workspace = bundle.artifacts?.workspace as
+        | { communityGate?: { policy?: { privateVulnerabilityDisclosure?: boolean } } }
+        | undefined;
+      const privateRoute =
+        workspace?.communityGate?.policy?.privateVulnerabilityDisclosure === true;
+      const routeId = privateRoute ? "PRIVATE_SECURITY" : "PUBLIC_ISSUE";
+      const route = artifactRoutes.find((candidate) => candidate.id === routeId);
+      if (!route) {
+        errors.push(
+          `Transcript action ${action.action} has no protocol route for ${routeId}.`,
+        );
+      } else {
+        for (const artifact of route.requiredArtifacts) {
+          if (!hasBundleArtifact(bundle, artifact)) {
+            errors.push(
+              `Transcript action ${action.action} requires ${routeId} artifact "${artifact}" but it is missing from the run bundle.`,
+            );
+          }
+          if (
+            bundle.events &&
+            !bundle.events.some(
+              (event) =>
+                event.eventType === "ARTIFACT_SAVED" &&
+                event.payload?.artifactType === artifact,
+            )
+          ) {
+            errors.push(
+              `Transcript action ${action.action} has no ARTIFACT_SAVED event for ${routeId} artifact "${artifact}".`,
+            );
+          }
+        }
+      }
+    }
+
+    // Check ordinary required artifacts.
     const requiredArtifacts = ACTION_TO_ARTIFACTS[action.action];
     if (requiredArtifacts) {
       for (const artifact of requiredArtifacts) {
@@ -580,10 +673,11 @@ export function executeBenchmarkScenario(
   }
 
   // 2. Verify canonical invariants.
+  const invariantIssues: BenchmarkInvariantIssue[] = [];
   const createRunError = checkCreateRunFirst(executedActions);
-  if (createRunError) errors.push(createRunError);
-
-  errors.push(...checkOrdering(executedActions, required));
+  if (createRunError) invariantIssues.push(createRunError);
+  invariantIssues.push(...checkOrdering(executedActions, required));
+  errors.push(...invariantIssues.map((issue) => issue.message));
 
   // 3. Verify step economy.
   if (stepsCount > scenario.maxAllowedSteps) {
@@ -607,18 +701,13 @@ export function executeBenchmarkScenario(
     e.startsWith('Missing required action'),
   );
 
-  // actionSequenceVerified is true only if all required actions are present AND
-  // canonical ordering invariants are satisfied (no ordering errors).
-  const orderingErrors = errors.filter((e) =>
-    e.includes('must be the first') || e.includes('in canonical order'),
-  );
-
   return {
     scenarioId: scenario.id,
     success: errors.length === 0,
     stepsTaken: stepsCount,
     durationMs,
-    actionSequenceVerified: missingActionErrors.length === 0 && orderingErrors.length === 0,
+    actionSequenceVerified:
+      missingActionErrors.length === 0 && invariantIssues.length === 0,
     runBundleVerified,
     errors,
   };

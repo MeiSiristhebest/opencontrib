@@ -90,6 +90,25 @@ function fixtureCommunityGate(
   };
 }
 
+function seedIssueBinding(
+  manager: ContributionRunManager,
+  runId: string,
+  repoFullName = "org/repo",
+  providerIssueId = 42,
+): void {
+  saveCanonicalArtifact(manager, runId, "issue_binding", {
+    runId,
+    provider: "github",
+    repoFullName,
+    providerIssueId,
+    state: "open",
+    title: "Fix the verified fixture issue",
+    issueUrl: `https://github.com/${repoFullName}/issues/${providerIssueId}`,
+    providerVerified: true,
+    verifiedAt: "2026-01-01T00:00:00.000Z",
+  });
+}
+
 function seedGovernanceReadyRun(
   manager: ContributionRunManager,
   runId: string,
@@ -154,6 +173,11 @@ function seedGovernanceReadyRun(
       ...fixtureCommunityGate(baseCommitSha, communityPolicy),
     },
     "WORKSPACE_PREPARED",
+  );
+  seedIssueBinding(
+    manager,
+    runId,
+    manager.getRun(runId)?.manifest.repoFullName ?? "org/repo",
   );
   saveCanonicalArtifact(
     manager,
@@ -1241,6 +1265,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         },
         "WORKSPACE_PREPARED",
       );
+      seedIssueBinding(manager, manifest2.runId, "owner/repo2", 43);
       saveCanonicalArtifact(
         manager,
         manifest2.runId,
@@ -1414,6 +1439,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         },
         "WORKSPACE_PREPARED",
       );
+      seedIssueBinding(manager, manifest.runId, "org/repo", 42);
       saveCanonicalArtifact(
         manager,
         manifest.runId,

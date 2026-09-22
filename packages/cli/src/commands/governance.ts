@@ -6,6 +6,7 @@ import {
   analyzePatchImpactAndConsistency,
   parseCiRawLogs,
   renderMasterPrTemplate,
+  resolveCanonicalSubmissionRoute,
   validateMarkdownIntegrity,
   buildContributionRunManager,
   detectCommunityGate,
@@ -368,7 +369,10 @@ const prTemplateCommand = new Command("pr-template")
   .description(
     "Render a clean PR description following target repo template or Master 6-Tier standard",
   )
-  .requiredOption("--issue <num>", "Fixed issue number")
+  .option(
+    "--issue <num>",
+    "Fixed issue number (diagnostic-only when --run-id is supplied)",
+  )
   .requiredOption("--issue-title <text>", "Title of the issue")
   .requiredOption("--summary <text>", "Concise fix summary")
   .option("--validation-cmd <cmd>", "Command used to verify the fix")
@@ -396,7 +400,7 @@ const prTemplateCommand = new Command("pr-template")
   .option("--pretty", "Pretty-print", false)
   .action(
     async (opts: {
-      issue: string;
+      issue?: string;
       issueTitle: string;
       summary: string;
       validationCmd?: string;
@@ -416,6 +420,24 @@ const prTemplateCommand = new Command("pr-template")
         if (runId && !canonicalRun) {
           throw new Error(`Contribution run "${runId}" not found.`);
         }
+        const canonicalRoute = canonicalRun
+          ? resolveCanonicalSubmissionRoute(canonicalRun)
+          : undefined;
+        const diagnosticIssueNumber = Number(opts.issue);
+        const issueNumber = canonicalRoute
+          ? canonicalRoute.route === "PUBLIC_ISSUE"
+            ? canonicalRoute.issueBinding!.providerIssueId
+            : undefined
+          : diagnosticIssueNumber;
+        if (
+          !canonicalRoute &&
+          (!Number.isInteger(diagnosticIssueNumber) || diagnosticIssueNumber <= 0)
+        ) {
+          throw new Error(
+            "CanonicalIssueBindingRequiredError: --issue must be a positive integer when rendering without a canonical run.",
+          );
+        }
+        const resolvedIssueNumber = issueNumber;
         let evidence: import("@opencontrib/core").EvidenceReport | undefined;
         if (runId) {
           const { EvidenceReportSchema } = await import("@opencontrib/core");
@@ -434,10 +456,12 @@ const prTemplateCommand = new Command("pr-template")
         const prBody = renderMasterPrTemplate({
           keyChanges: opts.keyChanges || [],
           nativeTemplateContent: opts.nativeTemplate,
-          issueNumber:
-            canonicalRun?.manifest.issueNumber ??
-            (parseInt(opts.issue, 10) || 1),
-          issueTitle: canonicalRun?.manifest.issueTitle ?? opts.issueTitle,
+          issueNumber: resolvedIssueNumber,
+          submissionRoute: canonicalRoute?.route,
+          issueTitle:
+            canonicalRoute?.issueBinding?.title ??
+            canonicalRun?.manifest.issueTitle ??
+            opts.issueTitle,
           summary: opts.summary,
           // A canonical run may only render verification facts from its
           // host-owned EvidenceReport; CLI-supplied validation text is
@@ -447,7 +471,10 @@ const prTemplateCommand = new Command("pr-template")
           confidenceScore: opts.confidence,
           riskLevel: opts.risk,
           isDocumentationOnly: opts.isDocsOnly ?? false,
-          aiDisclosureRequired: opts.aiDisclosure ?? false,
+          aiDisclosureRequired: canonicalRoute
+            ? canonicalRoute.policy.requiresAiDisclosure === true
+            : false,
+          dcoRequired: canonicalRoute?.policy.requiresDco === true,
           evidence,
         });
 
@@ -470,7 +497,9 @@ const prTemplateCommand = new Command("pr-template")
             ? `opencontrib governance audit --run-id ${runId} --pr-title "${opts.issueTitle}"`
             : `opencontrib governance audit --patch <file> --pr-title "${opts.issueTitle}"`,
           invariants: [
-            'Ensure the PR description includes "Fixes #<issue_number>".',
+            canonicalRoute?.route === "PRIVATE_SECURITY"
+              ? "Do not add a public Fixes/Closes issue reference; use the provider-authorized security route."
+              : 'Ensure the PR description includes the provider-bound "Fixes #<issue_number>" reference.',
             "Audit governance before requesting approval.",
           ],
         });
@@ -486,7 +515,7 @@ const prTemplateCommand = new Command("pr-template")
 const claimCommand = new Command("claim")
   .alias("render-issue")
   .description(
-    "Generate an authoritative Issue-First Claim statement or 0-day issue proposal",
+    "Generate an authoritative Claim artifact for the run's selected submission route",
   )
   .requiredOption(
     "--issue <num>",

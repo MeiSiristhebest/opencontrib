@@ -43,6 +43,25 @@ const testApprovalAuthority = () =>
       artifact.signature === "test-signature",
   });
 
+function seedIssueBinding(
+  manager: ContributionRunManager,
+  runId: string,
+  repoFullName = "org/repo",
+  providerIssueId = 42,
+): void {
+  saveCanonicalArtifact(manager, runId, "issue_binding", {
+    runId,
+    provider: "github",
+    repoFullName,
+    providerIssueId,
+    state: "open",
+    title: "Fix the verified fixture issue",
+    issueUrl: `https://github.com/${repoFullName}/issues/${providerIssueId}`,
+    providerVerified: true,
+    verifiedAt: "2026-01-01T00:00:00.000Z",
+  });
+}
+
 function makeValidatedPatch(
   runId: string,
   patchSha256: string,
@@ -159,6 +178,7 @@ function seedGovernanceReadyRun(
       },
       "WORKSPACE_PREPARED",
     );
+    seedIssueBinding(manager, runId);
   }
   saveCanonicalArtifact(
     manager,

@@ -564,7 +564,8 @@ export function auditGovernance(
 export type PrTemplateEvidence = EvidenceReport;
 
 export interface MasterPrTemplateInput {
-  issueNumber: number;
+  issueNumber?: number;
+  submissionRoute?: "PUBLIC_ISSUE" | "PRIVATE_SECURITY";
   issueTitle?: string;
   summary?: string;
   problemSummary?: string;
@@ -578,13 +579,26 @@ export interface MasterPrTemplateInput {
   riskLevel?: "LOW" | "MEDIUM" | "HIGH";
   isDocumentationOnly?: boolean;
   aiDisclosureRequired?: boolean;
+  dcoRequired?: boolean;
   conditionalAiRequired?: boolean;
   nativeTemplateContent?: string;
   evidence?: PrTemplateEvidence;
 }
 
 export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
-  const issueNumber = data.issueNumber;
+  const submissionRoute = data.submissionRoute ?? "PUBLIC_ISSUE";
+  if (
+    submissionRoute === "PUBLIC_ISSUE" &&
+    (!Number.isInteger(data.issueNumber) || (data.issueNumber ?? 0) <= 0)
+  ) {
+    throw new Error(
+      "CanonicalIssueBindingRequiredError: public PR rendering requires a provider-verified positive issue number.",
+    );
+  }
+  const issueReference =
+    submissionRoute === "PUBLIC_ISSUE"
+      ? `Fixes #${data.issueNumber}`
+      : "Security disclosure: provider-verified private channel";
   const problemSummary =
     data.problemSummary ||
     data.summary ||
@@ -664,13 +678,19 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
   ) {
     let result = data.nativeTemplateContent;
     result = result.replace(/<!--[\s\S]*?-->/g, ""); // strip comments
-    if (/fixes #|closes #|resolves #/i.test(result)) {
+    if (submissionRoute === "PRIVATE_SECURITY") {
       result = result.replace(
-        /(fixes|closes|resolves)\s+#\d*/i,
-        `$1 #${issueNumber}`,
+        /\b(?:fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/gim,
+        "",
+      );
+      result = `${issueReference}\n\n${result}`;
+    } else if (/\b(?:fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i.test(result)) {
+      result = result.replace(
+        /(fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i,
+        `$1 #${data.issueNumber}`,
       );
     } else {
-      result = `Fixes #${issueNumber}\n\n` + result;
+      result = `${issueReference}\n\n` + result;
     }
     if (
       /## description|## summary|## motivation|### description/i.test(result)
@@ -696,7 +716,15 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
           `${section}\n${reproductionDetail}\n${verificationLine}\n- Test Suite: ${testSuite}\n${userValidationNote}\n\n`,
       );
     }
-    return result.trim();
+    const complianceNotes = [
+      data.aiDisclosureRequired
+        ? "Automated assistance disclosure is required by the pinned repository policy."
+        : "",
+      data.dcoRequired
+        ? "DCO requirement: the commits must include a valid Signed-off-by trailer."
+        : "",
+    ].filter(Boolean);
+    return `${result.trim()}${complianceNotes.length ? `\n\n${complianceNotes.join("\n\n")}` : ""}`.trim();
   }
 
   const changeList = keyChanges.map((c) => `- ${c}`).join("\n");
@@ -710,7 +738,7 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     : "";
 
   return `### Problem Description
-Fixes #${issueNumber}
+${issueReference}
 ${problemSummary}
 
 ### Motivation & Root Cause Analysis
@@ -722,6 +750,10 @@ ${changeList}
 ### Verification & Empirical Evidence
 ${reproductionDetail}
 ${verificationLine}
-${regressionLine}${userValidationNote}${aiDisclosureSection}
+${regressionLine}${userValidationNote}${aiDisclosureSection}${
+    data.dcoRequired
+      ? "\n\n### Community Compliance\nDCO is required; every commit must include a valid `Signed-off-by` trailer."
+      : ""
+  }
 `;
 }

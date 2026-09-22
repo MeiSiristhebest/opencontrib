@@ -48,6 +48,15 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     expect(loaded?.availableArtifactFiles).toContain("manifest.json");
   });
 
+  it("only permits the first PR draft after canonical evidence is collected", () => {
+    const customBase = makeTempDir();
+    const manager = new ContributionRunManager({ baseDir: customBase });
+    const manifest = manager.createRun({ repoFullName: "owner/repo" });
+
+    expect(() => manager.saveArtifact(manifest.runId, "pr_draft", "premature"))
+      .toThrow(/first PR draft must be created in EVIDENCE_COLLECTED/);
+  });
+
   it("saves discrete stage artifacts and advances run phase seamlessly", () => {
     const customBase = makeTempDir();
     const manager = new ContributionRunManager({ baseDir: customBase });

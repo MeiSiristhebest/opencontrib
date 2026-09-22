@@ -57,7 +57,7 @@ We follow **Trunk-Based Development** and strict quality verification:
 OpenContrib adheres to strict contribution ethics and the 5 Zero-Tolerance Invariants:
 - **No Unverified AI Dumps**: Submissions must be reasoned through, tested locally, and accompanied by reproduction evidence.
 - **100-Line RFC Gate**: Proactive bug fixes should remain surgical and focused. Architectural refactors >100 lines require an approved Feature RFC Issue first.
-- **Issue-First Invariant**: Proactive 0-day discoveries must anchor a created Issue and claim before PR submission.
+- **Submission Route Invariant**: Public proactive discoveries must anchor a provider-verified IssueBindingArtifact and claim before PR submission; private vulnerability work uses the provider security-disclosure lifecycle and does not create a public Issue.
 - **Targeted Subsystem Isolation**: Always run isolated sub-package test commands, never broad un-isolated root tests.
 - **Explicit Search Paths**: Every `rg` or `fd` invocation must explicitly supply a target path.
 - **Zero Credential Leaks**: Never commit API keys, personal access tokens, or sensitive environment files.

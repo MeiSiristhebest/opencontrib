@@ -14,7 +14,7 @@ export interface IssueClaimPayload {
  */
 export class ClaimProtocol {
   /**
-   * Generates a conservative Issue-First claim.  This helper has no access to
+   * Generates a conservative claim artifact. This helper has no access to
    * canonical RED/GREEN evidence, so it must not claim that a fix is ready or
    * that a PR is ready for submission.
    */

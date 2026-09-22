@@ -73,6 +73,33 @@ describe("Native Template Merger & Fallback", () => {
     expect(merged).toContain("15 tests passed");
     expect(merged).toContain("## Checklist");
 
+    const privateBody = buildPrDescription(
+      {
+        ...prData,
+        issueNumber: undefined,
+        submissionRoute: "PRIVATE_SECURITY",
+      },
+      nativeTemplate,
+    );
+    expect(privateBody).toContain(
+      "Security disclosure: provider-verified private channel",
+    );
+    expect(privateBody).not.toMatch(/(?:Fixes|Closes|Resolves) #/);
+    const privateBodyWithLegacyReference = buildPrDescription(
+      {
+        ...prData,
+        issueNumber: undefined,
+        submissionRoute: "PRIVATE_SECURITY",
+      },
+      "Fixes #0\n\n## Description",
+    );
+    expect(privateBodyWithLegacyReference).not.toMatch(
+      /(?:Fixes|Closes|Resolves) #/,
+    );
+    expect(() =>
+      buildPrDescription({ ...prData, issueNumber: 0 }, nativeTemplate),
+    ).toThrow("CanonicalIssueBindingRequiredError");
+
     const conflictingGreen = buildPrDescription(
       {
         ...prData,

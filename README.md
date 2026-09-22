@@ -230,12 +230,17 @@ opencontrib governance audit \
   --subagent-score 95 \
   --pretty
 
-# Register Issue first with Claim statement
-gh issue create --repo owner/repo --title "[Bug]: Unhandled nil pointer in parser" --body-file issue_body.md
+# Generate the Claim artifact. A trusted host then creates or reuses the provider Issue
+# and seals the provider-verified IssueBindingArtifact. Private vulnerability policies
+# use the provider security-disclosure lifecycle instead and do not create a public Issue.
+opencontrib governance claim \
+  --title "[Bug]: Unhandled nil pointer in parser" \
+  --finding "Root cause in parser.ts:42" \
+  --pretty > issue_body.md
 
 # Render maintainer PR template and submit PR
 opencontrib governance pr-template \
-  --issue 42 \
+  --run-id "$RUN_ID" \
   --issue-title "Unhandled nil pointer in parser" \
   --summary "Add defensive boundary check to prevent parser panic" \
   | jq -r '.prBody' > pr-body.md
@@ -267,7 +272,7 @@ Industrial-grade command set spanning 16 core capability domains:
 |                | `governance impact`             | 360° cross-platform filepath/CRLF/sister-module hazard detector            |
 |                | `governance ci-diagnose`        | GitHub Actions CI raw log root cause diagnostics                           |
 |                | `governance pr-template`        | Merge contribution metadata into repository native PR template             |
-|                | `governance claim`              | Generate authoritative Issue-First Claim statement or 0-day proposal       |
+|                | `governance claim`              | Generate the Claim artifact for the run's selected submission route        |
 |                | `governance lint-md`            | Run static markdown encoding integrity and lint checks                     |
 | **Discovery**  | `scout <repo>`                  | Multi-signal issue opportunity scouting (top-level command)                |
 |                | `discovery rank`                | Multi-dimensional opportunity probability ranking                          |
@@ -355,7 +360,8 @@ Or add to client configuration:
 - **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
 - **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
-- **Governance and submission**: opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>" → opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
+- **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route.
+- **PR draft**: first write is restricted to EVIDENCE_COLLECTED; governance and later phases seal it. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP equivalents end at contrib_submit_pr / SubmissionPort.
 - Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
 <!-- OPENCONTRIB:GENERATED protocol:end -->
 
@@ -365,14 +371,14 @@ Or add to client configuration:
    Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 39 composable tools of `@opencontrib/mcp` remain first-class supported for MCP-native agents.
 2. **Anti-Drift Circuit Breaker (Max 3 `view_file` calls)**:
    Avoid blind sequential file reads (> 3 views). Pinpoint symbols strictly via Smart Pointer slices (`ptr://...`) or `grep_search`.
-3. **Mandatory Issue-First on 0-Days (No Blind PRs)**:
-   For proactive 0-day discoveries, **ALWAYS create a GitHub Issue first** (`gh issue create --body-file ...`) with an authoritative Claim statement. PR descriptions **MUST anchor `Fixes #<id>`**.
+3. **Canonical Submission Route (No Blind PRs)**:
+   Public submissions require a provider-verified `IssueBindingArtifact`; the PR description may reference only its canonical Issue ID. Private vulnerability submissions require a provider-verified `SecurityDisclosureArtifact` and lifecycle authorization, and must not create a public Issue.
 4. **Targeted Subsystem Test Isolation (No Global Flaky Runs)**:
    Never run broad root tests (`go test ./...` or `npm test` at repo root). Always scope test commands strictly to modified sub-packages.
 5. **Anti-Deadlock Search Mandate**:
    Every `rg` or `fd` command **MUST explicitly specify a target directory** (e.g. `rg "pattern" .`). Never omit target paths to prevent 30-minute stdin hangs.
-6. **Local Markdown Files for GitHub CLI**:
-   Always write Issue and PR bodies to temporary `.md` files and pass `--body-file <file>` to avoid shell escaping errors.
+6. **Local Markdown Files for Provider Operations**:
+   Write Claim and PR bodies to temporary `.md` files before passing them to trusted provider adapters, avoiding shell escaping errors.
 
 ---
 

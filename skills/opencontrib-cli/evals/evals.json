@@ -32,13 +32,13 @@
       ]
     },
     {
-      "id": "eval_03_governance_and_issue_first_pr",
-      "prompt": "Complete surgical remediation, collect empirical verification evidence, run governance quality audit, and submit an Issue-First pull request.",
+      "id": "eval_03_governance_and_canonical_route_pr",
+      "prompt": "Complete surgical remediation, collect empirical verification evidence, run governance quality audit, select the pinned public Issue or private security-disclosure route, and submit the pull request.",
       "expected_actions": [
         "opencontrib evidence capture-red",
         "opencontrib evidence verify-green",
         "opencontrib governance audit",
-        "gh issue create --body-file",
+        "trusted provider-backed IssueCreationService / IssueBindingArtifact or SecurityDisclosureArtifact",
         "opencontrib governance pr-template",
         "opencontrib governance request-approval",
         "opencontrib submission submit",
@@ -46,8 +46,8 @@
       ],
       "assertions": [
         "Enforces RFC-100 line limit and anti-AI linter",
-        "Creates tracking GitHub Issue before opening Pull Request",
-        "Passes markdown body safely via local body-file"
+        "Binds the provider-verified public Issue route or the authorized private security route before opening the Pull Request",
+        "Uses the canonical route and passes markdown bodies safely through local files"
       ]
     }
   ]
