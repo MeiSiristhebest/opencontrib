@@ -42,10 +42,15 @@ import { CliExitError } from "../utils/exit.js";
  */
 function readRunBundle(bundleDir: string): BenchmarkBundle {
   const eventsPath = path.join(bundleDir, "events.jsonl");
+  const events: NonNullable<BenchmarkBundle["events"]> = [];
+  const artifacts: Record<string, unknown> = {};
+  const parseErrors: string[] = [];
   const artifactTypes: string[] = [];
   const eventPhases: string[] = [];
 
-  if (fs.existsSync(eventsPath)) {
+  if (!fs.existsSync(eventsPath)) {
+    parseErrors.push("events.jsonl is missing");
+  } else {
     const lines = fs
       .readFileSync(eventsPath, "utf8")
       .trim()
@@ -53,42 +58,79 @@ function readRunBundle(bundleDir: string): BenchmarkBundle {
       .filter(Boolean);
     for (const line of lines) {
       try {
-        const event = JSON.parse(line) as { phase?: string };
-        if (event.phase) eventPhases.push(event.phase);
-      } catch {
-        /* skip malformed event */
+        const event = JSON.parse(line) as NonNullable<BenchmarkBundle["events"]>[number];
+        if (
+          typeof event.eventId !== "string" ||
+          typeof event.runId !== "string" ||
+          typeof event.timestamp !== "string" ||
+          typeof event.phase !== "string" ||
+          typeof event.eventType !== "string"
+        ) {
+          parseErrors.push("events.jsonl contains an event with an invalid shape");
+          continue;
+        }
+        events.push(event);
+        eventPhases.push(event.phase);
+      } catch (error) {
+        parseErrors.push(`events.jsonl contains malformed JSON: ${String(error)}`);
       }
     }
   }
 
-  // Discover artifact files by filename convention (e.g. evidence_red.json, patch.diff)
+  // Discover and parse canonical artifacts by filename convention.
   try {
     const files = fs.readdirSync(bundleDir);
     for (const file of files) {
       if (file === "manifest.json") continue;
+      let artifactType: string | undefined;
+      if (file === "patch.diff") artifactType = "patch";
+      else if (file === "pr_draft.md") artifactType = "pr_draft";
+      else if (file.endsWith(".json")) artifactType = file.replace(/\.json$/, "");
+      if (!artifactType) continue;
+
+      artifactTypes.push(artifactType);
+      const artifactPath = path.join(bundleDir, file);
+      if (artifactType === "patch" || artifactType === "pr_draft") {
+        artifacts[artifactType] = fs.readFileSync(artifactPath, "utf8");
+        continue;
+      }
       if (file.endsWith(".json")) {
-        artifactTypes.push(file.replace(/\.json$/, ""));
-      } else if (file === "patch.diff") {
-        // patch.diff is the canonical artifact for patch type
-        artifactTypes.push("patch");
+        try {
+          artifacts[artifactType] = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
+        } catch (error) {
+          parseErrors.push(`${file} contains malformed JSON: ${String(error)}`);
+        }
       }
     }
-  } catch {
-    /* dir not readable */
+  } catch (error) {
+    parseErrors.push(`bundle directory is not readable: ${String(error)}`);
   }
 
   let manifest: { runId: string; currentPhase: string } | undefined;
   const manifestPath = path.join(bundleDir, "manifest.json");
-  if (fs.existsSync(manifestPath)) {
+  if (!fs.existsSync(manifestPath)) {
+    parseErrors.push("manifest.json is missing");
+  } else {
     try {
       const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-      manifest = { runId: m.runId, currentPhase: m.currentPhase };
-    } catch {
-      /* skip malformed manifest */
+      if (typeof m.runId !== "string" || typeof m.currentPhase !== "string") {
+        parseErrors.push("manifest.json must contain string runId and currentPhase");
+      } else {
+        manifest = { runId: m.runId, currentPhase: m.currentPhase };
+      }
+    } catch (error) {
+      parseErrors.push(`manifest.json contains malformed JSON: ${String(error)}`);
     }
   }
 
-  return { manifest, eventPhases, artifactTypes };
+  return {
+    manifest,
+    events,
+    artifacts,
+    parseErrors,
+    eventPhases,
+    artifactTypes,
+  };
 }
 
 // ─── eval judge ───────────────────────────────────────────────────────────────

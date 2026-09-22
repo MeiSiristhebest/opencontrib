@@ -30,7 +30,11 @@ export interface ProtocolAction {
   toolName: string;
   /** Step index in the transcript. */
   stepIndex: number;
-  /** Canonical run id, when present in the transcript or parsed arguments. */
+  /** Run id supplied to the action, when present in its input. */
+  inputRunId?: string;
+  /** Run id returned by CREATE_RUN, when present in its tool result. */
+  outputRunId?: string;
+  /** Backward-compatible alias for an input run id. */
   runId?: string;
 }
 
@@ -99,6 +103,19 @@ export interface BenchmarkScenario {
 export interface BenchmarkBundle {
   /** Run manifest from the run bundle (events.jsonl or manifest.json). */
   manifest?: { runId: string; currentPhase: string };
+  /** Structured canonical events read from events.jsonl. */
+  events?: Array<{
+    eventId: string;
+    runId: string;
+    timestamp: string;
+    phase: string;
+    eventType: string;
+    payload?: Record<string, unknown>;
+  }>;
+  /** Parsed canonical artifacts keyed by their bundle artifact type. */
+  artifacts?: Record<string, unknown>;
+  /** Parsing failures are part of the bundle and must fail verification. */
+  parseErrors?: string[];
   /** Event types observed in the run's events.jsonl, keyed by phase. */
   eventPhases?: string[];
   /** Artifact types present in the run bundle directory. */

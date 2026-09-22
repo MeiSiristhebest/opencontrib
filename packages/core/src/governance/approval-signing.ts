@@ -6,6 +6,7 @@ import {
   type KeyObject,
 } from "node:crypto";
 import type { ApprovalArtifact } from "../contracts/schemas.js";
+import type { MaintainerGateEvidence } from "../contracts/schemas.js";
 import type {
   ApprovalArtifactVerifier,
   ApprovalAuthorityDecision,
@@ -23,6 +24,7 @@ export interface ApprovalSigningPayload {
   prBodySha256: string;
   approvedBy: string;
   approvalMode: ApprovalArtifact["approvalMode"];
+  maintainerGateEvidence?: MaintainerGateEvidence;
 }
 
 /** Stable detached-signature payload; approvedAt is intentionally metadata only. */
@@ -48,6 +50,7 @@ export function getApprovalSigningPayload(
     prBodySha256: request.prBodySha256,
     approvedBy: request.approvedBy,
     approvalMode: request.approvalMode,
+    maintainerGateEvidence: request.maintainerGateEvidence,
   };
   return JSON.stringify(payload);
 }
@@ -109,6 +112,7 @@ export class Ed25519ApprovalVerifier implements ApprovalArtifactVerifier {
       prBodySha256: artifact.prBodySha256,
       approvedBy: artifact.approvedBy,
       approvalMode: artifact.approvalMode,
+      maintainerGateEvidence: artifact.maintainerGateEvidence,
     });
     try {
       return verifyMessage(

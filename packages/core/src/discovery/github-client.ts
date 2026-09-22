@@ -8,6 +8,7 @@ import type {
   ApiStatus,
   GitHubClientOptions,
   IssueOrOpportunity,
+  ProviderIssue,
   RepoDetails,
   SearchIssuesResult,
 } from "../github/types.js";
@@ -19,6 +20,7 @@ export type {
   ApiStatus,
   GitHubClientOptions,
   IssueOrOpportunity,
+  ProviderIssue,
   RepoDetails,
   SearchIssuesResult,
 } from "../github/types.js";
@@ -95,6 +97,14 @@ export class GitHubClient {
     maxPages = 2,
   ): Promise<ApiResult<any[]>> {
     return this.source.getIssueComments(owner, repo, issue_number, maxPages);
+  }
+
+  getIssue(
+    owner: string,
+    repo: string,
+    issue_number: number,
+  ): Promise<ApiResult<ProviderIssue>> {
+    return this.source.getIssue(owner, repo, issue_number);
   }
 
   getRepoTextFile(

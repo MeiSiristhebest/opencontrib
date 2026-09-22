@@ -13,27 +13,70 @@ import type {
   BenchmarkScenario,
   ProtocolAction,
 } from './types.js';
+import { createHash } from 'node:crypto';
+import {
+  ApprovalArtifactSchema,
+  AuthoritativeRedEvidenceSchema,
+  EvidenceBundleV2Schema,
+  GovernanceDecisionArtifactSchema,
+  IssueBindingArtifactSchema,
+  ResultArtifactSchema,
+  SecurityDisclosureArtifactSchema,
+  SubmissionArtifactSchema,
+  SubmissionIntentArtifactSchema,
+  ValidatedPatchArtifactSchema,
+} from '../contracts/schemas.js';
+import {
+  PROTOCOL_CONTRACT_PHASES,
+  type ProtocolContractPhase,
+} from '../workflow/protocol-contract.js';
 
 // ─── Canonical action definitions (derived from PROTOCOL_CONTRACT_PHASES) ────
 
-/** Tool name → action verb mapping (single source of truth for benchmark). */
-export const TOOL_TO_ACTION: Record<string, string> = {
-  contrib_create_run: 'CREATE_RUN',
-  contrib_scout: 'SCOUT',
-  contrib_probe_run: 'PROBE_RUN',
-  contrib_assemble_context: 'ASSEMBLE_CONTEXT',
-  contrib_prepare_workspace: 'PREPARE_WORKSPACE',
-  contrib_capture_red: 'CAPTURE_RED',
-  contrib_verify_poc: 'VERIFY_POC',
-  contrib_save_artifact: 'SAVE_ARTIFACT',
-  contrib_verify_green: 'VERIFY_GREEN',
-  contrib_render_pr_template: 'RENDER_PR_TEMPLATE',
-  contrib_audit_governance: 'AUDIT_GOVERNANCE',
-  contrib_request_approval: 'REQUEST_APPROVAL',
-  contrib_submit_pr: 'SUBMIT_PR',
-  contrib_sync_flywheel: 'SYNC_FLYWHEEL',
-  contrib_resume_run: 'RESUME_RUN',
-};
+interface ContractActionDefinition {
+  action: string;
+  tool: string;
+  phase: string;
+  requiredArtifacts: string[];
+}
+
+function actionFromTool(tool: string): string {
+  return tool.replace(/^contrib_/, '').toUpperCase();
+}
+
+function actionsForContractPhase(
+  phase: string,
+  definition: ProtocolContractPhase,
+): ContractActionDefinition[] {
+  const configured = definition.benchmark?.actions;
+  if (configured && configured.length > 0) {
+    return configured.map((entry) => ({
+      action: entry.action,
+      tool: entry.tool,
+      phase,
+      requiredArtifacts: [...(entry.requiredArtifacts ?? [])],
+    }));
+  }
+  return [
+    {
+      action: actionFromTool(definition.mcp.tool),
+      tool: definition.mcp.tool,
+      phase,
+      requiredArtifacts: [...(definition.benchmark?.requiredArtifacts ?? [])],
+    },
+  ];
+}
+
+const CONTRACT_ACTIONS: ContractActionDefinition[] = Object.entries(
+  PROTOCOL_CONTRACT_PHASES,
+).flatMap(([phase, definition]) =>
+  actionsForContractPhase(phase, definition),
+);
+
+/** Tool name → action verb mapping, derived from the protocol contract. */
+export const TOOL_TO_ACTION: Record<string, string> = Object.fromEntries(
+  CONTRACT_ACTIONS.map(({ tool, action }) => [tool, action]),
+);
 
 /** Action verb → tool name (reverse lookup for bundle cross-validation). */
 const ACTION_TO_TOOL: Record<string, string> = Object.fromEntries(
@@ -41,33 +84,17 @@ const ACTION_TO_TOOL: Record<string, string> = Object.fromEntries(
 );
 
 /** Action verb → expected run event phase (for bundle cross-validation). */
-const ACTION_TO_PHASE: Record<string, string> = {
-  CREATE_RUN: 'INITIALIZED',
-  SCOUT: 'OPPORTUNITY_SCOUTED',
-  PROBE_RUN: 'PROBE_COMPLETED',
-  ASSEMBLE_CONTEXT: 'CONTEXT_ASSEMBLED',
-  PREPARE_WORKSPACE: 'WORKSPACE_PREPARED',
-  CAPTURE_RED: 'RED_CAPTURED',
-  VERIFY_POC: 'POC_GENERATED',
-  SAVE_ARTIFACT: 'PATCH_DRAFTED',
-  VERIFY_GREEN: 'EVIDENCE_COLLECTED',
-  RENDER_PR_TEMPLATE: 'GOVERNANCE_AUDITED',
-  AUDIT_GOVERNANCE: 'GOVERNANCE_AUDITED',
-  REQUEST_APPROVAL: 'GOVERNANCE_AUDITED',
-  SUBMIT_PR: 'PR_SUBMITTED',
-  SYNC_FLYWHEEL: 'COMPLETED',
-};
+const ACTION_TO_PHASE: Record<string, string> = Object.fromEntries(
+  CONTRACT_ACTIONS.map(({ action, phase }) => [action, phase]),
+);
 
 /** Action verb → required artifact types (for bundle cross-validation). */
-const ACTION_TO_ARTIFACTS: Record<string, string[]> = {
-  CREATE_RUN: ['workspace'],
-  CAPTURE_RED: ['evidence_red'],
-  SAVE_ARTIFACT: ['patch'],
-  VERIFY_GREEN: ['evidence', 'validated_patch'],
-  AUDIT_GOVERNANCE: ['governance'],
-  SUBMIT_PR: ['submission'],
-  SYNC_FLYWHEEL: ['result'],
-};
+const ACTION_TO_ARTIFACTS: Record<string, string[]> = Object.fromEntries(
+  CONTRACT_ACTIONS.map(({ action, requiredArtifacts }) => [
+    action,
+    requiredArtifacts,
+  ]),
+);
 
 // ─── Canonical invariants ────────────────────────────────────────────────────
 
@@ -113,6 +140,37 @@ function checkOrdering(
 
 // ─── Scenarios ───────────────────────────────────────────────────────────────
 
+function actionsForPhases(phases: string[]): string[] {
+  return phases.flatMap((phase) =>
+    CONTRACT_ACTIONS.filter((definition) => definition.phase === phase).map(
+      (definition) => definition.action,
+    ),
+  );
+}
+
+const TRACK_A_PHASES = [
+  'INITIALIZED',
+  'PROBE_COMPLETED',
+  'WORKSPACE_PREPARED',
+  'RED_CAPTURED',
+  'PATCH_DRAFTED',
+  'EVIDENCE_COLLECTED',
+  'GOVERNANCE_AUDITED',
+  'PR_SUBMITTED',
+];
+
+const TRACK_B_PHASES = [
+  'INITIALIZED',
+  'OPPORTUNITY_SCOUTED',
+  'CONTEXT_ASSEMBLED',
+  'WORKSPACE_PREPARED',
+  'RED_CAPTURED',
+  'PATCH_DRAFTED',
+  'EVIDENCE_COLLECTED',
+  'GOVERNANCE_AUDITED',
+  'PR_SUBMITTED',
+];
+
 export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
   {
     id: 'track-a-0day-ssrf-ipv6',
@@ -122,18 +180,7 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
     targetRepo: 'mock/agent-memory-hub',
     expectedDefectCwe: 'CWE-918',
     maxAllowedSteps: 25,
-    requiredActions: [
-      'CREATE_RUN',
-      'PROBE_RUN',
-      'PREPARE_WORKSPACE',
-      'CAPTURE_RED',
-      'SAVE_ARTIFACT',
-      'VERIFY_GREEN',
-      'RENDER_PR_TEMPLATE',
-      'AUDIT_GOVERNANCE',
-      'REQUEST_APPROVAL',
-      'SUBMIT_PR',
-    ],
+    requiredActions: actionsForPhases(TRACK_A_PHASES),
   },
   {
     id: 'track-b-reactive-mutex-leak',
@@ -143,23 +190,225 @@ export const STANDARD_BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
     targetRepo: 'mock/microservice-go',
     expectedDefectCwe: 'CWE-667',
     maxAllowedSteps: 25,
-    requiredActions: [
-      'CREATE_RUN',
-      'SCOUT',
-      'ASSEMBLE_CONTEXT',
-      'PREPARE_WORKSPACE',
-      'CAPTURE_RED',
-      'SAVE_ARTIFACT',
-      'VERIFY_GREEN',
-      'RENDER_PR_TEMPLATE',
-      'AUDIT_GOVERNANCE',
-      'REQUEST_APPROVAL',
-      'SUBMIT_PR',
-    ],
+    requiredActions: actionsForPhases(TRACK_B_PHASES),
   },
 ];
 
 // ─── Bundle cross-validation ────────────────────────────────────────────────
+
+function hashBundleArtifact(value: unknown): string {
+  const content = typeof value === 'string' ? value : JSON.stringify(value ?? '');
+  return createHash('sha256').update(content).digest('hex');
+}
+
+function hasBundleArtifact(bundle: BenchmarkBundle, type: string): boolean {
+  if (bundle.artifacts) {
+    return Object.prototype.hasOwnProperty.call(bundle.artifacts, type) &&
+      bundle.artifacts[type] !== undefined;
+  }
+  return new Set(bundle.artifactTypes ?? []).has(type);
+}
+
+function validateBundleArtifacts(bundle: BenchmarkBundle): string[] {
+  if (!bundle.artifacts) return [];
+  const errors: string[] = [];
+  const schemas: Record<string, { safeParse(value: unknown): { success: boolean; error?: { issues: Array<{ message: string }> } } }> = {
+    evidence_red: AuthoritativeRedEvidenceSchema,
+    validated_patch: ValidatedPatchArtifactSchema,
+    evidence: EvidenceBundleV2Schema,
+    governance: GovernanceDecisionArtifactSchema,
+    submission_intent: SubmissionIntentArtifactSchema,
+    approval: ApprovalArtifactSchema,
+    submission: SubmissionArtifactSchema,
+    result: ResultArtifactSchema,
+    issue_binding: IssueBindingArtifactSchema,
+    security_disclosure: SecurityDisclosureArtifactSchema,
+  };
+
+  for (const [type, schema] of Object.entries(schemas)) {
+    if (!hasBundleArtifact(bundle, type)) continue;
+    const result = schema.safeParse(bundle.artifacts[type]);
+    if (!result.success) {
+      errors.push(
+        `Artifact "${type}" failed canonical schema validation: ${result.error?.issues[0]?.message ?? 'invalid artifact'}.`,
+      );
+    }
+  }
+
+  for (const [type, value] of Object.entries(bundle.artifacts)) {
+    if (!value || typeof value !== 'object') continue;
+    const artifactRunId = (value as Record<string, unknown>).runId;
+    if (
+      typeof artifactRunId === 'string' &&
+      bundle.manifest?.runId &&
+      artifactRunId !== bundle.manifest.runId
+    ) {
+      errors.push(
+        `Artifact "${type}" runId (${artifactRunId}) does not match bundle manifest runId (${bundle.manifest.runId}).`,
+      );
+    }
+  }
+
+  const patch = bundle.artifacts.patch;
+  const validatedPatch = bundle.artifacts.validated_patch as Record<string, unknown> | undefined;
+  if (patch !== undefined && validatedPatch?.patchSha256 !== undefined) {
+    if (validatedPatch.patchSha256 !== hashBundleArtifact(patch)) {
+      errors.push('validated_patch.patchSha256 does not match the canonical patch artifact.');
+    }
+  }
+
+  const evidence = bundle.artifacts.evidence as Record<string, unknown> | undefined;
+  const greenEvidence = evidence?.greenEvidence as Record<string, unknown> | undefined;
+  if (
+    greenEvidence?.validatedPatchArtifactSha256 &&
+    validatedPatch !== undefined &&
+    greenEvidence.validatedPatchArtifactSha256 !== hashBundleArtifact(validatedPatch)
+  ) {
+    errors.push('evidence.greenEvidence.validatedPatchArtifactSha256 does not match validated_patch.');
+  }
+
+  const governance = bundle.artifacts.governance as Record<string, unknown> | undefined;
+  if (governance && patch !== undefined && governance.patchSha256 !== hashBundleArtifact(patch)) {
+    errors.push('governance.patchSha256 does not match the canonical patch artifact.');
+  }
+  if (governance && evidence !== undefined && governance.evidenceSha256 !== hashBundleArtifact(evidence)) {
+    errors.push('governance.evidenceSha256 does not match the canonical evidence artifact.');
+  }
+
+  const intent = bundle.artifacts.submission_intent as Record<string, unknown> | undefined;
+  if (intent) {
+    if (typeof intent.body === 'string' && intent.bodySha256 !== hashBundleArtifact(intent.body)) {
+      errors.push('submission_intent.bodySha256 does not match the canonical PR body.');
+    }
+    if (patch !== undefined && intent.patchSha256 !== hashBundleArtifact(patch)) {
+      errors.push('submission_intent.patchSha256 does not match the canonical patch artifact.');
+    }
+    if (evidence !== undefined && intent.evidenceSha256 !== hashBundleArtifact(evidence)) {
+      errors.push('submission_intent.evidenceSha256 does not match the canonical evidence artifact.');
+    }
+    if (governance !== undefined && intent.governanceSha256 !== hashBundleArtifact(governance)) {
+      errors.push('submission_intent.governanceSha256 does not match the canonical governance artifact.');
+    }
+  }
+
+  const approval = bundle.artifacts.approval as Record<string, unknown> | undefined;
+  if (approval && intent) {
+    const approvalBindings: Array<[string, string, string]> = [
+      ['intentSha256', 'intentSha256', 'approval.intentSha256 does not match submission_intent.intentSha256.'],
+      ['patchSha256', 'patchSha256', 'approval.patchSha256 does not match submission_intent.patchSha256.'],
+      ['evidenceSha256', 'evidenceSha256', 'approval.evidenceSha256 does not match submission_intent.evidenceSha256.'],
+      ['governanceSha256', 'governanceSha256', 'approval.governanceSha256 does not match submission_intent.governanceSha256.'],
+      ['prBodySha256', 'bodySha256', 'approval.prBodySha256 does not match submission_intent.bodySha256.'],
+    ];
+    for (const [approvalKey, intentKey, message] of approvalBindings) {
+      if (approval[approvalKey] !== intent[intentKey]) errors.push(message);
+    }
+    if (governance && approval.policySha256 !== governance.policySha256) {
+      errors.push('approval.policySha256 does not match governance.policySha256.');
+    }
+    if (governance && approval.communityGateSha256 !== governance.communityGateSha256) {
+      errors.push('approval.communityGateSha256 does not match governance.communityGateSha256.');
+    }
+  }
+
+  const submission = bundle.artifacts.submission as Record<string, unknown> | undefined;
+  if (submission && approval) {
+    const submissionBindings: Array<[string, string, string]> = [
+      ['runId', 'runId', 'submission.runId does not match approval.runId.'],
+      ['intentSha256', 'intentSha256', 'submission.intentSha256 does not match approval.intentSha256.'],
+      ['patchSha256', 'patchSha256', 'submission.patchSha256 does not match approval.patchSha256.'],
+      ['evidenceSha256', 'evidenceSha256', 'submission.evidenceSha256 does not match approval.evidenceSha256.'],
+      ['governanceSha256', 'governanceSha256', 'submission.governanceSha256 does not match approval.governanceSha256.'],
+      ['policySha256', 'policySha256', 'submission.policySha256 does not match approval.policySha256.'],
+      ['communityGateSha256', 'communityGateSha256', 'submission.communityGateSha256 does not match approval.communityGateSha256.'],
+    ];
+    for (const [submissionKey, approvalKey, message] of submissionBindings) {
+      if (submission[submissionKey] !== approval[approvalKey]) errors.push(message);
+    }
+  }
+
+  const result = bundle.artifacts.result as Record<string, unknown> | undefined;
+  const resultSubmission = result?.submission as Record<string, unknown> | undefined;
+  if (result && resultSubmission && submission) {
+    if (result.runId !== bundle.manifest?.runId || resultSubmission.runId !== submission.runId) {
+      errors.push('result and nested submission must match the canonical run identity.');
+    }
+    if (result.prNumber !== submission.prNumber || result.prUrl !== submission.prUrl) {
+      errors.push('result PR identity does not match the canonical submission artifact.');
+    }
+  }
+
+  return errors;
+}
+
+function validateBundleEvents(bundle: BenchmarkBundle): string[] {
+  if (!bundle.events) return [];
+
+  const errors: string[] = [];
+  const eventIds = new Set<string>();
+  const phaseOrder = new Map(
+    Object.keys(PROTOCOL_CONTRACT_PHASES).map((phase, index) => [phase, index]),
+  );
+  let previousTimestamp = Number.NEGATIVE_INFINITY;
+  let previousPhaseIndex = -1;
+
+  for (const event of bundle.events) {
+    if (eventIds.has(event.eventId)) {
+      errors.push(`Run event id ${event.eventId} is duplicated.`);
+    }
+    eventIds.add(event.eventId);
+
+    const timestamp =
+      typeof event.timestamp === "string"
+        ? Date.parse(event.timestamp)
+        : Number.NaN;
+    if (!Number.isFinite(timestamp)) {
+      errors.push(`Run event ${event.eventId} has an invalid timestamp.`);
+    } else if (timestamp < previousTimestamp) {
+      errors.push(`Run events are not ordered by timestamp at event ${event.eventId}.`);
+    } else {
+      previousTimestamp = timestamp;
+    }
+
+    const currentPhaseIndex = phaseOrder.get(event.phase);
+    if (currentPhaseIndex === undefined) {
+      errors.push(`Run event ${event.eventId} has an unknown phase ${event.phase}.`);
+    } else if (currentPhaseIndex < previousPhaseIndex) {
+      errors.push(`Run events move backwards from phase index ${previousPhaseIndex} to ${event.phase}.`);
+    } else {
+      previousPhaseIndex = currentPhaseIndex;
+    }
+
+    if (typeof event.eventType !== "string" || !event.eventType.trim()) {
+      errors.push(`Run event ${event.eventId} is missing eventType.`);
+    }
+    if (event.eventType === "RUN_CREATED" && event.phase !== "INITIALIZED") {
+      errors.push(`RUN_CREATED event ${event.eventId} must be in INITIALIZED.`);
+    }
+    if (event.eventType === "PHASE_TRANSITION") {
+      const payload = event.payload;
+      if (
+        !payload ||
+        typeof payload.fromPhase !== "string" ||
+        typeof payload.toPhase !== "string" ||
+        payload.toPhase !== event.phase
+      ) {
+        errors.push(
+          `PHASE_TRANSITION event ${event.eventId} must bind fromPhase/toPhase to its phase.`,
+        );
+      }
+    }
+    if (event.eventType === "ARTIFACT_SAVED") {
+      if (!event.payload || typeof event.payload.artifactType !== "string") {
+        errors.push(
+          `ARTIFACT_SAVED event ${event.eventId} must identify its artifactType.`,
+        );
+      }
+    }
+  }
+
+  return errors;
+}
 
 /**
  * Cross-validate transcript actions against the run bundle.
@@ -172,25 +421,85 @@ export function crossValidateWithBundle(
 ): { verified: boolean; errors: string[] } {
   const errors: string[] = [];
 
-  if (!bundle.eventPhases || bundle.eventPhases.length === 0) {
+  if (!bundle.manifest?.runId || !bundle.manifest.currentPhase) {
+    errors.push('Canonical manifest is required and must contain runId and currentPhase.');
+  } else if (!Object.prototype.hasOwnProperty.call(PROTOCOL_CONTRACT_PHASES, bundle.manifest.currentPhase)) {
+    errors.push(`Canonical manifest currentPhase is unknown: ${bundle.manifest.currentPhase}.`);
+  }
+  if (bundle.parseErrors?.length) {
+    errors.push(...bundle.parseErrors.map((error) => `Run bundle parse error: ${error}`));
+  }
+
+  const eventPhases = bundle.events?.map((event) => event.phase) ?? bundle.eventPhases ?? [];
+  if (eventPhases.length === 0) {
     return { verified: false, errors: ['No run events available for cross-validation.'] };
   }
 
-  const phases = new Set(bundle.eventPhases);
-  const artifacts = new Set(bundle.artifactTypes ?? []);
+  if (bundle.events && bundle.manifest?.runId) {
+    for (const event of bundle.events) {
+      if (event.runId !== bundle.manifest.runId) {
+        errors.push(
+          `Run event ${event.eventId} runId (${event.runId}) does not match bundle manifest runId (${bundle.manifest.runId}).`,
+        );
+      }
+    }
+  }
+  if (bundle.events?.length && bundle.manifest?.currentPhase) {
+    const lastEvent = bundle.events[bundle.events.length - 1];
+    if (lastEvent.phase !== bundle.manifest.currentPhase) {
+      errors.push(
+        `Last run event phase (${lastEvent.phase}) does not match manifest currentPhase (${bundle.manifest.currentPhase}).`,
+      );
+    }
+  }
+
+  const phases = new Set(eventPhases);
   const bundleRunId = bundle.manifest?.runId;
+  const strictIdentity = Boolean(bundleRunId);
+  errors.push(...validateBundleEvents(bundle));
+  const artifactErrors = validateBundleArtifacts(bundle);
+  errors.push(...artifactErrors);
+  let phaseCursor = -1;
+  let previousPhase: string | undefined;
 
   for (const action of actions) {
     if (action.action === 'UNKNOWN') continue;
-    if (bundleRunId) {
-      if (!action.runId) {
-        errors.push(
-          `Transcript action ${action.action} is missing runId and cannot be bound to the canonical run bundle.`,
-        );
-      } else if (action.runId !== bundleRunId) {
-        errors.push(
-          `Transcript action runId (${action.runId}) does not match bundle manifest runId (${bundleRunId}).`,
-        );
+
+    if (strictIdentity) {
+      if (action.action === 'CREATE_RUN') {
+        // CREATE_RUN cannot know its id at ingress. Only the provider/tool
+        // result is authoritative for the run identity it created.
+        const createdRunId = action.outputRunId;
+        if (!createdRunId) {
+          errors.push(
+            'Transcript action CREATE_RUN is missing the runId returned by its tool result.',
+          );
+        } else if (createdRunId !== bundleRunId) {
+          errors.push(
+            `CREATE_RUN output runId (${createdRunId}) does not match bundle manifest runId (${bundleRunId}).`,
+          );
+        }
+        if (
+          bundle.events &&
+          !bundle.events.some(
+            (event) =>
+              event.eventType === "RUN_CREATED" &&
+              event.phase === "INITIALIZED",
+          )
+        ) {
+          errors.push("CREATE_RUN has no canonical RUN_CREATED event.");
+        }
+      } else {
+        const inputRunId = action.inputRunId ?? action.runId;
+        if (!inputRunId) {
+          errors.push(
+            `Transcript action ${action.action} is missing runId and cannot be bound to the canonical run bundle.`,
+          );
+        } else if (inputRunId !== bundleRunId) {
+          errors.push(
+            `Transcript action runId (${inputRunId}) does not match bundle manifest runId (${bundleRunId}).`,
+          );
+        }
       }
     }
 
@@ -200,15 +509,42 @@ export function crossValidateWithBundle(
       errors.push(
         `Transcript action ${action.action} has no corresponding run event (expected phase: ${expectedPhase}).`,
       );
+    } else if (expectedPhase) {
+      const canReuseCurrentPhase = previousPhase === expectedPhase;
+      const nextPhaseIndex = canReuseCurrentPhase
+        ? phaseCursor
+        : eventPhases.findIndex(
+            (phase, index) => index > phaseCursor && phase === expectedPhase,
+          );
+      if (nextPhaseIndex === -1) {
+        errors.push(
+          `Transcript action ${action.action} is out of event order (expected phase: ${expectedPhase}).`,
+        );
+      } else {
+        phaseCursor = nextPhaseIndex;
+        previousPhase = expectedPhase;
+      }
     }
 
     // Check that required artifacts exist
     const requiredArtifacts = ACTION_TO_ARTIFACTS[action.action];
     if (requiredArtifacts) {
       for (const artifact of requiredArtifacts) {
-        if (!artifacts.has(artifact)) {
+        if (!hasBundleArtifact(bundle, artifact)) {
           errors.push(
             `Transcript action ${action.action} requires artifact "${artifact}" but it is missing from the run bundle.`,
+          );
+        }
+        if (
+          bundle.events &&
+          !bundle.events.some(
+            (event) =>
+              event.eventType === "ARTIFACT_SAVED" &&
+              event.payload?.artifactType === artifact,
+          )
+        ) {
+          errors.push(
+            `Transcript action ${action.action} has no ARTIFACT_SAVED event for artifact "${artifact}".`,
           );
         }
       }

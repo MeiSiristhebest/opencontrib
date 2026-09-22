@@ -6,6 +6,7 @@ import type {
 } from "./types.js";
 import type { ContributionRunManager } from "./run-manager.js";
 import { validatePhaseGate } from "./state-machine.js";
+import { PatchAttemptArtifactSchema } from "../contracts/schemas.js";
 
 /**
  * Private application-layer capability used by canonical artifact services.
@@ -69,8 +70,11 @@ export function saveCanonicalArtifact(
   const authoritativeTypes = new Set<ArtifactType>([
     "workspace",
     "validated_patch",
+    "patch_attempt",
     "evidence_red",
     "evidence",
+    "issue_binding",
+    "security_disclosure",
     "governance",
     "submission_intent",
     "approval",
@@ -81,6 +85,15 @@ export function saveCanonicalArtifact(
     throw new Error(
       `CanonicalArtifactTypeError: '${type}' is not an authoritative artifact type.`,
     );
+  }
+  if (type === "patch_attempt") {
+    const parsed = PatchAttemptArtifactSchema.safeParse(content);
+    if (!parsed.success) {
+      throw new Error(
+        `PatchAttemptIntegrityError: invalid patch attempt artifact (${parsed.error.issues[0]?.message ?? "invalid schema"}).`,
+      );
+    }
+    content = parsed.data;
   }
   const writer = getWriter(manager);
   const current = manager.getRun(runId);

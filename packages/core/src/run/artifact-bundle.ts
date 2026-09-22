@@ -26,6 +26,8 @@ const WRITE_ONCE_ARTIFACT_TYPES = new Set<ArtifactType>([
   "validated_patch",
   "evidence_red",
   "evidence",
+  "issue_binding",
+  "security_disclosure",
   "governance",
   "submission_intent",
   "approval",
@@ -139,6 +141,26 @@ export class ArtifactBundleManager {
     content: string | Record<string, unknown>,
   ): SavedArtifactResult {
     const runDir = this.ensureRunDir(runId);
+    if (type === "patch_attempt") {
+      const nextIndex =
+        readdirSync(runDir)
+          .map((name) => /^patch_attempt_(\d+)\.json$/.exec(name)?.[1])
+          .filter((value): value is string => value !== undefined)
+          .reduce((max, value) => Math.max(max, Number(value)), 0) + 1;
+      const filename = `patch_attempt_${String(nextIndex).padStart(4, "0")}.json`;
+      const filePath = join(runDir, filename);
+      const stringContent =
+        typeof content === "string" ? content : JSON.stringify(content, null, 2);
+      writeAtomic(filePath, stringContent);
+      return {
+        runId,
+        artifactType: type,
+        filePath,
+        savedAt: new Date().toISOString(),
+        byteSize: Buffer.byteLength(stringContent, "utf-8"),
+      };
+    }
+
     const filename = this.getArtifactFilename(type);
     const filePath = join(runDir, filename);
 
@@ -200,8 +222,18 @@ export class ArtifactBundleManager {
 
   readArtifact<T = unknown>(runId: string, type: ArtifactType): T | null {
     const runDir = this.getRunDir(runId);
-    const filename = this.getArtifactFilename(type);
-    const filePath = join(runDir, filename);
+    let filePath: string;
+    if (type === "patch_attempt") {
+      const latest = readdirSync(runDir)
+        .filter((name) => /^patch_attempt_\d+\.json$/.test(name))
+        .sort()
+        .pop();
+      if (!latest) return null;
+      filePath = join(runDir, latest);
+    } else {
+      const filename = this.getArtifactFilename(type);
+      filePath = join(runDir, filename);
+    }
 
     if (!existsSync(filePath)) {
       return null;
@@ -354,6 +386,7 @@ export class ArtifactBundleManager {
         validatedPatch:
           this.readArtifact(runId, "validated_patch") ?? undefined,
         patchAttempt: this.readArtifact(runId, "patch_attempt") ?? undefined,
+        patchAttempts: this.readPatchAttempts(runId),
         issueBinding: this.readArtifact(runId, "issue_binding") ?? undefined,
         securityDisclosure:
           this.readArtifact(runId, "security_disclosure") ?? undefined,
@@ -370,5 +403,22 @@ export class ArtifactBundleManager {
       events: this.readEvents(runId),
       availableArtifactFiles: this.listArtifactFiles(runId),
     };
+  }
+
+  private readPatchAttempts(runId: string): Record<string, unknown>[] {
+    const runDir = this.getRunDir(runId);
+    return readdirSync(runDir)
+      .filter((name) => /^patch_attempt_\d+\.json$/.test(name))
+      .sort()
+      .flatMap((name) => {
+        try {
+          const value = JSON.parse(readFileSync(join(runDir, name), "utf-8"));
+          return value && typeof value === "object"
+            ? [value as Record<string, unknown>]
+            : [];
+        } catch {
+          return [];
+        }
+      });
   }
 }

@@ -28,18 +28,33 @@ import {
 } from "../src/governance/community-gate.js";
 
 const testApprovalAuthority = (
-  approvalMode: "explicit_human" | "policy_waived" = "explicit_human",
+  approvalMode:
+    | "explicit_human"
+    | "policy_waived"
+    | "maintainer_evidence" = "explicit_human",
 ) =>
   createTrustedApprovalAuthority({
     issueApproval: () => ({
       approvedBy: "test-authority",
       approvalMode,
+      maintainerGateEvidence:
+        approvalMode === "maintainer_evidence"
+          ? {
+              actorAssociation: "MEMBER" as const,
+              providerEventId: "review-1",
+              providerVerified: true as const,
+              reviewState: "APPROVED" as const,
+              reviewerLogin: "maintainer",
+              reviewerType: "User" as const,
+            }
+          : undefined,
       signingKeyId: "test-key",
       signature: "test-signature",
     }),
     verifyApproval: (artifact) =>
       artifact.signingKeyId === "test-key" &&
       artifact.signature === "test-signature",
+    verifyMaintainerEvidence: (evidence) => evidence.providerVerified === true,
   });
 
 const fixturePolicySnapshot = {
@@ -394,6 +409,38 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           approvalMode: "explicit_human",
         }),
       ).rejects.toThrow(/no longer pending/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("trusted authority can mint provider-verified maintainer evidence", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-maintainer-evidence-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      seedGovernanceReadyRun(manager, manifest.runId, "body", {
+        hasGatingRules: true,
+        hasLgtmApprovalProtocol: true,
+      });
+      const intent = new SubmissionIntentService(manager).createIntent({
+        runId: manifest.runId,
+        upstreamOwner: "org",
+        upstreamRepo: "repo",
+        title: "fix: bug",
+        body: "body",
+      });
+
+      const approval = await new ApprovalService(
+        manager,
+        testApprovalAuthority("maintainer_evidence"),
+      ).recordApproval({
+        runId: manifest.runId,
+        expectedIntentSha256: intent.intentSha256,
+      });
+
+      expect(approval.approvalMode).toBe("maintainer_evidence");
+      expect(approval.maintainerGateEvidence?.providerVerified).toBe(true);
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
     }

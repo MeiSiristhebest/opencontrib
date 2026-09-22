@@ -1,6 +1,7 @@
 import type {
   ApprovalArtifact,
   CommunityGateSnapshot,
+  MaintainerGateEvidence,
 } from "../contracts/schemas.js";
 
 export interface ApprovalAuthorityRequest {
@@ -13,6 +14,7 @@ export interface ApprovalAuthorityRequest {
 export interface ApprovalAuthorityDecision {
   approvedBy: string;
   approvalMode: "explicit_human" | "policy_waived" | "maintainer_evidence";
+  maintainerGateEvidence?: MaintainerGateEvidence;
   signingKeyId: string;
   signature: string;
 }
@@ -22,10 +24,20 @@ export interface ApprovalArtifactVerifier {
   verifyApproval(artifact: ApprovalArtifact): boolean;
 }
 
+export interface MaintainerEvidenceProvider {
+  verifyMaintainerEvidence(
+    evidence: MaintainerGateEvidence,
+  ): boolean | Promise<boolean>;
+}
+
 export interface HostApprovalPort extends ApprovalArtifactVerifier {
   issueApproval(
     request: ApprovalAuthorityRequest,
   ): ApprovalAuthorityDecision | Promise<ApprovalAuthorityDecision>;
+  /** Provider-backed maintainer evidence verification, when that mode is used. */
+  verifyMaintainerEvidence?(
+    evidence: MaintainerGateEvidence,
+  ): boolean | Promise<boolean>;
 }
 
 const authorityBrand = Symbol("opencontrib.trustedApprovalAuthority");
@@ -52,6 +64,10 @@ export function createTrustedApprovalAuthority(
       host.issueApproval(request),
     verifyApproval: (artifact: ApprovalArtifact) =>
       host.verifyApproval(artifact),
+    verifyMaintainerEvidence: host.verifyMaintainerEvidence
+      ? (evidence: MaintainerGateEvidence) =>
+          host.verifyMaintainerEvidence!(evidence)
+      : undefined,
   }) as TrustedApprovalAuthority;
 }
 

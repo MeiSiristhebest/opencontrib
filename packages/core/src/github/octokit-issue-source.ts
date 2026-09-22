@@ -1,5 +1,5 @@
 import { Octokit } from '@octokit/rest';
-import type { ApiResult, RepoDetails, SearchIssuesResult } from './types.js';
+import type { ApiResult, ProviderIssue, RepoDetails, SearchIssuesResult } from './types.js';
 import type { ResponseCache } from '../ports/response-cache.port.js';
 import { requestWithRetry } from './retry-strategy.js';
 
@@ -136,6 +136,35 @@ export class OctokitIssueSource {
 
     this.cache.set(cacheKey, allComments);
     return { status: 'OK', data: allComments };
+  }
+
+  /** Fetch one issue directly from GitHub for canonical run binding. */
+  async getIssue(
+    owner: string,
+    repo: string,
+    issue_number: number,
+  ): Promise<ApiResult<ProviderIssue>> {
+    const res = await this.request(async () =>
+      this.octokit.rest.issues.get({ owner, repo, issue_number }),
+    );
+    if (res.status !== 'OK' || !res.data) {
+      return {
+        status: res.status,
+        data: null as any,
+        error: res.error,
+        statusCode: res.statusCode,
+      };
+    }
+    const issue = res.data.data as any;
+    return {
+      status: 'OK',
+      data: {
+        number: issue.number,
+        title: String(issue.title || ''),
+        state: issue.state === 'open' ? 'open' : 'closed',
+        htmlUrl: String(issue.html_url || ''),
+      },
+    };
   }
 
   async getRepoTextFile(owner: string, repo: string, path: string): Promise<string | null> {

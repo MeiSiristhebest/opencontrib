@@ -9,13 +9,22 @@ import {
   crossValidateWithBundle,
   TOOL_TO_ACTION,
 } from '../src/eval/benchmark-runner.js';
+import { parseTrajectoryFromJSONL } from '../src/eval/trajectory-parser.js';
 import type { BenchmarkBundle, ProtocolAction } from '../src/eval/types.js';
 
 function makeAction(action: string, stepIndex: number, runId?: string): ProtocolAction {
   const toolName = Object.entries(TOOL_TO_ACTION).find(
     ([, verb]) => verb === action,
   )?.[0] ?? `unknown_${action}`;
-  return { action, ingress: "mcp", toolName, stepIndex, runId };
+  return {
+    action,
+    ingress: "mcp",
+    toolName,
+    stepIndex,
+    runId: action === "CREATE_RUN" ? undefined : runId,
+    inputRunId: action === "CREATE_RUN" ? undefined : runId,
+    outputRunId: action === "CREATE_RUN" ? runId : undefined,
+  };
 }
 
 describe("Benchmark canonical invariants", () => {
@@ -273,6 +282,7 @@ describe("Run bundle cross-validation", () => {
 
     // Bundle has events but missing evidence_red, patch, evidence artifacts
     const bundle: BenchmarkBundle = {
+      manifest: { runId: "run_valid", currentPhase: "EVIDENCE_COLLECTED" },
       eventPhases: [
         "INITIALIZED",
         "RED_CAPTURED",
@@ -291,13 +301,14 @@ describe("Run bundle cross-validation", () => {
 
   it("Valid bundle passes cross-validation", () => {
     const actions: ProtocolAction[] = [
-      makeAction("CREATE_RUN", 0),
-      makeAction("CAPTURE_RED", 1),
-      makeAction("SAVE_ARTIFACT", 2),
-      makeAction("VERIFY_GREEN", 3),
+      makeAction("CREATE_RUN", 0, "run_valid"),
+      makeAction("CAPTURE_RED", 1, "run_valid"),
+      makeAction("SAVE_ARTIFACT", 2, "run_valid"),
+      makeAction("VERIFY_GREEN", 3, "run_valid"),
     ];
 
     const bundle: BenchmarkBundle = {
+      manifest: { runId: "run_valid", currentPhase: "EVIDENCE_COLLECTED" },
       eventPhases: [
         "INITIALIZED",
         "RED_CAPTURED",
@@ -360,5 +371,113 @@ describe("Run bundle cross-validation", () => {
     expect(
       result.errors.some((e) => e.includes("RED_CAPTURED")),
     ).toBe(true);
+  });
+});
+
+describe("Canonical run identity", () => {
+  it("binds CREATE_RUN to its tool result and later actions to that run", () => {
+    const transcript = [
+      JSON.stringify({
+        step_index: 0,
+        tool_calls: [
+          {
+            name: "contrib_create_run",
+            args: { repoFullName: "owner/repo" },
+            result: { runId: "run_123" },
+          },
+        ],
+      }),
+      JSON.stringify({
+        step_index: 1,
+        tool_calls: [
+          {
+            name: "contrib_probe_run",
+            args: { runId: "run_123", target: "owner/repo" },
+          },
+        ],
+      }),
+    ].join("\n");
+
+    const { actions } = parseTrajectoryFromJSONL(transcript);
+    expect(actions[0]?.outputRunId).toBe("run_123");
+    expect(actions[0]?.inputRunId).toBeUndefined();
+    expect(actions[1]?.inputRunId).toBe("run_123");
+
+    const result = crossValidateWithBundle(actions, {
+      manifest: { runId: "run_123", currentPhase: "PROBE_COMPLETED" },
+      events: [
+        {
+          eventId: "event-1",
+          runId: "run_123",
+          timestamp: new Date(0).toISOString(),
+          phase: "INITIALIZED",
+          eventType: "RUN_CREATED",
+        },
+        {
+          eventId: "event-2",
+          runId: "run_123",
+          timestamp: new Date(1).toISOString(),
+          phase: "INITIALIZED",
+          eventType: "ARTIFACT_SAVED",
+          payload: { artifactType: "probe" },
+        },
+        {
+          eventId: "event-3",
+          runId: "run_123",
+          timestamp: new Date(2).toISOString(),
+          phase: "PROBE_COMPLETED",
+          eventType: "PHASE_TRANSITION",
+          payload: {
+            fromPhase: "INITIALIZED",
+            toPhase: "PROBE_COMPLETED",
+          },
+        },
+      ],
+      artifacts: { probe: { runId: "run_123" } },
+    });
+
+    expect(result.verified).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("fails closed when the canonical manifest is missing", () => {
+    const result = crossValidateWithBundle(
+      [makeAction("CREATE_RUN", 0)],
+      {
+        eventPhases: ["INITIALIZED"],
+        artifactTypes: ["workspace"],
+      },
+    );
+
+    expect(result.verified).toBe(false);
+    expect(result.errors[0]).toContain("Canonical manifest is required");
+  });
+
+  it("does not treat a CREATE_RUN input id as its created run id", () => {
+    const result = crossValidateWithBundle(
+      [
+        {
+          ...makeAction("CREATE_RUN", 0),
+          runId: "forged-input-id",
+          inputRunId: "forged-input-id",
+        },
+      ],
+      {
+        manifest: { runId: "run_canonical", currentPhase: "INITIALIZED" },
+        events: [
+          {
+            eventId: "event-1",
+            runId: "run_canonical",
+            timestamp: new Date(0).toISOString(),
+            phase: "INITIALIZED",
+            eventType: "RUN_CREATED",
+          },
+        ],
+        artifacts: {},
+      },
+    );
+
+    expect(result.verified).toBe(false);
+    expect(result.errors.some((error) => error.includes("missing the runId returned"))).toBe(true);
   });
 });

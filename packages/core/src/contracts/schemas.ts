@@ -323,6 +323,24 @@ export type ValidatedPatchArtifact = z.infer<
   typeof ValidatedPatchArtifactSchema
 >;
 
+/** Immutable provenance record for one repair attempt after RED restoration. */
+export const PatchAttemptArtifactSchema = z.object({
+  runId: z.string().min(1),
+  attemptNumber: z.number().int().positive(),
+  parentPatchSha256: Sha256HexSchema,
+  patchSha256: Sha256HexSchema,
+  appliedFiles: z.array(
+    z.object({
+      path: z.string().trim().min(1),
+      operation: z.string().trim().min(1),
+    }),
+  ),
+  failureOutput: z.string(),
+  baselineCommitSha: z.string().regex(/^[0-9a-f]{7,64}$/i),
+  createdAt: z.string().min(1),
+});
+export type PatchAttemptArtifact = z.infer<typeof PatchAttemptArtifactSchema>;
+
 export const SubmissionIntentFileSchema = z.object({
   path: z.string(),
   content: z.string(),
@@ -354,6 +372,39 @@ export const SubmissionIntentArtifactSchema = z.object({
 });
 export type SubmissionIntentArtifact = z.infer<
   typeof SubmissionIntentArtifactSchema
+>;
+
+/** Provider-backed binding between a run and the issue selected for it. */
+export const IssueBindingArtifactSchema = z.object({
+  runId: z.string().min(1),
+  provider: z.literal("github"),
+  repoFullName: z.string().min(1),
+  providerIssueId: z.number().int().positive(),
+  state: z.enum(["open", "closed"]),
+  title: z.string().min(1),
+  issueUrl: z.string().url(),
+  providerVerified: z.literal(true),
+  verifiedAt: z.string().min(1),
+});
+export type IssueBindingArtifact = z.infer<typeof IssueBindingArtifactSchema>;
+
+/**
+ * Canonical record of a repository's private security-disclosure channel.
+ * `publicDisclosureAllowed` is deliberately separate from provider
+ * verification: finding SECURITY.md does not authorize a public issue or PR.
+ */
+export const SecurityDisclosureArtifactSchema = z.object({
+  runId: z.string().min(1),
+  provider: z.literal("github"),
+  repoFullName: z.string().min(1),
+  channel: z.string().min(1),
+  channelUrl: z.string().url(),
+  providerVerified: z.literal(true),
+  publicDisclosureAllowed: z.boolean(),
+  verifiedAt: z.string().min(1),
+});
+export type SecurityDisclosureArtifact = z.infer<
+  typeof SecurityDisclosureArtifactSchema
 >;
 
 /**
