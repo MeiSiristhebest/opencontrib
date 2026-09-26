@@ -357,10 +357,10 @@ npx -y @opencontrib/cli setup
 ## OpenContrib 权威协议（自动生成）
 
 - **运行锚点（必须首先执行）**：`opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`；没有 runId 不得侦察、准备工作区或修改源码。
-- **工作区与证据**：`opencontrib workspace prepare --repo <owner/repo> --issue <id>` / `contrib_prepare_workspace`；PoC（contrib_verify_poc）是可选复现步骤，不能替代 contrib_capture_red 的权威 RED。
+- **工作区与证据**：`opencontrib workspace prepare --repo <owner/repo> --issue <issue-or-task-id>` / `contrib_prepare_workspace`；PoC（contrib_verify_poc）是可选复现步骤，不能替代 contrib_capture_red 的权威 RED。
 - **RED → PATCH → GREEN**：必须先执行 contrib_capture_red，再通过 contrib_save_artifact 保存补丁，最后执行 contrib_verify_green 验证 GREEN；没有 RED 不得进入 PATCH_DRAFTED。
-- **路由与治理**：公开漏洞必须先绑定提供方校验的 IssueBindingArtifact；私有漏洞必须绑定提供方校验的 SecurityDisclosureArtifact 并获得公开修复授权，不能创建公开 Issue。
-- **PR 草稿**：只能在 EVIDENCE_COLLECTED 首次写入 pr_draft；进入治理后不可变。随后执行 contrib_audit_governance，请求受信任审批（contrib_request_approval），最终只通过 contrib_submit_pr / SubmissionPort 提交。
+- **路由与治理**：公开漏洞必须先绑定提供方校验的 IssueBindingArtifact；私有漏洞必须绑定提供方校验的 SecurityDisclosureArtifact 并获得公开修复授权，不能创建公开 Issue；准备私有漏洞工作区时使用非公开任务标识。
+- **PR 草稿**：仍处于 EVIDENCE_COLLECTED 时，通过 CLI opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>" 或 MCP contrib_render_pr_template 首次创建并保存不可变的 pr_draft；私有安全路由不得包含公开 Issue 引用。随后执行 opencontrib governance audit --run-id <run_id> --pr-title "<title>" / contrib_audit_governance，请求受信任审批（opencontrib governance request-approval --run-id <run_id> / contrib_request_approval），最终只通过 contrib_submit_pr / SubmissionPort 提交。
 - 禁止使用原始 GitHub CLI、GitHub MCP 或 GitHub API 写入 Pull Request；它们会绕过 SubmissionIntent、ApprovalArtifact、SubmissionPermit 与提供方校验。
 <!-- OPENCONTRIB:GENERATED protocol:end -->
 
