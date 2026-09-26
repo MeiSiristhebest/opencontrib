@@ -80,6 +80,26 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
           },
         }),
       };
+      let failFirstHostLookup = true;
+      let hostIssueLookupCount = 0;
+      const hostIssueProvider = {
+        getIssue: async () => {
+          hostIssueLookupCount += 1;
+          if (failFirstHostLookup) {
+            failFirstHostLookup = false;
+            return { status: "RATE_LIMITED" as const, data: null as never };
+          }
+          return {
+            status: "OK" as const,
+            data: {
+              number: 42,
+              title: "mul always returns 0",
+              state: "open" as const,
+              htmlUrl: "https://github.com/test-org/math-repo/issues/42",
+            },
+          };
+        },
+      };
       await new IssueBindingService(agentRunManager, issueProvider).bind({
         runId: manifest.runId,
         repoFullName: "test-org/math-repo",
@@ -206,10 +226,20 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         new TestWorktreeManager(),
         undefined,
         undefined,
-        issueProvider,
+        hostIssueProvider,
       );
-      const hostRun = await materializer.materialize(transferBundle);
+      await expect(materializer.materialize(transferBundle)).rejects.toThrow(
+        /RATE_LIMITED/,
+      );
+      const retryableRun = hostRunManager.getRun(manifest.runId);
+      expect(retryableRun?.manifest.currentPhase).toBe("GOVERNANCE_AUDITED");
+      expect(retryableRun?.artifacts.issueBinding).toBeUndefined();
+      expect(retryableRun?.artifacts.submissionIntent).toBeUndefined();
 
+      const hostRun = await materializer.materialize(transferBundle);
+      expect(hostIssueLookupCount).toBe(2);
+      expect(hostRun.artifacts.issueBinding).toBeDefined();
+      expect(hostRun.artifacts.submissionIntent).toBeDefined();
       expect(hostRun.manifest.currentPhase).toBe("GOVERNANCE_AUDITED");
       const hostValidatedPatch = hostRun.artifacts.validatedPatch as any;
       expect(hostValidatedPatch).toBeDefined();

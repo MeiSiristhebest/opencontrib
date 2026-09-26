@@ -157,7 +157,8 @@ export const PROTOCOL_CONTRACT_PHASES = {
     cli: {
       command: "workspace",
       subcommand: "prepare",
-      example: "opencontrib workspace prepare --repo <owner/repo> --issue <id>",
+      example:
+        "opencontrib workspace prepare --repo <owner/repo> --issue <issue-or-task-id>",
     },
     mcp: {
       tool: "contrib_prepare_workspace",

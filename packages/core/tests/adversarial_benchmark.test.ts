@@ -129,6 +129,7 @@ describe("Pi-axis scenario wiring (fake runner standing in for the real agent)",
   test("normal (fake CLI) completes through exactly one provider write", async () => {
     await withBenchRoot(async (rootDir) => {
       const fixture = createBenchmarkFixture(rootDir);
+      fixture.issueNumber = 73;
       const host = new InMemoryTrustHost({
         rootDir: join(rootDir, "pi-host"),
         fixture,

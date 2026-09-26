@@ -261,12 +261,13 @@ export class InMemoryGitHub {
   private readonly owner: string;
   private readonly repo: string;
   private readonly baseSha: string;
-  private readonly issueNumber = 42;
+  private readonly issueNumber: number;
 
-  constructor(owner: string, repo: string, baseSha: string) {
+  constructor(owner: string, repo: string, baseSha: string, issueNumber: number) {
     this.owner = owner;
     this.repo = repo;
     this.baseSha = baseSha;
+    this.issueNumber = issueNumber;
     this.prService = {
       submitPullRequest: async (options: {
         commitMessage: string;
@@ -462,6 +463,7 @@ export class InMemoryTrustHost {
       fixture.repoFullName.split("/")[0],
       fixture.repoFullName.split("/")[1] ?? "repo",
       fixture.baseSha,
+      fixture.issueNumber,
     );
     const worktreeManager = new LocalFixtureWorktreeManager(
       fixture.fixtureDir,
@@ -823,15 +825,35 @@ export async function seedScriptedAgent(
   const buildTransferBundle = (): RunTransferBundle => {
     const bundle = buildRunTransferBundle(agentRunManager, manifest.runId);
     if (!maliciousPatchFile) return bundle;
-    const rawPatch =
-      typeof bundle.patch === "string"
-        ? JSON.parse(bundle.patch)
-        : bundle.patch;
+    let rawPatch: unknown;
+    try {
+      rawPatch =
+        typeof bundle.patch === "string"
+          ? JSON.parse(bundle.patch)
+          : bundle.patch;
+    } catch {
+      throw new Error(
+        "BenchmarkFixtureError: canonical patch bundle is not valid JSON.",
+      );
+    }
+    if (
+      !rawPatch ||
+      typeof rawPatch !== "object" ||
+      Array.isArray(rawPatch) ||
+      !Array.isArray((rawPatch as Record<string, unknown>).files)
+    ) {
+      throw new Error(
+        "BenchmarkFixtureError: canonical patch bundle has no files array.",
+      );
+    }
+    const parsedPatch = rawPatch as Record<string, unknown> & {
+      files: unknown[];
+    };
     return {
       ...bundle,
       patch: JSON.stringify({
-        ...rawPatch,
-        files: [...rawPatch.files, maliciousPatchFile],
+        ...parsedPatch,
+        files: [...parsedPatch.files, maliciousPatchFile],
       }),
     };
   };

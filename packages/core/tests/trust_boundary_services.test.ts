@@ -150,6 +150,10 @@ function seedGovernanceReadyRun(
   body = "pr body",
   communityPolicy: Partial<CommunityGatePolicy> = {},
 ): void {
+  const canonicalRepoFullName = manager.getRun(runId)?.manifest.repoFullName;
+  if (!canonicalRepoFullName) {
+    throw new Error(`Fixture run ${runId} has no canonical repository binding.`);
+  }
   const baseCommitSha = "a".repeat(40);
   const patch = {
     title: "fix: bug",
@@ -202,18 +206,14 @@ function seedGovernanceReadyRun(
       baseBranch: "main",
       baseCommitSha,
       isWorktree: false,
-      repoFullName: "org/repo",
+      repoFullName: canonicalRepoFullName,
       policySnapshot: fixturePolicySnapshot,
       policySha256: fixturePolicySha256,
       ...fixtureCommunityGate(baseCommitSha, communityPolicy),
     },
     "WORKSPACE_PREPARED",
   );
-  seedIssueBinding(
-    manager,
-    runId,
-    manager.getRun(runId)?.manifest.repoFullName ?? "org/repo",
-  );
+  seedIssueBinding(manager, runId, canonicalRepoFullName);
   saveCanonicalArtifact(
     manager,
     runId,

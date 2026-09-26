@@ -1,7 +1,12 @@
 import { PatchDraftSchema, type PatchDraft } from "../contracts/llm-schemas.js";
+import {
+  CommunityGateSnapshotSchema,
+  SubmissionIntentArtifactSchema,
+} from "../contracts/schemas.js";
 import { GovernanceService } from "../governance/governance-service.js";
 import { SubmissionIntentService } from "../submission/submission-intent-service.js";
 import {
+  IssueBindingProviderLookupError,
   IssueBindingService,
   type IssueBindingProvider,
 } from "../github/issue-binding-service.js";
@@ -11,8 +16,10 @@ import type { ContributionRunManager } from "./run-manager.js";
 import {
   hydrateCanonicalRun,
   markCanonicalRunFailed,
+  recordCanonicalRunFailure,
 } from "./canonical-writer.js";
 import type { TrustedExecutionPort } from "./trusted-execution.port.js";
+import type { ContributionRunSummary } from "./types.js";
 import { validateStressDimensions } from "../contracts/stress.js";
 import {
   RunTransferBundleSchema,
@@ -21,7 +28,10 @@ import {
 } from "./run-transfer.js";
 
 export class TrustedRunMaterializationError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly retryable = false,
+  ) {
     super(`TrustedRunMaterializationError: ${message}`);
     this.name = "TrustedRunMaterializationError";
   }
@@ -152,8 +162,21 @@ export class TrustedRunMaterializer {
           `run ${bundle.manifest.runId} is already bound to another repository or issue.`,
         );
       }
+      if (existing.manifest.currentPhase === "GOVERNANCE_AUDITED") {
+        if (existing.artifacts.submissionIntent !== undefined) {
+          const intent = SubmissionIntentArtifactSchema.safeParse(
+            existing.artifacts.submissionIntent,
+          );
+          if (!intent.success) {
+            throw new TrustedRunMaterializationError(
+              `run ${bundle.manifest.runId} has an invalid immutable submission intent.`,
+            );
+          }
+          return existing;
+        }
+        return this.finalizeGovernanceReadyRun(existing.manifest.runId);
+      }
       if (
-        existing.manifest.currentPhase === "GOVERNANCE_AUDITED" ||
         existing.manifest.currentPhase === "PR_SUBMITTED" ||
         existing.manifest.currentPhase === "COMPLETED"
       ) {
@@ -273,22 +296,6 @@ export class TrustedRunMaterializer {
         rawGreen,
       );
 
-      if (bundle.manifest.issueNumber !== undefined) {
-        if (!this.issueBindingProvider) {
-          throw new TrustedRunMaterializationError(
-            "IssueBindingProviderRequiredError: public transfer requires a trusted provider issue lookup.",
-          );
-        }
-        await new IssueBindingService(
-          this.runManager,
-          this.issueBindingProvider,
-        ).bind({
-          runId: bundle.manifest.runId,
-          repoFullName: bundle.manifest.repoFullName,
-          issueNumber: bundle.manifest.issueNumber,
-        });
-      }
-
       this.runManager.saveArtifact(
         bundle.manifest.runId,
         "pr_draft",
@@ -301,30 +308,11 @@ export class TrustedRunMaterializer {
         prBody: bundle.prDraft,
       });
 
-      const [owner, repo] = bundle.manifest.repoFullName.split("/");
-      new SubmissionIntentService(this.runManager).createIntent({
-        runId: bundle.manifest.runId,
-        upstreamOwner: owner,
-        upstreamRepo: repo,
-        title,
-        body: bundle.prDraft,
-        baseBranch: workspace.artifact.baseBranch,
-        branchName: workspace.artifact.branchName,
-        commitMessage: title,
-        isDraft: true,
-      });
-
-      const result = this.runManager.getRun(bundle.manifest.runId);
-      if (!result || result.manifest.currentPhase !== "GOVERNANCE_AUDITED") {
-        throw new TrustedRunMaterializationError(
-          "host materialization did not produce a governance-ready canonical run.",
-        );
-      }
-      return result;
+      return await this.finalizeGovernanceReadyRun(bundle.manifest.runId);
     } catch (error) {
-      // Cleanup is deliberately limited to the pre-provider materialization
-      // boundary.  No GitHub PR is deleted or guessed at here; once a provider
-      // side effect is possible, reconciliation must use the stored identity.
+      // Clean up only this host-owned workspace. The provider operation here is
+      // a read-only issue lookup; retryable lookup failures preserve the
+      // governance phase so the canonical intent can be finalized later.
       if (allocatedWorkspace?.workspacePath) {
         try {
           this.worktreeManager.cleanupWorkspace(
@@ -335,23 +323,133 @@ export class TrustedRunMaterializer {
           // Preserve the original materialization error.
         }
       }
-      try {
-        markCanonicalRunFailed(
-          this.runManager,
-          bundle.manifest.runId,
-          error instanceof Error ? error.message : String(error),
-          true,
-          false,
-        );
-      } catch {
-        // If failure recording itself is unavailable, the original exception
-        // is still returned and no success state is synthesized.
+      if (!(error instanceof TrustedRunMaterializationError && error.retryable)) {
+        try {
+          markCanonicalRunFailed(
+            this.runManager,
+            bundle.manifest.runId,
+            error instanceof Error ? error.message : String(error),
+            true,
+            false,
+          );
+        } catch {
+          // If failure recording itself is unavailable, the original exception
+          // is still returned and no success state is synthesized.
+        }
       }
       if (error instanceof TrustedRunMaterializationError) throw error;
       throw new TrustedRunMaterializationError(
         error instanceof Error ? error.message : String(error),
       );
     }
+  }
+
+  private async finalizeGovernanceReadyRun(
+    runId: string,
+  ): Promise<ContributionRunSummary> {
+    const run = this.runManager.getRun(runId);
+    if (!run || run.manifest.currentPhase !== "GOVERNANCE_AUDITED") {
+      throw new TrustedRunMaterializationError(
+        `run ${runId} is not ready to finalize its governance-bound submission intent.`,
+      );
+    }
+    const workspace = run.artifacts.workspace as
+      | { communityGate?: unknown; baseBranch?: unknown; branchName?: unknown }
+      | undefined;
+    const communityGate = CommunityGateSnapshotSchema.safeParse(
+      workspace?.communityGate,
+    );
+    if (!communityGate.success) {
+      throw new TrustedRunMaterializationError(
+        "canonical workspace is missing a valid community policy snapshot.",
+      );
+    }
+
+    if (communityGate.data.policy.privateVulnerabilityDisclosure !== true) {
+      if (run.manifest.issueNumber === undefined) {
+        throw new TrustedRunMaterializationError(
+          "IssueBindingRequiredError: public transfer requires a canonical issue number.",
+        );
+      }
+      if (!this.issueBindingProvider) {
+        throw new TrustedRunMaterializationError(
+          "IssueBindingProviderRequiredError: public transfer requires a trusted provider issue lookup.",
+        );
+      }
+      try {
+        await new IssueBindingService(
+          this.runManager,
+          this.issueBindingProvider,
+        ).bind({
+          runId,
+          repoFullName: run.manifest.repoFullName,
+          issueNumber: run.manifest.issueNumber,
+        });
+      } catch (error) {
+        if (
+          error instanceof IssueBindingProviderLookupError &&
+          error.retryable
+        ) {
+          recordCanonicalRunFailure(
+            this.runManager,
+            runId,
+            error.message,
+            true,
+            false,
+          );
+          throw new TrustedRunMaterializationError(error.message, true);
+        }
+        throw error;
+      }
+    }
+
+    const repoMatch = /^([^/\s]+)\/([^/\s]+)$/.exec(
+      run.manifest.repoFullName,
+    );
+    if (!repoMatch) {
+      throw new TrustedRunMaterializationError(
+        "canonical manifest repoFullName must be exactly owner/repo.",
+      );
+    }
+    const [, owner, repo] = repoMatch;
+    const governance = run.artifacts.governance as
+      | { prTitle?: unknown }
+      | undefined;
+    const title =
+      typeof governance?.prTitle === "string"
+        ? governance.prTitle
+        : "chore: contribution";
+    const body = run.artifacts.prDraft;
+    if (typeof body !== "string") {
+      throw new TrustedRunMaterializationError(
+        "canonical PR draft is missing before submission intent creation.",
+      );
+    }
+    new SubmissionIntentService(this.runManager).createIntent({
+      runId,
+      upstreamOwner: owner,
+      upstreamRepo: repo,
+      title,
+      body,
+      baseBranch:
+        typeof workspace?.baseBranch === "string"
+          ? workspace.baseBranch
+          : undefined,
+      branchName:
+        typeof workspace?.branchName === "string"
+          ? workspace.branchName
+          : undefined,
+      commitMessage: title,
+      isDraft: true,
+    });
+
+    const result = this.runManager.getRun(runId);
+    if (!result || result.manifest.currentPhase !== "GOVERNANCE_AUDITED") {
+      throw new TrustedRunMaterializationError(
+        "host materialization did not produce a governance-ready canonical run.",
+      );
+    }
+    return result;
   }
 
   private parsePatch(raw: RunTransferBundle["patch"]): PatchDraft {

@@ -427,9 +427,9 @@ const prTemplateCommand = new Command("pr-template")
       pretty?: boolean;
     }) => {
       try {
-        const runId = getRunManager().resolveRunId(opts.runId);
+        const runId = opts.runId ? getRunManager().resolveRunId(opts.runId) : undefined;
         const canonicalRun = runId ? getRunManager().getRun(runId) : undefined;
-        if (runId && !canonicalRun) {
+        if (opts.runId && !canonicalRun) {
           throw new Error(`Contribution run "${runId}" not found.`);
         }
         const canonicalRoute = canonicalRun

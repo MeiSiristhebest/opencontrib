@@ -4,7 +4,7 @@ import {
 } from "../contracts/schemas.js";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
-import type { ApiResult, ProviderIssue } from "./types.js";
+import type { ApiResult, ApiStatus, ProviderIssue } from "./types.js";
 
 export interface IssueBindingProvider {
   getIssue(
@@ -18,6 +18,19 @@ export interface BindIssueInput {
   runId: string;
   repoFullName: string;
   issueNumber: number;
+}
+
+export class IssueBindingProviderLookupError extends Error {
+  readonly retryable: boolean;
+
+  constructor(readonly status: ApiStatus) {
+    super(`IssueBindingProviderError: GitHub issue lookup failed (${status}).`);
+    this.name = "IssueBindingProviderLookupError";
+    this.retryable =
+      status === "RATE_LIMITED" ||
+      status === "NETWORK_ERROR" ||
+      status === "UNKNOWN_ERROR";
+  }
 }
 
 /**
@@ -45,14 +58,22 @@ export class IssueBindingService {
 
     const existing = IssueBindingArtifactSchema.safeParse(run.artifacts.issueBinding);
 
-    const [owner, repo] = input.repoFullName.split("/");
-    if (!owner || !repo) {
-      throw new Error("IssueBindingInputError: repoFullName must be owner/repo.");
-    }
-    const response = await this.provider.getIssue(owner, repo, input.issueNumber);
-    if (response.status !== "OK" || !response.data) {
+    const repoMatch = /^([^/\s]+)\/([^/\s]+)$/.exec(input.repoFullName);
+    if (!repoMatch) {
       throw new Error(
-        `IssueBindingProviderError: GitHub issue lookup failed (${response.status}).`,
+        "IssueBindingInputError: repoFullName must be exactly owner/repo.",
+      );
+    }
+    const [, owner, repo] = repoMatch;
+    let response: ApiResult<ProviderIssue>;
+    try {
+      response = await this.provider.getIssue(owner, repo, input.issueNumber);
+    } catch {
+      throw new IssueBindingProviderLookupError("NETWORK_ERROR");
+    }
+    if (response.status !== "OK" || !response.data) {
+      throw new IssueBindingProviderLookupError(
+        response.status === "OK" ? "UNKNOWN_ERROR" : response.status,
       );
     }
     const issue = response.data;
@@ -61,9 +82,14 @@ export class IssueBindingService {
         "IssueBindingProviderError: provider issue identity or open state does not match the selected opportunity.",
       );
     }
-    if (!issue.title.trim() || !/^https:\/\/github\.com\//i.test(issue.htmlUrl)) {
+    const expectedIssueUrl =
+      `https://github.com/${input.repoFullName}/issues/${input.issueNumber}`;
+    if (
+      !issue.title.trim() ||
+      issue.htmlUrl.toLowerCase() !== expectedIssueUrl.toLowerCase()
+    ) {
       throw new Error(
-        "IssueBindingProviderError: provider returned incomplete issue identity data.",
+        "IssueBindingProviderError: provider returned incomplete or mismatched issue identity data.",
       );
     }
 

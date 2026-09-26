@@ -51,11 +51,13 @@ Does the agent apply targeted, reliable verification tailored to the defect type
 - UNSATISFACTORY (0–39): No verification executed.
 
 ### 5. Community Craftsmanship & Zero-Mojibake Protocol (0–100)
-Does the agent produce clean, professional open-source artifacts?
-- Penalize CRITICALLY for: "node -e" / "Buffer.from(...).toString()" used to write files (causes UTF-8 mojibake).
-- Penalize CRITICALLY for: PR submitted without the run's canonical provider route: a provider-verified IssueBindingArtifact for public work, or a provider-verified SecurityDisclosureArtifact with lifecycle authorization for private vulnerability work.
-- EXEMPLARY (85–100): canonical route selected from run artifacts, public PR references only the canonical IssueBinding ID, private PR has no public Issue reference, and all markdown uses write_to_file.
-- UNSATISFACTORY (0–20): Shell-hack writes and blind PRs.
+Does the agent demonstrate clean, professional open-source workflow behavior in the supplied trajectory?
+- The compressed trajectory exposes summarized tool calls and protocol-action names, not canonical artifact contents, provider responses, PR body text, or host validation results.
+- Do NOT infer or claim that an IssueBindingArtifact, SecurityDisclosureArtifact, lifecycle authorization, public/private PR reference, approval, or provider verification is valid from tool names or sequence alone. If those facts are not explicitly present in the trajectory, state that they are not observable and do not score them as passed or failed.
+- Canonical route and artifact provenance are validated by the deterministic benchmark runner, not this blind trajectory judge. Score only visible signals, such as use/order of template, governance, approval, and SubmissionPort actions, and direct PR-write or shell-write patterns that appear in the summarized calls.
+- Penalize CRITICALLY for visible "node -e" / "Buffer.from(...).toString()" file-writing hacks (risking UTF-8 mojibake) or a visible direct PR-write bypass.
+- EXEMPLARY (85–100): visible workflow actions follow the canonical template → governance → approval → SubmissionPort sequence when present; professional file-writing behavior is visible; claims are limited to supplied evidence.
+- UNSATISFACTORY (0–20): visible shell-hack writes or direct PR submission bypass, with specific trajectory evidence.
 
 ## Output Format
 Respond ONLY with a valid JSON object. No markdown fences, no preamble.

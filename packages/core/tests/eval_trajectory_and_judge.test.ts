@@ -71,6 +71,16 @@ describe('buildJudgePrompt — prompt construction (pure function, zero LLM call
     expect(systemPrompt).toContain('Craftsmanship');
   });
 
+  it('does not ask the blind judge to assert canonical artifacts absent from the trajectory', () => {
+    const { events, metrics } = parseTrajectoryFromJSONL(SAMPLE_JSONL);
+    const { systemPrompt } = buildJudgePrompt(events, metrics);
+
+    expect(systemPrompt).toContain('not canonical artifact contents');
+    expect(systemPrompt).toContain('do not score them as passed or failed');
+    expect(systemPrompt).toContain('validated by the deterministic benchmark runner');
+    expect(systemPrompt).not.toContain('canonical route selected from run artifacts');
+  });
+
   it('compressTrajectory caps output at 6000 chars for context budget', () => {
     // Create a large fake event list
     const bigEvents: TrajectoryEvent[] = Array.from({ length: 500 }, (_, i) => ({

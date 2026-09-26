@@ -20,6 +20,7 @@ import { verifyCommand } from "../src/commands/verify.js";
 import { evalCommand } from "../src/commands/eval.js";
 import { printPhaseGuidance, printTable } from "../src/utils/output.js";
 import {
+  ActiveSessionManager,
   defaultActiveSessionManager,
   SmartPointerStore,
 } from "@opencontrib/core";
@@ -169,6 +170,8 @@ describe("CLI Commands & Subcommands Test Suite", () => {
     );
     process.env.OPENCONTRIB_HOME = testHome;
     defaultActiveSessionManager.clearActiveSession();
+    new ActiveSessionManager(path.join(testHome, ".opencontrib", "active_session.json")).clearActiveSession();
+    new ActiveSessionManager(path.join(testHome, "active_session.json")).clearActiveSession();
     const tempDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "opencontrib-gov-cli-"),
     );
