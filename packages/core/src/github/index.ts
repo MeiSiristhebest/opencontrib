@@ -12,5 +12,4 @@ export * from "./submission-port.js";
 export * from "./submission-broker-client.js";
 export * from "./submission-broker.js";
 export * from "./issue-binding-service.js";
-export * from "./issue-creation-service.js";
 export * from "./security-disclosure-service.js";

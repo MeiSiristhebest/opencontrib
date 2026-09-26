@@ -60,10 +60,11 @@ export const knipPlugin: OpenContribPlugin = {
 
         try {
           const isKnipGlobal = host.isBinaryAvailable('knip');
+          const npxBin = process.platform === 'win32' ? 'npx.cmd' : 'npx';
           let cmd = isKnipGlobal
             ? 'knip --reporter json --no-exit-code'
             : (hasKnip
-                ? 'npx --yes knip --reporter json --no-exit-code'
+                ? `${npxBin} --yes knip --reporter json --no-exit-code`
                 : `docker run --rm -v "${targetPath.replace(/\\/g, '/')}:/src" -w /src node:alpine npx --yes knip --reporter json --no-exit-code`);
 
           const { stdout } = await host.exec(cmd, {

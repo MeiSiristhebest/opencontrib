@@ -6,6 +6,7 @@ import {
 } from "../contracts/schemas.js";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
+import { hasPublicSecurityDisclosureAuthorization } from "../submission/submission-route.js";
 import type { ApiResult } from "./types.js";
 
 export type SecurityDisclosureStage =
@@ -120,12 +121,12 @@ export class SecurityDisclosureService {
   async syncLifecycle(
     input: VerifySecurityDisclosureInput,
   ): Promise<SecurityDisclosureEventArtifact | null> {
-    const base = await this.verifyPrivateChannel(input);
     if (!this.provider.getDisclosureStatus) {
       throw new Error(
         "SecurityDisclosureProviderError: provider does not expose a disclosure lifecycle status endpoint.",
       );
     }
+    const base = await this.verifyPrivateChannel(input);
     const [owner, repo] = input.repoFullName.split("/");
     if (!owner || !repo) {
       throw new Error("SecurityDisclosureInputError: repoFullName must be owner/repo.");
@@ -179,20 +180,29 @@ export class SecurityDisclosureService {
       .filter((result): result is { success: true; data: SecurityDisclosureEventArtifact } => result.success)
       .map((result) => result.data);
     const latest = events[events.length - 1];
-    if (latest && order[stage] < order[latest.stage]) {
-      throw new Error(
-        "SecurityDisclosureLifecycleError: provider lifecycle moved backwards; refusing to append a downgrade.",
-      );
-    }
-    if (latest?.providerEventId === providerEventId) {
+    const matchingEvent = events.find(
+      (event) => event.providerEventId === providerEventId,
+    );
+    if (matchingEvent) {
       if (
-        latest.stage === stage &&
-        latest.publicDisclosureAllowed === publicDisclosureAllowed
+        matchingEvent === latest &&
+        matchingEvent.stage === stage &&
+        matchingEvent.publicDisclosureAllowed === publicDisclosureAllowed
       ) {
         return latest;
       }
       throw new Error(
-        "SecurityDisclosureLifecycleError: provider reused an event ID for a different lifecycle state.",
+        "SecurityDisclosureLifecycleError: provider reused an event ID for a different or previously recorded lifecycle state.",
+      );
+    }
+    if (!latest && stage !== "DISCLOSED") {
+      throw new Error(
+        "SecurityDisclosureLifecycleError: the first lifecycle event must be DISCLOSED.",
+      );
+    }
+    if (latest && order[stage] < order[latest.stage]) {
+      throw new Error(
+        "SecurityDisclosureLifecycleError: provider lifecycle moved backwards; refusing to append a downgrade.",
       );
     }
     if (latest && order[stage] === order[latest.stage]) {
@@ -241,19 +251,9 @@ export class SecurityDisclosureService {
         "SecurityDisclosureRequiredError: private disclosure policy requires provider-verified security channel evidence before submission.",
       );
     }
-    const events = (run.artifacts.securityDisclosureEvents ?? [])
-      .map((event) => SecurityDisclosureEventArtifactSchema.safeParse(event))
-      .filter((result): result is { success: true; data: SecurityDisclosureEventArtifact } => result.success)
-      .map((result) => result.data);
-    const latest = events[events.length - 1];
-    if (latest?.stage !== "PUBLIC_FIX_AUTHORIZED") {
+    if (!hasPublicSecurityDisclosureAuthorization(run)) {
       throw new Error(
         "PublicDisclosureBlockedError: public submission requires append-only DISCLOSED -> ACKNOWLEDGED -> PUBLIC_FIX_AUTHORIZED provider events; the initial private channel record is not authorization.",
-      );
-    }
-    if (latest.publicDisclosureAllowed !== true) {
-      throw new Error(
-        "PublicDisclosureBlockedError: repository requires private vulnerability disclosure; public submission is not authorized.",
       );
     }
   }

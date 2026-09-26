@@ -48,6 +48,25 @@ export const OUTPUT_PARSERS: Record<string, OutputParser> = {
     return findings;
   },
 
+  ocr: (_probe, data, targetPath) => {
+    if (Array.isArray(data.comments)) {
+      return data.comments.map((c: any) => ({
+        id: `ocr-${(c.file || 'unknown').replace(/[^a-zA-Z0-9]/g, '_')}-${c.line || 1}`,
+        probeName: 'ocr',
+        category: c.ruleType?.includes('concurrency') ? 'lifecycle_leak' : 'protocol_drift',
+        title: c.title || c.ruleName || 'Alibaba OCR Finding',
+        description: c.explanation || c.content || c.title || '',
+        file: path.relative(targetPath, c.file || ''),
+        line: c.line || 1,
+        severity: c.severity === 'critical' ? 'critical' : 'high',
+        ruleId: c.ruleName || c.ruleId,
+        remediation: c.suggestion,
+        prPotentialScore: 92,
+      }));
+    }
+    return [];
+  },
+
   'osv-scanner': (_probe, data, targetPath) => {
     if (!Array.isArray(data.results)) return [];
     const findings: NormalizedFinding[] = [];
@@ -189,7 +208,13 @@ export const FALLBACK_COMMANDS: Record<string, FallbackCommandBuilders> = {
       : undefined),
     docker: (t) => {
       const n = t.replace(/\\/g, '/');
-      return `docker run --rm -v "${n}:/src" -w /src returntocorp/semgrep semgrep scan --config auto --config p/security-audit --config p/owasp-top-ten --json --quiet /src`;
+      return `docker run --rm -v "${n}:/src" -w /src semgrep/semgrep semgrep scan --config auto --config p/security-audit --config p/owasp-top-ten --json --quiet /src`;
+    },
+  },
+  'cargo-deny': {
+    docker: (t) => {
+      const n = t.replace(/\\/g, '/');
+      return `docker run --rm -v "${n}:/src" -w /src embarkstudios/cargo-deny:latest cargo deny check advisories --format json`;
     },
   },
   ruff: {

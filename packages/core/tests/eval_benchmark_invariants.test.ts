@@ -11,6 +11,56 @@ import {
 } from '../src/eval/benchmark-runner.js';
 import { parseTrajectoryFromJSONL } from '../src/eval/trajectory-parser.js';
 import type { BenchmarkBundle, ProtocolAction } from '../src/eval/types.js';
+import { hashSubmissionArtifact } from '../src/submission/submission-route.js';
+
+function communityGateSnapshot(privateVulnerabilityDisclosure: boolean) {
+  return {
+    sourceCommitSha: 'a'.repeat(40),
+    policy: {
+      hasGatingRules: false,
+      requiresIssueApprovalBeforePr: false,
+      autoClosesNewIssues: false,
+      hasLgtmApprovalProtocol: false,
+      restrictedTriageHours: false,
+      privateVulnerabilityDisclosure,
+      reasons: [],
+      suggestedContributorAction: privateVulnerabilityDisclosure
+        ? 'Use private disclosure.'
+        : 'Use the provider-backed issue route.',
+      matchedKeywords: [],
+    },
+  };
+}
+
+function makeSubmissionIntent(
+  runId: string,
+  submissionRoute: 'PUBLIC_ISSUE' | 'PRIVATE_SECURITY',
+  routeHashKey: 'issueBindingSha256' | 'securityDisclosureSha256',
+  routeHash: string,
+) {
+  return {
+    runId,
+    upstreamOwner: 'owner',
+    upstreamRepo: 'repo',
+    baseBranch: 'main',
+    baseCommitSha: 'a'.repeat(40),
+    branchName: `opencontrib/${runId}`,
+    title: 'fix: verified issue',
+    body: 'Body',
+    bodySha256: hashSubmissionArtifact('Body'),
+    commitMessage: 'fix: verified issue',
+    isDraft: true,
+    files: [],
+    patchSha256: 'c'.repeat(64),
+    evidenceSha256: 'd'.repeat(64),
+    governanceSha256: 'e'.repeat(64),
+    policySha256: 'f'.repeat(64),
+    submissionRoute,
+    [routeHashKey]: routeHash,
+    intentSha256: '1'.repeat(64),
+    createdAt: new Date(0).toISOString(),
+  };
+}
 
 function makeAction(action: string, stepIndex: number, runId?: string): ProtocolAction {
   const toolName = Object.entries(TOOL_TO_ACTION).find(
@@ -324,15 +374,51 @@ describe("Run bundle cross-validation", () => {
     expect(errors).toHaveLength(0);
   });
 
-  it("accepts the private security route for PR submission benchmarks", () => {
+  it("accepts the private security route only with provider lifecycle authorization", () => {
+    const runId = "run_private";
+    const disclosure = {
+      runId,
+      provider: "github" as const,
+      repoFullName: "owner/repo",
+      channel: "security policy",
+      channelUrl: "https://github.com/owner/repo/security/policy",
+      providerVerified: true as const,
+      publicDisclosureAllowed: false,
+      stage: "CHANNEL_DISCOVERED" as const,
+      verifiedAt: new Date(0).toISOString(),
+    };
+    const events = [
+      "DISCLOSED",
+      "ACKNOWLEDGED",
+      "PUBLIC_FIX_AUTHORIZED",
+    ].map((stage, index) => ({
+      runId,
+      provider: "github" as const,
+      repoFullName: "owner/repo",
+      stage: stage as "DISCLOSED" | "ACKNOWLEDGED" | "PUBLIC_FIX_AUTHORIZED",
+      providerEventId: `private-provider-event-${index + 1}`,
+      providerVerified: true as const,
+      publicDisclosureAllowed: stage === "PUBLIC_FIX_AUTHORIZED",
+      recordedAt: new Date(index + 1).toISOString(),
+    }));
+    const intent = makeSubmissionIntent(
+      runId,
+      "PRIVATE_SECURITY",
+      "securityDisclosureSha256",
+      hashSubmissionArtifact(disclosure),
+    );
     const result = crossValidateWithBundle(
-      [makeAction("SUBMIT_PR", 0, "run_private")],
+      [makeAction("SUBMIT_PR", 0, runId)],
       {
-        manifest: { runId: "run_private", currentPhase: "PR_SUBMITTED" },
+        manifest: {
+          runId,
+          currentPhase: "PR_SUBMITTED",
+          repoFullName: "owner/repo",
+        },
         events: [
           {
             eventId: "private-event-1",
-            runId: "run_private",
+            runId,
             timestamp: new Date(0).toISOString(),
             phase: "PR_SUBMITTED",
             eventType: "ARTIFACT_SAVED",
@@ -340,7 +426,7 @@ describe("Run bundle cross-validation", () => {
           },
           {
             eventId: "private-event-2",
-            runId: "run_private",
+            runId,
             timestamp: new Date(1).toISOString(),
             phase: "PR_SUBMITTED",
             eventType: "ARTIFACT_SAVED",
@@ -348,18 +434,54 @@ describe("Run bundle cross-validation", () => {
           },
         ],
         artifacts: {
-          workspace: {
-            communityGate: {
-              policy: { privateVulnerabilityDisclosure: true },
-            },
-          },
+          workspace: { communityGate: communityGateSnapshot(true) },
+          security_disclosure: disclosure,
+          security_disclosure_events: events,
+          submission_intent: intent,
         },
-        artifactTypes: ["workspace", "submission", "security_disclosure"],
+        artifactTypes: [
+          "workspace",
+          "submission_intent",
+          "approval",
+          "submission",
+          "security_disclosure",
+          "security_disclosure_event",
+        ],
       },
     );
 
     expect(result.verified).toBe(true);
     expect(result.errors).toHaveLength(0);
+  });
+
+  it("rejects a public submission without the canonical issue binding", () => {
+    const runId = "run_public_without_binding";
+    const result = crossValidateWithBundle(
+      [makeAction("SUBMIT_PR", 0, runId)],
+      {
+        manifest: {
+          runId,
+          currentPhase: "PR_SUBMITTED",
+          repoFullName: "owner/repo",
+        },
+        eventPhases: ["PR_SUBMITTED"],
+        artifacts: {
+          workspace: { communityGate: communityGateSnapshot(false) },
+          submission_intent: makeSubmissionIntent(
+            runId,
+            "PUBLIC_ISSUE",
+            "issueBindingSha256",
+            "a".repeat(64),
+          ),
+        },
+        artifactTypes: ["workspace", "submission_intent", "submission"],
+      },
+    );
+
+    expect(result.verified).toBe(false);
+    expect(result.errors.some((error) => error.includes("issue_binding"))).toBe(
+      true,
+    );
   });
 
   it("Empty bundle fails with clear message", () => {

@@ -138,13 +138,21 @@ export class RemoteSubmissionBrokerClient implements SubmissionPort {
       throw new Error(`SubmissionBrokerRejectedError: ${message}`);
     }
 
-    const result = SubmissionArtifactSchema.safeParse(
-      typeof payload === "object" &&
-        payload !== null &&
-        "submissionArtifact" in payload
-        ? (payload as { submissionArtifact?: unknown }).submissionArtifact
-        : payload,
-    );
+    let candidateArtifact: unknown = payload;
+    if (typeof payload === "object" && payload !== null) {
+      const p = payload as Record<string, unknown>;
+      if ("submissionArtifact" in p) {
+        candidateArtifact = p.submissionArtifact;
+      } else if (
+        p.completionAttestation &&
+        typeof p.completionAttestation === "object" &&
+        "submissionArtifact" in (p.completionAttestation as Record<string, unknown>)
+      ) {
+        candidateArtifact = (p.completionAttestation as Record<string, unknown>).submissionArtifact;
+      }
+    }
+
+    const result = SubmissionArtifactSchema.safeParse(candidateArtifact);
     if (!result.success) {
       throw new Error(
         "SubmissionBrokerProtocolError: trusted broker response did not contain a valid verified SubmissionArtifact.",

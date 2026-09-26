@@ -10,6 +10,7 @@ import {
   validateMarkdownIntegrity,
   buildContributionRunManager,
   detectCommunityGate,
+  getOpenContribDataDir,
   ActiveSessionManager,
   type ContributionRunManager,
 } from "@opencontrib/core";
@@ -34,7 +35,7 @@ const getRunManager = (): ContributionRunManager => {
   // after this command module has been imported. Never reuse a manager bound
   // to a different home, or an active session from that home can leak into a
   // diagnostic-only command.
-  const currentHome = process.env.OPENCONTRIB_HOME ?? "";
+  const currentHome = getOpenContribDataDir();
   if (!_runManager || _runManagerHome !== currentHome) {
     _runManager = buildContributionRunManager();
     _runManagerHome = currentHome;
@@ -484,7 +485,7 @@ const prTemplateCommand = new Command("pr-template")
           isDocumentationOnly: opts.isDocsOnly ?? false,
           aiDisclosureRequired: canonicalRoute
             ? canonicalRoute.policy.requiresAiDisclosure === true
-            : false,
+            : opts.aiDisclosure ?? false,
           dcoRequired: canonicalRoute?.policy.requiresDco === true,
           evidence,
         });

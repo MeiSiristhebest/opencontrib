@@ -17,9 +17,7 @@ describe("Community Gate Detector", () => {
   });
 
   afterEach(() => {
-    try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    } catch {}
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("detects auto-close and lgtmi approval requirements from CONTRIBUTING.md", async () => {
@@ -106,6 +104,47 @@ Issues submitted Friday through Sunday are not guaranteed to be reviewed until t
     expect(gate.requiresAiDisclosure).toBe(true);
     expect(gate.reasons.join(" ")).toContain("Developer Certificate of Origin");
     expect(gate.reasons.join(" ")).toContain("AI");
+  });
+
+  it("detects required sign-off and AI disclosure without inventing optional requirements", () => {
+    const required = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "Commits must be signed off. AI-assisted contributions must be disclosed.",
+      },
+    ]);
+    expect(required.requiresDco).toBe(true);
+    expect(required.requiresAiDisclosure).toBe(true);
+
+    const optional = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "Signed-off-by is not required. AI disclosure is optional.",
+      },
+    ]);
+    expect(optional.requiresDco).toBe(false);
+    expect(optional.requiresAiDisclosure).toBe(false);
+
+    const mixedClauses = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "Signed-off-by is not required for docs-only changes, but commits must be signed off. AI disclosure is optional for docs-only changes, but AI-assisted contributions must be disclosed.",
+      },
+    ]);
+    expect(mixedClauses.requiresDco).toBe(true);
+    expect(mixedClauses.requiresAiDisclosure).toBe(true);
+
+    const dcoOnly = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content: "Commits must be signed off.",
+      },
+    ]);
+    expect(dcoOnly.suggestedContributorAction).toContain("commit sign-off");
+    expect(dcoOnly.suggestedContributorAction).not.toContain("AI-assistance");
   });
 
   it("fails closed when a baseline community policy read fails", () => {

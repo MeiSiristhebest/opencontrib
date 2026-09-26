@@ -94,6 +94,138 @@ export function lintAntiAiText(text: string): {
   };
 }
 
+export interface AssertionQualityResult {
+  isClean: boolean;
+  flaggedTautologicalAssertions: string[];
+}
+
+/**
+ * Hard Assertion Quality Gate (Anti-Tautological Assertion Linter)
+ *
+ * Detects lazy/tautological assertions added in patch diffs (e.g. asserting purely
+ * generic tokens like "Error:", "error", "fail", "invalid" without checking concrete
+ * error contract messages or domain terms).
+ */
+export function lintAssertionQuality(patch: string): AssertionQualityResult {
+  const flaggedTautologicalAssertions: string[] = [];
+  if (!patch) return { isClean: true, flaggedTautologicalAssertions };
+
+  const lines = patch.split("\n");
+  for (const line of lines) {
+    if (!line.startsWith("+") || line.startsWith("+++")) continue;
+    const addedContent = line.slice(1).trim();
+
+    // Cover two-argument helpers (Go strings.Contains/assertIn) and common
+    // one-argument matcher APIs (Jest/Bun toContain/toThrow).
+    const matches = [
+      ...addedContent.matchAll(
+        /(?:\bcontains\b|\bassertContains\b|\bassert\.Contains\b|\bassertIn\b)\s*\([^,]+,\s*["'`]([^"'`]+)["'`]/gi,
+      ),
+      ...addedContent.matchAll(
+        /\.(?:toContain|toThrow)\s*\(\s*["'`]([^"'`]+)["'`]/gi,
+      ),
+    ];
+    const genericTokens = new Set([
+      "error",
+      "error:",
+      "err",
+      "err:",
+      "fail",
+      "fail:",
+      "failed",
+      "failed:",
+      "invalid",
+      "invalid:",
+      "exception",
+      "exception:",
+    ]);
+    for (const match of matches) {
+      const needle = match[1].trim();
+      if (genericTokens.has(needle.toLowerCase())) {
+        flaggedTautologicalAssertions.push(
+          `Tautological error assertion "${needle}" in: ${addedContent}`,
+        );
+      }
+    }
+  }
+
+  return {
+    isClean: flaggedTautologicalAssertions.length === 0,
+    flaggedTautologicalAssertions,
+  };
+}
+
+export interface CommentHyperboleResult {
+  isClean: boolean;
+  flaggedCommentHyperboles: string[];
+}
+
+/**
+ * Patch Comment Severity & Hyperbole Linter
+ *
+ * Scans code comments added in the diff (//, /*, *, #) for exaggerated claims
+ * (e.g. "crashes", "panics", "fatal crash") when RED execution evidence proves
+ * the issue was a standard handled error return or normal exit.
+ */
+export function lintPatchCommentHyperbole(
+  patch: string,
+  evidence?: { exitCode?: number; observedOutputSnippet?: string },
+): CommentHyperboleResult {
+  const flaggedCommentHyperboles: string[] = [];
+  if (!patch) return { isClean: true, flaggedCommentHyperboles };
+
+  const snippet = evidence?.observedOutputSnippet?.toLowerCase() ?? "";
+  const exitCode = evidence?.exitCode;
+  const isActualCrashOrPanic =
+    snippet.includes("panic:") ||
+    snippet.includes("sigsegv") ||
+    snippet.includes("segmentation fault") ||
+    snippet.includes("fatal error: concurrent map") ||
+    snippet.includes("deadlock") ||
+    (typeof exitCode === "number" && exitCode > 128 && exitCode !== 143);
+
+  const lines = patch.split("\n");
+  for (const line of lines) {
+    if (!line.startsWith("+") || line.startsWith("+++")) continue;
+    const addedContent = line.slice(1).trim();
+
+    if (
+      addedContent.startsWith("//") ||
+      addedContent.startsWith("/*") ||
+      addedContent.startsWith("*") ||
+      addedContent.startsWith("#")
+    ) {
+      const lower = addedContent.toLowerCase();
+      const hyperboleWords = [
+        /\bcrashes\b/,
+        /\bcrashing\b/,
+        /\bcrash the\b/,
+        /\bcrashes the\b/,
+        /\bpanics\b/,
+        /\bpanicking\b/,
+        /\bfatal crash\b/,
+        /\bcatastrophic failure\b/,
+      ];
+
+      if (!isActualCrashOrPanic) {
+        for (const pattern of hyperboleWords) {
+          if (pattern.test(lower)) {
+            flaggedCommentHyperboles.push(
+              `Exaggerated severity in comment: "${addedContent}" (RED evidence indicates handled exit/error, not an unhandled process crash/panic).`,
+            );
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    isClean: flaggedCommentHyperboles.length === 0,
+    flaggedCommentHyperboles,
+  };
+}
+
 export function calculateConfidenceScore(breakdown: ConfidenceBreakdown): {
   overallScore: number;
   weakestDimension: { dimension: string; score: number };
@@ -392,6 +524,15 @@ export function auditGovernance(
   ];
   const antiAiCheckPassed = flaggedAiPhrases.length === 0;
 
+  // 1b. Assertion Quality & Patch Comment Severity Linting (Anti-Bypass Hard Gates)
+  const redEv = input.evidence?.redEvidence;
+  const commentHyperboleCheck = lintPatchCommentHyperbole(patch, redEv);
+  const assertionQualityCheck = lintAssertionQuality(patch);
+  const commentHyperbolePassed = commentHyperboleCheck.isClean;
+  const assertionQualityPassed = assertionQualityCheck.isClean;
+  const flaggedCommentHyperboles = commentHyperboleCheck.flaggedCommentHyperboles;
+  const flaggedTautologicalAssertions = assertionQualityCheck.flaggedTautologicalAssertions;
+
   // 2. Markdown Integrity & Encoding Check
   const integrityCheck = lintMarkdownIntegrity(prBody);
   const markdownIntegrityPassed = integrityCheck.isClean;
@@ -421,6 +562,8 @@ export function auditGovernance(
   const isTechnicalGatePassed =
     antiAiCheckPassed &&
     markdownIntegrityPassed &&
+    commentHyperbolePassed &&
+    assertionQualityPassed &&
     rfcGatePassed &&
     confidence.isPassed &&
     coverageGatePassed &&
@@ -506,6 +649,23 @@ export function auditGovernance(
     }
   }
 
+  if (!commentHyperbolePassed) {
+    remediationSuggestions.push(
+      ...flaggedCommentHyperboles.map(
+        (issue) =>
+          `Comment Severity Gate: ${issue} Replace with factual descriptions such as "fails the tool call with a Go error" or "returns a handled error".`,
+      ),
+    );
+  }
+  if (!assertionQualityPassed) {
+    remediationSuggestions.push(
+      ...flaggedTautologicalAssertions.map(
+        (issue) =>
+          `Assertion Quality Gate: ${issue} Tighten assertion to check domain error semantics (e.g. specific message or error code), not generic prefixes.`,
+      ),
+    );
+  }
+
   if (!input.variantHuntConducted) {
     remediationSuggestions.push(
       "In-Domain Defense Recommendation: Run Variant Hunting sweep across sister modules to ensure zero parallel structural defects.",
@@ -531,6 +691,10 @@ export function auditGovernance(
     flaggedAiPhrases,
     markdownIntegrityPassed,
     corruptedMarkdownIssues,
+    assertionQualityPassed,
+    flaggedTautologicalAssertions,
+    commentHyperbolePassed,
+    flaggedCommentHyperboles,
     remediationSuggestions,
     overallConfidence: {
       isPassed: isTechnicalGatePassed,

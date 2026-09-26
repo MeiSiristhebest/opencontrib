@@ -909,6 +909,12 @@ export class EvidenceService {
     );
 
     if (report.reproductionVerified === true) {
+      const existingValidatedPatch = this.runManager.getRun(input.runId)?.artifacts.validatedPatch as ValidatedPatchArtifact | undefined;
+      const validatedAt =
+        existingValidatedPatch && existingValidatedPatch.patchSha256 === appliedPatchSha256
+          ? existingValidatedPatch.validatedAt
+          : new Date().toISOString();
+
       const validatedPatch: ValidatedPatchArtifact = {
         runId: input.runId,
         patchSha256: appliedPatchSha256,
@@ -924,7 +930,7 @@ export class EvidenceService {
           mode: file.mode,
           contentSha256: file.contentSha256,
         })),
-        validatedAt: new Date().toISOString(),
+        validatedAt,
       };
       validatedPatch.artifactSha256 =
         hashValidatedPatchArtifact(validatedPatch);

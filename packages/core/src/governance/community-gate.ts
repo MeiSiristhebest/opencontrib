@@ -88,6 +88,7 @@ const DCO_PATTERNS = [
   /signed-off-by/i,
   /sign[- ]off (?:your )?commits/i,
   /dco (?:required|sign[- ]off)/i,
+  /commits?\s+(?:must|shall)\s+be\s+sign(?:ed)?[- ]off/i,
 ];
 
 const AI_DISCLOSURE_PATTERNS = [
@@ -95,7 +96,52 @@ const AI_DISCLOSURE_PATTERNS = [
   /disclose (?:the use of )?(?:ai|automated|copilot)/i,
   /ai disclosure is required/i,
   /generated with (?:ai|copilot)/i,
+  /(?:ai|artificial intelligence|copilot)[^.!?\n;]{0,50}\b(?:must|shall|has to|needs? to)\b[^.!?\n;]{0,40}\bdisclos(?:e|ed|ure)\b/i,
 ];
+
+const POLICY_NEGATION_PATTERN =
+  /\b(?:not\s+(?:required|mandatory|necessary|needed|expected)|(?:is|are)\s+optional|optional|no\s+(?:such\s+)?requirement|(?:do|does|did)\s+not\s+(?:require|need)|(?:don't|doesn't|didn't)\s+(?:require|need))\b/i;
+
+function findRequiredPolicyMatch(
+  content: string,
+  pattern: RegExp,
+): string | undefined {
+  const matcher = new RegExp(
+    pattern.source,
+    `${pattern.flags.replace(/g/g, "")}g`,
+  );
+  for (const match of content.matchAll(matcher)) {
+    const index = match.index ?? 0;
+    const matchEnd = index + match[0].length;
+    const previousBoundaries = ["\n", ".", "!", "?", ";"].map((token) =>
+      content.lastIndexOf(token, index - 1),
+    );
+    const nextBoundaries = ["\n", ".", "!", "?", ";"]
+      .map((token) => content.indexOf(token, matchEnd))
+      .filter((boundary) => boundary >= 0);
+    const sentenceStart = Math.max(...previousBoundaries) + 1;
+    const sentenceEnd = nextBoundaries.length
+      ? Math.min(...nextBoundaries)
+      : content.length;
+    const contrastClauses = Array.from(
+      content.matchAll(/\b(?:but|however|although|except|unless|yet)\b/gi),
+      (connector) => {
+        const start = connector.index ?? 0;
+        return { start, end: start + connector[0].length };
+      },
+    );
+    const clauseStart = contrastClauses
+      .filter((connector) => connector.end <= index)
+      .reduce((start, connector) => Math.max(start, connector.end), sentenceStart);
+    const clauseEnd = contrastClauses
+      .filter((connector) => connector.start >= matchEnd)
+      .reduce((end, connector) => Math.min(end, connector.start), sentenceEnd);
+    if (!POLICY_NEGATION_PATTERN.test(content.slice(clauseStart, clauseEnd))) {
+      return match[0];
+    }
+  }
+  return undefined;
+}
 
 function permissivePolicy(reason: string): CommunityGatePolicy {
   return {
@@ -182,18 +228,18 @@ export function detectCommunityGateFromContents(
   }
 
   for (const pattern of DCO_PATTERNS) {
-    const match = combinedContent.match(pattern);
+    const match = findRequiredPolicyMatch(combinedContent, pattern);
     if (match) {
       requiresDco = true;
-      matchedKeywords.push(match[0]);
+      matchedKeywords.push(match);
     }
   }
 
   for (const pattern of AI_DISCLOSURE_PATTERNS) {
-    const match = combinedContent.match(pattern);
+    const match = findRequiredPolicyMatch(combinedContent, pattern);
     if (match) {
       requiresAiDisclosure = true;
-      matchedKeywords.push(match[0]);
+      matchedKeywords.push(match);
     }
   }
 
@@ -266,8 +312,12 @@ export function detectCommunityGateFromContents(
     suggestedContributorAction =
       'Create and bind the provider-backed Issue first. PAUSE pipeline and wait for maintainer to reopen or comment "lgtmi" before submitting PR.';
   } else if (requiresDco || requiresAiDisclosure) {
+    const requirements = [
+      ...(requiresDco ? ["commit sign-off"] : []),
+      ...(requiresAiDisclosure ? ["AI-assistance disclosure"] : []),
+    ];
     suggestedContributorAction =
-      "Follow the pinned commit sign-off and AI disclosure requirements before requesting approval.";
+      `Follow the pinned ${requirements.join(" and ")} requirements before requesting approval.`;
   }
 
   return CommunityGatePolicySchema.parse({

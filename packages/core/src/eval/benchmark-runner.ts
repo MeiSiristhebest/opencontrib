@@ -31,6 +31,11 @@ import {
   PROTOCOL_CONTRACT_PHASES,
   type ProtocolContractPhase,
 } from '../workflow/protocol-contract.js';
+import {
+  hasPublicSecurityDisclosureAuthorization,
+  resolveCanonicalSubmissionRoute,
+} from '../submission/submission-route.js';
+import type { ContributionRunSummary } from '../run/types.js';
 
 // ─── Canonical action definitions (derived from PROTOCOL_CONTRACT_PHASES) ────
 
@@ -248,6 +253,90 @@ function hasBundleArtifact(bundle: BenchmarkBundle, type: string): boolean {
     }
   }
   return new Set(bundle.artifactTypes ?? []).has(type);
+}
+
+function validateSubmissionRouteBinding(bundle: BenchmarkBundle): string[] {
+  const artifacts = bundle.artifacts ?? {};
+  const intent = artifacts.submission_intent as Record<string, unknown> | undefined;
+  const submission = artifacts.submission as Record<string, unknown> | undefined;
+  if (!intent && !submission) return [];
+  const errors: string[] = [];
+  const manifest = bundle.manifest;
+  if (!manifest?.repoFullName) {
+    return [
+      "Canonical manifest repoFullName is required to validate the submission route.",
+    ];
+  }
+
+  const rawEvents =
+    artifacts.security_disclosure_events ?? artifacts.security_disclosure_event;
+  const securityDisclosureEvents = Array.isArray(rawEvents)
+    ? rawEvents
+    : rawEvents && typeof rawEvents === "object"
+      ? [rawEvents]
+      : [];
+  const run = {
+    manifest: {
+      runId: manifest.runId,
+      repoFullName: manifest.repoFullName,
+    },
+    artifacts: {
+      workspace: artifacts.workspace,
+      issueBinding: artifacts.issue_binding,
+      securityDisclosure: artifacts.security_disclosure,
+      securityDisclosureEvents,
+    },
+  } as ContributionRunSummary;
+
+  let canonicalRoute;
+  try {
+    canonicalRoute = resolveCanonicalSubmissionRoute(run);
+  } catch (error) {
+    return [error instanceof Error ? error.message : String(error)];
+  }
+
+  if (
+    canonicalRoute.route === "PRIVATE_SECURITY" &&
+    !hasPublicSecurityDisclosureAuthorization(run)
+  ) {
+    errors.push(
+      "PRIVATE_SECURITY submission requires the ordered provider lifecycle DISCLOSED -> ACKNOWLEDGED -> PUBLIC_FIX_AUTHORIZED with final public authorization.",
+    );
+  }
+
+  const routeHashKey =
+    canonicalRoute.route === "PUBLIC_ISSUE"
+      ? "issueBindingSha256"
+      : "securityDisclosureSha256";
+  const canonicalRouteArtifact =
+    canonicalRoute.route === "PUBLIC_ISSUE"
+      ? canonicalRoute.issueBinding
+      : canonicalRoute.securityDisclosure;
+  const expectedRouteHash = canonicalRouteArtifact
+    ? hashBundleArtifact(canonicalRouteArtifact)
+    : undefined;
+  for (const [label, artifact] of [
+    ["submission_intent", intent],
+    ["submission", submission],
+  ] as const) {
+    if (!artifact) continue;
+    if (artifact.submissionRoute !== canonicalRoute.route) {
+      errors.push(
+        `${label}.submissionRoute does not match the canonical ${canonicalRoute.route} route.`,
+      );
+    }
+    if (!expectedRouteHash || artifact[routeHashKey] !== expectedRouteHash) {
+      const artifactName =
+        canonicalRoute.route === "PUBLIC_ISSUE"
+          ? "issue_binding"
+          : "security_disclosure";
+      errors.push(
+        `${label}.${routeHashKey} does not match the provider-verified ${artifactName} artifact.`,
+      );
+    }
+  }
+
+  return errors;
 }
 
 function validateBundleArtifacts(bundle: BenchmarkBundle): string[] {
@@ -515,6 +604,7 @@ export function crossValidateWithBundle(
   errors.push(...validateBundleEvents(bundle));
   const artifactErrors = validateBundleArtifacts(bundle);
   errors.push(...artifactErrors);
+  errors.push(...validateSubmissionRouteBinding(bundle));
   let phaseCursor = -1;
   let previousPhase: string | undefined;
 

@@ -1093,6 +1093,10 @@ export class PrSubmissionStep implements PipelineStep {
           runId,
           repoFullName: selectedOpp.repoFullName,
         });
+        await disclosureService.syncLifecycle({
+          runId,
+          repoFullName: selectedOpp.repoFullName,
+        });
       } else if (Number.isInteger(selectedOpp.issueNumber) && selectedOpp.issueNumber > 0) {
         await new IssueBindingService(runManager, deps.client).bind({
           runId,

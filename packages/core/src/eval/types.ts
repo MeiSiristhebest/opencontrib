@@ -102,7 +102,11 @@ export interface BenchmarkScenario {
 
 export interface BenchmarkBundle {
   /** Run manifest from the run bundle (events.jsonl or manifest.json). */
-  manifest?: { runId: string; currentPhase: string };
+  manifest?: {
+    runId: string;
+    currentPhase: string;
+    repoFullName?: string;
+  };
   /** Structured canonical events read from events.jsonl. */
   events?: Array<{
     eventId: string;

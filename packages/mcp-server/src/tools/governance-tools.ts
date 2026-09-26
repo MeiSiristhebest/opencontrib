@@ -349,7 +349,7 @@ export function registerGovernanceTools(
         isDocumentationOnly: args.isDocumentationOnly,
         aiDisclosureRequired: canonicalRoute
           ? canonicalRoute.policy.requiresAiDisclosure === true
-          : false,
+          : (args.aiDisclosureRequired ?? false),
         dcoRequired: canonicalRoute?.policy.requiresDco === true,
         evidence,
       });

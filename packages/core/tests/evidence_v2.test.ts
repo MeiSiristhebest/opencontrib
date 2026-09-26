@@ -7,6 +7,7 @@ import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import {
   computeSourceTreeHash,
   computeTestIdentity,
+  resolveTestFiles,
   captureRedEvidence,
   verifyGreenEvidence,
 } from "../src/evidence/evidence-collector.js";
@@ -380,4 +381,28 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       rmSync(baseDir, { recursive: true, force: true });
     }
   }, 60000);
+
+  test("resolveTestFiles filters out production source files in package directory and keeps only test files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oc-test-filter-"));
+    try {
+      const pkgDir = join(dir, "internal", "tool");
+      execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
+      const { mkdirSync } = require("fs");
+      mkdirSync(pkgDir, { recursive: true });
+      writeFileSync(join(pkgDir, "code_search.go"), "package tool\n");
+      writeFileSync(join(pkgDir, "code_search_test.go"), "package tool\n");
+      writeFileSync(join(pkgDir, "other_service.go"), "package tool\n");
+      writeFileSync(join(dir, "package.json"), "{}");
+
+      const files = resolveTestFiles(dir, "go test -v ./internal/tool -run TestFoo");
+      const filePaths = files.map((f) => f.path.replace(/\\/g, "/"));
+
+      expect(filePaths).toContain("internal/tool/code_search_test.go");
+      expect(filePaths).toContain("package.json");
+      expect(filePaths).not.toContain("internal/tool/code_search.go");
+      expect(filePaths).not.toContain("internal/tool/other_service.go");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

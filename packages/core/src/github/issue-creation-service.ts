@@ -39,6 +39,11 @@ export class IssueCreationService {
   async createAndBind(input: CreateIssueInput): Promise<IssueBindingArtifact> {
     const run = this.runManager.getRun(input.runId);
     if (!run) throw new Error(`Contribution run ${input.runId} does not exist`);
+    if (!/^[^/\s]+\/[^/\s]+$/.test(input.repoFullName)) {
+      throw new Error(
+        "IssueCreationInputError: repoFullName must be exactly owner/repo.",
+      );
+    }
     if (
       run.manifest.repoFullName.toLowerCase() !== input.repoFullName.toLowerCase()
     ) {

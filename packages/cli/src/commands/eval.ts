@@ -47,6 +47,7 @@ function readRunBundle(bundleDir: string): BenchmarkBundle {
   const parseErrors: string[] = [];
   const artifactTypes: string[] = [];
   const eventPhases: string[] = [];
+  const securityDisclosureEventFiles: string[] = [];
 
   if (!fs.existsSync(eventsPath)) {
     parseErrors.push("events.jsonl is missing");
@@ -79,9 +80,16 @@ function readRunBundle(bundleDir: string): BenchmarkBundle {
 
   // Discover and parse canonical artifacts by filename convention.
   try {
-    const files = fs.readdirSync(bundleDir);
+    const files = fs.readdirSync(bundleDir).sort();
     for (const file of files) {
       if (file === "manifest.json") continue;
+      if (
+        file === "security_disclosure_event.json" ||
+        /^security_disclosure_event_\d+\.json$/.test(file)
+      ) {
+        securityDisclosureEventFiles.push(file);
+        continue;
+      }
       let artifactType: string | undefined;
       if (file === "patch.diff") artifactType = "patch";
       else if (file === "pr_draft.md") artifactType = "pr_draft";
@@ -106,7 +114,24 @@ function readRunBundle(bundleDir: string): BenchmarkBundle {
     parseErrors.push(`bundle directory is not readable: ${String(error)}`);
   }
 
-  let manifest: { runId: string; currentPhase: string } | undefined;
+  if (securityDisclosureEventFiles.length > 0) {
+    const events: unknown[] = [];
+    for (const file of securityDisclosureEventFiles) {
+      try {
+        events.push(
+          JSON.parse(fs.readFileSync(path.join(bundleDir, file), "utf8")),
+        );
+      } catch (error) {
+        parseErrors.push(`${file} contains malformed JSON: ${String(error)}`);
+      }
+    }
+    artifacts.security_disclosure_events = events;
+    artifactTypes.push("security_disclosure_event");
+  }
+
+  let manifest:
+    | { runId: string; currentPhase: string; repoFullName?: string }
+    | undefined;
   const manifestPath = path.join(bundleDir, "manifest.json");
   if (!fs.existsSync(manifestPath)) {
     parseErrors.push("manifest.json is missing");
@@ -116,7 +141,13 @@ function readRunBundle(bundleDir: string): BenchmarkBundle {
       if (typeof m.runId !== "string" || typeof m.currentPhase !== "string") {
         parseErrors.push("manifest.json must contain string runId and currentPhase");
       } else {
-        manifest = { runId: m.runId, currentPhase: m.currentPhase };
+        manifest = {
+          runId: m.runId,
+          currentPhase: m.currentPhase,
+          ...(typeof m.repoFullName === "string"
+            ? { repoFullName: m.repoFullName }
+            : {}),
+        };
       }
     } catch (error) {
       parseErrors.push(`manifest.json contains malformed JSON: ${String(error)}`);

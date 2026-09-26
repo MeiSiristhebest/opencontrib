@@ -130,9 +130,42 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 // themselves; here we translate that signal into the real exit code. Keep the
 // registration surface importable for contract tests without parsing test-runner
 // arguments or terminating the importing process.
-const isDirectEntry =
-  typeof process.argv[1] === "string" &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+function checkDirectEntry(): boolean {
+  if (typeof process.argv[1] !== "string" || !process.argv[1]) return false;
+  if (
+    process.env.NODE_ENV === "test" ||
+    process.argv.some(
+      (arg) =>
+        arg.includes("test") ||
+        arg.endsWith(".test.ts") ||
+        arg.endsWith(".spec.ts"),
+    )
+  ) {
+    return false;
+  }
+  try {
+    const fs = require("node:fs");
+    const scriptReal = fs.realpathSync(path.resolve(process.argv[1])).toLowerCase();
+    const moduleReal = fs.realpathSync(fileURLToPath(import.meta.url)).toLowerCase();
+    if (scriptReal === moduleReal) return true;
+  } catch {}
+
+  const normalizedArgv1 = process.argv[1].replace(/\\/g, "/").toLowerCase();
+  const normalizedModule = fileURLToPath(import.meta.url)
+    .replace(/\\/g, "/")
+    .toLowerCase();
+
+  return (
+    normalizedArgv1 === normalizedModule ||
+    normalizedArgv1.endsWith("/opencontrib") ||
+    normalizedArgv1.endsWith("/opencontrib.cmd") ||
+    normalizedArgv1.endsWith("/opencontrib.ps1") ||
+    normalizedArgv1.includes("opencontrib-cli/dist/index.js") ||
+    normalizedArgv1.includes("packages/cli/dist/index.js")
+  );
+}
+
+const isDirectEntry = checkDirectEntry();
 
 if (isDirectEntry) {
   program.parseAsync().catch((err: unknown) => {

@@ -173,13 +173,17 @@ export class OctokitIssueSource {
     repo: string,
     input: { title: string; body: string },
   ): Promise<ApiResult<ProviderIssue>> {
-    const res = await this.request(async () =>
-      this.octokit.rest.issues.create({
-        owner,
-        repo,
-        title: input.title,
-        body: input.body,
-      }),
+    // Issue creation is non-idempotent. Do not retry an ambiguous response,
+    // because GitHub may have accepted the first request and created the issue.
+    const res = await this.request(
+      async () =>
+        this.octokit.rest.issues.create({
+          owner,
+          repo,
+          title: input.title,
+          body: input.body,
+        }),
+      1,
     );
     if (res.status !== "OK" || !res.data) {
       return {

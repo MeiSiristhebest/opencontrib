@@ -3,6 +3,8 @@ import {
   auditGovernance,
   calculateConfidenceScore,
   lintAntiAiText,
+  lintAssertionQuality,
+  lintPatchCommentHyperbole,
   renderMasterPrTemplate,
 } from "../src/governance/index.js";
 
@@ -363,5 +365,130 @@ Fixes #1106
     expect(audit.remediationSuggestions.join(" ")).toContain(
       "Resource-leak evidence",
     );
+  });
+
+  it("detects and blocks tautological error assertions in test code", () => {
+    const tautologicalPatch = `
+diff --git a/foo_test.go b/foo_test.go
+--- a/foo_test.go
++++ b/foo_test.go
+@@ -10,3 +10,6 @@
++if !strings.Contains(result, "Error:") {
++    t.Fatalf("expected error")
++}
+`;
+    const check = lintAssertionQuality(tautologicalPatch);
+    expect(check.isClean).toBe(false);
+    expect(check.flaggedTautologicalAssertions.length).toBeGreaterThan(0);
+    expect(check.flaggedTautologicalAssertions[0]).toContain("Tautological error assertion");
+
+    const typescriptPatch = `
++expect(error.message).toContain("Error:");
+`;
+    const checkTypeScript = lintAssertionQuality(typescriptPatch);
+    expect(checkTypeScript.isClean).toBe(false);
+
+    const concretePatch = `
+diff --git a/foo_test.go b/foo_test.go
+--- a/foo_test.go
++++ b/foo_test.go
+@@ -10,3 +10,6 @@
++if !strings.Contains(result, "Error: invalid regular expression") {
++    t.Fatalf("expected specific error contract")
++}
+`;
+    const checkConcrete = lintAssertionQuality(concretePatch);
+    expect(checkConcrete.isClean).toBe(true);
+  });
+
+  it("detects and blocks exaggerated comment severity when defect evidence is non-crash", () => {
+    const hyperbolePatch = `
+diff --git a/foo_test.go b/foo_test.go
+--- a/foo_test.go
++++ b/foo_test.go
+@@ -10,3 +10,4 @@
++// An unbalanced parenthesis in PCRE mode causes git grep to fail with exit code 128.
++// It should return a graceful error message for the model instead of crashing the tool execution.
+`;
+    // Non-crash RED evidence: exit code 1, normal git grep failure
+    const check = lintPatchCommentHyperbole(hyperbolePatch, {
+      exitCode: 1,
+      observedOutputSnippet: "git grep failed: exit status 128: fatal: -e option: missing closing parenthesis",
+    });
+    expect(check.isClean).toBe(false);
+    expect(check.flaggedCommentHyperboles.length).toBeGreaterThan(0);
+    expect(check.flaggedCommentHyperboles[0]).toContain("Exaggerated severity in comment");
+
+    // Clean factual comment
+    const factualPatch = `
+diff --git a/foo_test.go b/foo_test.go
+--- a/foo_test.go
++++ b/foo_test.go
+@@ -10,3 +10,4 @@
++// It should return a graceful error message for the model instead of failing the tool call with a Go error.
+`;
+    const checkFactual = lintPatchCommentHyperbole(factualPatch, {
+      exitCode: 1,
+      observedOutputSnippet: "git grep failed: exit status 128: fatal: -e option: missing closing parenthesis",
+    });
+    expect(checkFactual.isClean).toBe(true);
+
+    // If RED evidence genuinely had panic:, the word panic is factual and allowed
+    const genuinePanicCheck = lintPatchCommentHyperbole(`
+diff --git a/foo.go b/foo.go
+--- a/foo.go
++++ b/foo.go
+@@ -10,3 +10,4 @@
++// Fixes nil dereference that panics the HTTP handler worker pool.
+`, {
+      exitCode: 2,
+      observedOutputSnippet: "panic: runtime error: invalid memory address or nil pointer dereference",
+    });
+    expect(genuinePanicCheck.isClean).toBe(true);
+  });
+
+  it("fails technical gate when patch contains tautological assertions or exaggerated comments", () => {
+    const failingPatch = `
+diff --git a/foo_test.go b/foo_test.go
+--- a/foo_test.go
++++ b/foo_test.go
+@@ -10,3 +10,5 @@
++// Unclosed regex crashes the tool execution
++if !strings.Contains(result, "Error:") {
++    t.Fail()
++}
+`;
+    const audit = auditGovernance({
+      patchContent: failingPatch,
+      prBody: "Fixes regex handling cleanly.",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      evidence: {
+        allTestsPassing: true,
+        passedUnitTestsCount: 1,
+        redEvidence: {
+          exitCode: 1,
+          observedOutputSnippet: "git grep failed with error",
+          capturedAt: new Date().toISOString(),
+          command: "go test",
+          sourceTreeSha256: "abc",
+          assertionMatched: true,
+        },
+      },
+      lineCount: 4,
+    });
+
+    expect(audit.technicalGate?.status).toBe("FAIL");
+    expect(audit.assertionQualityPassed).toBe(false);
+    expect(audit.commentHyperbolePassed).toBe(false);
+    expect(audit.remediationSuggestions.join(" ")).toContain("Assertion Quality Gate");
+    expect(audit.remediationSuggestions.join(" ")).toContain("Comment Severity Gate");
   });
 });

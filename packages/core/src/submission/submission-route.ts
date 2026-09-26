@@ -6,6 +6,7 @@ import {
   SecurityDisclosureEventArtifactSchema,
   type IssueBindingArtifact,
   type SecurityDisclosureArtifact,
+  type SecurityDisclosureEventArtifact,
   type SubmissionRoute,
 } from "../contracts/schemas.js";
 import type { ContributionRunSummary } from "../run/types.js";
@@ -94,14 +95,45 @@ export function hasPublicSecurityDisclosureAuthorization(
   const base = SecurityDisclosureArtifactSchema.safeParse(
     run.artifacts.securityDisclosure,
   );
-  if (!base.success || base.data.providerVerified !== true) return false;
-  const events = (run.artifacts.securityDisclosureEvents ?? [])
-    .map((event) => SecurityDisclosureEventArtifactSchema.safeParse(event))
-    .filter((result): result is { success: true; data: any } => result.success)
-    .map((result) => result.data);
+  if (
+    !base.success ||
+    base.data.runId !== run.manifest.runId ||
+    base.data.repoFullName.toLowerCase() !==
+      run.manifest.repoFullName.toLowerCase() ||
+    base.data.providerVerified !== true
+  ) {
+    return false;
+  }
+  const rawEvents = run.artifacts.securityDisclosureEvents ?? [];
+  const events: SecurityDisclosureEventArtifact[] = [];
+  for (const rawEvent of rawEvents) {
+    const result = SecurityDisclosureEventArtifactSchema.safeParse(rawEvent);
+    if (!result.success) return false;
+    events.push(result.data);
+  }
+  const lifecycle = [
+    "DISCLOSED",
+    "ACKNOWLEDGED",
+    "PUBLIC_FIX_AUTHORIZED",
+  ] as const;
+  if (
+    events.length !== lifecycle.length ||
+    new Set(events.map((event) => event.providerEventId)).size !== events.length ||
+    events.some(
+      (event, index) =>
+        event.runId !== run.manifest.runId ||
+        event.repoFullName.toLowerCase() !==
+          run.manifest.repoFullName.toLowerCase() ||
+        event.providerVerified !== true ||
+        event.stage !== lifecycle[index],
+    )
+  ) {
+    return false;
+  }
   const latest = events[events.length - 1];
+  if (!latest) return false;
   return (
-    latest?.stage === "PUBLIC_FIX_AUTHORIZED" &&
+    latest.stage === "PUBLIC_FIX_AUTHORIZED" &&
     latest.providerVerified === true &&
     latest.publicDisclosureAllowed === true &&
     latest.runId === run.manifest.runId &&

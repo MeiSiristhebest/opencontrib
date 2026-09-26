@@ -84,17 +84,17 @@ describe("Native Template Merger & Fallback", () => {
     expect(privateBody).toContain(
       "Security disclosure: provider-verified private channel",
     );
-    expect(privateBody).not.toMatch(/(?:Fixes|Closes|Resolves) #/);
+    expect(privateBody).not.toMatch(/(?:Fixes|Closes|Resolves) #/i);
     const privateBodyWithLegacyReference = buildPrDescription(
       {
         ...prData,
         issueNumber: undefined,
         submissionRoute: "PRIVATE_SECURITY",
       },
-      "Fixes #0\n\n## Description",
+      "fixes #0\n\n## Description",
     );
     expect(privateBodyWithLegacyReference).not.toMatch(
-      /(?:Fixes|Closes|Resolves) #/,
+      /(?:Fixes|Closes|Resolves) #/i,
     );
     expect(() =>
       buildPrDescription({ ...prData, issueNumber: 0 }, nativeTemplate),

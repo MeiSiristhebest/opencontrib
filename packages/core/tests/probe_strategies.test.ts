@@ -72,7 +72,7 @@ describe('Probe strategy registry (OCP)', () => {
   });
 
   test('fallback commands are keyed per probe, not branched', () => {
-    expect(Object.keys(FALLBACK_COMMANDS)).toEqual(['semgrep', 'ruff', 'knip', 'ast-grep']);
+    expect(Object.keys(FALLBACK_COMMANDS)).toEqual(['semgrep', 'cargo-deny', 'ruff', 'knip', 'ast-grep']);
     // The ephemeral command only resolves when its runner binary ('uv') is on
     // the OS PATH in the current environment; otherwise the function returns
     // undefined. The keying contract (one entry per probe, no branching) is the

@@ -29,6 +29,8 @@ describe("Agent-facing submission broker client", () => {
           headSha: "f".repeat(40),
           submittedAt: "2026-01-01T00:00:00.000Z",
           verified: true,
+          submissionRoute: "PUBLIC_ISSUE",
+          issueBindingSha256: "9".repeat(64),
         };
         const resultArtifact = {
           runId: submissionArtifact.runId,
@@ -100,6 +102,8 @@ describe("Agent-facing submission broker client", () => {
               headSha: "f".repeat(40),
               submittedAt: "2026-01-01T00:00:00.000Z",
               verified: true,
+              submissionRoute: "PUBLIC_ISSUE",
+              issueBindingSha256: "9".repeat(64),
             },
             completionAttestation: { not: "valid" },
           }),

@@ -593,6 +593,7 @@ function addFileIdentity(
   cwd: string,
   candidate: string,
   files: Map<string, TestIdentityFile>,
+  isExplicit: boolean = false,
 ): void {
   const full = resolve(cwd, candidate);
   if (!isWithinDirectory(cwd, full)) return;
@@ -600,6 +601,7 @@ function addFileIdentity(
   try {
     const st = lstatSync(full);
     if (st.isSymbolicLink()) {
+      if (!isExplicit && !isLikelyTestFile(normalizedPath)) return;
       // No-follow: a symlinked test file is bound to the link target string,
       // never to the content it points at (which may live outside the host).
       const target = readlinkSync(full);
@@ -624,20 +626,23 @@ function addFileIdentity(
           ].includes(entry.name)
         )
           continue;
-        addFileIdentity(cwd, join(full, entry.name), files);
+        addFileIdentity(cwd, join(full, entry.name), files, false);
       }
       return;
     }
     if (!st.isFile()) return;
+    if (!isExplicit && !isLikelyTestFile(normalizedPath)) return;
     const content = readFileSync(full);
     files.set(normalizedPath, {
       path: normalizedPath,
       sha256: createHash("sha256").update(content).digest("hex"),
     });
   } catch {
-    // Missing explicit paths remain represented with an empty digest, so RED
-    // and GREEN cannot silently switch to a different file.
-    files.set(normalizedPath, { path: normalizedPath, sha256: "" });
+    if (isExplicit || isLikelyTestFile(normalizedPath)) {
+      // Missing explicit paths remain represented with an empty digest, so RED
+      // and GREEN cannot silently switch to a different file.
+      files.set(normalizedPath, { path: normalizedPath, sha256: "" });
+    }
   }
 }
 
@@ -691,13 +696,14 @@ export function resolveTestFiles(
   explicitTestFile?: string | string[],
 ): TestIdentityFile[] {
   const spec = parseCommandSpec(testCommand);
-  const candidates = new Set<string>();
+  const explicitCandidates = new Set<string>();
   let explicit: string[] = [];
   if (Array.isArray(explicitTestFile)) explicit = explicitTestFile;
   else if (explicitTestFile) explicit = [explicitTestFile];
   for (const candidate of explicit)
-    if (candidate.trim()) candidates.add(candidate.trim());
+    if (candidate.trim()) explicitCandidates.add(candidate.trim());
 
+  const candidates = new Set<string>();
   const testFileToken =
     /\.(test|spec)\.[cm]?[jt]sx?$|\.(test|spec)\.py$|_test\.(?:go|rs)$|^test_[a-z0-9_.]+\.py$|\.test$|\.spec$/i;
   for (const token of spec.args) {
@@ -713,7 +719,8 @@ export function resolveTestFiles(
   }
 
   const files = new Map<string, TestIdentityFile>();
-  for (const candidate of candidates) addFileIdentity(cwd, candidate, files);
+  for (const candidate of explicitCandidates) addFileIdentity(cwd, candidate, files, true);
+  for (const candidate of candidates) addFileIdentity(cwd, candidate, files, false);
   // Broad commands such as `bun test`, `pytest`, `cargo test`, and `npm test`
   // receive a deterministic repository test-file set rather than an empty
   // identity. If no set can be resolved, the phase gate remains unavailable.
@@ -734,7 +741,7 @@ export function resolveTestFiles(
   for (const hf of harnessFiles) {
     const full = resolve(cwd, hf);
     if (isWithinDirectory(cwd, full) && existsSync(full)) {
-      addFileIdentity(cwd, hf, files);
+      addFileIdentity(cwd, hf, files, true);
     }
   }
 

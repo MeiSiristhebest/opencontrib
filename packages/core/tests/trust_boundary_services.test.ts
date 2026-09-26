@@ -22,6 +22,7 @@ import { EvidenceService } from "../src/evidence/evidence-service.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
+import { SubmissionArtifactSchema } from "../src/contracts/schemas.js";
 import {
   hashCommunityGateSnapshot,
   type CommunityGatePolicy,
@@ -56,6 +57,40 @@ const testApprovalAuthority = (
       artifact.signature === "test-signature",
     verifyMaintainerEvidence: (evidence) => evidence.providerVerified === true,
   });
+
+describe("Submission route artifact schema", () => {
+  it("rejects legacy submissions and route-unbound submissions", () => {
+    const legacySubmission = {
+      runId: "run-legacy",
+      provider: "github",
+      owner: "org",
+      repo: "repo",
+      baseBranch: "main",
+      baseCommitSha: "a".repeat(40),
+      branchName: "opencontrib/run-legacy",
+      intentSha256: "b".repeat(64),
+      patchSha256: "c".repeat(64),
+      evidenceSha256: "d".repeat(64),
+      governanceSha256: "e".repeat(64),
+      policySha256: "f".repeat(64),
+      communityGateSha256: "1".repeat(64),
+      prNumber: 1,
+      prUrl: "https://github.com/org/repo/pull/1",
+      headSha: "2".repeat(40),
+      submittedAt: "2026-01-01T00:00:00.000Z",
+      verified: true,
+    };
+    expect(SubmissionArtifactSchema.safeParse(legacySubmission).success).toBe(
+      false,
+    );
+    expect(
+      SubmissionArtifactSchema.safeParse({
+        ...legacySubmission,
+        submissionRoute: "PUBLIC_ISSUE",
+      }).success,
+    ).toBe(false);
+  });
+});
 
 const fixturePolicySnapshot = {
   coverage: {

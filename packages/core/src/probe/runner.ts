@@ -218,6 +218,9 @@ const BUILTIN_RUNNERS: Record<string, BuiltinRunner> = {
     runPioliumBuiltin(fingerprint, accumulated),
   'builtin:piolium': (_probe, _targetPath, fingerprint, accumulated) =>
     runPioliumBuiltin(fingerprint, accumulated),
+
+  'ocr': (probe, targetPath, fingerprint) => runOcrBuiltin(probe, targetPath, fingerprint),
+  'builtin:ocr': (probe, targetPath, fingerprint) => runOcrBuiltin(probe, targetPath, fingerprint),
 };
 
 function runGitHotspotBuiltin(targetPath: string): NormalizedFinding[] {
@@ -297,4 +300,121 @@ function runPioliumBuiltin(
       prPotentialScore: adv.confidenceScore,
     },
   ];
+}
+
+async function runOcrBuiltin(
+  probe: ProbeManifest,
+  targetPath: string,
+  fingerprint: RepoFingerprint,
+): Promise<NormalizedFinding[]> {
+  const hasLlmEnv = !!(
+    process.env.OPENAI_API_KEY ||
+    process.env.OCR_LLM_URL ||
+    process.env.OCR_LLM_TOKEN ||
+    process.env.ANTHROPIC_AUTH_TOKEN
+  );
+
+  // If LLM environment is explicitly configured, use standard ocr scan
+  if (hasLlmEnv) {
+    try {
+      const normalizedTarget = `"${targetPath.replace(/\\/g, '/').replace(/"/g, '\\"')}"`;
+      const res = await execWithSpawn(
+        `ocr scan --path ${normalizedTarget} -f json`,
+        { cwd: targetPath, timeout: 30000 },
+      );
+      if (res.stdout) {
+        const parsed = parseProbeOutput(probe, res.stdout, targetPath);
+        if (parsed.length > 0) return parsed;
+      }
+    } catch {
+      // Fall through to host-agent delegation mode
+    }
+  }
+
+  // Host-Agent Delegation Mode: No external LLM key required!
+  // Extracts official Alibaba OpenCodeReview review rules & targets for host AI review.
+  try {
+    const previewRes = await execWithSpawn('ocr delegate preview', {
+      cwd: targetPath,
+      timeout: 15000,
+    });
+    const stdout = previewRes.stdout || '';
+    const fileMatches = stdout.matchAll(/`([^`]+)`\s+\[(modified|added)\]/g);
+    let filesToInspect = Array.from(fileMatches).map((m) => m[1]);
+
+    if (filesToInspect.length === 0) {
+      filesToInspect = findSampleSourceFiles(targetPath, fingerprint.primaryLanguage, 3);
+    }
+
+    if (filesToInspect.length === 0) return [];
+
+    const quotedFiles = filesToInspect.map((f) => `"${f.replace(/\\/g, '/')}"`).join(' ');
+    const ruleRes = await execWithSpawn(
+      `ocr delegate rule -f json ${quotedFiles}`,
+      { cwd: targetPath, timeout: 15000 },
+    );
+    if (!ruleRes.stdout) return [];
+
+    const ruleData = JSON.parse(ruleRes.stdout);
+    const findings: NormalizedFinding[] = [];
+    for (const g of ruleData.groups || []) {
+      for (const f of g.files || []) {
+        findings.push({
+          id: `ocr-delegate-${f.replace(/[^a-zA-Z0-9]/g, '_')}`,
+          probeName: 'ocr',
+          category: 'protocol_drift',
+          title: `[OCR Delegated Spec] Review ${f} against Alibaba code review principles`,
+          description: `Alibaba OpenCodeReview delegation spec active for ${f}. Agent directly evaluates Go/TS contracts, error handling, and concurrency traps without external LLM API key.`,
+          file: f,
+          line: 1,
+          severity: 'medium',
+          ruleId: `ocr-spec-${g.group_id}`,
+          remediation: `Inspect ${f} using OCR principles: verify error propagation, goroutine lifetimes, and context bounds.`,
+          prPotentialScore: 89,
+        });
+      }
+    }
+    return findings;
+  } catch {
+    return [];
+  }
+}
+
+function findSampleSourceFiles(targetPath: string, primaryLanguage?: string, limit = 3): string[] {
+  const extMap: Record<string, string[]> = {
+    go: ['.go'],
+    typescript: ['.ts', '.tsx'],
+    javascript: ['.js', '.jsx'],
+    python: ['.py'],
+    rust: ['.rs'],
+    java: ['.java'],
+  };
+  const exts = (primaryLanguage && extMap[primaryLanguage.toLowerCase()]) || ['.go', '.ts', '.py', '.js'];
+  const results: string[] = [];
+
+  function walk(dir: string, depth: number) {
+    if (depth > 3 || results.length >= limit) return;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const e of entries) {
+        if (results.length >= limit) break;
+        if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'vendor' || e.name === 'dist') continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(full, depth + 1);
+        } else if (
+          e.isFile() &&
+          exts.some((ext) => e.name.endsWith(ext)) &&
+          !e.name.endsWith('_test.go') &&
+          !e.name.includes('.test.') &&
+          !e.name.includes('.spec.')
+        ) {
+          results.push(path.relative(targetPath, full).replace(/\\/g, '/'));
+        }
+      }
+    } catch {}
+  }
+
+  walk(targetPath, 0);
+  return results;
 }

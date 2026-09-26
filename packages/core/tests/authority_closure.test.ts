@@ -1,4 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ArtifactBundleManager } from "../src/run/artifact-bundle.js";
 import { ContributionRunManager } from "../src/run/run-manager.js";
@@ -7,12 +9,19 @@ import { IssueBindingService } from "../src/github/issue-binding-service.js";
 import { IssueCreationService } from "../src/github/issue-creation-service.js";
 import { SecurityDisclosureService } from "../src/github/security-disclosure-service.js";
 
+const testStorageDirs: string[] = [];
+
 function baseDir(name: string): string {
-  return join(
-    process.env.OPENCONTRIB_HOME ?? ".",
-    `authority-closure-${name}-${Date.now()}`,
-  );
+  const dir = mkdtempSync(join(tmpdir(), `authority-closure-${name}-`));
+  testStorageDirs.push(dir);
+  return dir;
 }
+
+afterEach(() => {
+  for (const dir of testStorageDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe("Authority closure", () => {
   it("creates a provider issue and seals its returned identity before binding", async () => {
@@ -43,6 +52,34 @@ describe("Authority closure", () => {
     expect(created).toBe(true);
     expect(binding.providerIssueId).toBe(73);
     expect(manager.getRun(run.runId)?.artifacts.issueBinding).toEqual(binding);
+  });
+
+  it("rejects malformed repository names before creating a provider issue", async () => {
+    const manager = new ContributionRunManager({ baseDir: baseDir("invalid-repo") });
+    const run = manager.createRun({ repoFullName: "owner/repo" });
+    let createCalls = 0;
+    const provider = {
+      createIssue: async () => {
+        createCalls += 1;
+        return { status: "OK" as const, data: {
+          number: 1,
+          title: "issue",
+          state: "open" as const,
+          htmlUrl: "https://github.com/owner/repo/issues/1",
+        } };
+      },
+      getIssue: async () => ({ status: "NOT_FOUND" as const, data: null as never }),
+    };
+
+    await expect(
+      new IssueCreationService(manager, provider).createAndBind({
+        runId: run.runId,
+        repoFullName: "owner/repo/extra",
+        title: "Issue title",
+        body: "Issue body",
+      }),
+    ).rejects.toThrow("repoFullName must be exactly owner/repo");
+    expect(createCalls).toBe(0);
   });
 
   it("creates issue_binding only from a provider response", async () => {
@@ -153,6 +190,66 @@ describe("Authority closure", () => {
     await service.syncLifecycle({ runId: run.runId, repoFullName: "owner/repo" });
     expect(() => service.assertPublicSubmissionAllowed(run.runId)).not.toThrow();
     expect(manager.getRun(run.runId)?.artifacts.securityDisclosureEvents).toHaveLength(3);
+  });
+
+  it("rejects skipped stages, backwards stages, and replayed lifecycle IDs", async () => {
+    const manager = new ContributionRunManager({ baseDir: baseDir("lifecycle-order") });
+    const run = manager.createRun({ repoFullName: "owner/repo" });
+    saveCanonicalArtifact(
+      manager,
+      run.runId,
+      "workspace",
+      {
+        baseBranch: "main",
+        baseCommitSha: "a".repeat(40),
+        communityGate: {
+          policy: { privateVulnerabilityDisclosure: true },
+        },
+      },
+      "WORKSPACE_PREPARED",
+    );
+    let stage: "DISCLOSED" | "ACKNOWLEDGED" | "PUBLIC_FIX_AUTHORIZED" =
+      "DISCLOSED";
+    let eventId = "event-DISCLOSED";
+    const provider = {
+      getRepoTextFile: async () =>
+        "Report vulnerabilities privately to the security maintainers.",
+      getDisclosureStatus: async () => ({
+        status: "OK" as const,
+        data: {
+          stage,
+          providerEventId: eventId,
+          publicDisclosureAllowed: stage === "PUBLIC_FIX_AUTHORIZED",
+        },
+      }),
+    };
+    const service = new SecurityDisclosureService(manager, provider);
+    const input = { runId: run.runId, repoFullName: "owner/repo" };
+
+    await service.syncLifecycle(input);
+    stage = "PUBLIC_FIX_AUTHORIZED";
+    eventId = "event-PUBLIC_FIX_AUTHORIZED";
+    await expect(service.syncLifecycle(input)).rejects.toThrow(
+      "lifecycle stages must advance",
+    );
+
+    stage = "ACKNOWLEDGED";
+    eventId = "event-ACKNOWLEDGED";
+    await service.syncLifecycle(input);
+    stage = "PUBLIC_FIX_AUTHORIZED";
+    eventId = "event-PUBLIC_FIX_AUTHORIZED";
+    await service.syncLifecycle(input);
+
+    stage = "DISCLOSED";
+    eventId = "event-DOWNGRADE";
+    await expect(service.syncLifecycle(input)).rejects.toThrow(
+      "provider lifecycle moved backwards",
+    );
+    stage = "ACKNOWLEDGED";
+    eventId = "event-DISCLOSED";
+    await expect(service.syncLifecycle(input)).rejects.toThrow(
+      "provider reused an event ID",
+    );
   });
 
   it("stores patch attempts append-only", () => {

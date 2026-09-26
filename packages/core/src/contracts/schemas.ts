@@ -374,7 +374,7 @@ export const SubmissionIntentArtifactSchema = z.object({
   governanceSha256: z.string(),
   policySha256: z.string(),
   /** Canonical provider route selected from the pinned community policy. */
-  submissionRoute: SubmissionRouteSchema.default("PUBLIC_ISSUE"),
+  submissionRoute: SubmissionRouteSchema,
   /** Hash of the provider-verified route artifact bound into this intent. */
   issueBindingSha256: z
     .string()
@@ -386,6 +386,37 @@ export const SubmissionIntentArtifactSchema = z.object({
     .optional(),
   intentSha256: z.string(),
   createdAt: z.string(),
+}).superRefine((intent, ctx) => {
+  const selectedHash =
+    intent.submissionRoute === "PUBLIC_ISSUE"
+      ? intent.issueBindingSha256
+      : intent.securityDisclosureSha256;
+  const unusedHash =
+    intent.submissionRoute === "PUBLIC_ISSUE"
+      ? intent.securityDisclosureSha256
+      : intent.issueBindingSha256;
+  const selectedField =
+    intent.submissionRoute === "PUBLIC_ISSUE"
+      ? "issueBindingSha256"
+      : "securityDisclosureSha256";
+  const unusedField =
+    intent.submissionRoute === "PUBLIC_ISSUE"
+      ? "securityDisclosureSha256"
+      : "issueBindingSha256";
+  if (!selectedHash) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [selectedField],
+      message: `A ${intent.submissionRoute} intent requires its provider-verified route hash.`,
+    });
+  }
+  if (unusedHash !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [unusedField],
+      message: `The ${unusedField} field is invalid for the ${intent.submissionRoute} route.`,
+    });
+  }
 });
 export type SubmissionIntentArtifact = z.infer<
   typeof SubmissionIntentArtifactSchema
@@ -515,7 +546,7 @@ export const SubmissionArtifactSchema = z.object({
   governanceSha256: z.string(),
   policySha256: z.string(),
   communityGateSha256: Sha256HexSchema,
-  submissionRoute: SubmissionRouteSchema.optional(),
+  submissionRoute: SubmissionRouteSchema,
   issueBindingSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
   securityDisclosureSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
   prNumber: z.number().finite().int().positive(),
@@ -523,6 +554,37 @@ export const SubmissionArtifactSchema = z.object({
   headSha: z.string().min(1),
   submittedAt: z.string().min(1),
   verified: z.literal(true),
+}).superRefine((submission, ctx) => {
+  const selectedHash =
+    submission.submissionRoute === "PUBLIC_ISSUE"
+      ? submission.issueBindingSha256
+      : submission.securityDisclosureSha256;
+  const unusedHash =
+    submission.submissionRoute === "PUBLIC_ISSUE"
+      ? submission.securityDisclosureSha256
+      : submission.issueBindingSha256;
+  const selectedField =
+    submission.submissionRoute === "PUBLIC_ISSUE"
+      ? "issueBindingSha256"
+      : "securityDisclosureSha256";
+  const unusedField =
+    submission.submissionRoute === "PUBLIC_ISSUE"
+      ? "securityDisclosureSha256"
+      : "issueBindingSha256";
+  if (!selectedHash) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [selectedField],
+      message: `A ${submission.submissionRoute} submission requires its provider-verified route hash.`,
+    });
+  }
+  if (unusedHash !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [unusedField],
+      message: `The ${unusedField} field is invalid for the ${submission.submissionRoute} route.`,
+    });
+  }
 });
 export type SubmissionArtifact = z.infer<typeof SubmissionArtifactSchema>;
 
@@ -1044,6 +1106,10 @@ export const GovernanceAuditResultSchema = z.object({
   flaggedAiPhrases: z.array(z.string()),
   markdownIntegrityPassed: z.boolean().default(true).optional(),
   corruptedMarkdownIssues: z.array(z.string()).default([]).optional(),
+  assertionQualityPassed: z.boolean().default(true).optional(),
+  flaggedTautologicalAssertions: z.array(z.string()).default([]).optional(),
+  commentHyperbolePassed: z.boolean().default(true).optional(),
+  flaggedCommentHyperboles: z.array(z.string()).default([]).optional(),
   remediationSuggestions: z.array(z.string()),
   guidance: z
     .object({

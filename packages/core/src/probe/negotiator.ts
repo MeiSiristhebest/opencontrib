@@ -36,16 +36,7 @@ function isBinaryAvailable(binary: string): boolean {
   }
 }
 
-const DOCKER_SUPPORTED_PROBES = new Set([
-  'semgrep',
-  'ruff',
-  'knip',
-  'ast-grep',
-  'go-analyzers',
-  'nilaway',
-  'bodyclose',
-  'cargo-deny',
-]);
+import { FALLBACK_COMMANDS } from './strategies.js';
 
 function canExecuteProbe(probe: ProbeManifest): boolean {
   if (!probe.activation.requiresBinaries || probe.activation.requiresBinaries.length === 0) {
@@ -56,16 +47,19 @@ function canExecuteProbe(probe: ProbeManifest): boolean {
   const anyDirect = probe.activation.requiresBinaries.some((bin) => isBinaryAvailable(bin));
   if (anyDirect) return true;
 
-  // 2. Ephemeral fallbacks (uvx for semgrep/ruff, npx/bun for knip/ast-grep)
-  if (probe.name === 'semgrep' || probe.name === 'ruff') {
-    if (isBinaryAvailable('uv')) return true;
-  }
-  if (probe.name === 'knip' || probe.name === 'ast-grep') {
-    if (isBinaryAvailable('npx') || isBinaryAvailable('bun')) return true;
+  // 2. Ephemeral fallbacks
+  const fallback = FALLBACK_COMMANDS[probe.name];
+  if (fallback?.ephemeral) {
+    if (probe.name === 'semgrep' || probe.name === 'ruff') {
+      if (isBinaryAvailable('uv')) return true;
+    }
+    if (probe.name === 'knip' || probe.name === 'ast-grep') {
+      if (isBinaryAvailable('npx') || isBinaryAvailable('bun')) return true;
+    }
   }
 
-  // 3. Docker container fallback if Docker daemon is active
-  if (DOCKER_SUPPORTED_PROBES.has(probe.name)) {
+  // 3. Docker container fallback if Docker daemon is active and fallback is configured
+  if (fallback?.docker) {
     try {
       const docker = discoverDocker();
       if (docker.found) return true;
