@@ -102,13 +102,21 @@ export function parseCiRawLogs(rawLogText: string): CiDiagnosticReport {
       panicMessages.push(line);
     }
 
-    // Compilation error detection
-    if (line.match(/^#\s+[^\s]+/) || line.includes(': syntax error:') || line.includes(': undefined:')) {
-      compilationErrors.push(line);
+    // Infrastructure and environment protection failure detection
+    if (
+      line.includes('environment protection rules') ||
+      line.includes('is not allowed to deploy to') ||
+      line.includes('Resource not accessible by integration') ||
+      line.includes('The deployment was rejected or didn\'t satisfy other protection rules')
+    ) {
+      compilationErrors.push(`[INFRASTRUCTURE_GATE] ${line.trim()}`);
     }
   }
 
-  const hasFailure = failedTests.length > 0 || compilationErrors.length > 0 || panicMessages.length > 0;
+  const infraFailures = compilationErrors.filter((e) => e.startsWith('[INFRASTRUCTURE_GATE]'));
+  const realCompilationErrors = compilationErrors.filter((e) => !e.startsWith('[INFRASTRUCTURE_GATE]'));
+
+  const hasFailure = failedTests.length > 0 || realCompilationErrors.length > 0 || panicMessages.length > 0 || infraFailures.length > 0;
 
   let rootCauseSummary = 'No failures detected in CI logs.';
   let recommendedAction = 'CI is healthy and passing.';
@@ -119,19 +127,22 @@ export function parseCiRawLogs(rawLogText: string): CiDiagnosticReport {
       first.sourceFile ? ` (${first.sourceFile}:${first.sourceLine})` : ''
     }: ${first.failureMessage}`;
     recommendedAction = `Reproduce '${first.testName}' in sandbox, fix the underlying cross-platform or logic bug, and push updated commit.`;
-  } else if (compilationErrors.length > 0) {
-    rootCauseSummary = `CI failed with ${compilationErrors.length} compilation error(s): ${compilationErrors[0]}`;
+  } else if (realCompilationErrors.length > 0) {
+    rootCauseSummary = `CI failed with ${realCompilationErrors.length} compilation error(s): ${realCompilationErrors[0]}`;
     recommendedAction = `Fix syntax or typing errors locally before pushing.`;
   } else if (panicMessages.length > 0) {
     rootCauseSummary = `CI experienced a runtime panic: ${panicMessages[0]}`;
     recommendedAction = `Inspect nil pointers or out-of-bounds access in the stack trace.`;
+  } else if (infraFailures.length > 0) {
+    rootCauseSummary = `CI failed due to target repository environment protection / app token permissions: ${infraFailures[0]}`;
+    recommendedAction = `This is an upstream infrastructure privilege limitation on fork PRs (not a code or test regression). No code action required; awaiting maintainer dispatch or approval.`;
   }
 
   return {
     hasFailure,
     totalFailedTests: failedTests.length,
     failedTests,
-    compilationErrors,
+    compilationErrors: realCompilationErrors,
     panicMessages,
     rootCauseSummary,
     recommendedAction,

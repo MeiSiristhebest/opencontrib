@@ -7,7 +7,27 @@ export interface RunnableCommands {
   testCommand?: string;
   buildCommand?: string;
   lintCommand?: string;
-  packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun' | 'cargo' | 'go' | 'pytest' | 'cmake';
+  packageManager?:
+    | 'npm'
+    | 'pnpm'
+    | 'yarn'
+    | 'bun'
+    | 'cargo'
+    | 'go'
+    | 'uv'
+    | 'poetry'
+    | 'pipenv'
+    | 'conda'
+    | 'pytest'
+    | 'cmake'
+    | 'meson'
+    | 'make'
+    | 'gradle'
+    | 'maven'
+    | 'dotnet'
+    | 'swift'
+    | 'composer'
+    | 'bundle';
 }
 
 export interface ContributionGuidance {
@@ -36,6 +56,7 @@ export interface AssembledContributionContext {
     runnableCommands: RunnableCommands;
     detectedSkeletonFiles: string[];
     contributingGuidelinesSnippet?: string;
+    nativePrTemplate?: string;
   };
   memoryContext: {
     pastFailures: string[];
@@ -79,25 +100,143 @@ function detectNodeCommands(files: string[], dirPath: string, commands: Runnable
   } catch {}
 }
 
-function detectCompiledEcosystemCommands(files: string[], commands: RunnableCommands): void {
+function detectCompiledEcosystemCommands(files: string[], dirPath: string, commands: RunnableCommands): void {
+  // 1. Rust Ecosystem
   if (files.includes('Cargo.toml')) {
     commands.packageManager = 'cargo';
     commands.testCommand = 'cargo test';
     commands.buildCommand = 'cargo build';
     commands.lintCommand = 'cargo clippy';
-  } else if (files.includes('go.mod')) {
+    return;
+  }
+
+  // 2. Go Ecosystem
+  if (files.includes('go.mod')) {
     commands.packageManager = 'go';
     commands.testCommand = 'go test ./...';
     commands.buildCommand = 'go build ./...';
     commands.lintCommand = 'golangci-lint run';
-  } else if (files.includes('pyproject.toml') || files.includes('requirements.txt')) {
-    commands.packageManager = 'pytest';
-    commands.testCommand = 'pytest';
-    commands.lintCommand = 'ruff check .';
-  } else if (files.includes('CMakeLists.txt')) {
+    return;
+  }
+
+  // 3. Python Ecosystem (priority: uv -> poetry -> pipenv -> conda -> standard pytest/ruff)
+  if (
+    files.includes('pyproject.toml') ||
+    files.includes('requirements.txt') ||
+    files.includes('uv.lock') ||
+    files.includes('poetry.lock') ||
+    files.includes('Pipfile') ||
+    files.includes('Pipfile.lock') ||
+    files.includes('environment.yml') ||
+    files.includes('setup.py') ||
+    files.includes('setup.cfg')
+  ) {
+    if (files.includes('uv.lock')) {
+      commands.packageManager = 'uv';
+      commands.testCommand = 'uv run pytest';
+      commands.lintCommand = 'uv run ruff check .';
+    } else if (files.includes('poetry.lock')) {
+      commands.packageManager = 'poetry';
+      commands.testCommand = 'poetry run pytest';
+      commands.lintCommand = 'poetry run ruff check .';
+    } else if (files.includes('Pipfile') || files.includes('Pipfile.lock')) {
+      commands.packageManager = 'pipenv';
+      commands.testCommand = 'pipenv run pytest';
+      commands.lintCommand = 'pipenv run flake8';
+    } else if (files.includes('environment.yml')) {
+      commands.packageManager = 'conda';
+      commands.testCommand = 'conda run pytest';
+      commands.lintCommand = 'ruff check .';
+    } else {
+      commands.packageManager = 'pytest';
+      commands.testCommand = 'pytest';
+      commands.lintCommand = 'ruff check .';
+    }
+    return;
+  }
+
+  // 4. Java / Kotlin Ecosystem (Gradle vs Maven)
+  if (files.includes('gradlew') || files.includes('gradlew.bat') || files.includes('build.gradle') || files.includes('build.gradle.kts')) {
+    commands.packageManager = 'gradle';
+    const isWin = process.platform === 'win32';
+    const gradleCmd = files.includes('gradlew') ? (isWin ? '.\\gradlew.bat' : './gradlew') : 'gradle';
+    commands.buildCommand = `${gradleCmd} build -x test`;
+    commands.testCommand = `${gradleCmd} test`;
+    commands.lintCommand = `${gradleCmd} check`;
+    return;
+  }
+  if (files.includes('mvnw') || files.includes('mvnw.cmd') || files.includes('pom.xml')) {
+    commands.packageManager = 'maven';
+    const isWin = process.platform === 'win32';
+    const mvnCmd = files.includes('mvnw') ? (isWin ? '.\\mvnw.cmd' : './mvnw') : 'mvn';
+    commands.buildCommand = `${mvnCmd} compile`;
+    commands.testCommand = `${mvnCmd} test`;
+    commands.lintCommand = `${mvnCmd} checkstyle:check`;
+    return;
+  }
+
+  // 5. C# / .NET Ecosystem
+  const hasDotnetProject = files.some(
+    (f) => f.endsWith('.sln') || f.endsWith('.csproj') || f.endsWith('.fsproj')
+  );
+  if (hasDotnetProject) {
+    commands.packageManager = 'dotnet';
+    commands.buildCommand = 'dotnet build';
+    commands.testCommand = 'dotnet test';
+    commands.lintCommand = 'dotnet format --verify-no-changes';
+    return;
+  }
+
+  // 6. Swift Ecosystem
+  if (files.includes('Package.swift')) {
+    commands.packageManager = 'swift';
+    commands.buildCommand = 'swift build';
+    commands.testCommand = 'swift test';
+    commands.lintCommand = 'swiftlint';
+    return;
+  }
+
+  // 7. PHP Ecosystem (Composer)
+  if (files.includes('composer.json') || files.includes('composer.lock')) {
+    commands.packageManager = 'composer';
+    commands.buildCommand = 'composer install';
+    commands.testCommand = existsSync(join(dirPath, 'vendor/bin/phpunit'))
+      ? (process.platform === 'win32' ? '.\\vendor\\bin\\phpunit' : './vendor/bin/phpunit')
+      : 'composer test';
+    commands.lintCommand = existsSync(join(dirPath, 'vendor/bin/phpcs'))
+      ? (process.platform === 'win32' ? '.\\vendor\\bin\\phpcs' : './vendor/bin/phpcs')
+      : 'composer check';
+    return;
+  }
+
+  // 8. Ruby Ecosystem (Bundler)
+  if (files.includes('Gemfile') || files.includes('Gemfile.lock')) {
+    commands.packageManager = 'bundle';
+    commands.buildCommand = 'bundle install';
+    commands.testCommand = 'bundle exec rake test';
+    commands.lintCommand = 'bundle exec rubocop';
+    return;
+  }
+
+  // 9. C / C++ Ecosystem (CMake -> Meson -> Make)
+  if (files.includes('CMakeLists.txt')) {
     commands.packageManager = 'cmake';
     commands.buildCommand = 'cmake -B build && cmake --build build';
     commands.testCommand = 'ctest --test-dir build';
+    return;
+  }
+  if (files.includes('meson.build')) {
+    commands.packageManager = 'meson';
+    commands.buildCommand = 'meson setup build && meson compile -C build';
+    commands.testCommand = 'meson test -C build';
+    return;
+  }
+  if (files.includes('Makefile') || files.includes('makefile') || files.includes('GNUmakefile')) {
+    commands.packageManager = 'make';
+    commands.buildCommand = 'make';
+    commands.testCommand = 'make test';
+    commands.lintCommand = 'make check';
+    return;
   }
 }
 
@@ -112,11 +251,40 @@ export function detectRunnableCommandsFromDir(dirPath: string): RunnableCommands
     const files = readdirSync(dirPath);
     detectNodeCommands(files, dirPath, commands);
     if (!commands.testCommand) {
-      detectCompiledEcosystemCommands(files, commands);
+      detectCompiledEcosystemCommands(files, dirPath, commands);
     }
   } catch {}
 
   return commands;
+}
+
+/**
+ * Extracts native PR template from workspace if present.
+ */
+export function extractNativePrTemplate(dirPath: string): string | undefined {
+  if (!existsSync(dirPath)) return undefined;
+
+  const candidateFiles = [
+    '.github/pull_request_template.md',
+    '.github/PULL_REQUEST_TEMPLATE.md',
+    'pull_request_template.md',
+    'PULL_REQUEST_TEMPLATE.md',
+    '.github/PULL_REQUEST_TEMPLATE/pull_request_template.md',
+  ];
+
+  for (const rel of candidateFiles) {
+    const full = join(dirPath, rel);
+    if (existsSync(full)) {
+      try {
+        const content = readFileSync(full, 'utf-8');
+        if (content.trim().length > 10) {
+          return content;
+        }
+      } catch {}
+    }
+  }
+
+  return undefined;
 }
 
 /**
@@ -131,7 +299,6 @@ export function extractContributingGuidelines(dirPath: string): string | undefin
     'AGENTS.md',
     '.github/AGENTS.md',
     'CLAUDE.md',
-    '.github/PULL_REQUEST_TEMPLATE.md',
   ];
 
   for (const rel of candidateFiles) {
@@ -162,6 +329,13 @@ function buildExplorationGuidance(
     if (packageManifest.includes('package.json')) suggestedReadingOrder.push('package.json');
     if (packageManifest.includes('Cargo.toml')) suggestedReadingOrder.push('Cargo.toml');
     if (packageManifest.includes('go.mod')) suggestedReadingOrder.push('go.mod');
+    if (packageManifest.includes('pyproject.toml')) suggestedReadingOrder.push('pyproject.toml');
+    if (packageManifest.includes('requirements.txt')) suggestedReadingOrder.push('requirements.txt');
+    if (packageManifest.includes('pom.xml')) suggestedReadingOrder.push('pom.xml');
+    if (packageManifest.includes('build.gradle')) suggestedReadingOrder.push('build.gradle');
+    if (packageManifest.includes('Package.swift')) suggestedReadingOrder.push('Package.swift');
+    if (packageManifest.includes('composer.json')) suggestedReadingOrder.push('composer.json');
+    if (packageManifest.includes('Gemfile')) suggestedReadingOrder.push('Gemfile');
   }
   if (contributingSnippet) {
     suggestedReadingOrder.push('CONTRIBUTING.md');
@@ -271,12 +445,33 @@ export class ContextAssembler {
         testCommandHint = 'cargo test';
       } else if (packageManifest.includes('go.mod')) {
         testCommandHint = 'go test ./...';
+      } else if (packageManifest.includes('uv.lock') || packageManifest.includes('[tool.uv]')) {
+        testCommandHint = 'uv run pytest';
+      } else if (packageManifest.includes('poetry.lock') || packageManifest.includes('[tool.poetry]')) {
+        testCommandHint = 'poetry run pytest';
+      } else if (packageManifest.includes('pyproject.toml') || packageManifest.includes('pytest')) {
+        testCommandHint = 'pytest';
+      } else if (packageManifest.includes('build.gradle')) {
+        testCommandHint = './gradlew test';
+      } else if (packageManifest.includes('pom.xml')) {
+        testCommandHint = 'mvn test';
+      } else if (packageManifest.includes('.csproj') || packageManifest.includes('.sln')) {
+        testCommandHint = 'dotnet test';
+      } else if (packageManifest.includes('Package.swift')) {
+        testCommandHint = 'swift test';
+      } else if (packageManifest.includes('composer.json')) {
+        testCommandHint = 'composer test';
+      } else if (packageManifest.includes('Gemfile')) {
+        testCommandHint = 'bundle exec rake test';
+      } else if (packageManifest.includes('CMakeLists.txt')) {
+        testCommandHint = 'ctest --test-dir build';
       }
     }
 
     // 4. Detect skeleton files & architecture
     const detectedSkeletonFiles: string[] = [];
     let contributingGuidelinesSnippet: string | undefined;
+    let nativePrTemplate: string | undefined;
 
     if (workspacePath && existsSync(workspacePath)) {
       try {
@@ -287,6 +482,7 @@ export class ContextAssembler {
           }
         }
         contributingGuidelinesSnippet = extractContributingGuidelines(workspacePath);
+        nativePrTemplate = extractNativePrTemplate(workspacePath);
       } catch {}
     } else if (skeletonFiles && skeletonFiles.length > 0) {
       detectedSkeletonFiles.push(...skeletonFiles.slice(0, 20));
@@ -317,6 +513,7 @@ export class ContextAssembler {
         runnableCommands,
         detectedSkeletonFiles,
         contributingGuidelinesSnippet,
+        nativePrTemplate,
       },
       memoryContext: {
         pastFailures,

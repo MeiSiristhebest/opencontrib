@@ -21,9 +21,13 @@ export class OctokitIssueSource {
   private cache: ResponseCache;
 
   constructor(opts: OctokitIssueSourceOptions) {
+    const isCustomEnterpriseHost =
+      opts.host &&
+      opts.host !== 'github.com' &&
+      opts.host !== 'api.github.com';
     this.octokit = new Octokit({
       auth: opts.token || undefined,
-      baseUrl: opts.host ? `https://${opts.host}/api/v3` : undefined,
+      baseUrl: isCustomEnterpriseHost ? `https://${opts.host}/api/v3` : undefined,
     });
     this.cache = opts.cache;
   }

@@ -94,4 +94,27 @@ describe('GitHubClient composition root seam', () => {
     // Construction should not have performed cache I/O yet; the seam is wired.
     expect(Array.isArray(calls)).toBe(true);
   });
+
+  it('keeps baseUrl undefined for public github.com and api.github.com to hit api.github.com', () => {
+    const fakeCreds: CredentialsProvider = {
+      getToken: () => 'token',
+      getTokenScope: () => 'scope',
+    };
+    const fakeCache: ResponseCache = {
+      get: () => null,
+      set: () => {},
+    };
+
+    const publicClient = new GitHubClient({}, { credentials: fakeCreds, cache: fakeCache });
+    const octokitPublic = (publicClient as any).source.octokit;
+    expect(octokitPublic.request.endpoint.DEFAULTS.baseUrl).toBe('https://api.github.com');
+
+    const dotComClient = new GitHubClient({ host: 'github.com' }, { credentials: fakeCreds, cache: fakeCache });
+    const octokitDotCom = (dotComClient as any).source.octokit;
+    expect(octokitDotCom.request.endpoint.DEFAULTS.baseUrl).toBe('https://api.github.com');
+
+    const enterpriseClient = new GitHubClient({ host: 'github.mycompany.internal' }, { credentials: fakeCreds, cache: fakeCache });
+    const octokitEnterprise = (enterpriseClient as any).source.octokit;
+    expect(octokitEnterprise.request.endpoint.DEFAULTS.baseUrl).toBe('https://github.mycompany.internal/api/v3');
+  });
 });

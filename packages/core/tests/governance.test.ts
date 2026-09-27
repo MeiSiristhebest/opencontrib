@@ -304,6 +304,40 @@ describe("Governance & Anti-AI Audit Engine", () => {
     expect(cleanTemplate).toContain(
       "User-provided validation note (not verified)",
     );
+
+    // Test native PR template merger with Checkboxes and Related Issues
+    const nativeTemplate = `
+## Description
+<!-- What does this PR do? -->
+
+## Type of Change
+- [ ] Bug fix (non-breaking change that fixes an issue)
+- [ ] Documentation update
+
+## How Has This Been Tested?
+- [ ] \`make test\` passes locally
+
+## Checklist
+- [ ] I have signed the CLA
+- [ ] I did not use AI/LLM to create this PR, or I disclosed the tool/model below
+
+## Related Issues
+<!-- Link related issues below. -->
+`;
+    const mergedNative = renderMasterPrTemplate({
+      issueNumber: 1581,
+      problemSummary: "Handle LLM truncated output",
+      rootCause: "Truncation caused JSON parse error",
+      keyChanges: ["Add IsTruncated helper"],
+      nativeTemplateContent: nativeTemplate,
+    });
+
+    expect(mergedNative).toContain("- [x] Bug fix");
+    expect(mergedNative).toContain("- [x] `make test` passes locally");
+    expect(mergedNative).toContain("- [x] I have signed the CLA");
+    expect(mergedNative).toContain("closes #1581");
+    expect(mergedNative).toContain("Handle LLM truncated output");
+    expect(mergedNative).not.toContain("<!-- What does this PR do? -->");
   });
 
   it("detects corrupted Unicode replacement characters and malformed headers", () => {

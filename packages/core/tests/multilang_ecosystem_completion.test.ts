@@ -13,6 +13,10 @@ import { runDoctorAudit } from '../src/discovery/doctor.js';
 import { detectSystemCapabilities, assessFeasibility } from '../src/discovery/feasibility.js';
 import { runResilientCommand } from '../src/sandbox/resilient-runner.js';
 import { AutonomousPoCVerifier } from '../src/sandbox/poc-verifier.js';
+import { detectRunnableCommandsFromDir, extractNativePrTemplate } from '../src/discovery/context-assembler.js';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 describe('Multi-Language Ecosystem Completion & Deep Parity', () => {
   describe('1. Multi-Language Test Output Parsers Matrix', () => {
@@ -233,6 +237,90 @@ diff --git a/tests/parser.test.ts b/tests/parser.test.ts
       expect(AutonomousPoCVerifier.resolveDefaultTestCommand('app.rb')).toBe('bundle exec rspec');
       expect(AutonomousPoCVerifier.resolveDefaultTestCommand('index.php')).toBe('vendor/bin/phpunit');
       expect(AutonomousPoCVerifier.resolveDefaultTestCommand('index.ts')).toBe('npm test');
+    });
+
+    it('detectRunnableCommandsFromDir infers modern Python (uv, poetry, pipenv, conda) accurately', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-test-python-'));
+      try {
+        writeFileSync(join(tempDir, 'uv.lock'), '# uv lockfile');
+        writeFileSync(join(tempDir, 'pyproject.toml'), '[tool.uv]\n');
+        const uvCmds = detectRunnableCommandsFromDir(tempDir);
+        expect(uvCmds.packageManager).toBe('uv');
+        expect(uvCmds.testCommand).toBe('uv run pytest');
+        expect(uvCmds.lintCommand).toBe('uv run ruff check .');
+
+        rmSync(join(tempDir, 'uv.lock'));
+        writeFileSync(join(tempDir, 'poetry.lock'), '# poetry lockfile');
+        const poetryCmds = detectRunnableCommandsFromDir(tempDir);
+        expect(poetryCmds.packageManager).toBe('poetry');
+        expect(poetryCmds.testCommand).toBe('poetry run pytest');
+        expect(poetryCmds.lintCommand).toBe('poetry run ruff check .');
+
+        rmSync(join(tempDir, 'poetry.lock'));
+        writeFileSync(join(tempDir, 'Pipfile.lock'), '{}');
+        const pipenvCmds = detectRunnableCommandsFromDir(tempDir);
+        expect(pipenvCmds.packageManager).toBe('pipenv');
+        expect(pipenvCmds.testCommand).toBe('pipenv run pytest');
+        expect(pipenvCmds.lintCommand).toBe('pipenv run flake8');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('detectRunnableCommandsFromDir infers Java (Gradle/Maven), .NET, Swift, PHP, Ruby accurately', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-test-polyglot-'));
+      try {
+        writeFileSync(join(tempDir, 'build.gradle.kts'), '// gradle');
+        writeFileSync(join(tempDir, 'gradlew'), '#!/bin/sh');
+        const gradleCmds = detectRunnableCommandsFromDir(tempDir);
+        expect(gradleCmds.packageManager).toBe('gradle');
+        expect(gradleCmds.testCommand).toBeDefined();
+
+        rmSync(join(tempDir, 'build.gradle.kts'));
+        rmSync(join(tempDir, 'gradlew'));
+        writeFileSync(join(tempDir, 'pom.xml'), '<project></project>');
+        const mavenCmds = detectRunnableCommandsFromDir(tempDir);
+        expect(mavenCmds.packageManager).toBe('maven');
+        expect(mavenCmds.testCommand).toBe('mvn test');
+
+        rmSync(join(tempDir, 'pom.xml'));
+        writeFileSync(join(tempDir, 'App.sln'), '');
+        const dotnetCmds = detectRunnableCommandsFromDir(tempDir);
+        expect(dotnetCmds.packageManager).toBe('dotnet');
+        expect(dotnetCmds.testCommand).toBe('dotnet test');
+        expect(dotnetCmds.buildCommand).toBe('dotnet build');
+
+        rmSync(join(tempDir, 'App.sln'));
+        writeFileSync(join(tempDir, 'Package.swift'), '// swift');
+        const swiftCmds = detectRunnableCommandsFromDir(tempDir);
+        expect(swiftCmds.packageManager).toBe('swift');
+        expect(swiftCmds.testCommand).toBe('swift test');
+
+        rmSync(join(tempDir, 'Package.swift'));
+        writeFileSync(join(tempDir, 'Gemfile'), 'source "https://rubygems.org"');
+        const rubyCmds = detectRunnableCommandsFromDir(tempDir);
+        expect(rubyCmds.packageManager).toBe('bundle');
+        expect(rubyCmds.testCommand).toBe('bundle exec rake test');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('extractNativePrTemplate retrieves templates from .github directory or root accurately', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-test-pr-template-'));
+      try {
+        mkdirSync(join(tempDir, '.github'), { recursive: true });
+        writeFileSync(
+          join(tempDir, '.github', 'PULL_REQUEST_TEMPLATE.md'),
+          '## Description\n\nFixes issue.\n\n## Checklist\n- [ ] test passes\n'
+        );
+        const template = extractNativePrTemplate(tempDir);
+        expect(template).toBeDefined();
+        expect(template).toContain('## Description');
+        expect(template).toContain('## Checklist');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
     });
   });
 });

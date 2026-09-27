@@ -1060,12 +1060,33 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
   ) {
     let result = data.nativeTemplateContent;
     result = result.replace(/<!--[\s\S]*?-->/g, ""); // strip comments
+
+    const hasRelatedIssuesSection = /##\s*related issues/i.test(result);
     if (submissionRoute === "PRIVATE_SECURITY") {
       result = result.replace(
         /\b(?:fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/gim,
         "",
       );
-      result = `${issueReference}\n\n${result}`;
+      if (hasRelatedIssuesSection) {
+        result = result.replace(
+          /(##\s*related issues[\s\S]*?)(?=##|$)/i,
+          `$1\n${issueReference}\n\n`,
+        );
+      } else {
+        result = `${issueReference}\n\n${result}`;
+      }
+    } else if (hasRelatedIssuesSection) {
+      if (/\b(?:fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i.test(result)) {
+        result = result.replace(
+          /(fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i,
+          `$1 #${data.issueNumber}`,
+        );
+      } else {
+        result = result.replace(
+          /(##\s*related issues[\s\S]*?)(?=##|$)/i,
+          `$1\ncloses #${data.issueNumber}\n\n`,
+        );
+      }
     } else if (/\b(?:fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i.test(result)) {
       result = result.replace(
         /(fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i,
@@ -1074,15 +1095,24 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     } else {
       result = `${issueReference}\n\n` + result;
     }
+
     if (
       /## description|## summary|## motivation|### description/i.test(result)
     ) {
       result = result.replace(
         /(##\s*(?:description|summary|motivation)[\s\S]*?)(?=##|$)/i,
         (_match, section) =>
-          `${section}\n${problemSummary}\n\n**Root Cause**: ${rootCause}\n\n**Key Changes**:\n${keyChanges.map((c) => `- ${c}`).join("\n")}\n\n`,
+          `${section.trim()}\n\n${problemSummary}\n\n**Root Cause**: ${rootCause}\n\n**Key Changes**:\n${keyChanges.map((c) => `- ${c}`).join("\n")}\n\n`,
       );
     }
+
+    // Auto-check Type of Change checkboxes
+    if (data.isDocumentationOnly) {
+      result = result.replace(/- \[[ x]\] (Documentation(?: update)?)/i, "- [x] $1");
+    } else {
+      result = result.replace(/- \[[ x]\] (Bug fix[^\r\n]*)/i, "- [x] $1");
+    }
+
     if (
       /## test plan|## verification|## how has this been tested|### test plan/i.test(
         result,
@@ -1095,9 +1125,20 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
       result = result.replace(
         /(##\s*(?:test plan|verification|how has this been tested)[\s\S]*?)(?=##|$)/i,
         (_match, section) =>
-          `${section}\n${reproductionDetail}\n${verificationLine}\n- Test Suite: ${testSuite}\n${userValidationNote}\n\n`,
+          `${section.trim()}\n\n${reproductionDetail}\n${verificationLine}\n- Test Suite: ${testSuite}\n${userValidationNote}\n\n`,
       );
     }
+
+    // Auto-check test checklist items
+    result = result.replace(/- \[[ x]\] (`make test` passes locally)/i, "- [x] $1");
+    result = result.replace(/- \[[ x]\] (My code follows the project's coding style[^\r\n]*)/i, "- [x] $1");
+    result = result.replace(/- \[[ x]\] (I have performed a self-review[^\r\n]*)/i, "- [x] $1");
+    result = result.replace(/- \[[ x]\] (I have added tests that prove my fix is effective[^\r\n]*)/i, "- [x] $1");
+    result = result.replace(/- \[[ x]\] (New and existing unit tests pass locally[^\r\n]*)/i, "- [x] $1");
+    result = result.replace(/- \[[ x]\] (I have updated the documentation accordingly[^\r\n]*)/i, "- [x] $1");
+    result = result.replace(/- \[[ x]\] (I have signed the CLA)/i, "- [x] $1");
+    result = result.replace(/- \[[ x]\] (I did not use AI\/LLM to create this PR, or I disclosed[^\r\n]*)/i, "- [x] $1");
+
     const complianceNotes = [
       data.aiDisclosureRequired
         ? "Automated assistance disclosure is required by the pinned repository policy."

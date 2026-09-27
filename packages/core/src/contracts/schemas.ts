@@ -90,6 +90,21 @@ export const QualificationResultSchema = z.object({
 });
 export type QualificationResult = z.infer<typeof QualificationResultSchema>;
 
+export const CommunityGateStatusSchema = z.enum([
+  'OPEN_FOR_CONTRIBUTION',
+  'REQUIRES_MAINTAINER_APPROVAL',
+  'APPROVED_BY_MAINTAINER',
+  'GATE_UNKNOWN',
+]);
+export type CommunityGateStatus = z.infer<typeof CommunityGateStatusSchema>;
+
+export const MaintainerApprovalSignalSchema = z.object({
+  source: z.enum(['comment_keyword', 'label', 'author_association', 'timeline_event']),
+  detail: z.string(),
+  confidence: z.enum(['high', 'medium', 'low']),
+});
+export type MaintainerApprovalSignal = z.infer<typeof MaintainerApprovalSignalSchema>;
+
 export const OpportunitySchema = z.object({
   repoFullName: z.string(),
   repoStars: z.number(),
@@ -127,6 +142,9 @@ export const OpportunitySchema = z.object({
       actionabilityModifier: z.number(),
     })
     .optional(),
+  communityGateStatus: CommunityGateStatusSchema.optional(),
+  communityGateSignals: z.array(MaintainerApprovalSignalSchema).optional(),
+  communityGateSuggestedAction: z.string().optional(),
 });
 export type Opportunity = z.infer<typeof OpportunitySchema>;
 

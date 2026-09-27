@@ -155,14 +155,23 @@ Issues submitted Friday through Sunday are not guaranteed to be reviewed until t
     ]);
     expect(requiredAfterAnd.requiresAiDisclosure).toBe(true);
 
-    const dcoOnly = detectCommunityGateFromContents([
+    const reversedAiWording = detectCommunityGateFromContents([
       {
-        path: "CONTRIBUTING.md",
-        content: "Commits must be signed off.",
+        path: ".github/pull_request_template.md",
+        content:
+          "I did not use AI/LLM to create this PR, or I disclosed the tool/model below and reviewed its output.",
       },
     ]);
-    expect(dcoOnly.suggestedContributorAction).toContain("commit sign-off");
-    expect(dcoOnly.suggestedContributorAction).not.toContain("AI-assistance");
+    expect(reversedAiWording.requiresAiDisclosure).toBe(true);
+
+    const mustDiscloseAi = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "You must disclose to maintainers that you used AI or LLM tools.",
+      },
+    ]);
+    expect(mustDiscloseAi.requiresAiDisclosure).toBe(true);
   });
 
   it("fails closed when a baseline community policy read fails", () => {

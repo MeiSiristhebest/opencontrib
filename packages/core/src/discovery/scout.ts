@@ -1,7 +1,17 @@
-import type { Opportunity, UserProfile } from '../contracts/schemas.js';
+import type {
+  Opportunity,
+  UserProfile,
+  CommunityGateStatus,
+  MaintainerApprovalSignal,
+} from '../contracts/schemas.js';
 import { assessFeasibility, detectSystemCapabilities } from './feasibility.js';
 import { GitHubClient } from './github-client.js';
 import { qualifyIssue } from './qualification.js';
+import {
+  COMMUNITY_GATE_POLICY_PATHS,
+  detectCommunityGateFromContents,
+  type CommunityGatePolicy,
+} from '../governance/community-gate.js';
 import {
   applyDiversityReranking,
   getSearchAliasQuery,
@@ -124,6 +134,7 @@ export async function scoutOpportunities(
 
   // 3. Tier 2: Bounded Parallel Enrichment (Concurrency = 5)
   const repoDetailsCache = new Map<string, any>();
+  const repoGatePolicyCache = new Map<string, CommunityGatePolicy>();
 
   const candidates = (
     await mapConcurrent(preFiltered, 5, async ({ item, labels }) => {
@@ -146,6 +157,21 @@ export async function scoutOpportunities(
       }
       if (repoDetails.isArchived) return null;
 
+      // Fail-Safe Batch repo community gate policy
+      let gatePolicy = repoGatePolicyCache.get(repoFullName);
+      if (!gatePolicy) {
+        const policyFiles: Array<{ path: string; content: string }> = [];
+        const policyCandidates = ['CONTRIBUTING.md', '.github/CONTRIBUTING.md', 'AGENTS.md'];
+        for (const p of policyCandidates) {
+          const content = await resolvedClient.getRepoTextFile(owner, repo, p);
+          if (content) {
+            policyFiles.push({ path: p, content });
+          }
+        }
+        gatePolicy = detectCommunityGateFromContents(policyFiles);
+        repoGatePolicyCache.set(repoFullName, gatePolicy);
+      }
+
       // Paged comments and timeline with rich ApiStatus
       const commentsResult = await resolvedClient.getIssueComments(owner, repo, item.number);
       const timelineResult = await resolvedClient.getIssueLinkedPrsCount(owner, repo, item.number);
@@ -154,6 +180,7 @@ export async function scoutOpportunities(
         id: c.id,
         body: c.body,
         user: { login: c.user?.login },
+        author_association: c.author_association,
         created_at: c.created_at,
       }));
 
@@ -175,6 +202,70 @@ export async function scoutOpportunities(
 
       if (!qualification.isQualified) {
         return null; // Discard disqualified issues
+      }
+
+      // Multi-dimensional Community Gate & Maintainer Approval Detection
+      const hasGateRules = Boolean(
+        gatePolicy.autoClosesNewIssues ||
+        gatePolicy.hasLgtmApprovalProtocol ||
+        gatePolicy.requiresIssueApprovalBeforePr
+      );
+
+      const approvalSignals: MaintainerApprovalSignal[] = [];
+
+      if (hasGateRules) {
+        // 1. Label-based maintainer approval signal (e.g. accepted, approved, lgtm, triaged, ready)
+        for (const l of labels) {
+          const lLower = l.toLowerCase();
+          if (/\b(?:approved|lgtm|accepted|triaged|ready-for-pr|ready|confirmed)\b/i.test(lLower)) {
+            approvalSignals.push({
+              source: 'label',
+              detail: `Issue labeled: "${l}"`,
+              confidence: 'high',
+            });
+          }
+        }
+
+        // 2. Author association + comment intent detection
+        for (const c of comments) {
+          const assoc = (c.author_association || '').toUpperCase();
+          const isMaintainer = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(assoc);
+          const body = (c.body || '').trim().toLowerCase();
+
+          // Maintainer comment indicating approval / greenlight to contribute
+          if (isMaintainer) {
+            if (/\b(?:lgtmi?|approved|looks good|go ahead|feel free to|welcome to send|assigned to you|\+1)\b/i.test(body)) {
+              approvalSignals.push({
+                source: 'author_association',
+                detail: `Maintainer (@${c.user?.login || 'unknown'}, ${assoc}) approved: "${(c.body || '').slice(0, 80)}"`,
+                confidence: 'high',
+              });
+            }
+          } else {
+            // General comment approval tokens
+            if (/\b(?:lgtmi|approved\s+(?:to\s+work|for\s+pr))\b/i.test(body)) {
+              approvalSignals.push({
+                source: 'comment_keyword',
+                detail: `Approval token found: "${(c.body || '').slice(0, 80)}"`,
+                confidence: 'medium',
+              });
+            }
+          }
+        }
+      }
+
+      let communityGateStatus: CommunityGateStatus = 'OPEN_FOR_CONTRIBUTION';
+      let communityGateSuggestedAction: string | undefined;
+
+      if (hasGateRules) {
+        if (approvalSignals.length > 0) {
+          communityGateStatus = 'APPROVED_BY_MAINTAINER';
+          communityGateSuggestedAction = 'Maintainer has approved this issue. Ready for contribution.';
+        } else {
+          communityGateStatus = 'REQUIRES_MAINTAINER_APPROVAL';
+          communityGateSuggestedAction = gatePolicy.suggestedContributorAction ||
+            'Repository requires maintainer triage/approval before submitting a PR. Discuss in issue first.';
+        }
       }
 
       // Feasibility Assessment
@@ -229,6 +320,9 @@ export async function scoutOpportunities(
         coreDemand: item.title,
         discoveryMode,
         matchedSignals: scoring.matchedSignals,
+        communityGateStatus,
+        communityGateSignals: approvalSignals.length > 0 ? approvalSignals : undefined,
+        communityGateSuggestedAction,
       };
 
       return opp;

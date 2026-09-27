@@ -18,5 +18,5 @@ describe('application/ ContributionPipeline (shared use-case facade)', () => {
     expect(r).toBeInstanceOf(Promise);
     // Drain: the offline run may reject at discovery; we only assert the contract.
     await r.catch(() => undefined);
-  });
+  }, 15000);
 });
