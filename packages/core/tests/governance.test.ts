@@ -124,7 +124,7 @@ describe("Governance & Anti-AI Audit Engine", () => {
     expect(auditFailRfc.isGatedPassed).toBe(false);
     expect(auditFailRfc.rfcGatePassed).toBe(false);
     expect(auditFailRfc.remediationSuggestions[0]).toContain(
-      "exceeds 100 lines",
+      "configured limit of 100 lines",
     );
   });
 
@@ -217,6 +217,56 @@ describe("Governance & Anti-AI Audit Engine", () => {
     expect(applicationSource.diffLineCount).toBe(101);
     expect(applicationSource.rfcGatePassed).toBe(false);
     expect(incrementLines.diffLineCount).toBe(2);
+  });
+
+  it("tracks unified and quoted paths without treating hunk content as headers", () => {
+    const confidenceBreakdown = {
+      rootCause: 95,
+      implementation: 95,
+      regression: 95,
+      defensiveCoverage: 95,
+      testCoverage: 95,
+      styleMatch: 95,
+      securityAudit: 95,
+    };
+    const supportingDiff = [
+      "--- docs/user guide.md",
+      "+++ docs/user guide.md",
+      "@@ -0,0 +1,2 @@",
+      "+guide line",
+      "+details line",
+      'diff --git "a/tests/用户 guide.test.ts" "b/tests/用户 guide.test.ts"',
+      '--- "a/tests/用户 guide.test.ts"',
+      '+++ "b/tests/用户 guide.test.ts"',
+      "@@ -0,0 +1,2 @@",
+      "+test one",
+      "+test two",
+    ].join("\n");
+    const supportingOnly = auditGovernance({
+      diffText: supportingDiff,
+      maxDiffLines: 1,
+      confidenceBreakdown,
+    });
+    const hunkContentWithHeaderPrefix = auditGovernance({
+      diffText: [
+        "diff --git a/src/core.ts b/src/core.ts",
+        "--- a/src/core.ts",
+        "+++ b/src/core.ts",
+        "@@ -0,0 +1,2 @@",
+        "+++ b/tests/foo.test.ts",
+        "+const coreFix = true;",
+      ].join("\n"),
+      maxDiffLines: 1,
+      confidenceBreakdown,
+    });
+
+    expect(supportingOnly.diffLineCount).toBe(4);
+    expect(supportingOnly.rfcGatePassed).toBe(true);
+    expect(hunkContentWithHeaderPrefix.diffLineCount).toBe(2);
+    expect(hunkContentWithHeaderPrefix.rfcGatePassed).toBe(false);
+    expect(hunkContentWithHeaderPrefix.remediationSuggestions).toContain(
+      "Diff exceeds the configured limit of 1 lines (2 core lines). Split into RFC Discussion issue first.",
+    );
   });
 
   it("renders natural humanized PR template and bans robotic meta headers", () => {

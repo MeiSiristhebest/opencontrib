@@ -85,7 +85,8 @@ describe("Canonical core diff accounting", () => {
           },
         ],
       };
-      const patchSha256 = sha256(JSON.stringify(patch));
+      const canonicalPatchContent = JSON.stringify(patch, null, 2);
+      const patchSha256 = sha256(canonicalPatchContent);
       const validatedPatchPayload: Omit<
         ValidatedPatchArtifact,
         "artifactSha256"
@@ -103,18 +104,21 @@ describe("Canonical core diff accounting", () => {
             mode: "100644",
             operation: "MODIFY",
             contentSha256: sha256(updatedSource),
+            changedLines: 1,
           },
           {
             path: "README.md",
             mode: "100644",
             operation: "CREATE",
             contentSha256: sha256(documentation),
+            changedLines: 150,
           },
           {
             path: "tests/core.test.ts",
             mode: "100644",
             operation: "CREATE",
             contentSha256: sha256(testSource),
+            changedLines: 150,
           },
         ],
         validatedAt: "2026-09-27T00:00:00.000Z",
@@ -123,9 +127,21 @@ describe("Canonical core diff accounting", () => {
         ...validatedPatchPayload,
         artifactSha256: hashValidatedPatchArtifact(validatedPatchPayload),
       });
+      const alteredFileLineCount = {
+        ...validatedPatch,
+        files: validatedPatch.files.map((file, index) =>
+          index === 0 ? { ...file, changedLines: 2 } : file,
+        ),
+      };
+      expect(
+        ValidatedPatchArtifactSchema.safeParse(alteredFileLineCount).success,
+      ).toBe(false);
+      expect(hashValidatedPatchArtifact(alteredFileLineCount)).not.toBe(
+        validatedPatch.artifactSha256,
+      );
       const run = {
         artifacts: {
-          patch,
+          patch: canonicalPatchContent,
           validatedPatch,
           workspace: { workspacePath, baseCommitSha },
         },
@@ -173,7 +189,7 @@ describe("Canonical core diff accounting", () => {
       );
 
       expect(fallbackCtx.coreDiffLines).toBeUndefined();
-      expect(fallbackCtx.coreFilesCount).toBe(1);
+      expect(fallbackCtx.coreFilesCount).toBe(patch.files.length);
 
       writeFileSync(
         join(workspacePath, "src.ts"),
@@ -189,7 +205,7 @@ describe("Canonical core diff accounting", () => {
       await new QualityRubricStep().execute(staleTreeCtx, deps);
 
       expect(staleTreeCtx.coreDiffLines).toBeUndefined();
-      expect(staleTreeCtx.coreFilesCount).toBe(1);
+      expect(staleTreeCtx.coreFilesCount).toBe(patch.files.length);
     } finally {
       rmSync(workspacePath, { recursive: true, force: true });
     }

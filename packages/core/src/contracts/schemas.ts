@@ -304,21 +304,58 @@ export const ValidatedPatchFileSchema = z.object({
   mode: z.enum(["100644", "100755", "120000"]),
   operation: z.enum(["CREATE", "MODIFY", "DELETE"]),
   contentSha256: z.string(),
+  // Optional only for legacy artifacts; new artifacts bind per-file counts into their hash.
+  changedLines: z.number().int().nonnegative().optional(),
 });
 export type ValidatedPatchFile = z.infer<typeof ValidatedPatchFileSchema>;
 
-export const ValidatedPatchArtifactSchema = z.object({
-  runId: z.string(),
-  patchSha256: z.string(),
-  actualDeltaSha256: z.string(),
-  baseCommitSha: z.string(),
-  redTreeSha256: z.string(),
-  greenTreeSha256: z.string(),
-  artifactSha256: z.string(),
-  changedLines: z.number().int().nonnegative(),
-  files: z.array(ValidatedPatchFileSchema),
-  validatedAt: z.string(),
-});
+export const ValidatedPatchArtifactSchema = z
+  .object({
+    runId: z.string(),
+    patchSha256: z.string(),
+    actualDeltaSha256: z.string(),
+    baseCommitSha: z.string(),
+    redTreeSha256: z.string(),
+    greenTreeSha256: z.string(),
+    artifactSha256: z.string(),
+    changedLines: z.number().int().nonnegative(),
+    files: z.array(ValidatedPatchFileSchema),
+    validatedAt: z.string(),
+  })
+  .superRefine((artifact, context) => {
+    const filesWithLineCounts = artifact.files.filter(
+      (file) => file.changedLines !== undefined,
+    );
+    if (filesWithLineCounts.length === 0) {
+      if (artifact.files.length === 0 && artifact.changedLines !== 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["changedLines"],
+          message: "An empty validated patch must have zero changed lines.",
+        });
+      }
+      return;
+    }
+    if (filesWithLineCounts.length !== artifact.files.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["files"],
+        message: "Per-file changed-line counts must be present for every file.",
+      });
+      return;
+    }
+    const fileChangedLines = filesWithLineCounts.reduce(
+      (total, file) => total + (file.changedLines ?? 0),
+      0,
+    );
+    if (fileChangedLines !== artifact.changedLines) {
+      context.addIssue({
+        code: "custom",
+        path: ["files"],
+        message: "Per-file changed-line counts must sum to the validated total.",
+      });
+    }
+  });
 export type ValidatedPatchArtifact = z.infer<
   typeof ValidatedPatchArtifactSchema
 >;

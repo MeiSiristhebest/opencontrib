@@ -67,16 +67,15 @@ import type {
 import { halt, continuePipeline } from "./types.js";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 function getCoreDiffMetrics(
   ctx: PipelineContext,
   deps: PipelineDeps,
   patch: PatchDraft,
 ): { coreDiffLines?: number; coreFilesCount: number } {
-  const fallbackCoreFilesCount = patch.files.filter(
-    (file) => !isSupportingFile(file.path),
-  ).length;
-  if (!ctx.runId) return { coreFilesCount: fallbackCoreFilesCount };
+  const fallbackFilesCount = patch.files.length;
+  if (!ctx.runId) return { coreFilesCount: fallbackFilesCount };
 
   const runManager = deps.runManager ?? defaultRunManager;
   const run = runManager.getRun(ctx.runId);
@@ -86,24 +85,34 @@ function getCoreDiffMetrics(
     patchArtifact === null ||
     (typeof patchArtifact === "string" && patchArtifact.trim() === "")
   ) {
-    return { coreFilesCount: fallbackCoreFilesCount };
+    return { coreFilesCount: fallbackFilesCount };
   }
-  const canonicalPatchContent =
-    typeof patchArtifact === "string"
-      ? patchArtifact
-      : JSON.stringify(patchArtifact);
-  const activePatchContent = JSON.stringify(patch);
-  if (
-    typeof canonicalPatchContent !== "string" ||
-    typeof activePatchContent !== "string"
-  ) {
-    return { coreFilesCount: fallbackCoreFilesCount };
+
+  let canonicalPatchContent = "";
+  let canonicalPatchSnapshot: unknown;
+  let activePatchSnapshot: unknown;
+  try {
+    canonicalPatchContent =
+      typeof patchArtifact === "string"
+        ? patchArtifact
+        : (JSON.stringify(patchArtifact) ?? "");
+    const activePatchContent = JSON.stringify(patch);
+    if (!canonicalPatchContent.trim() || typeof activePatchContent !== "string") {
+      return { coreFilesCount: fallbackFilesCount };
+    }
+    canonicalPatchSnapshot = JSON.parse(canonicalPatchContent);
+    activePatchSnapshot = JSON.parse(activePatchContent);
+  } catch {
+    return { coreFilesCount: fallbackFilesCount };
+  }
+  if (!isDeepStrictEqual(canonicalPatchSnapshot, activePatchSnapshot)) {
+    return { coreFilesCount: fallbackFilesCount };
   }
 
   const parsed = ValidatedPatchArtifactSchema.safeParse(
     run?.artifacts.validatedPatch,
   );
-  if (!parsed.success) return { coreFilesCount: fallbackCoreFilesCount };
+  if (!parsed.success) return { coreFilesCount: fallbackFilesCount };
 
   const validatedPatch = parsed.data;
   const sha256 = (content: string) =>
@@ -112,10 +121,9 @@ function getCoreDiffMetrics(
     validatedPatch.runId !== ctx.runId ||
     validatedPatch.artifactSha256 !==
       hashValidatedPatchArtifact(validatedPatch) ||
-    validatedPatch.patchSha256 !== sha256(canonicalPatchContent) ||
-    validatedPatch.patchSha256 !== sha256(activePatchContent)
+    validatedPatch.patchSha256 !== sha256(canonicalPatchContent)
   ) {
-    return { coreFilesCount: fallbackCoreFilesCount };
+    return { coreFilesCount: fallbackFilesCount };
   }
 
   const workspaceArtifact = run?.artifacts.workspace as
@@ -126,7 +134,7 @@ function getCoreDiffMetrics(
     workspaceArtifact.workspacePath.trim() === "" ||
     workspaceArtifact.baseCommitSha !== validatedPatch.baseCommitSha
   ) {
-    return { coreFilesCount: fallbackCoreFilesCount };
+    return { coreFilesCount: fallbackFilesCount };
   }
 
   const coreFiles = validatedPatch.files.filter(
@@ -141,7 +149,7 @@ function getCoreDiffMetrics(
     );
     return { coreDiffLines, coreFilesCount: coreFiles.length };
   } catch {
-    return { coreFilesCount: coreFiles.length };
+    return { coreFilesCount: fallbackFilesCount };
   }
 }
 

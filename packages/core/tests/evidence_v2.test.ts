@@ -117,28 +117,38 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       );
       rmSync(join(dir, "deleted.ts"));
 
-      const changedLines = countValidatedPatchChangedLines(dir, baseCommitSha, [
+      const validatedFiles = [
         {
           path: "modified.ts",
-          operation: "MODIFY",
+          operation: "MODIFY" as const,
           mode: "100644",
           contentSha256: "b".repeat(64),
         },
         {
           path: "new-source.ts",
-          operation: "CREATE",
+          operation: "CREATE" as const,
           mode: "100644",
           contentSha256: "c".repeat(64),
         },
         {
           path: "deleted.ts",
-          operation: "DELETE",
+          operation: "DELETE" as const,
           mode: "100644",
           contentSha256: "d".repeat(64),
         },
-      ]);
-
-      expect(changedLines).toBe(123);
+      ] as const;
+      expect(
+        countValidatedPatchChangedLines(dir, baseCommitSha, [validatedFiles[0]]),
+      ).toBe(1);
+      expect(
+        countValidatedPatchChangedLines(dir, baseCommitSha, [validatedFiles[1]]),
+      ).toBe(120);
+      expect(
+        countValidatedPatchChangedLines(dir, baseCommitSha, [validatedFiles[2]]),
+      ).toBe(2);
+      expect(
+        countValidatedPatchChangedLines(dir, baseCommitSha, validatedFiles),
+      ).toBe(123);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -444,6 +454,11 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
 
       const updated = manager.getRun(manifest.runId);
       expect(updated?.manifest.currentPhase).toBe("EVIDENCE_COLLECTED");
+      const validatedPatch = updated?.artifacts.validatedPatch as
+        | { changedLines?: number; files?: Array<{ changedLines?: number }> }
+        | undefined;
+      expect(validatedPatch?.changedLines).toBe(2);
+      expect(validatedPatch?.files?.[0]?.changedLines).toBe(2);
     } finally {
       rmSync(wsDir, { recursive: true, force: true });
       rmSync(baseDir, { recursive: true, force: true });

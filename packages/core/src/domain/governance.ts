@@ -99,17 +99,26 @@ export interface AssertionQualityResult {
   flaggedTautologicalAssertions: string[];
 }
 
-function isTestSourcePath(filePath: string): boolean {
-  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
-  const baseName = normalized.slice(normalized.lastIndexOf("/") + 1);
+function isTestPath(
+  normalizedPath: string,
+  includeTestPrefixedBasename: boolean,
+): boolean {
+  const baseName = normalizedPath.slice(normalizedPath.lastIndexOf("/") + 1);
   return (
-    /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalized) ||
+    /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalizedPath) ||
     /\.(?:test|spec)\.[^/]+$/.test(baseName) ||
     /tests?\.[^/]+$/.test(baseName) ||
     /_test\.[^/]+$/.test(baseName) ||
     /^test_[^/]+\.[^/]+$/.test(baseName) ||
-    /^test[^/]*\.[^/]+$/.test(baseName)
+    (includeTestPrefixedBasename && /^test[^/]*\.[^/]+$/.test(baseName))
   );
+}
+
+function isTestSourcePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  // Assertion analysis treats names such as testUtils.ts as test sources;
+  // supporting-file classification intentionally requires clearer test markers.
+  return isTestPath(normalized, true);
 }
 
 /**
@@ -476,25 +485,140 @@ function isNonNegativeLineCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-function isSupportingTestPath(normalizedPath: string): boolean {
-  const baseName = normalizedPath.slice(normalizedPath.lastIndexOf("/") + 1);
-  return (
-    /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalizedPath) ||
-    /\.(?:test|spec)\.[^/]+$/.test(baseName) ||
-    /^tests?\.[^/]+$/.test(baseName) ||
-    /_test\.[^/]+$/.test(baseName) ||
-    /^test_[^/]+\.[^/]+$/.test(baseName)
-  );
-}
-
 export function isSupportingFile(filePath: string): boolean {
   if (!filePath) return false;
   const normalized = filePath.replace(/\\/g, "/").toLowerCase();
   return (
-    isSupportingTestPath(normalized) ||
+    isTestPath(normalized, false) ||
     /\.(?:md|mdx|rst)$/.test(normalized) ||
     /(^|\/)docs?(?:\/|$)/.test(normalized)
   );
+}
+
+function parseDiffPath(rawPath: string): string {
+  const path = rawPath.trim();
+  return path.startsWith('"') && path.endsWith('"')
+    ? path.slice(1, -1).replace(/\\(["\\])/g, "$1")
+    : path;
+}
+
+function parseGitDiffPaths(line: string): string[] {
+  const tokens =
+    line
+      .slice("diff --git ".length)
+      .match(/"(?:\\.|[^"])*"|\S+/g) ?? [];
+  return tokens.map(parseDiffPath);
+}
+
+function parseUnifiedDiffPath(line: string): string {
+  return parseDiffPath(line.slice(4).split("\t", 1)[0] ?? "");
+}
+
+interface DiffLineAccountingState {
+  currentFile: string;
+  oldFilePath: string;
+  totalLines: number;
+  coreLines: number;
+  hasFileHeaders: boolean;
+  hasCoreFileHeader: boolean;
+  pendingUnifiedFileHeader: boolean;
+  inHunk: boolean;
+  remainingOldLines: number | undefined;
+  remainingNewLines: number | undefined;
+}
+
+function recordChangedLine(state: DiffLineAccountingState): void {
+  state.totalLines++;
+  if (!state.hasFileHeaders || !isSupportingFile(state.currentFile)) {
+    state.coreLines++;
+  }
+}
+
+function recordDiffFile(state: DiffLineAccountingState, path: string): void {
+  if (path && !isSupportingFile(path)) state.hasCoreFileHeader = true;
+}
+
+function handleGitDiffHeader(
+  state: DiffLineAccountingState,
+  line: string,
+): boolean {
+  if (!line.startsWith("diff --git ")) return false;
+  state.inHunk = false;
+  state.remainingOldLines = undefined;
+  state.remainingNewLines = undefined;
+  state.hasFileHeaders = true;
+  state.pendingUnifiedFileHeader = true;
+  state.oldFilePath = "";
+  const paths = parseGitDiffPaths(line);
+  state.currentFile = paths[1] ?? paths[0] ?? "";
+  recordDiffFile(state, state.currentFile);
+  return true;
+}
+
+function handleHunkHeader(
+  state: DiffLineAccountingState,
+  line: string,
+): boolean {
+  if (!line.startsWith("@@")) return false;
+  state.pendingUnifiedFileHeader = false;
+  const counts = line.match(
+    /^@@\s+-\d+(?:,(\d+))?\s+\+\d+(?:,(\d+))?\s+@@/,
+  );
+  state.inHunk = true;
+  state.remainingOldLines = counts ? Number(counts[1] ?? 1) : undefined;
+  state.remainingNewLines = counts ? Number(counts[2] ?? 1) : undefined;
+  if (state.remainingOldLines === 0 && state.remainingNewLines === 0) {
+    state.inHunk = false;
+  }
+  return true;
+}
+
+function handleUnifiedFileHeader(
+  state: DiffLineAccountingState,
+  line: string,
+): boolean {
+  if (state.inHunk) return false;
+  if (line.startsWith("--- ")) {
+    state.hasFileHeaders = true;
+    state.pendingUnifiedFileHeader = true;
+    state.oldFilePath = parseUnifiedDiffPath(line);
+    if (state.oldFilePath !== "/dev/null") {
+      state.currentFile = state.oldFilePath;
+    }
+    recordDiffFile(state, state.currentFile);
+    return true;
+  }
+  if (state.pendingUnifiedFileHeader && line.startsWith("+++ ")) {
+    state.hasFileHeaders = true;
+    const newFilePath = parseUnifiedDiffPath(line);
+    state.currentFile =
+      newFilePath === "/dev/null" ? state.oldFilePath : newFilePath;
+    state.pendingUnifiedFileHeader = false;
+    recordDiffFile(state, state.currentFile);
+    return true;
+  }
+  return false;
+}
+
+function handleHunkBody(
+  state: DiffLineAccountingState,
+  line: string,
+): boolean {
+  if (!state.inHunk) return false;
+  if (line.startsWith("+")) {
+    recordChangedLine(state);
+    if (state.remainingNewLines !== undefined) state.remainingNewLines--;
+  } else if (line.startsWith("-")) {
+    recordChangedLine(state);
+    if (state.remainingOldLines !== undefined) state.remainingOldLines--;
+  } else if (line.startsWith(" ")) {
+    if (state.remainingOldLines !== undefined) state.remainingOldLines--;
+    if (state.remainingNewLines !== undefined) state.remainingNewLines--;
+  }
+  if (state.remainingOldLines === 0 && state.remainingNewLines === 0) {
+    state.inHunk = false;
+  }
+  return true;
 }
 
 function calculateDiffLines(patch: string): {
@@ -503,54 +627,42 @@ function calculateDiffLines(patch: string): {
 } {
   if (!patch) return { totalLines: 0, coreLines: 0 };
 
-  const lines = patch.split("\n");
-  let currentFile = "";
-  let totalLines = 0;
-  let coreLines = 0;
-  let hasFileHeaders = false;
-  let hasCoreFileHeader = false;
+  const state: DiffLineAccountingState = {
+    currentFile: "",
+    oldFilePath: "",
+    totalLines: 0,
+    coreLines: 0,
+    hasFileHeaders: false,
+    hasCoreFileHeader: false,
+    pendingUnifiedFileHeader: false,
+    inHunk: false,
+    remainingOldLines: undefined,
+    remainingNewLines: undefined,
+  };
 
+  const lines = patch.split(/\r?\n/);
   for (const line of lines) {
     if (
-      line.startsWith("diff --git ") ||
-      line.startsWith("--- a/") ||
-      line.startsWith("--- /dev/null") ||
-      line.startsWith("+++ b/") ||
-      line.startsWith("+++ /dev/null")
+      handleGitDiffHeader(state, line) ||
+      handleHunkHeader(state, line) ||
+      handleUnifiedFileHeader(state, line) ||
+      handleHunkBody(state, line)
     ) {
-      hasFileHeaders = true;
-      if (line.startsWith("+++ b/")) {
-        currentFile = line.slice(6).trim();
-      } else if (line.startsWith("--- a/")) {
-        currentFile = line.slice(6).trim();
-      } else if (line.startsWith("diff --git a/")) {
-        const parts = line.split(" b/");
-        if (parts.length >= 2) {
-          currentFile = parts[1].trim();
-        }
-      }
-      if (currentFile && !isSupportingFile(currentFile)) {
-        hasCoreFileHeader = true;
-      }
       continue;
     }
-
     if (line.startsWith("+") || line.startsWith("-")) {
-      totalLines++;
-      if (!hasFileHeaders || !isSupportingFile(currentFile)) {
-        coreLines++;
-      }
+      recordChangedLine(state);
     }
   }
 
-  if (totalLines === 0 && lines.length > 0) {
-    totalLines = lines.length;
-    if (!hasFileHeaders || hasCoreFileHeader) {
-      coreLines = lines.length;
+  if (state.totalLines === 0 && lines.length > 0) {
+    state.totalLines = lines.length;
+    if (!state.hasFileHeaders || state.hasCoreFileHeader) {
+      state.coreLines = lines.length;
     }
   }
 
-  return { totalLines, coreLines };
+  return { totalLines: state.totalLines, coreLines: state.coreLines };
 }
 
 export function auditGovernance(
@@ -713,7 +825,7 @@ export function auditGovernance(
   }
   if (!rfcGatePassed) {
     remediationSuggestions.push(
-      `Diff exceeds 100 lines (${coreLines} core lines). Split into RFC Discussion issue first.`,
+      `Diff exceeds the configured limit of ${maxDiffAllowed} lines (${coreLines} core lines). Split into RFC Discussion issue first.`,
     );
   } else if (lines > maxDiffAllowed) {
     remediationSuggestions.push(
