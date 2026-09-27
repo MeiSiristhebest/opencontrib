@@ -17,7 +17,10 @@ import {
   type ContributionRunSummary,
 } from "../src/index.js";
 import type { RedEvidence } from "../src/contracts/schemas.js";
-import { EvidenceService } from "../src/evidence/evidence-service.js";
+import {
+  countValidatedPatchChangedLines,
+  EvidenceService,
+} from "../src/evidence/evidence-service.js";
 
 function makeSummary(
   currentPhase: ContributionRunSummary["manifest"]["currentPhase"],
@@ -71,6 +74,71 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       writeFileSync(join(dir, "a.txt"), "alpha CHANGED\n");
       const h3 = computeSourceTreeHash(dir);
       expect(h3).not.toBe(h1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("counts actual lines across validated CREATE, MODIFY, and DELETE files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oc-core-diff-count-"));
+    try {
+      writeFileSync(join(dir, "modified.ts"), "const keep = 1;\n");
+      writeFileSync(
+        join(dir, "deleted.ts"),
+        "const old = 1;\nconst gone = 2;\n",
+      );
+      execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], {
+        cwd: dir,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "OpenContrib Test"], {
+        cwd: dir,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["add", "."], { cwd: dir, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "baseline"], {
+        cwd: dir,
+        stdio: "ignore",
+      });
+      const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: dir,
+        encoding: "utf8",
+      }).trim();
+
+      writeFileSync(
+        join(dir, "modified.ts"),
+        "const keep = 1;\nconst added = 2;\n",
+      );
+      writeFileSync(
+        join(dir, "new-source.ts"),
+        Array.from({ length: 120 }, (_, index) => `line-${index}`).join("\n") +
+          "\n",
+      );
+      rmSync(join(dir, "deleted.ts"));
+
+      const changedLines = countValidatedPatchChangedLines(dir, baseCommitSha, [
+        {
+          path: "modified.ts",
+          operation: "MODIFY",
+          mode: "100644",
+          contentSha256: "b".repeat(64),
+        },
+        {
+          path: "new-source.ts",
+          operation: "CREATE",
+          mode: "100644",
+          contentSha256: "c".repeat(64),
+        },
+        {
+          path: "deleted.ts",
+          operation: "DELETE",
+          mode: "100644",
+          contentSha256: "d".repeat(64),
+        },
+      ]);
+
+      expect(changedLines).toBe(123);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

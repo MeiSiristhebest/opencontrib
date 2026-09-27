@@ -485,7 +485,7 @@ function collectActualDelta(cwd: string, baseCommitSha: string): DeltaFile[] {
 function countChangedLinesFromActualDelta(
   cwd: string,
   baseCommitSha: string,
-  deltaFiles: DeltaFile[],
+  deltaFiles: readonly DeltaFile[],
 ): number {
   let total = 0;
   for (const file of deltaFiles) {
@@ -594,6 +594,39 @@ function countChangedLinesFromActualDelta(
     }
   }
   return total;
+}
+
+export function countValidatedPatchChangedLines(
+  cwd: string,
+  baseCommitSha: string,
+  files: readonly ValidatedPatchFile[],
+): number {
+  return countChangedLinesFromActualDelta(cwd, baseCommitSha, files);
+}
+
+/** Count lines only while the workspace remains bound to canonical GREEN evidence. */
+export function countValidatedPatchChangedLinesAtGreenTree(
+  cwd: string,
+  baseCommitSha: string,
+  files: readonly ValidatedPatchFile[],
+  expectedGreenTreeSha256: string,
+): number {
+  if (computeSourceTreeHash(cwd) !== expectedGreenTreeSha256) {
+    throw new Error(
+      "EvidencePatchProvenanceError: workspace differs from canonical GREEN tree before diff measurement.",
+    );
+  }
+  const changedLines = countChangedLinesFromActualDelta(
+    cwd,
+    baseCommitSha,
+    files,
+  );
+  if (computeSourceTreeHash(cwd) !== expectedGreenTreeSha256) {
+    throw new Error(
+      "EvidencePatchProvenanceError: workspace changed during validated diff measurement.",
+    );
+  }
+  return changedLines;
 }
 
 function computeFinalTreeHash(cwd: string): string {

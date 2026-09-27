@@ -7,7 +7,8 @@ import {
   ValidatedPatchArtifactSchema,
   type GovernanceDecisionArtifact,
 } from "../contracts/schemas.js";
-import { auditGovernance } from "./governance-auditor.js";
+import { auditGovernance, isSupportingFile } from "./governance-auditor.js";
+import { countValidatedPatchChangedLinesAtGreenTree } from "../evidence/evidence-service.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 import {
   hashTrustedPolicySnapshot,
@@ -114,7 +115,8 @@ export class GovernanceService {
       "chore: opencontrib contribution";
 
     const workspaceArtifact = run.artifacts.workspace as
-      | {
+        | {
+          workspacePath?: unknown;
           baseCommitSha?: unknown;
           policySnapshot?: unknown;
           policySha256?: unknown;
@@ -203,12 +205,40 @@ export class GovernanceService {
     const effectiveResourceLeakPolicy =
       effectivePolicySnapshot.resourceLeakCheck;
 
+    let coreDiffLines: number | undefined;
+    try {
+      if (
+        typeof workspaceArtifact.workspacePath !== "string" ||
+        workspaceArtifact.workspacePath.trim() === "" ||
+        workspaceArtifact.baseCommitSha !== validatedPatch.baseCommitSha
+      ) {
+        throw new Error(
+          "Canonical workspace path or base commit does not match validated patch evidence.",
+        );
+      }
+      const workspacePath = workspaceArtifact.workspacePath;
+      const coreFiles = validatedPatch.files.filter(
+        (file) => !isSupportingFile(file.path),
+      );
+      coreDiffLines = countValidatedPatchChangedLinesAtGreenTree(
+        workspacePath,
+        validatedPatch.baseCommitSha,
+        coreFiles,
+        validatedPatch.greenTreeSha256,
+      );
+    } catch {
+      // If canonical counting is unavailable, auditGovernance falls back to
+      // the total validated diff size rather than exempting unmeasured lines.
+      coreDiffLines = undefined;
+    }
+
     const auditResult = auditGovernance({
       patchContent,
       prTitle,
       prBody: prDraftRaw,
       evidence: evidenceArtifact as any,
       lineCount: validatedPatch.changedLines,
+      coreDiffLines,
       // Governance is deliberately technical-only. Approval is minted later
       // by an external trusted authority and is not inferred from this audit.
       coveragePolicy: effectiveCoveragePolicy,

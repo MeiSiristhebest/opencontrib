@@ -7,6 +7,7 @@ import {
   lintPatchCommentHyperbole,
   renderMasterPrTemplate,
 } from "../src/governance/index.js";
+import { isSupportingFile } from "../src/governance/governance-auditor.js";
 
 describe("Governance & Anti-AI Audit Engine", () => {
   it("detects forbidden AI phrases in text", () => {
@@ -125,6 +126,97 @@ describe("Governance & Anti-AI Audit Engine", () => {
     expect(auditFailRfc.remediationSuggestions[0]).toContain(
       "exceeds 100 lines",
     );
+  });
+
+  it("applies the RFC size gate to measured core lines while retaining total changed lines", () => {
+    const confidenceBreakdown = {
+      rootCause: 95,
+      implementation: 95,
+      regression: 95,
+      defensiveCoverage: 95,
+      testCoverage: 95,
+      styleMatch: 95,
+      securityAudit: 95,
+    };
+    const result = auditGovernance({
+      prBodyText: "Fixes bug with regression tests and documentation.",
+      lineCount: 150,
+      coreDiffLines: 40,
+      confidenceBreakdown,
+    });
+    const invalidCoreLineCount = auditGovernance({
+      lineCount: 150,
+      coreDiffLines: -1,
+      confidenceBreakdown,
+    });
+
+    expect(result.diffLineCount).toBe(150);
+    expect(result.rfcGatePassed).toBe(true);
+    expect(result.isGatedPassed).toBe(true);
+    expect(result.remediationSuggestions).toContain(
+      "Supporting Engineering Exemption: Core production logic is within threshold (40/100 lines). Additional 110 lines are test matrices and documentation.",
+    );
+    expect(invalidCoreLineCount.rfcGatePassed).toBe(false);
+  });
+
+  it("classifies test and documentation paths without exempting application source", () => {
+    expect(isSupportingFile("packages/core/tests/fixture.json")).toBe(true);
+    expect(isSupportingFile("src/parser.test.py")).toBe(true);
+    expect(isSupportingFile("docs/guide.txt")).toBe(true);
+    expect(isSupportingFile("README.md")).toBe(true);
+    expect(isSupportingFile("apps/web/pages/index.tsx")).toBe(false);
+    expect(isSupportingFile("src/testHarness.ts")).toBe(false);
+    expect(isSupportingFile("docs/guide.mdx")).toBe(true);
+    expect(isSupportingFile("src/config.txt")).toBe(false);
+  });
+
+  it("applies the core limit to parsed supporting and application diff paths", () => {
+    const diffFor = (filePath: string, lineCount: number) =>
+      [
+        `diff --git a/${filePath} b/${filePath}`,
+        `--- a/${filePath}`,
+        `+++ b/${filePath}`,
+        `@@ -0,0 +1,${lineCount} @@`,
+        ...Array.from({ length: lineCount }, (_, index) => `+line-${index}`),
+      ].join("\n");
+    const confidenceBreakdown = {
+      rootCause: 95,
+      implementation: 95,
+      regression: 95,
+      defensiveCoverage: 95,
+      testCoverage: 95,
+      styleMatch: 95,
+      securityAudit: 95,
+    };
+
+    const supportingOnly = auditGovernance({
+      diffText: [
+        diffFor("docs/guide.md", 60),
+        diffFor("tests/guide.test.ts", 60),
+      ].join("\n"),
+      confidenceBreakdown,
+    });
+    const applicationSource = auditGovernance({
+      diffText: diffFor("apps/web/pages/index.tsx", 101),
+      confidenceBreakdown,
+    });
+    const incrementLines = auditGovernance({
+      diffText: [
+        "diff --git a/src/counter.c b/src/counter.c",
+        "--- a/src/counter.c",
+        "+++ b/src/counter.c",
+        "@@ -1 +1 @@",
+        "---counter;",
+        "+++counter;",
+      ].join("\n"),
+      confidenceBreakdown,
+    });
+
+    expect(supportingOnly.diffLineCount).toBe(120);
+    expect(supportingOnly.rfcGatePassed).toBe(true);
+    expect(applicationSource.diffLineCount).toBe(101);
+    expect(applicationSource.rfcGatePassed).toBe(false);
+    expect(incrementLines.diffLineCount).toBe(2);
   });
 
   it("renders natural humanized PR template and bans robotic meta headers", () => {

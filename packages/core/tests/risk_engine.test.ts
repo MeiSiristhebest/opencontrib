@@ -60,4 +60,37 @@ describe('Contribution Risk Engine & Evidence-Backed Quality Rubric', () => {
     expect(result.rubricResult.isPassed).toBe(true);
     expect(result.rubricResult.overallScore).toBeGreaterThanOrEqual(90);
   });
+
+  it('does not penalize PR with comprehensive tests and docs when coreDiffLines is small', () => {
+    // Total lines 180 (e.g. 30 core lines + 150 lines of comprehensive tests and docs)
+    // Total files 4 (1 core file + 2 test files + 1 doc file)
+    const assessment = assessContributionRisk({
+      repoFullName: 'alibaba/open-code-review',
+      diffLines: 180,
+      coreDiffLines: 30,
+      filesCount: 4,
+      coreFilesCount: 1,
+      validationStatus: 'VALIDATED',
+      subagentQualityScore: 95,
+    });
+
+    expect(assessment.riskLevel).toBe('LOW');
+    expect(assessment.recommendedPolicy).toBe('autonomous_headless');
+    expect(assessment.reasons.some((r) => r.includes('exceeds 100-line'))).toBe(false);
+    expect(assessment.reasons.some((r) => r.includes('core files across repository'))).toBe(false);
+  });
+
+  it('preserves implementation confidence when coreDiffLines is <= 100 even if total diffLines is large', () => {
+    const result = deriveEvidenceBackedQualityRubric({
+      hasReproductionAssertion: true,
+      testsPassed: true,
+      passedTestsCount: 10,
+      diffLines: 250,
+      coreDiffLines: 40,
+      styleScore: 95,
+      securityScore: 95,
+    });
+
+    expect(result.breakdown.implementation).toBe(94);
+  });
 });

@@ -318,6 +318,7 @@ export function deriveEvidenceBackedQualityRubric(input: {
   passedTestsCount?: number;
   testCoveragePercent?: number;
   diffLines?: number;
+  coreDiffLines?: number;
   styleScore?: number;
   securityScore?: number;
   subagentReviewAvailable?: boolean;
@@ -342,11 +343,12 @@ export function deriveEvidenceBackedQualityRubric(input: {
 
   // Root cause confidence: 95 only if empirical failure reproduction was confirmed, 90 if standard tests passed, 65 if untested
   const rootCause = hasReproductionAssertion ? 95 : testsPassed ? 90 : 65;
-  // Implementation confidence: based on surgical diff size
+  // Implementation confidence: based on core logic diff size
+  const effectiveCoreLines = input.coreDiffLines !== undefined ? input.coreDiffLines : diffLines;
   const implementation =
-    diffLines <= 100
+    effectiveCoreLines <= 100
       ? 94
-      : Math.max(60, 94 - Math.round((diffLines - 100) * 0.25));
+      : Math.max(60, 94 - Math.round((effectiveCoreLines - 100) * 0.25));
   // Regression confidence: based on actual test passes
   const regression = testsPassed ? 93 : 50;
   // Defensive coverage comes from executed tests. Changed-code coverage is a
@@ -467,6 +469,88 @@ export interface AuditGovernanceInput {
   isAutonomousPrSubmission?: boolean;
   variantHuntConducted?: boolean;
   impactAnalysisConducted?: boolean;
+  coreDiffLines?: number;
+}
+
+function isNonNegativeLineCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isSupportingTestPath(normalizedPath: string): boolean {
+  const baseName = normalizedPath.slice(normalizedPath.lastIndexOf("/") + 1);
+  return (
+    /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalizedPath) ||
+    /\.(?:test|spec)\.[^/]+$/.test(baseName) ||
+    /^tests?\.[^/]+$/.test(baseName) ||
+    /_test\.[^/]+$/.test(baseName) ||
+    /^test_[^/]+\.[^/]+$/.test(baseName)
+  );
+}
+
+export function isSupportingFile(filePath: string): boolean {
+  if (!filePath) return false;
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  return (
+    isSupportingTestPath(normalized) ||
+    /\.(?:md|mdx|rst)$/.test(normalized) ||
+    /(^|\/)docs?(?:\/|$)/.test(normalized)
+  );
+}
+
+function calculateDiffLines(patch: string): {
+  totalLines: number;
+  coreLines: number;
+} {
+  if (!patch) return { totalLines: 0, coreLines: 0 };
+
+  const lines = patch.split("\n");
+  let currentFile = "";
+  let totalLines = 0;
+  let coreLines = 0;
+  let hasFileHeaders = false;
+  let hasCoreFileHeader = false;
+
+  for (const line of lines) {
+    if (
+      line.startsWith("diff --git ") ||
+      line.startsWith("--- a/") ||
+      line.startsWith("--- /dev/null") ||
+      line.startsWith("+++ b/") ||
+      line.startsWith("+++ /dev/null")
+    ) {
+      hasFileHeaders = true;
+      if (line.startsWith("+++ b/")) {
+        currentFile = line.slice(6).trim();
+      } else if (line.startsWith("--- a/")) {
+        currentFile = line.slice(6).trim();
+      } else if (line.startsWith("diff --git a/")) {
+        const parts = line.split(" b/");
+        if (parts.length >= 2) {
+          currentFile = parts[1].trim();
+        }
+      }
+      if (currentFile && !isSupportingFile(currentFile)) {
+        hasCoreFileHeader = true;
+      }
+      continue;
+    }
+
+    if (line.startsWith("+") || line.startsWith("-")) {
+      totalLines++;
+      if (!hasFileHeaders || !isSupportingFile(currentFile)) {
+        coreLines++;
+      }
+    }
+  }
+
+  if (totalLines === 0 && lines.length > 0) {
+    totalLines = lines.length;
+    if (!hasFileHeaders || hasCoreFileHeader) {
+      coreLines = lines.length;
+    }
+  }
+
+  return { totalLines, coreLines };
 }
 
 export function auditGovernance(
@@ -476,23 +560,18 @@ export function auditGovernance(
 } {
   const patch = input.diffText || input.patchContent || "";
   const prBody = input.prBodyText || input.prBody || "";
-  let lines = typeof input.lineCount === "number" ? input.lineCount : 0;
-  if (typeof input.lineCount !== "number") {
-    if (patch) {
-      // Calculate true added/removed line changes from unified diff hunks
-      const diffHunkLines = patch
-        .split("\n")
-        .filter(
-          (l) =>
-            (l.startsWith("+") || l.startsWith("-")) &&
-            !l.startsWith("+++") &&
-            !l.startsWith("---"),
-        );
-      lines =
-        diffHunkLines.length > 0
-          ? diffHunkLines.length
-          : patch.split("\n").length;
-    }
+  const validatedLineCount = isNonNegativeLineCount(input.lineCount)
+    ? input.lineCount
+    : undefined;
+  const validatedCoreLineCount = isNonNegativeLineCount(input.coreDiffLines)
+    ? input.coreDiffLines
+    : undefined;
+  let lines = validatedLineCount ?? 0;
+  let coreLines = validatedCoreLineCount ?? validatedLineCount ?? 0;
+  if (validatedLineCount === undefined && patch) {
+    const calculated = calculateDiffLines(patch);
+    lines = calculated.totalLines;
+    coreLines = validatedCoreLineCount ?? calculated.coreLines;
   }
   const maxDiffAllowed = input.maxDiffLines ?? 100;
 
@@ -526,6 +605,7 @@ export function auditGovernance(
           ? minimumChangedLineCoverage
           : undefined,
       diffLines: lines,
+      coreDiffLines: coreLines,
       styleScore: input.subagentQualityScore,
       securityScore: input.subagentQualityScore,
       subagentReviewAvailable: typeof input.subagentQualityScore === "number",
@@ -561,7 +641,7 @@ export function auditGovernance(
   const corruptedMarkdownIssues = integrityCheck.corruptedIssues;
 
   // 3. RFC 100-line (or configured maxDiffLines) Gate Check
-  const rfcGatePassed = lines <= maxDiffAllowed;
+  const rfcGatePassed = coreLines <= maxDiffAllowed;
 
   // 4. Mathematical Quality Rubric Calculation
   const confidence = calculateConfidenceScore(breakdown!);
@@ -633,7 +713,11 @@ export function auditGovernance(
   }
   if (!rfcGatePassed) {
     remediationSuggestions.push(
-      `Diff exceeds 100 lines (${lines} lines). Split into RFC Discussion issue first.`,
+      `Diff exceeds 100 lines (${coreLines} core lines). Split into RFC Discussion issue first.`,
+    );
+  } else if (lines > maxDiffAllowed) {
+    remediationSuggestions.push(
+      `Supporting Engineering Exemption: Core production logic is within threshold (${coreLines}/${maxDiffAllowed} lines). Additional ${lines - coreLines} lines are test matrices and documentation.`,
     );
   }
   if (!coverageMinimumIsValid) {
