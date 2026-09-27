@@ -26,6 +26,7 @@ import { submissionCommand } from "./commands/submission.js";
 import { displayFirstRunBannerIfNeeded } from "./utils/banner.js";
 import { sendAnonymousPing } from "./utils/telemetry.js";
 import { CliExitError } from "./utils/exit.js";
+import { isTestEntrypoint } from "./utils/entrypoint.js";
 
 export const program = new Command();
 
@@ -134,11 +135,7 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 function checkDirectEntry(): boolean {
   if (typeof process.argv[1] !== "string" || !process.argv[1]) return false;
   const normalizedEntry = process.argv[1].replace(/\\/g, "/").toLowerCase();
-  const entryFile = path.basename(normalizedEntry);
-  const isTestEntry =
-    /(?:^|\/)(?:__tests__|tests?)\//.test(normalizedEntry) ||
-    /^(?:test|spec)/.test(entryFile) ||
-    /\.(?:test|spec)\.(?:[cm]?[jt]sx?)$/.test(entryFile);
+  const isTestEntry = isTestEntrypoint(normalizedEntry);
   if (process.env.NODE_ENV === "test" || isTestEntry) {
     return false;
   }

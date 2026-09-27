@@ -121,10 +121,19 @@ export class SecurityDisclosureService {
           policyContent = response;
         }
       } catch (error) {
-        if (error instanceof SecurityDisclosureProviderLookupError) throw error;
-        throw new SecurityDisclosureProviderLookupError(
-          mapErrorToApiStatus(error).status,
-        );
+        if (error instanceof SecurityDisclosureProviderLookupError) {
+          if (error.status === "NOT_FOUND") {
+            policyContent = null;
+            continue;
+          }
+          throw error;
+        }
+        const status = mapErrorToApiStatus(error).status;
+        if (status === "NOT_FOUND") {
+          policyContent = null;
+          continue;
+        }
+        throw new SecurityDisclosureProviderLookupError(status);
       }
       if (policyContent) break;
     }

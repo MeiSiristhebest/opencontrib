@@ -313,6 +313,7 @@ function tokenizeCommandLine(command: string): string[] {
     token += character;
     tokenStarted = true;
   }
+  if (quote) return [];
   pushToken();
   return tokens;
 }

@@ -399,6 +399,24 @@ describe("Trusted private security materialization", () => {
       seedGovernanceReadyRun(manager, manifest.runId, "Private fix.", {
         privateVulnerabilityDisclosure: true,
       });
+      const policyPaths: string[] = [];
+      const legacyPolicyLookup = new SecurityDisclosureService(manager, {
+        getRepoTextFile: async (_owner, _repo, path) => {
+          policyPaths.push(path);
+          if (path === "SECURITY.md") {
+            throw Object.assign(new Error("policy file not found"), {
+              status: 404,
+            });
+          }
+          return "Report vulnerabilities privately through the security channel.";
+        },
+      });
+      await legacyPolicyLookup.verifyPrivateChannel({
+        runId: manifest.runId,
+        repoFullName: "owner/private-repo",
+      });
+      expect(policyPaths).toEqual(["SECURITY.md", ".github/SECURITY.md"]);
+
       const forbiddenError = Object.assign(new Error("forbidden"), {
         status: 403,
       });
