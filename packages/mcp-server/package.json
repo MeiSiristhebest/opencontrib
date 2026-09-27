@@ -18,6 +18,7 @@
   },
   "scripts": {
     "build": "bun build ./src/index.ts --target=node --outfile=./dist/index.js",
+    "test:ci": "bun --cwd=../.. test packages/mcp-server/tests --timeout 60000",
     "prepublishOnly": "bun run build"
   },
   "keywords": [
@@ -42,6 +43,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@opencontrib/core": "workspace:*",
     "@types/node": "^22.13.4",
     "typescript": "^5.7.3"
   }

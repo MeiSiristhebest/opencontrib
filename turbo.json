@@ -1,0 +1,21 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [
+    "scripts/**",
+    "tsconfig.json"
+  ],
+  "globalEnv": [
+    "CI",
+    "NODE_ENV",
+    "OPENCONTRIB_OFFLINE",
+    "RUNNER_OS"
+  ],
+  "tasks": {
+    "test:ci": {
+      "dependsOn": ["^test:ci"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": []
+    }
+  }
+}
