@@ -247,7 +247,7 @@ describe("Benchmark canonical invariants", () => {
     ).toBe(true);
   });
 
-  it("Valid Track A sequence passes without bundle", () => {
+  it("does not pass a valid Track A action sequence without the canonical run bundle", () => {
     const scenario = STANDARD_BENCHMARK_SCENARIOS[0];
     const actions: ProtocolAction[] = [
       makeAction("CREATE_RUN", 0),
@@ -269,9 +269,14 @@ describe("Benchmark canonical invariants", () => {
       actions.length,
       0,
     );
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(result.actionSequenceVerified).toBe(true);
-    expect(result.errors).toHaveLength(0);
+    expect(result.runBundleVerified).toBe(false);
+    expect(
+      result.errors.some((error) =>
+        error.includes("Canonical run bundle is required"),
+      ),
+    ).toBe(true);
   });
 
   it("Step count exceeding budget fails", () => {
@@ -407,51 +412,69 @@ describe("Run bundle cross-validation", () => {
       "securityDisclosureSha256",
       hashSubmissionArtifact(disclosure),
     );
+    const privateRouteBundle: BenchmarkBundle = {
+      manifest: {
+        runId,
+        currentPhase: "PR_SUBMITTED",
+        repoFullName: "owner/repo",
+      },
+      events: [
+        {
+          eventId: "private-event-1",
+          runId,
+          timestamp: new Date(0).toISOString(),
+          phase: "PR_SUBMITTED",
+          eventType: "ARTIFACT_SAVED",
+          payload: { artifactType: "submission" },
+        },
+        {
+          eventId: "private-event-2",
+          runId,
+          timestamp: new Date(1).toISOString(),
+          phase: "PR_SUBMITTED",
+          eventType: "ARTIFACT_SAVED",
+          payload: { artifactType: "security_disclosure" },
+        },
+      ],
+      artifacts: {
+        workspace: { communityGate: communityGateSnapshot(true) },
+        security_disclosure: disclosure,
+        security_disclosure_events: events,
+        submission_intent: intent,
+      },
+      artifactTypes: [
+        "workspace",
+        "submission_intent",
+        "approval",
+        "submission",
+        "security_disclosure",
+        "security_disclosure_event",
+      ],
+    };
     const result = crossValidateWithBundle(
       [makeAction("SUBMIT_PR", 0, runId)],
-      {
-        manifest: {
-          runId,
-          currentPhase: "PR_SUBMITTED",
-          repoFullName: "owner/repo",
-        },
-        events: [
-          {
-            eventId: "private-event-1",
-            runId,
-            timestamp: new Date(0).toISOString(),
-            phase: "PR_SUBMITTED",
-            eventType: "ARTIFACT_SAVED",
-            payload: { artifactType: "submission" },
-          },
-          {
-            eventId: "private-event-2",
-            runId,
-            timestamp: new Date(1).toISOString(),
-            phase: "PR_SUBMITTED",
-            eventType: "ARTIFACT_SAVED",
-            payload: { artifactType: "security_disclosure" },
-          },
-        ],
-        artifacts: {
-          workspace: { communityGate: communityGateSnapshot(true) },
-          security_disclosure: disclosure,
-          security_disclosure_events: events,
-          submission_intent: intent,
-        },
-        artifactTypes: [
-          "workspace",
-          "submission_intent",
-          "approval",
-          "submission",
-          "security_disclosure",
-          "security_disclosure_event",
-        ],
-      },
+      privateRouteBundle,
     );
 
     expect(result.verified).toBe(true);
     expect(result.errors).toHaveLength(0);
+
+    const issueReferencingResult = crossValidateWithBundle(
+      [makeAction("SUBMIT_PR", 0, runId)],
+      {
+        ...privateRouteBundle,
+        artifacts: {
+          ...privateRouteBundle.artifacts,
+          submission_intent: { ...intent, body: "Fixes #42" },
+        },
+      },
+    );
+    expect(issueReferencingResult.verified).toBe(false);
+    expect(
+      issueReferencingResult.errors.some((error) =>
+        error.includes("body contains a public Issue reference"),
+      ),
+    ).toBe(true);
   });
 
   it("rejects a public submission without the canonical issue binding", () => {
@@ -612,6 +635,25 @@ describe("Canonical run identity", () => {
 
     expect(result.verified).toBe(false);
     expect(result.errors[0]).toContain("Canonical manifest is required");
+  });
+
+  it("rejects malformed canonical run ids even when event identity agrees", () => {
+    const invalidRunId = "run/with-invalid-separator";
+    const result = crossValidateWithBundle([], {
+      manifest: { runId: invalidRunId, currentPhase: "INITIALIZED" },
+      events: [
+        {
+          eventId: "event-1",
+          runId: invalidRunId,
+          timestamp: new Date(0).toISOString(),
+          phase: "INITIALIZED",
+          eventType: "RUN_CREATED",
+        },
+      ],
+    });
+
+    expect(result.verified).toBe(false);
+    expect(result.errors.some((error) => error.includes("valid runId"))).toBe(true);
   });
 
   it("does not treat a CREATE_RUN input id as its created run id", () => {

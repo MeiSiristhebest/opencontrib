@@ -1086,9 +1086,14 @@ export class PrSubmissionStep implements PipelineStep {
       );
       const disclosureService = new SecurityDisclosureService(
         runManager,
-        deps.client,
+        deps.securityPolicyProvider ?? deps.client,
       );
       if (privateDisclosureRequired) {
+        if (!deps.securityPolicyProvider?.getDisclosureStatus) {
+          throw new Error(
+            "SecurityDisclosureProviderRequiredError: private workflow requires a trusted provider with disclosure lifecycle status support.",
+          );
+        }
         await disclosureService.verifyPrivateChannel({
           runId,
           repoFullName: selectedOpp.repoFullName,

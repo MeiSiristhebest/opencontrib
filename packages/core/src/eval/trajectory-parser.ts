@@ -47,7 +47,7 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
         const duration = tc.durationMs || tc.duration;
         const exitCode = tc.exitCode;
         const output = tc.output || tc.result;
-        const inputRunId = extractRunId(parsedArgs);
+        const inputRunId = extractInputRunId(name, parsedArgs);
         const outputRunId = extractRunId(output);
 
         if (typeof duration === 'number' && duration > 0) {
@@ -260,6 +260,30 @@ function extractRunId(value: unknown): string | undefined {
     if (nested) return nested;
   }
   return undefined;
+}
+
+function extractInputRunId(
+  toolName: string,
+  args: unknown,
+): string | undefined {
+  const structuredRunId = extractRunId(args);
+  if (
+    structuredRunId ||
+    toolName !== 'run_command' ||
+    !args ||
+    typeof args !== 'object' ||
+    Array.isArray(args)
+  ) {
+    return structuredRunId;
+  }
+
+  const record = args as Record<string, unknown>;
+  const command = unwrapCommandString(record.CommandLine ?? record.command ?? '');
+  const match = command.match(
+    /(?:^|\s)--run-id(?:=|\s+)(?:"([A-Za-z0-9_-]+)"|'([A-Za-z0-9_-]+)'|([A-Za-z0-9_-]+))(?=\s|$)/i,
+  );
+  // Do not treat shell variables such as "$RUN_ID" as resolved identities.
+  return match?.[1] ?? match?.[2] ?? match?.[3];
 }
 
 function unwrapCommandString(raw: any): string {

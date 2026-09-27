@@ -11,6 +11,8 @@ import {
 } from "../contracts/schemas.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 import {
+  hasPublicIssueReference,
+  hasPublicSecurityDisclosureAuthorization,
   hashSubmissionArtifact,
   resolveCanonicalSubmissionRoute,
 } from "./submission-route.js";
@@ -68,6 +70,14 @@ export class SubmissionIntentService {
     }
 
     const submissionRoute = resolveCanonicalSubmissionRoute(run);
+    if (
+      submissionRoute.route === "PRIVATE_SECURITY" &&
+      !hasPublicSecurityDisclosureAuthorization(run)
+    ) {
+      throw new Error(
+        "PublicDisclosureBlockedError: private security submission requires the ordered provider lifecycle DISCLOSED -> ACKNOWLEDGED -> PUBLIC_FIX_AUTHORIZED with final public authorization.",
+      );
+    }
     const issueBindingSha256 = submissionRoute.issueBinding
       ? hashSubmissionArtifact(submissionRoute.issueBinding)
       : undefined;
@@ -196,6 +206,14 @@ export class SubmissionIntentService {
       );
     }
     const body = storedBody;
+    if (
+      submissionRoute.route === "PRIVATE_SECURITY" &&
+      hasPublicIssueReference(body)
+    ) {
+      throw new Error(
+        "PrivateSecurityIssueReferenceError: private security PR drafts must not reference a public GitHub Issue.",
+      );
+    }
 
     const title = governanceResult.data.prTitle;
     if (

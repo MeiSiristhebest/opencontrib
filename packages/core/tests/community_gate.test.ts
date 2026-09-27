@@ -137,6 +137,15 @@ Issues submitted Friday through Sunday are not guaranteed to be reviewed until t
     expect(mixedClauses.requiresDco).toBe(true);
     expect(mixedClauses.requiresAiDisclosure).toBe(true);
 
+    const requiredAfterAnd = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "AI disclosure is optional for docs-only changes, and AI-assisted contributions must be disclosed.",
+      },
+    ]);
+    expect(requiredAfterAnd.requiresAiDisclosure).toBe(true);
+
     const dcoOnly = detectCommunityGateFromContents([
       {
         path: "CONTRIBUTING.md",

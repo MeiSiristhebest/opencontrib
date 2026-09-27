@@ -65,6 +65,10 @@ describe("Sandbox Runtime & Environment Security Hardening", () => {
       expect(sanitized.OPENAI_API_KEY).toBeUndefined();
       expect(sanitized.GITHUB_TOKEN).toBeUndefined();
       expect(sanitized.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+      expect(sanitized.APPDATA).toBeUndefined();
+      expect(sanitized.AppData).toBeUndefined();
+      expect(sanitized.LOCALAPPDATA).toBeUndefined();
+      expect(sanitized.LocalAppData).toBeUndefined();
     } finally {
       rmSync(mockTempDir, { recursive: true, force: true });
     }

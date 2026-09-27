@@ -2,6 +2,7 @@
 
 import "./bootstrap-home.js";
 import { Command } from "commander";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -144,11 +145,13 @@ function checkDirectEntry(): boolean {
     return false;
   }
   try {
-    const fs = require("node:fs");
-    const scriptReal = fs.realpathSync(path.resolve(process.argv[1])).toLowerCase();
-    const moduleReal = fs.realpathSync(fileURLToPath(import.meta.url)).toLowerCase();
+    const scriptReal = realpathSync(path.resolve(process.argv[1])).toLowerCase();
+    const moduleReal = realpathSync(fileURLToPath(import.meta.url)).toLowerCase();
     if (scriptReal === moduleReal) return true;
-  } catch {}
+  } catch (error) {
+    if (error instanceof Error) return false;
+    throw error;
+  }
 
   const normalizedArgv1 = process.argv[1].replace(/\\/g, "/").toLowerCase();
   const normalizedModule = fileURLToPath(import.meta.url)

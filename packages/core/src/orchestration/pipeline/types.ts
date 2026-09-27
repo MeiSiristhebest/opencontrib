@@ -38,6 +38,7 @@ import type { ProfileFlywheel } from "../../flywheel/profile-sync.js";
 import type { ContributionPrService } from "../../github/contribution-pr-service.js";
 import type { SubmissionPort } from "../../github/submission-port.js";
 import type { IssueCreationService } from "../../github/issue-creation-service.js";
+import type { SecurityPolicyProvider } from "../../github/security-disclosure-service.js";
 import type { ContributionRunManager } from "../../run/run-manager.js";
 import type {
   ApprovalArtifactVerifier,
@@ -64,6 +65,8 @@ export type OrchestratorSubagentReview =
 /** Injected collaborators. The orchestrator supplies real impls; tests supply doubles. */
 export interface PipelineDeps {
   client: GitHubClient;
+  /** Read-only host provider for private security lifecycle verification. */
+  securityPolicyProvider?: SecurityPolicyProvider;
   llmService?: LLMService;
   memory: RepoMemoryLedger;
   flywheel: ProfileFlywheel;

@@ -24,6 +24,15 @@ export function hashSubmissionArtifact(value: unknown): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+/** Detect GitHub Issue URLs and shorthand references such as `owner/repo#42`. */
+export function hasPublicIssueReference(body: string): boolean {
+  return (
+    /(?:https?:\/\/)?(?:www\.)?github\.com\/[^\s/]+\/[^\s/#]+\/issues\/\d+\b/i.test(
+      body,
+    ) || /(?:^|[^\w])(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+\b/.test(body)
+  );
+}
+
 /**
  * Resolve the only submission route permitted by the pinned workspace policy.
  * Discovery metadata and manifest.issueNumber are intentionally not inputs.

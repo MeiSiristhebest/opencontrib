@@ -118,10 +118,6 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       "GOBIN",
       "GOCACHE",
       "GOMODCACHE",
-      "LOCALAPPDATA",
-      "LocalAppData",
-      "APPDATA",
-      "AppData",
       // Rust toolchain
       "CARGO_HOME",
       "RUSTUP_HOME",
@@ -171,7 +167,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
     sanitizedEnv["GIT_TERMINAL_PROMPT"] = "0";
     sanitizedEnv["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
     sanitizedEnv["NEXT_TELEMETRY_DISABLED"] = "1";
-    if (!sanitizedEnv["GOCACHE"] && !sanitizedEnv["LOCALAPPDATA"]) {
+    if (!sanitizedEnv["GOCACHE"]) {
       sanitizedEnv["GOCACHE"] = join(sandboxTempDir, "go-build");
     }
 

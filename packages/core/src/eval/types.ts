@@ -136,7 +136,7 @@ export interface BenchmarkResult {
    *  Renamed from `phaseGatingVerified` — it only proves action ordering, not
    *  that canonical phase gates were truly enforced. */
   actionSequenceVerified: boolean;
-  /** True when transcript actions are cross-validated against run events/artifacts. */
-  runBundleVerified?: boolean;
+  /** True only when transcript actions are cross-validated against run events/artifacts. */
+  runBundleVerified: boolean;
   errors: string[];
 }

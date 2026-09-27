@@ -1,3 +1,5 @@
+export const RUN_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
 export type ContributionRunPhase =
   | "INITIALIZED"
   | "OPPORTUNITY_SCOUTED"

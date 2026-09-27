@@ -32,10 +32,11 @@ import {
   type ProtocolContractPhase,
 } from '../workflow/protocol-contract.js';
 import {
+  hasPublicIssueReference,
   hasPublicSecurityDisclosureAuthorization,
   resolveCanonicalSubmissionRoute,
 } from '../submission/submission-route.js';
-import type { ContributionRunSummary } from '../run/types.js';
+import { RUN_ID_PATTERN, type ContributionRunSummary } from '../run/types.js';
 
 // ─── Canonical action definitions (derived from PROTOCOL_CONTRACT_PHASES) ────
 
@@ -325,6 +326,15 @@ function validateSubmissionRouteBinding(bundle: BenchmarkBundle): string[] {
         `${label}.submissionRoute does not match the canonical ${canonicalRoute.route} route.`,
       );
     }
+    if (
+      canonicalRoute.route === "PRIVATE_SECURITY" &&
+      typeof artifact.body === "string" &&
+      hasPublicIssueReference(artifact.body)
+    ) {
+      errors.push(
+        `${label}.body contains a public Issue reference on a PRIVATE_SECURITY route.`,
+      );
+    }
     if (!expectedRouteHash || artifact[routeHashKey] !== expectedRouteHash) {
       const artifactName =
         canonicalRoute.route === "PUBLIC_ISSUE"
@@ -566,8 +576,12 @@ export function crossValidateWithBundle(
 ): { verified: boolean; errors: string[] } {
   const errors: string[] = [];
 
-  if (!bundle.manifest?.runId || !bundle.manifest.currentPhase) {
-    errors.push('Canonical manifest is required and must contain runId and currentPhase.');
+  if (
+    !bundle.manifest?.runId ||
+    !RUN_ID_PATTERN.test(bundle.manifest.runId) ||
+    !bundle.manifest.currentPhase
+  ) {
+    errors.push('Canonical manifest is required and must contain a valid runId and currentPhase.');
   } else if (!Object.prototype.hasOwnProperty.call(PROTOCOL_CONTRACT_PHASES, bundle.manifest.currentPhase)) {
     errors.push(`Canonical manifest currentPhase is unknown: ${bundle.manifest.currentPhase}.`);
   }
@@ -777,7 +791,7 @@ export function executeBenchmarkScenario(
   }
 
   // 4. Cross-validate with run bundle (if provided).
-  let runBundleVerified: boolean | undefined;
+  let runBundleVerified = false;
   if (bundle) {
     const { verified, errors: bundleErrors } = crossValidateWithBundle(
       executedActions,
@@ -785,6 +799,10 @@ export function executeBenchmarkScenario(
     );
     runBundleVerified = verified;
     errors.push(...bundleErrors);
+  } else {
+    errors.push(
+      "Canonical run bundle is required to verify benchmark actions against run events and artifacts.",
+    );
   }
 
   const missingActionErrors = errors.filter((e) =>
