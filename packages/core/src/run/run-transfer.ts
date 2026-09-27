@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { RedEvidenceSchema } from "../contracts/schemas.js";
 import { CodeChangeFileSchema } from "../contracts/llm-schemas.js";
+import { RUN_ID_PATTERN } from "./types.js";
 import type {
   ContributionRunManifest,
   ContributionRunSummary,
@@ -19,7 +20,7 @@ export const RunTransferBundleSchema = z.object({
   protocolVersion: z.literal("1.0"),
   manifest: z.object({
     schemaVersion: z.string(),
-    runId: z.string().regex(/^[A-Za-z0-9_-]+$/),
+    runId: z.string().regex(RUN_ID_PATTERN),
     repoFullName: z.string().regex(/^[^/\s]+\/[^/\s]+$/),
     issueNumber: z.number().optional(),
     issueTitle: z.string().optional(),

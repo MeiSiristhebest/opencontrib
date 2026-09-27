@@ -30,6 +30,7 @@ import {
   createBenchmarkFixture,
   runPiAdversarialScenario,
   PiAgentRunner,
+  RUN_ID_PATTERN,
   type AdversarialScenarioId,
 } from "@opencontrib/core";
 import type { BenchmarkBundle, TrajectoryEvent } from "@opencontrib/core";
@@ -138,8 +139,14 @@ function readRunBundle(bundleDir: string): BenchmarkBundle {
   } else {
     try {
       const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-      if (typeof m.runId !== "string" || typeof m.currentPhase !== "string") {
-        parseErrors.push("manifest.json must contain string runId and currentPhase");
+      if (
+        typeof m.runId !== "string" ||
+        !RUN_ID_PATTERN.test(m.runId) ||
+        typeof m.currentPhase !== "string"
+      ) {
+        parseErrors.push(
+          "manifest.json must contain a valid runId and string currentPhase",
+        );
       } else {
         manifest = {
           runId: m.runId,
@@ -555,7 +562,7 @@ const benchmarkCommand = new Command("benchmark")
             stepsTaken: number;
             durationMs: number;
             actionSequenceVerified: boolean;
-            runBundleVerified?: boolean;
+            runBundleVerified: boolean;
             errors: string[];
           }[];
           appliedPatch?: string;

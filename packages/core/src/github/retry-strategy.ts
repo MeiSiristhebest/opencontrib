@@ -11,6 +11,20 @@ export function mapErrorToApiStatus(err: any): {
   isRetryable: boolean;
 } {
   const status = err?.status || err?.statusCode;
+  if (typeof status === 'string') {
+    switch (status) {
+      case 'NOT_FOUND':
+        return { status, isRetryable: false };
+      case 'FORBIDDEN':
+        return { status, isRetryable: false };
+      case 'RATE_LIMITED':
+      case 'NETWORK_ERROR':
+      case 'UNKNOWN_ERROR':
+        return { status, isRetryable: true };
+      default:
+        break;
+    }
+  }
   if (status === 404) return { status: 'NOT_FOUND', statusCode: 404, isRetryable: false };
   if (status === 401) return { status: 'FORBIDDEN', statusCode: 401, isRetryable: false };
   if (status === 403) {

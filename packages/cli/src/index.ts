@@ -2,6 +2,7 @@
 
 import "./bootstrap-home.js";
 import { Command } from "commander";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -25,6 +26,7 @@ import { submissionCommand } from "./commands/submission.js";
 import { displayFirstRunBannerIfNeeded } from "./utils/banner.js";
 import { sendAnonymousPing } from "./utils/telemetry.js";
 import { CliExitError } from "./utils/exit.js";
+import { isTestEntrypoint } from "./utils/entrypoint.js";
 
 export const program = new Command();
 
@@ -132,23 +134,18 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 // arguments or terminating the importing process.
 function checkDirectEntry(): boolean {
   if (typeof process.argv[1] !== "string" || !process.argv[1]) return false;
-  if (
-    process.env.NODE_ENV === "test" ||
-    process.argv.some(
-      (arg) =>
-        arg.includes("test") ||
-        arg.endsWith(".test.ts") ||
-        arg.endsWith(".spec.ts"),
-    )
-  ) {
+  const normalizedEntry = process.argv[1].replace(/\\/g, "/").toLowerCase();
+  const isTestEntry = isTestEntrypoint(normalizedEntry);
+  if (process.env.NODE_ENV === "test" || isTestEntry) {
     return false;
   }
   try {
-    const fs = require("node:fs");
-    const scriptReal = fs.realpathSync(path.resolve(process.argv[1])).toLowerCase();
-    const moduleReal = fs.realpathSync(fileURLToPath(import.meta.url)).toLowerCase();
+    const scriptReal = realpathSync(path.resolve(process.argv[1])).toLowerCase();
+    const moduleReal = realpathSync(fileURLToPath(import.meta.url)).toLowerCase();
     if (scriptReal === moduleReal) return true;
-  } catch {}
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+  }
 
   const normalizedArgv1 = process.argv[1].replace(/\\/g, "/").toLowerCase();
   const normalizedModule = fileURLToPath(import.meta.url)

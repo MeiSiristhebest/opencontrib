@@ -383,10 +383,38 @@ diff --git a/foo_test.go b/foo_test.go
     expect(check.flaggedTautologicalAssertions[0]).toContain("Tautological error assertion");
 
     const typescriptPatch = `
+diff --git a/packages/core/tests/assertion.test.ts b/packages/core/tests/assertion.test.ts
+--- a/packages/core/tests/assertion.test.ts
++++ b/packages/core/tests/assertion.test.ts
+@@ -1,1 +1,1 @@
 +expect(error.message).toContain("Error:");
 `;
     const checkTypeScript = lintAssertionQuality(typescriptPatch);
     expect(checkTypeScript.isClean).toBe(false);
+
+    for (const testPath of [
+      "src/ParserTest.java",
+      "src/ServiceTests.cs",
+      "src/testParser.ts",
+    ]) {
+      const conventionalTestPatch = `
+diff --git a/${testPath} b/${testPath}
+--- a/${testPath}
++++ b/${testPath}
+@@ -1,1 +1,1 @@
++expect(error.message).toContain("Error:");
+`;
+      expect(lintAssertionQuality(conventionalTestPatch).isClean).toBe(false);
+    }
+
+    const productionComparisonPatch = `
+diff --git a/packages/core/src/error-utils.ts b/packages/core/src/error-utils.ts
+--- a/packages/core/src/error-utils.ts
++++ b/packages/core/src/error-utils.ts
+@@ -1,1 +1,1 @@
++if (!strings.Contains(err.Error(), "error")) return false;
+`;
+    expect(lintAssertionQuality(productionComparisonPatch).isClean).toBe(true);
 
     const concretePatch = `
 diff --git a/foo_test.go b/foo_test.go
@@ -417,7 +445,21 @@ diff --git a/foo_test.go b/foo_test.go
     });
     expect(check.isClean).toBe(false);
     expect(check.flaggedCommentHyperboles.length).toBeGreaterThan(0);
-    expect(check.flaggedCommentHyperboles[0]).toContain("Exaggerated severity in comment");
+    expect(check.flaggedCommentHyperboles[0]).toContain(
+      "Unsubstantiated crash/panic claim in comment",
+    );
+
+    const highExitCodeWithoutCrashEvidence = lintPatchCommentHyperbole(
+      hyperbolePatch,
+      { exitCode: 129, observedOutputSnippet: "process exited with status 129" },
+    );
+    expect(highExitCodeWithoutCrashEvidence.isClean).toBe(false);
+
+    const missingEvidence = lintPatchCommentHyperbole(hyperbolePatch);
+    expect(missingEvidence.isClean).toBe(false);
+    expect(missingEvidence.flaggedCommentHyperboles[0]).toContain(
+      "available RED evidence does not establish",
+    );
 
     // Clean factual comment
     const factualPatch = `

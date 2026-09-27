@@ -116,6 +116,14 @@ export class GitHubClient {
     return this.source.createIssue(owner, repo, input);
   }
 
+  getRepoTextFileResult(
+    owner: string,
+    repo: string,
+    path: string,
+  ): Promise<ApiResult<string | null>> {
+    return this.source.getRepoTextFileResult(owner, repo, path);
+  }
+
   getRepoTextFile(
     owner: string,
     repo: string,

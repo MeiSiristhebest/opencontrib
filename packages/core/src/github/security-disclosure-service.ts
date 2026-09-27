@@ -7,7 +7,8 @@ import {
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import { hasPublicSecurityDisclosureAuthorization } from "../submission/submission-route.js";
-import type { ApiResult } from "./types.js";
+import { mapErrorToApiStatus } from "./retry-strategy.js";
+import type { ApiResult, ApiStatus } from "./types.js";
 
 export type SecurityDisclosureStage =
   | "CHANNEL_DISCOVERED"
@@ -23,6 +24,12 @@ export interface ProviderSecurityDisclosureStatus {
 
 export interface SecurityPolicyProvider {
   getRepoTextFile(owner: string, repo: string, path: string): Promise<string | null>;
+  /** Optional status-preserving adapter used when provider lookup fails. */
+  getRepoTextFileResult?(
+    owner: string,
+    repo: string,
+    path: string,
+  ): Promise<ApiResult<string | null>>;
   /** Optional host/provider integration for append-only lifecycle events. */
   getDisclosureStatus?(
     owner: string,
@@ -34,6 +41,30 @@ export interface SecurityPolicyProvider {
 export interface VerifySecurityDisclosureInput {
   runId: string;
   repoFullName: string;
+}
+
+export class SecurityDisclosureProviderLookupError extends Error {
+  readonly retryable: boolean;
+
+  constructor(readonly status: ApiStatus) {
+    super(
+      `SecurityDisclosureProviderError: disclosure lifecycle lookup failed (${status}).`,
+    );
+    this.name = "SecurityDisclosureProviderLookupError";
+    this.retryable =
+      status === "RATE_LIMITED" ||
+      status === "NETWORK_ERROR" ||
+      status === "UNKNOWN_ERROR";
+  }
+}
+
+export class SecurityDisclosureAuthorizationPendingError extends Error {
+  readonly retryable = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "SecurityDisclosureAuthorizationPendingError";
+  }
 }
 
 /**
@@ -69,7 +100,41 @@ export class SecurityDisclosureService {
 
     let policyContent: string | null = null;
     for (const policyPath of ["SECURITY.md", ".github/SECURITY.md"]) {
-      policyContent = await this.provider.getRepoTextFile(owner, repo, policyPath);
+      try {
+        const response = this.provider.getRepoTextFileResult
+          ? await this.provider.getRepoTextFileResult(owner, repo, policyPath)
+          : await this.provider.getRepoTextFile(owner, repo, policyPath);
+        if (
+          typeof response === "object" &&
+          response !== null &&
+          "status" in response
+        ) {
+          if (response.status === "NOT_FOUND") {
+            policyContent = null;
+            continue;
+          }
+          if (response.status !== "OK") {
+            throw new SecurityDisclosureProviderLookupError(response.status);
+          }
+          policyContent = response.data;
+        } else {
+          policyContent = response;
+        }
+      } catch (error) {
+        if (error instanceof SecurityDisclosureProviderLookupError) {
+          if (error.status === "NOT_FOUND") {
+            policyContent = null;
+            continue;
+          }
+          throw error;
+        }
+        const status = mapErrorToApiStatus(error).status;
+        if (status === "NOT_FOUND") {
+          policyContent = null;
+          continue;
+        }
+        throw new SecurityDisclosureProviderLookupError(status);
+      }
       if (policyContent) break;
     }
     if (!policyContent || !/(?:private|security|vulnerabilit|contact)/i.test(policyContent)) {
@@ -131,14 +196,21 @@ export class SecurityDisclosureService {
     if (!owner || !repo) {
       throw new Error("SecurityDisclosureInputError: repoFullName must be owner/repo.");
     }
-    const response = await this.provider.getDisclosureStatus(
-      owner,
-      repo,
-      input.runId,
-    );
+    let response: ApiResult<ProviderSecurityDisclosureStatus>;
+    try {
+      response = await this.provider.getDisclosureStatus(
+        owner,
+        repo,
+        input.runId,
+      );
+    } catch (error) {
+      throw new SecurityDisclosureProviderLookupError(
+        mapErrorToApiStatus(error).status,
+      );
+    }
     if (response.status !== "OK" || !response.data) {
-      throw new Error(
-        `SecurityDisclosureProviderError: disclosure lifecycle lookup failed (${response.status}).`,
+      throw new SecurityDisclosureProviderLookupError(
+        response.status === "OK" ? "UNKNOWN_ERROR" : response.status,
       );
     }
     const order: Record<SecurityDisclosureStage, number> = {
@@ -247,12 +319,12 @@ export class SecurityDisclosureService {
       run.artifacts.securityDisclosure,
     );
     if (!disclosure.success || disclosure.data.providerVerified !== true) {
-      throw new Error(
+      throw new SecurityDisclosureAuthorizationPendingError(
         "SecurityDisclosureRequiredError: private disclosure policy requires provider-verified security channel evidence before submission.",
       );
     }
     if (!hasPublicSecurityDisclosureAuthorization(run)) {
-      throw new Error(
+      throw new SecurityDisclosureAuthorizationPendingError(
         "PublicDisclosureBlockedError: public submission requires append-only DISCLOSED -> ACKNOWLEDGED -> PUBLIC_FIX_AUTHORIZED provider events; the initial private channel record is not authorization.",
       );
     }

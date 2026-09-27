@@ -99,20 +99,44 @@ export interface AssertionQualityResult {
   flaggedTautologicalAssertions: string[];
 }
 
+function isTestSourcePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  const baseName = normalized.slice(normalized.lastIndexOf("/") + 1);
+  return (
+    /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalized) ||
+    /\.(?:test|spec)\.[^/]+$/.test(baseName) ||
+    /tests?\.[^/]+$/.test(baseName) ||
+    /_test\.[^/]+$/.test(baseName) ||
+    /^test_[^/]+\.[^/]+$/.test(baseName) ||
+    /^test[^/]*\.[^/]+$/.test(baseName)
+  );
+}
+
 /**
  * Hard Assertion Quality Gate (Anti-Tautological Assertion Linter)
  *
- * Detects lazy/tautological assertions added in patch diffs (e.g. asserting purely
+ * Detects lazy/tautological assertions added to test sources (e.g. asserting purely
  * generic tokens like "Error:", "error", "fail", "invalid" without checking concrete
- * error contract messages or domain terms).
+ * error contract messages or domain terms). Production comparisons are not assertions.
  */
 export function lintAssertionQuality(patch: string): AssertionQualityResult {
   const flaggedTautologicalAssertions: string[] = [];
   if (!patch) return { isClean: true, flaggedTautologicalAssertions };
 
   const lines = patch.split("\n");
+  let currentFileIsTest: boolean | undefined;
   for (const line of lines) {
-    if (!line.startsWith("+") || line.startsWith("+++")) continue;
+    if (line.startsWith("+++ ")) {
+      currentFileIsTest = isTestSourcePath(line.slice(4).trim());
+      continue;
+    }
+    if (
+      !line.startsWith("+") ||
+      line.startsWith("+++") ||
+      currentFileIsTest === false
+    ) {
+      continue;
+    }
     const addedContent = line.slice(1).trim();
 
     // Cover two-argument helpers (Go strings.Contains/assertIn) and common
@@ -163,9 +187,9 @@ export interface CommentHyperboleResult {
 /**
  * Patch Comment Severity & Hyperbole Linter
  *
- * Scans code comments added in the diff (//, /*, *, #) for exaggerated claims
- * (e.g. "crashes", "panics", "fatal crash") when RED execution evidence proves
- * the issue was a standard handled error return or normal exit.
+ * Scans code comments added in the diff (//, /*, *, #) for crash/panic claims
+ * (e.g. "crashes", "panics", "fatal crash") that available RED evidence does not
+ * establish. Missing evidence is inconclusive and does not authorize the claim.
  */
 export function lintPatchCommentHyperbole(
   patch: string,
@@ -175,14 +199,12 @@ export function lintPatchCommentHyperbole(
   if (!patch) return { isClean: true, flaggedCommentHyperboles };
 
   const snippet = evidence?.observedOutputSnippet?.toLowerCase() ?? "";
-  const exitCode = evidence?.exitCode;
   const isActualCrashOrPanic =
     snippet.includes("panic:") ||
     snippet.includes("sigsegv") ||
     snippet.includes("segmentation fault") ||
     snippet.includes("fatal error: concurrent map") ||
-    snippet.includes("deadlock") ||
-    (typeof exitCode === "number" && exitCode > 128 && exitCode !== 143);
+    snippet.includes("deadlock");
 
   const lines = patch.split("\n");
   for (const line of lines) {
@@ -211,7 +233,7 @@ export function lintPatchCommentHyperbole(
         for (const pattern of hyperboleWords) {
           if (pattern.test(lower)) {
             flaggedCommentHyperboles.push(
-              `Exaggerated severity in comment: "${addedContent}" (RED evidence indicates handled exit/error, not an unhandled process crash/panic).`,
+              `Unsubstantiated crash/panic claim in comment: "${addedContent}" (available RED evidence does not establish an unhandled process crash/panic).`,
             );
             break;
           }
@@ -653,7 +675,7 @@ export function auditGovernance(
     remediationSuggestions.push(
       ...flaggedCommentHyperboles.map(
         (issue) =>
-          `Comment Severity Gate: ${issue} Replace with factual descriptions such as "fails the tool call with a Go error" or "returns a handled error".`,
+          `Comment Severity Gate: ${issue} Provide RED evidence that establishes an unhandled crash/panic or use factual descriptions such as "fails the tool call with a Go error" or "returns a handled error".`,
       ),
     );
   }

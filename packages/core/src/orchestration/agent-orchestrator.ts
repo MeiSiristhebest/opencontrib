@@ -215,6 +215,7 @@ export class AgentOrchestrator {
       issueCreationService: options.deps?.issueCreationService,
       approvalAuthority: options.deps?.approvalAuthority,
       approvalVerifier: options.deps?.approvalVerifier,
+      securityPolicyProvider: options.deps?.securityPolicyProvider,
     };
   }
 

@@ -127,6 +127,15 @@ Issues submitted Friday through Sunday are not guaranteed to be reviewed until t
     expect(optional.requiresDco).toBe(false);
     expect(optional.requiresAiDisclosure).toBe(false);
 
+    const coordinatedOptional = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content: "Signed-off-by and AI disclosure are optional.",
+      },
+    ]);
+    expect(coordinatedOptional.requiresDco).toBe(false);
+    expect(coordinatedOptional.requiresAiDisclosure).toBe(false);
+
     const mixedClauses = detectCommunityGateFromContents([
       {
         path: "CONTRIBUTING.md",
@@ -136,6 +145,15 @@ Issues submitted Friday through Sunday are not guaranteed to be reviewed until t
     ]);
     expect(mixedClauses.requiresDco).toBe(true);
     expect(mixedClauses.requiresAiDisclosure).toBe(true);
+
+    const requiredAfterAnd = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "AI disclosure is optional for docs-only changes, and AI-assisted contributions must be disclosed.",
+      },
+    ]);
+    expect(requiredAfterAnd.requiresAiDisclosure).toBe(true);
 
     const dcoOnly = detectCommunityGateFromContents([
       {

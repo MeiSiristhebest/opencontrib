@@ -47,7 +47,7 @@ export function parseTrajectoryFromJSONL(jsonlContentOrPath: string): {
         const duration = tc.durationMs || tc.duration;
         const exitCode = tc.exitCode;
         const output = tc.output || tc.result;
-        const inputRunId = extractRunId(parsedArgs);
+        const inputRunId = extractInputRunId(name, parsedArgs);
         const outputRunId = extractRunId(output);
 
         if (typeof duration === 'number' && duration > 0) {
@@ -258,6 +258,104 @@ function extractRunId(value: unknown): string | undefined {
   for (const key of ['data', 'result', 'manifest', 'run', 'structuredContent', 'content']) {
     const nested = extractRunId(record[key]);
     if (nested) return nested;
+  }
+  return undefined;
+}
+
+function tokenizeCommandLine(command: string): string[] {
+  const tokens: string[] = [];
+  let token = "";
+  let tokenStarted = false;
+  let quote: "'" | '"' | null = null;
+
+  const pushToken = () => {
+    if (tokenStarted) tokens.push(token);
+    token = "";
+    tokenStarted = false;
+  };
+
+  for (let index = 0; index < command.length; index++) {
+    const character = command.charAt(index);
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+        tokenStarted = true;
+        continue;
+      }
+      const next = command[index + 1];
+      if (character === "\\" && (next === quote || next === "\\")) {
+        token += next;
+        tokenStarted = true;
+        index++;
+        continue;
+      }
+      token += character;
+      tokenStarted = true;
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      tokenStarted = true;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      pushToken();
+      continue;
+    }
+    const next = command[index + 1];
+    if (character === "\\" && next && /[\s'"\\]/.test(next)) {
+      token += next;
+      tokenStarted = true;
+      index++;
+      continue;
+    }
+    token += character;
+    tokenStarted = true;
+  }
+  if (quote) return [];
+  pushToken();
+  return tokens;
+}
+
+function extractInputRunId(
+  toolName: string,
+  args: unknown,
+): string | undefined {
+  const structuredRunId = extractRunId(args);
+  if (
+    structuredRunId ||
+    toolName !== 'run_command' ||
+    !args ||
+    typeof args !== 'object' ||
+    Array.isArray(args)
+  ) {
+    return structuredRunId;
+  }
+
+  const record = args as Record<string, unknown>;
+  const command = unwrapCommandString(record.CommandLine ?? record.command ?? '');
+  const tokens = tokenizeCommandLine(command);
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index] ?? "";
+    const normalized = token.toLowerCase();
+    let candidate: string | undefined;
+    if (normalized === "--run-id") {
+      candidate = tokens[index + 1];
+      index++;
+    } else if (normalized.startsWith("--run-id=")) {
+      candidate = token.slice("--run-id=".length);
+    } else {
+      continue;
+    }
+
+    if (
+      !candidate ||
+      /^(?:\$[A-Za-z_][A-Za-z0-9_]*|\$\{[^}]+\}|%[^%]+%)$/.test(candidate)
+    ) {
+      return undefined;
+    }
+    return candidate;
   }
   return undefined;
 }

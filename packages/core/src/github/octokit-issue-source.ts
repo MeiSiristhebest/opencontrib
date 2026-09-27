@@ -205,7 +205,11 @@ export class OctokitIssueSource {
     };
   }
 
-  async getRepoTextFile(owner: string, repo: string, path: string): Promise<string | null> {
+  async getRepoTextFileResult(
+    owner: string,
+    repo: string,
+    path: string,
+  ): Promise<ApiResult<string | null>> {
     const res = await this.request(async () => {
       return await this.octokit.rest.repos.getContent({
         owner,
@@ -214,12 +218,37 @@ export class OctokitIssueSource {
       });
     });
 
-    if (res.status !== 'OK' || !res.data) return null;
-    const data = res.data.data;
-    if (Array.isArray(data) || (data as any).type !== 'file' || typeof (data as any).content !== 'string') {
-      return null;
+    if (res.status !== "OK" || !res.data) {
+      return {
+        status: res.status,
+        data: null,
+        error: res.error,
+        statusCode: res.statusCode,
+      };
     }
-    return Buffer.from((data as any).content, 'base64').toString('utf-8').slice(0, 30_000);
+    const data = res.data.data;
+    if (
+      Array.isArray(data) ||
+      (data as any).type !== "file" ||
+      typeof (data as any).content !== "string"
+    ) {
+      return { status: "OK", data: null };
+    }
+    return {
+      status: "OK",
+      data: Buffer.from((data as any).content, "base64")
+        .toString("utf-8")
+        .slice(0, 30_000),
+    };
+  }
+
+  async getRepoTextFile(
+    owner: string,
+    repo: string,
+    path: string,
+  ): Promise<string | null> {
+    const result = await this.getRepoTextFileResult(owner, repo, path);
+    return result.status === "OK" ? result.data : null;
   }
 
   async listWorkflowFiles(owner: string, repo: string): Promise<Array<{ path: string; content: string }>> {

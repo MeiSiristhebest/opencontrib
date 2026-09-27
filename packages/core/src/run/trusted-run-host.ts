@@ -10,6 +10,12 @@ import {
   IssueBindingService,
   type IssueBindingProvider,
 } from "../github/issue-binding-service.js";
+import {
+  SecurityDisclosureAuthorizationPendingError,
+  SecurityDisclosureProviderLookupError,
+  SecurityDisclosureService,
+  type SecurityPolicyProvider,
+} from "../github/security-disclosure-service.js";
 import { EvidenceService } from "../evidence/evidence-service.js";
 import { WorktreeManager } from "../workspace/worktree-manager.js";
 import type { ContributionRunManager } from "./run-manager.js";
@@ -137,6 +143,7 @@ export class TrustedRunMaterializer {
     executionPort?: TrustedExecutionPort,
     executionPolicy?: Partial<EvidenceExecutionPolicy>,
     private readonly issueBindingProvider?: IssueBindingProvider,
+    private readonly securityPolicyProvider?: SecurityPolicyProvider,
   ) {
     this.executionPort = executionPort ?? new DevelopmentUnsafeExecutionPort();
     const dimensions = validateStressDimensions(
@@ -199,11 +206,22 @@ export class TrustedRunMaterializer {
         await import("../workspace/workspace-service.js")
       ).WorkspaceService(this.runManager, this.worktreeManager).prepare({
         runId: bundle.manifest.runId,
-        issueOrTaskId: bundle.manifest.issueNumber ?? "transfer",
+        // The host workspace path uses the opaque run ID; do not propagate an
+        // untrusted public Issue number into private-workflow storage paths.
+        issueOrTaskId: bundle.manifest.runId,
         repoFullName: bundle.manifest.repoFullName,
       });
       allocatedWorkspace = workspaceResult.context;
       const workspace = workspaceResult;
+      if (
+        workspace.artifact.communityGate.policy
+          .privateVulnerabilityDisclosure &&
+        bundle.manifest.issueNumber !== undefined
+      ) {
+        throw new TrustedRunMaterializationError(
+          "private security transfers must use a non-public task identifier and cannot carry a public Issue number.",
+        );
+      }
 
       const patch = this.parsePatch(bundle.patch);
       // Patch and PR draft are proposals. Store the patch only after the
@@ -365,7 +383,47 @@ export class TrustedRunMaterializer {
       );
     }
 
-    if (communityGate.data.policy.privateVulnerabilityDisclosure !== true) {
+    if (communityGate.data.policy.privateVulnerabilityDisclosure === true) {
+      if (run.manifest.issueNumber !== undefined) {
+        throw new TrustedRunMaterializationError(
+          "private security transfers must use a non-public task identifier and cannot carry a public Issue number.",
+        );
+      }
+      if (!this.securityPolicyProvider?.getDisclosureStatus) {
+        throw new TrustedRunMaterializationError(
+          "SecurityDisclosureProviderRequiredError: private transfer requires a trusted provider with disclosure lifecycle status support.",
+        );
+      }
+      const disclosureService = new SecurityDisclosureService(
+        this.runManager,
+        this.securityPolicyProvider,
+      );
+      try {
+        await disclosureService.syncLifecycle({
+          runId,
+          repoFullName: run.manifest.repoFullName,
+        });
+        disclosureService.assertPublicSubmissionAllowed(runId);
+      } catch (error) {
+        if (
+          error instanceof SecurityDisclosureAuthorizationPendingError ||
+          (error instanceof SecurityDisclosureProviderLookupError &&
+            error.retryable)
+        ) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          recordCanonicalRunFailure(
+            this.runManager,
+            runId,
+            message,
+            true,
+            false,
+          );
+          throw new TrustedRunMaterializationError(message, true);
+        }
+        throw error;
+      }
+    } else {
       if (run.manifest.issueNumber === undefined) {
         throw new TrustedRunMaterializationError(
           "IssueBindingRequiredError: public transfer requires a canonical issue number.",

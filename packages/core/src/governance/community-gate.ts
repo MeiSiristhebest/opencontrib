@@ -124,7 +124,7 @@ function findRequiredPolicyMatch(
       ? Math.min(...nextBoundaries)
       : content.length;
     const contrastClauses = Array.from(
-      content.matchAll(/\b(?:but|however|although|except|unless|yet)\b/gi),
+      content.matchAll(/,\s*(?:and|or)\b|\b(?:but|however|although|except|unless|yet)\b/gi),
       (connector) => {
         const start = connector.index ?? 0;
         return { start, end: start + connector[0].length };

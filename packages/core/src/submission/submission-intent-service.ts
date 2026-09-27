@@ -11,6 +11,8 @@ import {
 } from "../contracts/schemas.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 import {
+  hasPublicIssueReference,
+  hasPublicSecurityDisclosureAuthorization,
   hashSubmissionArtifact,
   resolveCanonicalSubmissionRoute,
 } from "./submission-route.js";
@@ -68,6 +70,14 @@ export class SubmissionIntentService {
     }
 
     const submissionRoute = resolveCanonicalSubmissionRoute(run);
+    if (
+      submissionRoute.route === "PRIVATE_SECURITY" &&
+      !hasPublicSecurityDisclosureAuthorization(run)
+    ) {
+      throw new Error(
+        "PublicDisclosureBlockedError: private security submission requires the ordered provider lifecycle DISCLOSED -> ACKNOWLEDGED -> PUBLIC_FIX_AUTHORIZED with final public authorization.",
+      );
+    }
     const issueBindingSha256 = submissionRoute.issueBinding
       ? hashSubmissionArtifact(submissionRoute.issueBinding)
       : undefined;
@@ -82,6 +92,30 @@ export class SubmissionIntentService {
         throw new Error(
           `SubmissionIntentIntegrityError: existing intent for run ${input.runId} is invalid and cannot be replaced.`,
         );
+      }
+      if (submissionRoute.route === "PRIVATE_SECURITY") {
+        const canonicalDraft = run.artifacts.prDraft;
+        if (typeof canonicalDraft !== "string") {
+          throw new Error(
+            "SubmissionIntentIntegrityError: existing private intent has no canonical pr_draft to bind against.",
+          );
+        }
+        if (
+          hasPublicIssueReference(canonicalDraft) ||
+          hasPublicIssueReference(existing.data.body)
+        ) {
+          throw new Error(
+            "PrivateSecurityIssueReferenceError: existing private intent and its canonical pr_draft must not reference a public GitHub Issue.",
+          );
+        }
+        if (
+          existing.data.body !== canonicalDraft ||
+          existing.data.bodySha256 !== sha256(existing.data.body)
+        ) {
+          throw new Error(
+            "SubmissionIntentIntegrityError: existing private intent body is not bound to the canonical pr_draft.",
+          );
+        }
       }
       if (
         input.upstreamOwner.toLowerCase() !==
@@ -196,6 +230,14 @@ export class SubmissionIntentService {
       );
     }
     const body = storedBody;
+    if (
+      submissionRoute.route === "PRIVATE_SECURITY" &&
+      hasPublicIssueReference(body)
+    ) {
+      throw new Error(
+        "PrivateSecurityIssueReferenceError: private security PR drafts must not reference a public GitHub Issue.",
+      );
+    }
 
     const title = governanceResult.data.prTitle;
     if (

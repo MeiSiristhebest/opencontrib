@@ -30,6 +30,17 @@ describe('retry-strategy (GitHubClient split)', () => {
     expect(r.isRetryable).toBe(true);
   });
 
+  it('preserves provider errors that already carry an ApiStatus', () => {
+    expect(mapErrorToApiStatus({ status: 'RATE_LIMITED' })).toEqual({
+      status: 'RATE_LIMITED',
+      isRetryable: true,
+    });
+    expect(mapErrorToApiStatus({ status: 'FORBIDDEN' })).toEqual({
+      status: 'FORBIDDEN',
+      isRetryable: false,
+    });
+  });
+
   it('returns OK on first success', async () => {
     const res = await requestWithRetry(async () => 42);
     expect(res).toEqual({ status: 'OK', data: 42 });

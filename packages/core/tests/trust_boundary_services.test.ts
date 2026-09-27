@@ -23,6 +23,11 @@ import { GovernanceService } from "../src/governance/governance-service.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
 import { SubmissionArtifactSchema } from "../src/contracts/schemas.js";
+import { IssueBindingService } from "../src/github/issue-binding-service.js";
+import { SecurityDisclosureService } from "../src/github/security-disclosure-service.js";
+import { TrustedRunMaterializer } from "../src/run/trusted-run-host.js";
+import { RunTransferBundleSchema } from "../src/run/run-transfer.js";
+import { runBranchName } from "../src/run/run-branch.js";
 import {
   hashCommunityGateSnapshot,
   type CommunityGatePolicy,
@@ -201,7 +206,7 @@ function seedGovernanceReadyRun(
     "workspace",
     {
       workspacePath: "/tmp",
-      branchName: "fixture-branch",
+      branchName: runBranchName(runId),
       baseRepoPath: "/tmp",
       baseBranch: "main",
       baseCommitSha,
@@ -213,7 +218,9 @@ function seedGovernanceReadyRun(
     },
     "WORKSPACE_PREPARED",
   );
-  seedIssueBinding(manager, runId, canonicalRepoFullName);
+  if (communityPolicy.privateVulnerabilityDisclosure !== true) {
+    seedIssueBinding(manager, runId, canonicalRepoFullName);
+  }
   saveCanonicalArtifact(
     manager,
     runId,
@@ -299,6 +306,340 @@ function seedGovernanceReadyRun(
     subagentScore: 100,
   });
 }
+
+describe("Trusted private security materialization", () => {
+  function makeTransferBundle(
+    runId: string,
+    repoFullName: string,
+    issueNumber?: number,
+    prDraft = "Private security contribution details.",
+  ) {
+    return RunTransferBundleSchema.parse({
+      protocolVersion: "1.0",
+      manifest: {
+        schemaVersion: "1.0",
+        runId,
+        repoFullName,
+        issueNumber,
+        createdAt: new Date(0).toISOString(),
+      },
+      patch: JSON.stringify({
+        files: [{ path: "src/fix.ts", content: "fixed" }],
+      }),
+      prDraft,
+      redRecipe: {
+        command: "bun test regression.test.ts",
+        expectedAssertion: "REGRESSION_FAIL",
+        testFiles: ["regression.test.ts"],
+      },
+    });
+  }
+
+  function makeSecurityProvider(
+    getStage: () => "DISCLOSED" | "ACKNOWLEDGED" | "PUBLIC_FIX_AUTHORIZED",
+    shouldRateLimit?: () => boolean,
+  ) {
+    return {
+      getRepoTextFile: async (_owner: string, _repo: string, path: string) =>
+        path === "SECURITY.md"
+          ? "Report vulnerabilities privately through the security channel. Do not open a public issue."
+          : null,
+      getDisclosureStatus: async () => {
+        if (shouldRateLimit?.()) {
+          return { status: "RATE_LIMITED" as const, data: null as never };
+        }
+        const stage = getStage();
+        return {
+          status: "OK" as const,
+          data: {
+            stage,
+            providerEventId: `provider-event-${stage}`,
+            publicDisclosureAllowed: stage === "PUBLIC_FIX_AUTHORIZED",
+          },
+        };
+      },
+    };
+  }
+
+  it("preserves typed statuses from rejected provider lookups", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-provider-status-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
+      const rateLimitError = Object.assign(new Error("rate limited"), {
+        status: 429,
+      });
+      const issueBinding = new IssueBindingService(manager, {
+        getIssue: async () => {
+          throw rateLimitError;
+        },
+      });
+      await expect(
+        issueBinding.bind({
+          runId: manifest.runId,
+          repoFullName: "owner/private-repo",
+          issueNumber: 42,
+        }),
+      ).rejects.toMatchObject({ status: "RATE_LIMITED", retryable: true });
+
+      const policyLookup = new SecurityDisclosureService(manager, {
+        getRepoTextFile: async () => null,
+        getRepoTextFileResult: async () => ({
+          status: "RATE_LIMITED",
+          data: null,
+        }),
+      });
+      await expect(
+        policyLookup.verifyPrivateChannel({
+          runId: manifest.runId,
+          repoFullName: "owner/private-repo",
+        }),
+      ).rejects.toThrow(/RATE_LIMITED/);
+
+      seedGovernanceReadyRun(manager, manifest.runId, "Private fix.", {
+        privateVulnerabilityDisclosure: true,
+      });
+      const policyPaths: string[] = [];
+      const legacyPolicyLookup = new SecurityDisclosureService(manager, {
+        getRepoTextFile: async (_owner, _repo, path) => {
+          policyPaths.push(path);
+          if (path === "SECURITY.md") {
+            throw Object.assign(new Error("policy file not found"), {
+              status: 404,
+            });
+          }
+          return "Report vulnerabilities privately through the security channel.";
+        },
+      });
+      await legacyPolicyLookup.verifyPrivateChannel({
+        runId: manifest.runId,
+        repoFullName: "owner/private-repo",
+      });
+      expect(policyPaths).toEqual(["SECURITY.md", ".github/SECURITY.md"]);
+
+      const forbiddenError = Object.assign(new Error("forbidden"), {
+        status: 403,
+      });
+      const securityDisclosure = new SecurityDisclosureService(manager, {
+        getRepoTextFile: async () =>
+          "Report vulnerabilities privately through the security channel.",
+        getDisclosureStatus: async () => {
+          throw forbiddenError;
+        },
+      });
+      await expect(
+        securityDisclosure.syncLifecycle({
+          runId: manifest.runId,
+          repoFullName: "owner/private-repo",
+        }),
+      ).rejects.toMatchObject({ status: "FORBIDDEN", retryable: false });
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("binds reused private intents to the canonical pr_draft", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-private-intent-draft-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
+      const body = "Private security contribution details.";
+      seedGovernanceReadyRun(manager, manifest.runId, body, {
+        privateVulnerabilityDisclosure: true,
+      });
+
+      let stage: "DISCLOSED" | "ACKNOWLEDGED" | "PUBLIC_FIX_AUTHORIZED" =
+        "DISCLOSED";
+      const disclosureService = new SecurityDisclosureService(
+        manager,
+        makeSecurityProvider(() => stage),
+      );
+      const disclosureInput = {
+        runId: manifest.runId,
+        repoFullName: "owner/private-repo",
+      };
+      await disclosureService.verifyPrivateChannel(disclosureInput);
+      for (const nextStage of [
+        "DISCLOSED",
+        "ACKNOWLEDGED",
+        "PUBLIC_FIX_AUTHORIZED",
+      ] as const) {
+        stage = nextStage;
+        await disclosureService.syncLifecycle(disclosureInput);
+      }
+
+      const intentService = new SubmissionIntentService(manager);
+      const intentInput = {
+        runId: manifest.runId,
+        upstreamOwner: "owner",
+        upstreamRepo: "private-repo",
+      };
+      expect(intentService.createIntent(intentInput).body).toBe(body);
+
+      const prDraftPath = join(baseDir, manifest.runId, "pr_draft.md");
+      writeFileSync(prDraftPath, "Different private draft.");
+      expect(() => intentService.createIntent(intentInput)).toThrow(
+        /existing private intent body is not bound to the canonical pr_draft/,
+      );
+
+      writeFileSync(prDraftPath, "Fixes #42");
+      expect(() => intentService.createIntent(intentInput)).toThrow(
+        /PrivateSecurityIssueReferenceError/,
+      );
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for the complete provider lifecycle before creating a private intent", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-private-materializer-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({
+        repoFullName: "owner/private-repo",
+      });
+      seedGovernanceReadyRun(manager, manifest.runId, "Private security fix.", {
+        privateVulnerabilityDisclosure: true,
+      });
+
+      let stage: "DISCLOSED" | "ACKNOWLEDGED" | "PUBLIC_FIX_AUTHORIZED" =
+        "DISCLOSED";
+      let failFirstLookup = true;
+      const provider = makeSecurityProvider(
+        () => stage,
+        () => {
+          if (!failFirstLookup) return false;
+          failFirstLookup = false;
+          return true;
+        },
+      );
+      const materializer = new TrustedRunMaterializer(
+        manager,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        provider,
+      );
+      const bundle = makeTransferBundle(manifest.runId, "owner/private-repo");
+
+      await expect(materializer.materialize(bundle)).rejects.toThrow(
+        /RATE_LIMITED/,
+      );
+      const retryableRun = manager.getRun(manifest.runId);
+      expect(retryableRun?.manifest.currentPhase).toBe("GOVERNANCE_AUDITED");
+      expect(retryableRun?.artifacts.submissionIntent).toBeUndefined();
+
+      for (const pendingStage of ["DISCLOSED", "ACKNOWLEDGED"] as const) {
+        stage = pendingStage;
+        await expect(materializer.materialize(bundle)).rejects.toThrow(
+          /PublicDisclosureBlockedError/,
+        );
+        const pendingRun = manager.getRun(manifest.runId);
+        expect(pendingRun?.manifest.currentPhase).toBe("GOVERNANCE_AUDITED");
+        expect(pendingRun?.artifacts.submissionIntent).toBeUndefined();
+        expect(pendingRun?.artifacts.issueBinding).toBeUndefined();
+      }
+
+      stage = "PUBLIC_FIX_AUTHORIZED";
+      const finalized = await materializer.materialize(bundle);
+      const intent = finalized.artifacts.submissionIntent as
+        | { submissionRoute?: string }
+        | undefined;
+      expect(intent?.submissionRoute).toBe("PRIVATE_SECURITY");
+      expect(finalized.artifacts.securityDisclosureEvents).toHaveLength(3);
+      expect(finalized.artifacts.issueBinding).toBeUndefined();
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects public Issue identity on a private transfer", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-private-issue-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({
+        repoFullName: "owner/private-repo",
+        issueNumber: 73,
+      });
+      seedGovernanceReadyRun(manager, manifest.runId, "Private security fix.", {
+        privateVulnerabilityDisclosure: true,
+      });
+      let providerLookups = 0;
+      const provider = makeSecurityProvider(() => {
+        providerLookups += 1;
+        return "PUBLIC_FIX_AUTHORIZED";
+      });
+      const materializer = new TrustedRunMaterializer(
+        manager,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        provider,
+      );
+
+      await expect(
+        materializer.materialize(
+          makeTransferBundle(manifest.runId, "owner/private-repo", 73),
+        ),
+      ).rejects.toThrow(/cannot carry a public Issue number/);
+      expect(providerLookups).toBe(0);
+      expect(
+        manager.getRun(manifest.runId)?.artifacts.submissionIntent,
+      ).toBeUndefined();
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("requires disclosure authorization and rejects public Issue references in private drafts", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-private-draft-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
+      seedGovernanceReadyRun(manager, manifest.runId, "Fixes #42", {
+        privateVulnerabilityDisclosure: true,
+      });
+      let stage: "DISCLOSED" | "ACKNOWLEDGED" | "PUBLIC_FIX_AUTHORIZED" =
+        "DISCLOSED";
+      const disclosure = new SecurityDisclosureService(
+        manager,
+        makeSecurityProvider(() => stage),
+      );
+      await disclosure.verifyPrivateChannel({
+        runId: manifest.runId,
+        repoFullName: "owner/private-repo",
+      });
+      const intentService = new SubmissionIntentService(manager);
+      const input = {
+        runId: manifest.runId,
+        upstreamOwner: "owner",
+        upstreamRepo: "private-repo",
+      };
+      expect(() => intentService.createIntent(input)).toThrow(
+        /PublicDisclosureBlockedError/,
+      );
+
+      for (const nextStage of [
+        "DISCLOSED",
+        "ACKNOWLEDGED",
+        "PUBLIC_FIX_AUTHORIZED",
+      ] as const) {
+        stage = nextStage;
+        await disclosure.syncLifecycle({
+          runId: manifest.runId,
+          repoFullName: "owner/private-repo",
+        });
+      }
+      expect(() => intentService.createIntent(input)).toThrow(
+        /PrivateSecurityIssueReferenceError/,
+      );
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("Trust Boundary: Approval & Submission Services with Provenance Gates", () => {
   it("rejects generic saves of authoritative artifacts", () => {

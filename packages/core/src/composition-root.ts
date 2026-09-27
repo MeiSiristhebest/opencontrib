@@ -27,6 +27,7 @@ import {
   type SubmissionPort,
 } from "./github/index.js";
 import { ContributionPrService } from "./github/contribution-pr-service.js";
+import type { SecurityPolicyProvider } from "./github/security-disclosure-service.js";
 import type { GitHubClientOptions } from "./github/types.js";
 import type {
   ApprovalArtifactVerifier,
@@ -92,6 +93,7 @@ export function buildContributionPipeline(
     submissionBrokerEndpoint?: string;
     llmService?: LLMService;
     approvalAuthority?: TrustedApprovalAuthority;
+    securityPolicyProvider?: SecurityPolicyProvider;
   } = {},
 ): ContributionPipeline {
   const client = buildProductionGitHubClient({
@@ -111,6 +113,7 @@ export function buildContributionPipeline(
         options.submissionBrokerEndpoint,
       ),
       approvalAuthority: options.approvalAuthority,
+      securityPolicyProvider: options.securityPolicyProvider,
     },
   });
 }
@@ -131,6 +134,8 @@ export function buildTrustedSubmissionBroker(options: {
   githubHost?: string;
   approvalVerifier: ApprovalArtifactVerifier;
   executionPort: import("./run/trusted-execution.port.js").TrustedExecutionPort;
+  /** Optional trusted provider integration for private security disclosure. */
+  securityPolicyProvider?: SecurityPolicyProvider;
 }): {
   githubClient: GitHubClient;
   runManager: ContributionRunManager;
@@ -158,6 +163,7 @@ export function buildTrustedSubmissionBroker(options: {
     options.executionPort,
     undefined,
     githubClient,
+    options.securityPolicyProvider,
   );
   return {
     githubClient,
@@ -178,6 +184,8 @@ export function buildDevelopmentSubmissionBroker(options: {
   githubToken: string;
   githubHost?: string;
   approvalVerifier: ApprovalArtifactVerifier;
+  /** Optional trusted provider integration for private security disclosure. */
+  securityPolicyProvider?: SecurityPolicyProvider;
 }): {
   githubClient: GitHubClient;
   runManager: ContributionRunManager;
@@ -203,6 +211,7 @@ export function buildProductionCompositionRoot(
     submissionBrokerEndpoint?: string;
     llmService?: LLMService;
     approvalAuthority?: TrustedApprovalAuthority;
+    securityPolicyProvider?: SecurityPolicyProvider;
   } = {},
 ): ProductionCompositionRoot {
   const githubClient = buildProductionGitHubClient({
@@ -222,6 +231,7 @@ export function buildProductionCompositionRoot(
         options.submissionBrokerEndpoint,
       ),
       approvalAuthority: options.approvalAuthority,
+      securityPolicyProvider: options.securityPolicyProvider,
     },
   });
   return {
