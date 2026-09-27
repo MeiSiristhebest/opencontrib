@@ -392,6 +392,21 @@ diff --git a/packages/core/tests/assertion.test.ts b/packages/core/tests/asserti
     const checkTypeScript = lintAssertionQuality(typescriptPatch);
     expect(checkTypeScript.isClean).toBe(false);
 
+    for (const testPath of [
+      "src/ParserTest.java",
+      "src/ServiceTests.cs",
+      "src/testParser.ts",
+    ]) {
+      const conventionalTestPatch = `
+diff --git a/${testPath} b/${testPath}
+--- a/${testPath}
++++ b/${testPath}
+@@ -1,1 +1,1 @@
++expect(error.message).toContain("Error:");
+`;
+      expect(lintAssertionQuality(conventionalTestPatch).isClean).toBe(false);
+    }
+
     const productionComparisonPatch = `
 diff --git a/packages/core/src/error-utils.ts b/packages/core/src/error-utils.ts
 --- a/packages/core/src/error-utils.ts

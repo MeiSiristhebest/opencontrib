@@ -120,9 +120,9 @@ export interface BenchmarkBundle {
   artifacts?: Record<string, unknown>;
   /** Parsing failures are part of the bundle and must fail verification. */
   parseErrors?: string[];
-  /** Event types observed in the run's events.jsonl, keyed by phase. */
+  /** Non-authoritative phase summary for diagnostics; cannot verify a run bundle. */
   eventPhases?: string[];
-  /** Artifact types present in the run bundle directory. */
+  /** Non-authoritative file-type summary for diagnostics; cannot verify artifacts. */
   artifactTypes?: string[];
 }
 

@@ -24,13 +24,40 @@ export function hashSubmissionArtifact(value: unknown): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-/** Detect GitHub Issue URLs and shorthand references such as `owner/repo#42`. */
+/** Detect exact public GitHub Issue URLs and shorthand references such as `owner/repo#42`. */
 export function hasPublicIssueReference(body: string): boolean {
-  return (
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/[^\s/]+\/[^\s/#]+\/issues\/\d+\b/i.test(
-      body,
-    ) || /(?:^|[^\w])(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+\b/.test(body)
+  const issueUrls = body.matchAll(
+    /(?:https?:\/\/)?(?:www\.)?github\.com\/[^\s/?#]+\/[^\s/?#]+\/issues\/\d+\b/gi,
   );
+  for (const match of issueUrls) {
+    const start = match.index ?? 0;
+    const precedingCharacter = body[start - 1] ?? "";
+    if (
+      start > 0 &&
+      precedingCharacter !== "[" &&
+      !/[\s(<{\"'`]/.test(precedingCharacter)
+    ) {
+      continue;
+    }
+
+    try {
+      const candidate = /^https?:\/\//i.test(match[0])
+        ? match[0]
+        : `https://${match[0]}`;
+      const url = new URL(candidate);
+      if (
+        (url.hostname.toLowerCase() === "github.com" ||
+          url.hostname.toLowerCase() === "www.github.com") &&
+        /^\/[^/]+\/[^/]+\/issues\/\d+\b/i.test(url.pathname)
+      ) {
+        return true;
+      }
+    } catch {
+      // Malformed URL-like text is not provider-bound Issue evidence.
+    }
+  }
+
+  return /(?:^|[^\w])(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+\b/.test(body);
 }
 
 /**

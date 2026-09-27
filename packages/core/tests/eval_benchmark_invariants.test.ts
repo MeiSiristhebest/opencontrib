@@ -11,7 +11,10 @@ import {
 } from '../src/eval/benchmark-runner.js';
 import { parseTrajectoryFromJSONL } from '../src/eval/trajectory-parser.js';
 import type { BenchmarkBundle, ProtocolAction } from '../src/eval/types.js';
-import { hashSubmissionArtifact } from '../src/submission/submission-route.js';
+import {
+  hasPublicIssueReference,
+  hashSubmissionArtifact,
+} from '../src/submission/submission-route.js';
 
 function communityGateSnapshot(privateVulnerabilityDisclosure: boolean) {
   return {
@@ -76,6 +79,44 @@ function makeAction(action: string, stepIndex: number, runId?: string): Protocol
     outputRunId: action === "CREATE_RUN" ? runId : undefined,
   };
 }
+
+function makeRunEvents(
+  runId: string,
+  phases: string[],
+): NonNullable<BenchmarkBundle["events"]> {
+  return phases.map((phase, index) => ({
+    eventId: `event-${index + 1}`,
+    runId,
+    timestamp: new Date(index * 1000).toISOString(),
+    phase,
+    eventType: index === 0 ? "RUN_CREATED" : "PHASE_TRANSITION",
+    ...(index === 0
+      ? {}
+      : {
+          payload: {
+            fromPhase: phases[index - 1] ?? phase,
+            toPhase: phase,
+          },
+        }),
+  }));
+}
+
+describe("Public Issue reference detection", () => {
+  it("requires a real github.com host boundary for Issue URLs", () => {
+    expect(
+      hasPublicIssueReference("See https://github.com/owner/repo/issues/42"),
+    ).toBe(true);
+    expect(
+      hasPublicIssueReference("https://notgithub.com/owner/repo/issues/42"),
+    ).toBe(false);
+    expect(
+      hasPublicIssueReference(
+        "https://evil.example/path/github.com/owner/repo/issues/42",
+      ),
+    ).toBe(false);
+    expect(hasPublicIssueReference("owner/repo#42")).toBe(true);
+  });
+});
 
 describe("Benchmark canonical invariants", () => {
   it("CREATE_RUN must be the first protocol action", () => {
@@ -316,10 +357,11 @@ describe("Run bundle cross-validation", () => {
       makeAction("SUBMIT_PR", 2),
     ];
 
-    // Bundle has events but missing RED_CAPTURED and PR_SUBMITTED phases
+    // Canonical events exist, but RED_CAPTURED and PR_SUBMITTED are absent.
     const bundle: BenchmarkBundle = {
-      eventPhases: ["INITIALIZED"],
-      artifactTypes: ["workspace"],
+      manifest: { runId: "run_phase_missing", currentPhase: "INITIALIZED" },
+      events: makeRunEvents("run_phase_missing", ["INITIALIZED"]),
+      artifacts: { workspace: { runId: "run_phase_missing" } },
     };
 
     const { verified, errors } = crossValidateWithBundle(actions, bundle);
@@ -336,16 +378,17 @@ describe("Run bundle cross-validation", () => {
       makeAction("VERIFY_GREEN", 3),
     ];
 
-    // Bundle has events but missing evidence_red, patch, evidence artifacts
+    // Canonical events exist, but evidence_red, patch, and evidence are missing.
     const bundle: BenchmarkBundle = {
       manifest: { runId: "run_valid", currentPhase: "EVIDENCE_COLLECTED" },
-      eventPhases: [
+      events: makeRunEvents("run_valid", [
         "INITIALIZED",
+        "WORKSPACE_PREPARED",
         "RED_CAPTURED",
         "PATCH_DRAFTED",
         "EVIDENCE_COLLECTED",
-      ],
-      artifactTypes: ["workspace"], // missing evidence_red, patch, evidence
+      ]),
+      artifacts: { workspace: { runId: "run_valid" } },
     };
 
     const { verified, errors } = crossValidateWithBundle(actions, bundle);
@@ -355,28 +398,42 @@ describe("Run bundle cross-validation", () => {
     expect(errors.some((e) => e.includes("evidence"))).toBe(true);
   });
 
-  it("Valid bundle passes cross-validation", () => {
-    const actions: ProtocolAction[] = [
-      makeAction("CREATE_RUN", 0, "run_valid"),
-      makeAction("CAPTURE_RED", 1, "run_valid"),
-      makeAction("SAVE_ARTIFACT", 2, "run_valid"),
-      makeAction("VERIFY_GREEN", 3, "run_valid"),
-    ];
-
+  it("accepts actual canonical events and artifacts", () => {
+    const runId = "run_valid";
+    const actions = [makeAction("CREATE_RUN", 0, runId)];
     const bundle: BenchmarkBundle = {
-      manifest: { runId: "run_valid", currentPhase: "EVIDENCE_COLLECTED" },
-      eventPhases: [
-        "INITIALIZED",
-        "RED_CAPTURED",
-        "PATCH_DRAFTED",
-        "EVIDENCE_COLLECTED",
-      ],
-      artifactTypes: ["workspace", "evidence_red", "patch", "evidence", "validated_patch"],
+      manifest: { runId, currentPhase: "INITIALIZED" },
+      events: makeRunEvents(runId, ["INITIALIZED"]),
+      artifacts: { workspace: { runId } },
     };
 
     const { verified, errors } = crossValidateWithBundle(actions, bundle);
     expect(verified).toBe(true);
     expect(errors).toHaveLength(0);
+  });
+
+  it("never verifies a metadata-only bundle", () => {
+    const runId = "run_metadata_only";
+    const scenario = STANDARD_BENCHMARK_SCENARIOS[0];
+    const actions = scenario.requiredActions.map((action, index) =>
+      makeAction(action, index, runId),
+    );
+    const result = executeBenchmarkScenario(
+      scenario,
+      actions,
+      actions.length,
+      0,
+      {
+        manifest: { runId, currentPhase: "PR_SUBMITTED", repoFullName: "owner/repo" },
+        eventPhases: scenario.requiredActions,
+        artifactTypes: ["workspace", "evidence_red", "patch", "evidence"],
+      },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.runBundleVerified).toBe(false);
+    expect(result.errors.some((error) => error.includes("actual canonical events"))).toBe(true);
+    expect(result.errors.some((error) => error.includes("parsed artifacts"))).toBe(true);
   });
 
   it("accepts the private security route only with provider lifecycle authorization", () => {
@@ -412,6 +469,28 @@ describe("Run bundle cross-validation", () => {
       "securityDisclosureSha256",
       hashSubmissionArtifact(disclosure),
     );
+    const submission = {
+      runId,
+      provider: "github" as const,
+      owner: "owner",
+      repo: "repo",
+      baseBranch: "main",
+      baseCommitSha: "a".repeat(40),
+      branchName: `opencontrib/${runId}`,
+      intentSha256: intent.intentSha256,
+      patchSha256: intent.patchSha256,
+      evidenceSha256: intent.evidenceSha256,
+      governanceSha256: intent.governanceSha256,
+      policySha256: intent.policySha256,
+      communityGateSha256: "b".repeat(64),
+      submissionRoute: "PRIVATE_SECURITY" as const,
+      securityDisclosureSha256: hashSubmissionArtifact(disclosure),
+      prNumber: 1,
+      prUrl: "https://github.com/owner/repo/pull/1",
+      headSha: "c".repeat(40),
+      submittedAt: new Date(0).toISOString(),
+      verified: true as const,
+    };
     const privateRouteBundle: BenchmarkBundle = {
       manifest: {
         runId,
@@ -441,15 +520,9 @@ describe("Run bundle cross-validation", () => {
         security_disclosure: disclosure,
         security_disclosure_events: events,
         submission_intent: intent,
+        submission,
+        pr_draft: intent.body,
       },
-      artifactTypes: [
-        "workspace",
-        "submission_intent",
-        "approval",
-        "submission",
-        "security_disclosure",
-        "security_disclosure_event",
-      ],
     };
     const result = crossValidateWithBundle(
       [makeAction("SUBMIT_PR", 0, runId)],
@@ -465,7 +538,11 @@ describe("Run bundle cross-validation", () => {
         ...privateRouteBundle,
         artifacts: {
           ...privateRouteBundle.artifacts,
-          submission_intent: { ...intent, body: "Fixes #42" },
+          submission_intent: {
+            ...intent,
+            body: "Fixes #42",
+            bodySha256: hashSubmissionArtifact("Fixes #42"),
+          },
         },
       },
     );
@@ -473,6 +550,23 @@ describe("Run bundle cross-validation", () => {
     expect(
       issueReferencingResult.errors.some((error) =>
         error.includes("body contains a public Issue reference"),
+      ),
+    ).toBe(true);
+
+    const issueReferencingDraftResult = crossValidateWithBundle(
+      [makeAction("SUBMIT_PR", 0, runId)],
+      {
+        ...privateRouteBundle,
+        artifacts: {
+          ...privateRouteBundle.artifacts,
+          pr_draft: "Fixes #42",
+        },
+      },
+    );
+    expect(issueReferencingDraftResult.verified).toBe(false);
+    expect(
+      issueReferencingDraftResult.errors.some((error) =>
+        error.includes("pr_draft contains a public Issue reference"),
       ),
     ).toBe(true);
   });
@@ -487,7 +581,16 @@ describe("Run bundle cross-validation", () => {
           currentPhase: "PR_SUBMITTED",
           repoFullName: "owner/repo",
         },
-        eventPhases: ["PR_SUBMITTED"],
+        events: [
+          {
+            eventId: "public-event-1",
+            runId,
+            timestamp: new Date(0).toISOString(),
+            phase: "PR_SUBMITTED",
+            eventType: "ARTIFACT_SAVED",
+            payload: { artifactType: "submission" },
+          },
+        ],
         artifacts: {
           workspace: { communityGate: communityGateSnapshot(false) },
           submission_intent: makeSubmissionIntent(
@@ -497,7 +600,6 @@ describe("Run bundle cross-validation", () => {
             "a".repeat(64),
           ),
         },
-        artifactTypes: ["workspace", "submission_intent", "submission"],
       },
     );
 
@@ -517,7 +619,8 @@ describe("Run bundle cross-validation", () => {
 
     const { verified, errors } = crossValidateWithBundle(actions, bundle);
     expect(verified).toBe(false);
-    expect(errors[0]).toContain("No run events");
+    expect(errors.some((error) => error.includes("No run events"))).toBe(true);
+    expect(errors.some((error) => error.includes("parsed artifacts"))).toBe(true);
   });
 
   it("Bundle cross-validation integrates with full scenario execution", () => {
@@ -723,7 +826,7 @@ describe("Canonical run identity", () => {
       {
         manifest: { runId: "run_dag", currentPhase: "RED_CAPTURED" },
         events: validEvents,
-        artifactTypes: ["workspace"],
+        artifacts: { workspace: { runId: "run_dag" } },
       },
     );
     expect(valid.verified).toBe(true);
@@ -747,7 +850,7 @@ describe("Canonical run identity", () => {
             payload: { fromPhase: "RED_CAPTURED", toPhase: "POC_GENERATED" },
           },
         ],
-        artifactTypes: ["workspace"],
+        artifacts: { workspace: { runId: "run_dag" } },
       },
     );
     expect(invalid.verified).toBe(false);

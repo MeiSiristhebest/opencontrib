@@ -93,6 +93,30 @@ export class SubmissionIntentService {
           `SubmissionIntentIntegrityError: existing intent for run ${input.runId} is invalid and cannot be replaced.`,
         );
       }
+      if (submissionRoute.route === "PRIVATE_SECURITY") {
+        const canonicalDraft = run.artifacts.prDraft;
+        if (typeof canonicalDraft !== "string") {
+          throw new Error(
+            "SubmissionIntentIntegrityError: existing private intent has no canonical pr_draft to bind against.",
+          );
+        }
+        if (
+          hasPublicIssueReference(canonicalDraft) ||
+          hasPublicIssueReference(existing.data.body)
+        ) {
+          throw new Error(
+            "PrivateSecurityIssueReferenceError: existing private intent and its canonical pr_draft must not reference a public GitHub Issue.",
+          );
+        }
+        if (
+          existing.data.body !== canonicalDraft ||
+          existing.data.bodySha256 !== sha256(existing.data.body)
+        ) {
+          throw new Error(
+            "SubmissionIntentIntegrityError: existing private intent body is not bound to the canonical pr_draft.",
+          );
+        }
+      }
       if (
         input.upstreamOwner.toLowerCase() !==
           existing.data.upstreamOwner.toLowerCase() ||

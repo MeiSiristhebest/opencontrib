@@ -54,4 +54,24 @@ describe('trajectory parser CLI run identity', () => {
     expect(actions).toHaveLength(1);
     expect(actions[0]?.inputRunId).toBeUndefined();
   });
+
+  it('does not extract --run-id from a nested test command', () => {
+    const transcript = JSON.stringify({
+      step_index: 0,
+      type: 'PLANNER_RESPONSE',
+      tool_calls: [
+        {
+          name: 'run_command',
+          args: {
+            CommandLine:
+              'opencontrib evidence capture-red --test-cmd "echo --run-id nested_run"',
+          },
+        },
+      ],
+    });
+
+    const { actions } = parseTrajectoryFromJSONL(transcript);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]?.inputRunId).toBeUndefined();
+  });
 });

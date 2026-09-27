@@ -23,6 +23,7 @@ import { GovernanceService } from "../src/governance/governance-service.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
 import { SubmissionArtifactSchema } from "../src/contracts/schemas.js";
+import { IssueBindingService } from "../src/github/issue-binding-service.js";
 import { SecurityDisclosureService } from "../src/github/security-disclosure-service.js";
 import { TrustedRunMaterializer } from "../src/run/trusted-run-host.js";
 import { RunTransferBundleSchema } from "../src/run/run-transfer.js";
@@ -359,6 +360,118 @@ describe("Trusted private security materialization", () => {
       },
     };
   }
+
+  it("preserves typed statuses from rejected provider lookups", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-provider-status-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
+      const rateLimitError = Object.assign(new Error("rate limited"), {
+        status: 429,
+      });
+      const issueBinding = new IssueBindingService(manager, {
+        getIssue: async () => {
+          throw rateLimitError;
+        },
+      });
+      await expect(
+        issueBinding.bind({
+          runId: manifest.runId,
+          repoFullName: "owner/private-repo",
+          issueNumber: 42,
+        }),
+      ).rejects.toMatchObject({ status: "RATE_LIMITED", retryable: true });
+
+      const policyLookup = new SecurityDisclosureService(manager, {
+        getRepoTextFile: async () => null,
+        getRepoTextFileResult: async () => ({
+          status: "RATE_LIMITED",
+          data: null,
+        }),
+      });
+      await expect(
+        policyLookup.verifyPrivateChannel({
+          runId: manifest.runId,
+          repoFullName: "owner/private-repo",
+        }),
+      ).rejects.toThrow(/RATE_LIMITED/);
+
+      seedGovernanceReadyRun(manager, manifest.runId, "Private fix.", {
+        privateVulnerabilityDisclosure: true,
+      });
+      const forbiddenError = Object.assign(new Error("forbidden"), {
+        status: 403,
+      });
+      const securityDisclosure = new SecurityDisclosureService(manager, {
+        getRepoTextFile: async () =>
+          "Report vulnerabilities privately through the security channel.",
+        getDisclosureStatus: async () => {
+          throw forbiddenError;
+        },
+      });
+      await expect(
+        securityDisclosure.syncLifecycle({
+          runId: manifest.runId,
+          repoFullName: "owner/private-repo",
+        }),
+      ).rejects.toMatchObject({ status: "FORBIDDEN", retryable: false });
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("binds reused private intents to the canonical pr_draft", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-private-intent-draft-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
+      const body = "Private security contribution details.";
+      seedGovernanceReadyRun(manager, manifest.runId, body, {
+        privateVulnerabilityDisclosure: true,
+      });
+
+      let stage: "DISCLOSED" | "ACKNOWLEDGED" | "PUBLIC_FIX_AUTHORIZED" =
+        "DISCLOSED";
+      const disclosureService = new SecurityDisclosureService(
+        manager,
+        makeSecurityProvider(() => stage),
+      );
+      const disclosureInput = {
+        runId: manifest.runId,
+        repoFullName: "owner/private-repo",
+      };
+      await disclosureService.verifyPrivateChannel(disclosureInput);
+      for (const nextStage of [
+        "DISCLOSED",
+        "ACKNOWLEDGED",
+        "PUBLIC_FIX_AUTHORIZED",
+      ] as const) {
+        stage = nextStage;
+        await disclosureService.syncLifecycle(disclosureInput);
+      }
+
+      const intentService = new SubmissionIntentService(manager);
+      const intentInput = {
+        runId: manifest.runId,
+        upstreamOwner: "owner",
+        upstreamRepo: "private-repo",
+      };
+      expect(intentService.createIntent(intentInput).body).toBe(body);
+
+      const prDraftPath = join(baseDir, manifest.runId, "pr_draft.md");
+      writeFileSync(prDraftPath, "Different private draft.");
+      expect(() => intentService.createIntent(intentInput)).toThrow(
+        /existing private intent body is not bound to the canonical pr_draft/,
+      );
+
+      writeFileSync(prDraftPath, "Fixes #42");
+      expect(() => intentService.createIntent(intentInput)).toThrow(
+        /PrivateSecurityIssueReferenceError/,
+      );
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
 
   it("waits for the complete provider lifecycle before creating a private intent", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-private-materializer-"));

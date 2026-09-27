@@ -389,9 +389,9 @@ export class TrustedRunMaterializer {
           "private security transfers must use a non-public task identifier and cannot carry a public Issue number.",
         );
       }
-      if (!this.securityPolicyProvider) {
+      if (!this.securityPolicyProvider?.getDisclosureStatus) {
         throw new TrustedRunMaterializationError(
-          "SecurityDisclosureProviderRequiredError: private transfer requires a trusted provider for security channel and lifecycle verification.",
+          "SecurityDisclosureProviderRequiredError: private transfer requires a trusted provider with disclosure lifecycle status support.",
         );
       }
       const disclosureService = new SecurityDisclosureService(

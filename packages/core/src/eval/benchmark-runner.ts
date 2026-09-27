@@ -245,15 +245,11 @@ function hashBundleArtifact(value: unknown): string {
 }
 
 function hasBundleArtifact(bundle: BenchmarkBundle, type: string): boolean {
-  if (bundle.artifacts) {
-    if (
+  return Boolean(
+    bundle.artifacts &&
       Object.prototype.hasOwnProperty.call(bundle.artifacts, type) &&
-      bundle.artifacts[type] !== undefined
-    ) {
-      return true;
-    }
-  }
-  return new Set(bundle.artifactTypes ?? []).has(type);
+      bundle.artifacts[type] !== undefined,
+  );
 }
 
 function validateSubmissionRouteBinding(bundle: BenchmarkBundle): string[] {
@@ -289,7 +285,7 @@ function validateSubmissionRouteBinding(bundle: BenchmarkBundle): string[] {
     },
   } as ContributionRunSummary;
 
-  let canonicalRoute;
+  let canonicalRoute: ReturnType<typeof resolveCanonicalSubmissionRoute>;
   try {
     canonicalRoute = resolveCanonicalSubmissionRoute(run);
   } catch (error) {
@@ -303,6 +299,39 @@ function validateSubmissionRouteBinding(bundle: BenchmarkBundle): string[] {
     errors.push(
       "PRIVATE_SECURITY submission requires the ordered provider lifecycle DISCLOSED -> ACKNOWLEDGED -> PUBLIC_FIX_AUTHORIZED with final public authorization.",
     );
+  }
+
+  if (canonicalRoute.route === "PRIVATE_SECURITY") {
+    const canonicalDraft = artifacts.pr_draft;
+    if (typeof canonicalDraft !== "string") {
+      errors.push(
+        "PRIVATE_SECURITY submission requires the canonical pr_draft artifact.",
+      );
+    } else {
+      if (hasPublicIssueReference(canonicalDraft)) {
+        errors.push(
+          "pr_draft contains a public Issue reference on a PRIVATE_SECURITY route.",
+        );
+      }
+      if (!intent || typeof intent.body !== "string") {
+        errors.push(
+          "PRIVATE_SECURITY submission requires a canonical submission_intent body to bind to pr_draft.",
+        );
+      } else if (intent.body !== canonicalDraft) {
+        errors.push(
+          "submission_intent.body does not match the canonical pr_draft artifact on a PRIVATE_SECURITY route.",
+        );
+      }
+      if (
+        submission &&
+        typeof submission.body === "string" &&
+        submission.body !== canonicalDraft
+      ) {
+        errors.push(
+          "submission.body does not match the canonical pr_draft artifact on a PRIVATE_SECURITY route.",
+        );
+      }
+    }
   }
 
   const routeHashKey =
@@ -589,9 +618,16 @@ export function crossValidateWithBundle(
     errors.push(...bundle.parseErrors.map((error) => `Run bundle parse error: ${error}`));
   }
 
-  const eventPhases = bundle.events?.map((event) => event.phase) ?? bundle.eventPhases ?? [];
+  const eventPhases = bundle.events?.map((event) => event.phase) ?? [];
   if (eventPhases.length === 0) {
-    return { verified: false, errors: ['No run events available for cross-validation.'] };
+    errors.push(
+      "No run events available: actual canonical events are required; eventPhases metadata is insufficient.",
+    );
+  }
+  if (!bundle.artifacts || Object.keys(bundle.artifacts).length === 0) {
+    errors.push(
+      "No canonical run artifacts available: parsed artifacts are required; artifactTypes metadata is insufficient.",
+    );
   }
 
   if (bundle.events && bundle.manifest?.runId) {

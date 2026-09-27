@@ -7,6 +7,7 @@ import {
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import { hasPublicSecurityDisclosureAuthorization } from "../submission/submission-route.js";
+import { mapErrorToApiStatus } from "./retry-strategy.js";
 import type { ApiResult, ApiStatus } from "./types.js";
 
 export type SecurityDisclosureStage =
@@ -23,6 +24,12 @@ export interface ProviderSecurityDisclosureStatus {
 
 export interface SecurityPolicyProvider {
   getRepoTextFile(owner: string, repo: string, path: string): Promise<string | null>;
+  /** Optional status-preserving adapter used when provider lookup fails. */
+  getRepoTextFileResult?(
+    owner: string,
+    repo: string,
+    path: string,
+  ): Promise<ApiResult<string | null>>;
   /** Optional host/provider integration for append-only lifecycle events. */
   getDisclosureStatus?(
     owner: string,
@@ -94,13 +101,30 @@ export class SecurityDisclosureService {
     let policyContent: string | null = null;
     for (const policyPath of ["SECURITY.md", ".github/SECURITY.md"]) {
       try {
-        policyContent = await this.provider.getRepoTextFile(
-          owner,
-          repo,
-          policyPath,
+        const response = this.provider.getRepoTextFileResult
+          ? await this.provider.getRepoTextFileResult(owner, repo, policyPath)
+          : await this.provider.getRepoTextFile(owner, repo, policyPath);
+        if (
+          typeof response === "object" &&
+          response !== null &&
+          "status" in response
+        ) {
+          if (response.status === "NOT_FOUND") {
+            policyContent = null;
+            continue;
+          }
+          if (response.status !== "OK") {
+            throw new SecurityDisclosureProviderLookupError(response.status);
+          }
+          policyContent = response.data;
+        } else {
+          policyContent = response;
+        }
+      } catch (error) {
+        if (error instanceof SecurityDisclosureProviderLookupError) throw error;
+        throw new SecurityDisclosureProviderLookupError(
+          mapErrorToApiStatus(error).status,
         );
-      } catch {
-        throw new SecurityDisclosureProviderLookupError("NETWORK_ERROR");
       }
       if (policyContent) break;
     }
@@ -170,8 +194,10 @@ export class SecurityDisclosureService {
         repo,
         input.runId,
       );
-    } catch {
-      throw new SecurityDisclosureProviderLookupError("NETWORK_ERROR");
+    } catch (error) {
+      throw new SecurityDisclosureProviderLookupError(
+        mapErrorToApiStatus(error).status,
+      );
     }
     if (response.status !== "OK" || !response.data) {
       throw new SecurityDisclosureProviderLookupError(

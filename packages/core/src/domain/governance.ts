@@ -105,8 +105,10 @@ function isTestSourcePath(filePath: string): boolean {
   return (
     /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalized) ||
     /\.(?:test|spec)\.[^/]+$/.test(baseName) ||
+    /tests?\.[^/]+$/.test(baseName) ||
     /_test\.[^/]+$/.test(baseName) ||
-    /^test_[^/]+\.[^/]+$/.test(baseName)
+    /^test_[^/]+\.[^/]+$/.test(baseName) ||
+    /^test[^/]*\.[^/]+$/.test(baseName)
   );
 }
 

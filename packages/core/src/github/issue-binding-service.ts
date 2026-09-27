@@ -4,6 +4,7 @@ import {
 } from "../contracts/schemas.js";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
+import { mapErrorToApiStatus } from "./retry-strategy.js";
 import type { ApiResult, ApiStatus, ProviderIssue } from "./types.js";
 
 export interface IssueBindingProvider {
@@ -68,8 +69,10 @@ export class IssueBindingService {
     let response: ApiResult<ProviderIssue>;
     try {
       response = await this.provider.getIssue(owner, repo, input.issueNumber);
-    } catch {
-      throw new IssueBindingProviderLookupError("NETWORK_ERROR");
+    } catch (error) {
+      throw new IssueBindingProviderLookupError(
+        mapErrorToApiStatus(error).status,
+      );
     }
     if (response.status !== "OK" || !response.data) {
       throw new IssueBindingProviderLookupError(

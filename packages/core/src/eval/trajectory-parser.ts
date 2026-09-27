@@ -262,6 +262,61 @@ function extractRunId(value: unknown): string | undefined {
   return undefined;
 }
 
+function tokenizeCommandLine(command: string): string[] {
+  const tokens: string[] = [];
+  let token = "";
+  let tokenStarted = false;
+  let quote: "'" | '"' | null = null;
+
+  const pushToken = () => {
+    if (tokenStarted) tokens.push(token);
+    token = "";
+    tokenStarted = false;
+  };
+
+  for (let index = 0; index < command.length; index++) {
+    const character = command.charAt(index);
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+        tokenStarted = true;
+        continue;
+      }
+      const next = command[index + 1];
+      if (character === "\\" && (next === quote || next === "\\")) {
+        token += next;
+        tokenStarted = true;
+        index++;
+        continue;
+      }
+      token += character;
+      tokenStarted = true;
+      continue;
+    }
+
+    if (character === "'" || character === '"') {
+      quote = character;
+      tokenStarted = true;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      pushToken();
+      continue;
+    }
+    const next = command[index + 1];
+    if (character === "\\" && next && /[\s'"\\]/.test(next)) {
+      token += next;
+      tokenStarted = true;
+      index++;
+      continue;
+    }
+    token += character;
+    tokenStarted = true;
+  }
+  pushToken();
+  return tokens;
+}
+
 function extractInputRunId(
   toolName: string,
   args: unknown,
@@ -279,11 +334,29 @@ function extractInputRunId(
 
   const record = args as Record<string, unknown>;
   const command = unwrapCommandString(record.CommandLine ?? record.command ?? '');
-  const match = command.match(
-    /(?:^|\s)--run-id(?:=|\s+)(?:"([A-Za-z0-9_-]+)"|'([A-Za-z0-9_-]+)'|([A-Za-z0-9_-]+))(?=\s|$)/i,
-  );
-  // Do not treat shell variables such as "$RUN_ID" as resolved identities.
-  return match?.[1] ?? match?.[2] ?? match?.[3];
+  const tokens = tokenizeCommandLine(command);
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index] ?? "";
+    const normalized = token.toLowerCase();
+    let candidate: string | undefined;
+    if (normalized === "--run-id") {
+      candidate = tokens[index + 1];
+      index++;
+    } else if (normalized.startsWith("--run-id=")) {
+      candidate = token.slice("--run-id=".length);
+    } else {
+      continue;
+    }
+
+    if (
+      !candidate ||
+      /^(?:\$[A-Za-z_][A-Za-z0-9_]*|\$\{[^}]+\}|%[^%]+%)$/.test(candidate)
+    ) {
+      return undefined;
+    }
+    return candidate;
+  }
+  return undefined;
 }
 
 function unwrapCommandString(raw: any): string {
