@@ -178,13 +178,8 @@ function seedGovernanceReadyRun(
   workspacePath: string,
   body = "pr body",
   communityPolicy: Partial<CommunityGatePolicy> = {},
-  traceEnabled = false,
 ): void {
   mkdirSync(workspacePath, { recursive: true });
-  const trace = (stage: string) => {
-    if (traceEnabled) console.log(`[ci-trace] seed ${stage}`);
-  };
-  trace("start");
   const canonicalRepoFullName = manager.getRun(runId)?.manifest.repoFullName;
   if (!canonicalRepoFullName) {
     throw new Error(`Fixture run ${runId} has no canonical repository binding.`);
@@ -230,7 +225,6 @@ function seedGovernanceReadyRun(
     validatedAt: "2026-01-01T00:01:00.000Z",
   };
   validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
-  trace("before workspace artifact");
   saveCanonicalArtifact(
     manager,
     runId,
@@ -249,7 +243,6 @@ function seedGovernanceReadyRun(
     },
     "WORKSPACE_PREPARED",
   );
-  trace("workspace artifact saved");
   if (communityPolicy.privateVulnerabilityDisclosure !== true) {
     seedIssueBinding(manager, runId, canonicalRepoFullName);
   }
@@ -267,11 +260,8 @@ function seedGovernanceReadyRun(
     } as any,
     "RED_CAPTURED",
   );
-  trace("red evidence saved");
   manager.saveArtifact(runId, "patch", patchContent);
-  trace("patch saved");
   saveCanonicalArtifact(manager, runId, "validated_patch", validatedPatch);
-  trace("validated patch saved");
   const testIdentity = {
     normalizedCommand: "bun test regression.test.ts",
     testFiles: [{ path: "regression.test.ts", sha256: "same" }],
@@ -333,16 +323,13 @@ function seedGovernanceReadyRun(
     },
     "EVIDENCE_COLLECTED",
   );
-  trace("green evidence saved");
 
   manager.saveArtifact(runId, "pr_draft", body);
-  trace("PR draft saved");
   new GovernanceService(manager).audit(runId, {
     prTitle: "fix: bug",
     prBody: body,
     subagentScore: 100,
   });
-  trace("governance audit complete");
 }
 
 describe("Trusted private security materialization", () => {
@@ -400,12 +387,10 @@ describe("Trusted private security materialization", () => {
   }
 
   it("preserves typed statuses from rejected provider lookups", async () => {
-    console.log("[ci-trace] provider-status start");
     const baseDir = mkdtempSync(join(tmpdir(), "oc-provider-status-"));
     try {
       const manager = isolatedRunManager(baseDir);
       const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
-      console.log("[ci-trace] provider-status run created");
       const rateLimitError = Object.assign(new Error("rate limited"), {
         status: 429,
       });
@@ -421,7 +406,6 @@ describe("Trusted private security materialization", () => {
           issueNumber: 42,
         }),
       ).rejects.toMatchObject({ status: "RATE_LIMITED", retryable: true });
-      console.log("[ci-trace] provider-status issue binding rejected");
 
       const policyLookup = new SecurityDisclosureService(manager, {
         getRepoTextFile: async () => null,
@@ -436,7 +420,6 @@ describe("Trusted private security materialization", () => {
           repoFullName: "owner/private-repo",
         }),
       ).rejects.toThrow(/RATE_LIMITED/);
-      console.log("[ci-trace] provider-status rate-limit policy rejected");
 
       seedGovernanceReadyRun(
         manager,
@@ -444,9 +427,7 @@ describe("Trusted private security materialization", () => {
         join(baseDir, "workspace"),
         "Private fix.",
         { privateVulnerabilityDisclosure: true },
-        true,
       );
-      console.log("[ci-trace] provider-status governance seeded");
       const policyPaths: string[] = [];
       const legacyPolicyLookup = new SecurityDisclosureService(manager, {
         getRepoTextFile: async (_owner, _repo, path) => {
@@ -463,7 +444,6 @@ describe("Trusted private security materialization", () => {
         runId: manifest.runId,
         repoFullName: "owner/private-repo",
       });
-      console.log("[ci-trace] provider-status legacy policy verified");
       expect(policyPaths).toEqual(["SECURITY.md", ".github/SECURITY.md"]);
 
       const forbiddenError = Object.assign(new Error("forbidden"), {
@@ -482,10 +462,8 @@ describe("Trusted private security materialization", () => {
           repoFullName: "owner/private-repo",
         }),
       ).rejects.toMatchObject({ status: "FORBIDDEN", retryable: false });
-      console.log("[ci-trace] provider-status lifecycle rejected");
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
-      console.log("[ci-trace] provider-status cleanup complete");
     }
   });
 
