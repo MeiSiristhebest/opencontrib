@@ -177,7 +177,12 @@ function seedGovernanceReadyRun(
   runId: string,
   body = "pr body",
   communityPolicy: Partial<CommunityGatePolicy> = {},
+  traceEnabled = false,
 ): void {
+  const trace = (stage: string) => {
+    if (traceEnabled) console.log(`[ci-trace] seed ${stage}`);
+  };
+  trace("start");
   const canonicalRepoFullName = manager.getRun(runId)?.manifest.repoFullName;
   if (!canonicalRepoFullName) {
     throw new Error(`Fixture run ${runId} has no canonical repository binding.`);
@@ -223,6 +228,7 @@ function seedGovernanceReadyRun(
     validatedAt: "2026-01-01T00:01:00.000Z",
   };
   validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
+  trace("before workspace artifact");
   saveCanonicalArtifact(
     manager,
     runId,
@@ -241,6 +247,7 @@ function seedGovernanceReadyRun(
     },
     "WORKSPACE_PREPARED",
   );
+  trace("workspace artifact saved");
   if (communityPolicy.privateVulnerabilityDisclosure !== true) {
     seedIssueBinding(manager, runId, canonicalRepoFullName);
   }
@@ -258,8 +265,11 @@ function seedGovernanceReadyRun(
     } as any,
     "RED_CAPTURED",
   );
+  trace("red evidence saved");
   manager.saveArtifact(runId, "patch", patchContent);
+  trace("patch saved");
   saveCanonicalArtifact(manager, runId, "validated_patch", validatedPatch);
+  trace("validated patch saved");
   const testIdentity = {
     normalizedCommand: "bun test regression.test.ts",
     testFiles: [{ path: "regression.test.ts", sha256: "same" }],
@@ -321,13 +331,16 @@ function seedGovernanceReadyRun(
     },
     "EVIDENCE_COLLECTED",
   );
+  trace("green evidence saved");
 
   manager.saveArtifact(runId, "pr_draft", body);
+  trace("PR draft saved");
   new GovernanceService(manager).audit(runId, {
     prTitle: "fix: bug",
     prBody: body,
     subagentScore: 100,
   });
+  trace("governance audit complete");
 }
 
 describe("Trusted private security materialization", () => {
@@ -423,9 +436,13 @@ describe("Trusted private security materialization", () => {
       ).rejects.toThrow(/RATE_LIMITED/);
       console.log("[ci-trace] provider-status rate-limit policy rejected");
 
-      seedGovernanceReadyRun(manager, manifest.runId, "Private fix.", {
-        privateVulnerabilityDisclosure: true,
-      });
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        "Private fix.",
+        { privateVulnerabilityDisclosure: true },
+        true,
+      );
       console.log("[ci-trace] provider-status governance seeded");
       const policyPaths: string[] = [];
       const legacyPolicyLookup = new SecurityDisclosureService(manager, {
