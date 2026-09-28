@@ -91,8 +91,8 @@ jobs:
 
       - name: Run affected workspace tests (pull requests)
         if: github.event_name == 'pull_request'
-        # Package suites share profile state; keep task execution serial and cache unchanged packages.
-        run: bunx turbo run test:ci --affected --concurrency=1
+        # Keep package tasks serial; parallelize isolated test files within each package.
+        run: bunx turbo run test:ci --affected --concurrency=1 --log-order=stream
 
       - name: Run full workspace test suite (main and manual runs)
         if: github.event_name != 'pull_request'

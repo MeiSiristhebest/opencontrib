@@ -18,7 +18,7 @@
   },
   "scripts": {
     "build": "bun build ./src/index.ts --target=node --outfile=./dist/index.js",
-    "test:ci": "bun --cwd=../.. test packages/cli/tests --timeout 60000",
+    "test:ci": "bun --cwd=../.. test packages/cli/tests --timeout 60000 --parallel=2",
     "prepublishOnly": "bun run build",
     "dev": "bun ./src/index.ts"
   },

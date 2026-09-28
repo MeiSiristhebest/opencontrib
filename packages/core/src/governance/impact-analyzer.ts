@@ -89,7 +89,7 @@ export function analyzePatchImpactAndConsistency(input: ImpactAnalysisInput): Im
     );
   }
 
-  // 3. Defensive checks (try-catch, error handling)
+  // 3. Defensive checks (try-catch, error handling, namespace collision)
   if (
     (patchContent.includes('.ts') || patchContent.includes('.js')) &&
     patchContent.includes('JSON.parse(') &&
@@ -97,6 +97,30 @@ export function analyzePatchImpactAndConsistency(input: ImpactAnalysisInput): Im
   ) {
     defensiveRecommendations.push(
       `Add try-catch block around 'JSON.parse' to gracefully handle malformed JSON without crashing.`
+    );
+  }
+
+  // D. Index/Key Promotion Collision Hazard (e.g. pandas reset_index with hardcoded or unvalidated column names)
+  if (
+    patchContent.includes('.reset_index(') &&
+    !patchContent.includes('while') &&
+    !patchContent.includes('not in') &&
+    !patchContent.includes('unique') &&
+    !patchContent.includes('get_loc')
+  ) {
+    defensiveRecommendations.push(
+      `DEFENSIVE COLLISION HAZARD: '.reset_index()' detected without explicit uniqueness verification or collision resolution against existing columns. Verify that promoted index name cannot collide with existing DataFrame columns.`
+    );
+  }
+
+  // E. Symmetric Lifecycle Warning: if training validation or data intake is modified, check predict / inference paths
+  if (
+    (patchContent.includes('validate_data') || patchContent.includes('fit(')) &&
+    !patchContent.includes('predict(') &&
+    !patchContent.includes('_normalize')
+  ) {
+    consistencyWarnings.push(
+      `SYMMETRIC LIFECYCLE WARNING: Patch alters data validation/ingestion in training path. Verify whether identical input shapes (e.g. indexed Series/DataFrames) must also be supported in validation (X_val) or inference (predict) paths.`
     );
   }
 
