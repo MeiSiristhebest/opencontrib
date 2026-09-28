@@ -91,6 +91,8 @@ jobs:
 
       - name: Run affected workspace tests (pull requests)
         if: github.event_name == 'pull_request'
+        env:
+          TURBO_SCM_BASE: origin/${{ github.event.pull_request.base.ref }}
         # Keep package tasks serial; parallelize isolated test files within each package.
         run: bunx turbo run test:ci --affected --concurrency=1 --log-order=stream
 
