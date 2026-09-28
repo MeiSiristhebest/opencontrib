@@ -25,6 +25,7 @@ export const COMMUNITY_GATE_POLICY_PATHS = [
   ".github/ISSUE_TEMPLATE/bug.yaml",
   ".github/ISSUE_TEMPLATE/bug_report.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
+  ".github/PULL_REQUEST_TEMPLATE/pull_request_template.md",
   ".github/pull_request_template.md",
   "PULL_REQUEST_TEMPLATE.md",
   "pull_request_template.md",
@@ -115,7 +116,7 @@ export const DEFAULT_POLICY_RULES: PolicyRule[] = [
 ];
 
 const POLICY_NEGATION_PATTERN =
-  /\b(?:not\s+(?:required|mandatory|necessary|needed|expected)|(?:is|are)\s+optional|optional|no\s+(?:such\s+)?requirement|(?:do|does|did)\s+not\s+(?:require|need)|(?:don't|doesn't|didn't)\s+(?:require|need))\b/i;
+  /\b(?:not\s+(?:required|mandatory|necessary|needed|expected)|(?:is|are)\s+optional|optional|no\s+(?:such\s+)?requirement|no\s+longer\s+(?:require|requires|need|needs)|(?:do|does|did)\s+not\s+(?:require|need)|(?:don't|doesn't|didn't)\s+(?:require|need))\b/i;
 
 function findRequiredPolicyMatch(
   content: string,

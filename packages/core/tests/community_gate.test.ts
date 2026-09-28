@@ -174,6 +174,52 @@ Issues submitted Friday through Sunday are not guaranteed to be reviewed until t
     expect(mustDiscloseAi.requiresAiDisclosure).toBe(true);
   });
 
+  it("scans nested PR templates and retains the DCO-only contributor action", () => {
+    const templatePath =
+      ".github/PULL_REQUEST_TEMPLATE/pull_request_template.md";
+    const requestedPaths: string[] = [];
+    const snapshot = readCommunityGateAtCommit(
+      {
+        listTree: (policyPath) => {
+          requestedPaths.push(policyPath);
+          return {
+            success: true,
+            stdout: policyPath === templatePath ? `${templatePath}\n` : "",
+            stderr: "",
+          };
+        },
+        show: (policyPath) => ({
+          success: true,
+          stdout:
+            policyPath === templatePath
+              ? "Every commit must include Signed-off-by."
+              : "",
+          stderr: "",
+        }),
+      },
+      "a".repeat(40),
+    );
+
+    expect(requestedPaths).toContain(templatePath);
+    expect(snapshot.policy.requiresDco).toBe(true);
+    expect(snapshot.policy.requiresAiDisclosure).toBe(false);
+    expect(snapshot.policy.suggestedContributorAction).toContain(
+      "commit sign-off",
+    );
+  });
+
+  it("does not require a retired CLA policy", () => {
+    const retired = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "We no longer require a Contributor License Agreement (CLA).",
+      },
+    ]);
+
+    expect(retired.requiresCla).toBe(false);
+  });
+
   it("fails closed when a baseline community policy read fails", () => {
     expect(() =>
       readCommunityGateAtCommit(

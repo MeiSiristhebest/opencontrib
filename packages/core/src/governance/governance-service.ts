@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
@@ -33,6 +34,29 @@ function hash(value: unknown): string {
   const content =
     typeof value === "string" ? value : JSON.stringify(value ?? "");
   return createHash("sha256").update(content).digest("hex");
+}
+
+function readTrackedFilesAtCommit(
+  repositoryPath: string,
+  baseCommitSha: string,
+): string[] {
+  if (!/^[a-f0-9]{40,64}$/i.test(baseCommitSha)) return [];
+  try {
+    const output = execFileSync(
+      "git",
+      ["-C", repositoryPath, "ls-tree", "-r", "--name-only", "-z", baseCommitSha],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 10_000,
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+    return output.split("\\0").filter((filePath) => filePath.length > 0);
+  } catch {
+    // Repository context is advisory; an unavailable tree is never evidence of compliance.
+    return [];
+  }
 }
 
 export class GovernanceService {
@@ -206,6 +230,7 @@ export class GovernanceService {
       effectivePolicySnapshot.resourceLeakCheck;
 
     let coreDiffLines: number | undefined;
+    let repoContextFiles: string[] = [];
     try {
       if (
         typeof workspaceArtifact.workspacePath !== "string" ||
@@ -217,6 +242,10 @@ export class GovernanceService {
         );
       }
       const workspacePath = workspaceArtifact.workspacePath;
+      repoContextFiles = readTrackedFilesAtCommit(
+        workspacePath,
+        validatedPatch.baseCommitSha,
+      );
       const coreFiles = validatedPatch.files.filter(
         (file) => !isSupportingFile(file.path),
       );
@@ -243,6 +272,8 @@ export class GovernanceService {
       // by an external trusted authority and is not inferred from this audit.
       coveragePolicy: effectiveCoveragePolicy,
       resourceLeakPolicy: effectiveResourceLeakPolicy,
+      modifiedFiles: validatedPatch.files.map((file) => file.path),
+      repoContextFiles,
       maxDiffLines:
         communityGate.policy.maxDiffCeiling === undefined
           ? undefined

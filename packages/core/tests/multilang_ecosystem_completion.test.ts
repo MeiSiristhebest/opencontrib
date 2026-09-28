@@ -13,7 +13,11 @@ import { runDoctorAudit } from '../src/discovery/doctor.js';
 import { detectSystemCapabilities, assessFeasibility } from '../src/discovery/feasibility.js';
 import { runResilientCommand } from '../src/sandbox/resilient-runner.js';
 import { AutonomousPoCVerifier } from '../src/sandbox/poc-verifier.js';
-import { detectRunnableCommandsFromDir, extractNativePrTemplate } from '../src/discovery/context-assembler.js';
+import {
+  detectRunnableCommandsFromDir,
+  extractNativePrTemplate,
+  extractNativePrTemplateAtCommit,
+} from '../src/discovery/context-assembler.js';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -215,6 +219,43 @@ diff --git a/tests/parser.test.ts b/tests/parser.test.ts
       expect(caps.toolchains).toHaveProperty('php');
     });
 
+    it('classifies runtime, performance, and containerd requirements accurately', () => {
+      const baseCapabilities = {
+        ...detectSystemCapabilities(),
+        os: 'linux' as const,
+        hasDocker: false,
+      };
+      const nullPointer = assessFeasibility(
+        'NullPointerException in request handler',
+        '',
+        [],
+        baseCapabilities,
+      );
+      const performance = assessFeasibility(
+        'Improve performance of parser',
+        '',
+        [],
+        baseCapabilities,
+      );
+      const containerd = assessFeasibility(
+        'Support containerd runtime',
+        '',
+        [],
+        baseCapabilities,
+      );
+      const docker = assessFeasibility(
+        'Support Docker Compose integration',
+        '',
+        [],
+        { ...baseCapabilities, hasDocker: true },
+      );
+
+      expect(nullPointer.scope).toBe('runtime_bug');
+      expect(performance.scope).toBe('performance');
+      expect(containerd.missingCapabilities).not.toContain('docker_runtime');
+      expect(docker.mitigations).toContain('docker_available');
+    });
+
     it('resilient runner actively rewrites broad go test ./... and pytest commands to modified package targets', () => {
       const goResult = runResilientCommand({
         cwd: process.cwd(),
@@ -271,19 +312,29 @@ diff --git a/tests/parser.test.ts b/tests/parser.test.ts
       const tempDir = mkdtempSync(join(tmpdir(), 'oc-test-polyglot-'));
       try {
         writeFileSync(join(tempDir, 'build.gradle.kts'), '// gradle');
-        writeFileSync(join(tempDir, 'gradlew'), '#!/bin/sh');
+        const gradleWrapper =
+          process.platform === 'win32' ? 'gradlew.bat' : 'gradlew';
+        writeFileSync(join(tempDir, gradleWrapper), '#!/bin/sh');
         const gradleCmds = detectRunnableCommandsFromDir(tempDir);
         expect(gradleCmds.packageManager).toBe('gradle');
-        expect(gradleCmds.testCommand).toBeDefined();
+        expect(gradleCmds.testCommand).toBe(
+          process.platform === 'win32' ? '.\\gradlew.bat test' : './gradlew test',
+        );
 
         rmSync(join(tempDir, 'build.gradle.kts'));
-        rmSync(join(tempDir, 'gradlew'));
+        rmSync(join(tempDir, gradleWrapper));
         writeFileSync(join(tempDir, 'pom.xml'), '<project></project>');
+        const mavenWrapper =
+          process.platform === 'win32' ? 'mvnw.cmd' : 'mvnw';
+        writeFileSync(join(tempDir, mavenWrapper), 'echo wrapper');
         const mavenCmds = detectRunnableCommandsFromDir(tempDir);
         expect(mavenCmds.packageManager).toBe('maven');
-        expect(mavenCmds.testCommand).toBe('mvn test');
+        expect(mavenCmds.testCommand).toBe(
+          process.platform === 'win32' ? '.\\mvnw.cmd test' : './mvnw test',
+        );
 
         rmSync(join(tempDir, 'pom.xml'));
+        rmSync(join(tempDir, mavenWrapper));
         writeFileSync(join(tempDir, 'App.sln'), '');
         const dotnetCmds = detectRunnableCommandsFromDir(tempDir);
         expect(dotnetCmds.packageManager).toBe('dotnet');
@@ -301,6 +352,80 @@ diff --git a/tests/parser.test.ts b/tests/parser.test.ts
         const rubyCmds = detectRunnableCommandsFromDir(tempDir);
         expect(rubyCmds.packageManager).toBe('bundle');
         expect(rubyCmds.testCommand).toBe('bundle exec rake test');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('detects conda commands from an isolated environment.yml fixture', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-test-conda-'));
+      try {
+        writeFileSync(join(tempDir, 'environment.yml'), 'name: fixture\n');
+        const commands = detectRunnableCommandsFromDir(tempDir);
+        expect(commands.packageManager).toBe('conda');
+        expect(commands.testCommand).toBe('conda run pytest');
+        expect(commands.lintCommand).toBe('ruff check .');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('detects Composer commands from an isolated composer.json fixture', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-test-composer-'));
+      try {
+        writeFileSync(join(tempDir, 'composer.json'), '{"name":"fixture/app"}');
+        const commands = detectRunnableCommandsFromDir(tempDir);
+        expect(commands.packageManager).toBe('composer');
+        expect(commands.testCommand).toBe('composer test');
+        expect(commands.buildCommand).toBe('composer install');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('extractNativePrTemplateAtCommit reads a template only from the validated baseline SHA', () => {
+      const baseCommitSha = 'a'.repeat(40);
+      const attemptedRefs: string[] = [];
+      const template = extractNativePrTemplateAtCommit(
+        (args) => {
+          const ref = args.at(-1) ?? '';
+          attemptedRefs.push(ref);
+          return ref === `${baseCommitSha}:.github/PULL_REQUEST_TEMPLATE.md`
+            ? { success: true, stdout: '## Baseline template\n' }
+            : { success: false, stdout: '' };
+        },
+        '/repo',
+        baseCommitSha,
+      );
+
+      expect(template).toContain('Baseline template');
+      expect(attemptedRefs).toEqual([
+        `${baseCommitSha}:.github/pull_request_template.md`,
+        `${baseCommitSha}:.github/PULL_REQUEST_TEMPLATE.md`,
+      ]);
+      const invalidShaCalls: string[][] = [];
+      expect(
+        extractNativePrTemplateAtCommit(
+          (args) => {
+            invalidShaCalls.push(args);
+            return { success: true, stdout: 'should not be read' };
+          },
+          '/repo',
+          'not-a-commit',
+        ),
+      ).toBeUndefined();
+      expect(invalidShaCalls).toHaveLength(0);
+    });
+
+    it('extractNativePrTemplate retrieves a root-only template without a .github shadow', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-test-pr-template-root-'));
+      try {
+        writeFileSync(
+          join(tempDir, 'PULL_REQUEST_TEMPLATE.md'),
+          '## Root-only template\n',
+        );
+        const template = extractNativePrTemplate(tempDir);
+        expect(template).toContain('Root-only template');
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }

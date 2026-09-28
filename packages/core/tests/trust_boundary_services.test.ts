@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { execFileSync } from "child_process";
 import { createHash, generateKeyPairSync } from "crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
@@ -29,7 +30,7 @@ import { TrustedRunMaterializer } from "../src/run/trusted-run-host.js";
 import { RunTransferBundleSchema } from "../src/run/run-transfer.js";
 import { runBranchName } from "../src/run/run-branch.js";
 import { ActiveSessionManager } from "../src/run/active-session.js";
-import { bunCommand } from "./helpers/bun-command.js";
+import { stateAssertionCommand } from "./helpers/bun-command.js";
 import {
   hashCommunityGateSnapshot,
   type CommunityGatePolicy,
@@ -42,18 +43,6 @@ function isolatedRunManager(baseDir: string): ContributionRunManager {
       join(baseDir, "active_session.json"),
     ),
   });
-}
-
-function stateAssertionCommand(stateFile: string, assertion: string): string {
-  const statePath = JSON.stringify(stateFile.replace(/\\/g, "/"));
-  const source = [
-    `const state = require("node:fs").readFileSync(${statePath}, "utf8");`,
-    `if (state.includes("FAIL")) {`,
-    `console.log(${JSON.stringify(assertion)});`,
-    "process.exitCode = 1;",
-    `} else { console.log("PASS"); }`,
-  ].join(" ");
-  return bunCommand(source);
 }
 
 const testApprovalAuthority = (
@@ -178,21 +167,23 @@ function seedGovernanceReadyRun(
   workspacePath: string,
   body = "pr body",
   communityPolicy: Partial<CommunityGatePolicy> = {},
-): void {
+  options: { baseCommitSha?: string; patchPath?: string } = {},
+) {
   mkdirSync(workspacePath, { recursive: true });
   const canonicalRepoFullName = manager.getRun(runId)?.manifest.repoFullName;
   if (!canonicalRepoFullName) {
     throw new Error(`Fixture run ${runId} has no canonical repository binding.`);
   }
-  const baseCommitSha = "a".repeat(40);
+  const baseCommitSha = options.baseCommitSha ?? "a".repeat(40);
+  const patchPath = options.patchPath ?? "src/fix.ts";
   const patch = {
     title: "fix: bug",
     summary: "fix",
     rationale: "reproduce and correct the defect",
-    targetFiles: [{ path: "src/fix.ts", reason: "correct defect" }],
+    targetFiles: [{ path: patchPath, reason: "correct defect" }],
     files: [
       {
-        path: "src/fix.ts",
+        path: patchPath,
         operation: "MODIFY",
         mode: "100644",
         content: "fixed",
@@ -216,7 +207,7 @@ function seedGovernanceReadyRun(
     changedLines: 0,
     files: [
       {
-        path: "src/fix.ts",
+        path: patchPath,
         operation: "MODIFY" as const,
         mode: "100644" as const,
         contentSha256: createHash("sha256").update("fixed").digest("hex"),
@@ -325,12 +316,63 @@ function seedGovernanceReadyRun(
   );
 
   manager.saveArtifact(runId, "pr_draft", body);
-  new GovernanceService(manager).audit(runId, {
+  const audit = new GovernanceService(manager).audit(runId, {
     prTitle: "fix: bug",
     prBody: body,
     subagentScore: 100,
   });
+  return audit;
 }
+
+describe("Governance audit impact context", () => {
+  it("passes validated patch paths and the base tree into sibling-file analysis", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-impact-"));
+    const repoPath = join(baseDir, "repo");
+    try {
+      mkdirSync(join(repoPath, "src"), { recursive: true });
+      writeFileSync(join(repoPath, "src", "parser.ts"), "export const parser = 1;\n");
+      writeFileSync(join(repoPath, "src", "hunk.ts"), "export type Hunk = {};\n");
+      execFileSync("git", ["init"], { cwd: repoPath, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], {
+        cwd: repoPath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "OpenContrib Test"], {
+        cwd: repoPath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["add", "."], { cwd: repoPath, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "baseline"], {
+        cwd: repoPath,
+        stdio: "ignore",
+      });
+      const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: repoPath,
+        encoding: "utf8",
+      }).trim();
+
+      const manager = isolatedRunManager(join(baseDir, "runs"));
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const audit = seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        repoPath,
+        "pr body",
+        {},
+        { baseCommitSha, patchPath: "src/parser.ts" },
+      );
+
+      expect(
+        audit.auditResult.impactAnalysisIssues?.some((issue: string) =>
+          issue.includes("src/hunk.ts"),
+        ),
+      ).toBe(true);
+      expect(audit.auditResult.impactAnalysisPassed).toBe(true);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("Trusted private security materialization", () => {
   function makeTransferBundle(

@@ -28,7 +28,7 @@ import {
 import { scoutOpportunities } from "../../discovery/scout.js";
 import { MultiSignalHeuristicRanker } from "../../discovery/ranking.js";
 import { detectSystemCapabilities } from "../../discovery/feasibility.js";
-import { extractNativePrTemplate } from "../../discovery/context-assembler.js";
+import { extractNativePrTemplateAtCommit } from "../../discovery/context-assembler.js";
 import {
   countValidatedPatchChangedLinesAtGreenTree,
   EvidenceService,
@@ -1229,8 +1229,28 @@ export class PrSubmissionStep implements PipelineStep {
       );
       const effectiveIssueNumber = canonicalRoute.issueBinding?.providerIssueId;
 
-      const wsPath = (canonicalBeforeDisclosure.artifacts.workspace as any)?.workspacePath;
-      const nativeTemplateContent = wsPath ? extractNativePrTemplate(wsPath) : undefined;
+      const workspaceArtifact = canonicalBeforeDisclosure.artifacts.workspace as
+        | { baseRepoPath?: unknown; baseCommitSha?: unknown }
+        | undefined;
+      const validatedPatchResult = ValidatedPatchArtifactSchema.safeParse(
+        canonicalBeforeDisclosure.artifacts.validatedPatch,
+      );
+      const validatedPatch = validatedPatchResult.success
+        ? validatedPatchResult.data
+        : undefined;
+      const nativeTemplateContent =
+        validatedPatch &&
+        validatedPatch.runId === runId &&
+        validatedPatch.artifactSha256 ===
+          hashValidatedPatchArtifact(validatedPatch) &&
+        typeof workspaceArtifact?.baseRepoPath === "string" &&
+        workspaceArtifact.baseCommitSha === validatedPatch.baseCommitSha
+          ? extractNativePrTemplateAtCommit(
+              (args) => deps.worktreeManager.runGit(args),
+              workspaceArtifact.baseRepoPath,
+              validatedPatch.baseCommitSha,
+            )
+          : undefined;
 
       const prDraftText = buildPrDescription(
         {

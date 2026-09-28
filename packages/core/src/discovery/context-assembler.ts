@@ -159,7 +159,12 @@ function detectCompiledEcosystemCommands(files: string[], dirPath: string, comma
   if (files.includes('gradlew') || files.includes('gradlew.bat') || files.includes('build.gradle') || files.includes('build.gradle.kts')) {
     commands.packageManager = 'gradle';
     const isWin = process.platform === 'win32';
-    const gradleCmd = files.includes('gradlew') ? (isWin ? '.\\gradlew.bat' : './gradlew') : 'gradle';
+    const wrapperName = isWin ? 'gradlew.bat' : 'gradlew';
+    const gradleCmd = files.includes(wrapperName)
+      ? isWin
+        ? '.\\gradlew.bat'
+        : './gradlew'
+      : 'gradle';
     commands.buildCommand = `${gradleCmd} build -x test`;
     commands.testCommand = `${gradleCmd} test`;
     commands.lintCommand = `${gradleCmd} check`;
@@ -168,7 +173,12 @@ function detectCompiledEcosystemCommands(files: string[], dirPath: string, comma
   if (files.includes('mvnw') || files.includes('mvnw.cmd') || files.includes('pom.xml')) {
     commands.packageManager = 'maven';
     const isWin = process.platform === 'win32';
-    const mvnCmd = files.includes('mvnw') ? (isWin ? '.\\mvnw.cmd' : './mvnw') : 'mvn';
+    const wrapperName = isWin ? 'mvnw.cmd' : 'mvnw';
+    const mvnCmd = files.includes(wrapperName)
+      ? isWin
+        ? '.\\mvnw.cmd'
+        : './mvnw'
+      : 'mvn';
     commands.buildCommand = `${mvnCmd} compile`;
     commands.testCommand = `${mvnCmd} test`;
     commands.lintCommand = `${mvnCmd} checkstyle:check`;
@@ -258,21 +268,53 @@ export function detectRunnableCommandsFromDir(dirPath: string): RunnableCommands
   return commands;
 }
 
+const NATIVE_PR_TEMPLATE_PATHS = [
+  '.github/pull_request_template.md',
+  '.github/PULL_REQUEST_TEMPLATE.md',
+  'pull_request_template.md',
+  'PULL_REQUEST_TEMPLATE.md',
+  '.github/PULL_REQUEST_TEMPLATE/pull_request_template.md',
+] as const;
+
+/**
+ * Reads a native PR template from an immutable baseline commit.
+ */
+export function extractNativePrTemplateAtCommit(
+  runGit: (args: string[]) => {
+    success: boolean;
+    stdout: string;
+  },
+  repositoryPath: string,
+  baseCommitSha: string,
+): string | undefined {
+  if (!/^[a-f0-9]{40,64}$/i.test(baseCommitSha)) return undefined;
+
+  for (const rel of NATIVE_PR_TEMPLATE_PATHS) {
+    try {
+      const result = runGit([
+        '-C',
+        repositoryPath,
+        'show',
+        `${baseCommitSha}:${rel}`,
+      ]);
+      if (result.success && result.stdout.trim().length > 10) {
+        return result.stdout;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
 /**
  * Extracts native PR template from workspace if present.
  */
 export function extractNativePrTemplate(dirPath: string): string | undefined {
   if (!existsSync(dirPath)) return undefined;
 
-  const candidateFiles = [
-    '.github/pull_request_template.md',
-    '.github/PULL_REQUEST_TEMPLATE.md',
-    'pull_request_template.md',
-    'PULL_REQUEST_TEMPLATE.md',
-    '.github/PULL_REQUEST_TEMPLATE/pull_request_template.md',
-  ];
-
-  for (const rel of candidateFiles) {
+  for (const rel of NATIVE_PR_TEMPLATE_PATHS) {
     const full = join(dirPath, rel);
     if (existsSync(full)) {
       try {
@@ -280,7 +322,9 @@ export function extractNativePrTemplate(dirPath: string): string | undefined {
         if (content.trim().length > 10) {
           return content;
         }
-      } catch {}
+      } catch {
+        continue;
+      }
     }
   }
 

@@ -18,9 +18,27 @@ export interface CiDiagnosticReport {
 }
 
 const ANSI_REGEX = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const INFRASTRUCTURE_FAILURE_PATTERN =
+  /(?:environment protection rules|is not allowed to deploy to|Resource not accessible by integration|The deployment was rejected or didn\'t satisfy other protection rules)/i;
+const RUNNER_PROCESS_EXIT_PATTERN =
+  /^\s*Error:\s*Process completed with exit code ([1-9]\d*)\./i;
 
 export function stripAnsiCodes(text: string): string {
   return text.replace(ANSI_REGEX, '');
+}
+
+function isCompilerDiagnostic(line: string): boolean {
+  return (
+    !INFRASTRUCTURE_FAILURE_PATTERN.test(line) &&
+    !RUNNER_PROCESS_EXIT_PATTERN.test(line) &&
+    (/^\s*(?:error(?:\s+TS\d+|\s*\[E\d+\])?:|fatal error:|syntax error:|SyntaxError:)/i.test(
+      line,
+    ) ||
+      /^\s*[^\s:]+\.(?:go|ts|tsx|js|jsx|py|rs|c|cc|cpp|cxx|h|hpp|java|kt|cs):\d+(?::\d+)?:\s*(?:error\b|fatal error\b|syntax error\b|undefined:|cannot\b|expected\b|unknown\b|no such file\b|invalid operation\b|not enough\b)/i.test(
+        line,
+      ) ||
+      /^\s*[^\s(]+\(\d+(?:,\d+)?\):\s*error\s+TS\d+\b/i.test(line))
+  );
 }
 
 export function parseCiRawLogs(rawLogText: string): CiDiagnosticReport {
@@ -102,21 +120,54 @@ export function parseCiRawLogs(rawLogText: string): CiDiagnosticReport {
       panicMessages.push(line);
     }
 
-    // Infrastructure and environment protection failure detection
+    // Only trust infrastructure messages in native GitHub Actions error lines;
+    // build scripts can echo these phrases without the workflow being blocked.
+    const hasNativeRunnerErrorContext =
+      /^\s*(?:##\[error\]|::error(?::|\s|$))/i.test(line) ||
+      (/^\s*Error:\s*/i.test(line) &&
+        lines
+          .slice(i + 1, Math.min(lines.length, i + 6))
+          .some((nextLine) =>
+            /^\s*Error:\s*Process completed with exit code [1-9]\d*\./i.test(
+              nextLine,
+            ),
+          ));
     if (
-      line.includes('environment protection rules') ||
-      line.includes('is not allowed to deploy to') ||
-      line.includes('Resource not accessible by integration') ||
-      line.includes('The deployment was rejected or didn\'t satisfy other protection rules')
+      hasNativeRunnerErrorContext &&
+      INFRASTRUCTURE_FAILURE_PATTERN.test(line)
     ) {
       compilationErrors.push(`[INFRASTRUCTURE_GATE] ${line.trim()}`);
+    }
+    if (RUNNER_PROCESS_EXIT_PATTERN.test(line)) {
+      compilationErrors.push(`[RUNNER_PROCESS_EXIT] ${line.trim()}`);
+    }
+
+    // Preserve compiler errors as well as infrastructure failures. Go emits a
+    // `# package/path` header immediately before its compiler diagnostics.
+    if (isCompilerDiagnostic(line) && !compilationErrors.includes(line.trim())) {
+      compilationErrors.push(line.trim());
+    }
+    if (
+      /^\s*#\s+\S+/.test(line) &&
+      lines.slice(i + 1, i + 5).some(isCompilerDiagnostic) &&
+      !compilationErrors.includes(`[COMPILER_PACKAGE] ${line.trim()}`)
+    ) {
+      compilationErrors.push(`[COMPILER_PACKAGE] ${line.trim()}`);
     }
   }
 
   const infraFailures = compilationErrors.filter((e) => e.startsWith('[INFRASTRUCTURE_GATE]'));
-  const realCompilationErrors = compilationErrors.filter((e) => !e.startsWith('[INFRASTRUCTURE_GATE]'));
+  const runnerExitFailures = compilationErrors.filter((e) => e.startsWith('[RUNNER_PROCESS_EXIT]'));
+  const realCompilationErrors = compilationErrors.filter(
+    (e) => !e.startsWith('[INFRASTRUCTURE_GATE]') && !e.startsWith('[RUNNER_PROCESS_EXIT]'),
+  );
 
-  const hasFailure = failedTests.length > 0 || realCompilationErrors.length > 0 || panicMessages.length > 0 || infraFailures.length > 0;
+  const hasFailure =
+    failedTests.length > 0 ||
+    realCompilationErrors.length > 0 ||
+    panicMessages.length > 0 ||
+    infraFailures.length > 0 ||
+    runnerExitFailures.length > 0;
 
   let rootCauseSummary = 'No failures detected in CI logs.';
   let recommendedAction = 'CI is healthy and passing.';
@@ -136,6 +187,9 @@ export function parseCiRawLogs(rawLogText: string): CiDiagnosticReport {
   } else if (infraFailures.length > 0) {
     rootCauseSummary = `CI failed due to target repository environment protection / app token permissions: ${infraFailures[0]}`;
     recommendedAction = `This is an upstream infrastructure privilege limitation on fork PRs (not a code or test regression). No code action required; awaiting maintainer dispatch or approval.`;
+  } else if (runnerExitFailures.length > 0) {
+    rootCauseSummary = `CI process exited unsuccessfully: ${runnerExitFailures[0]}`;
+    recommendedAction = `Inspect the preceding runner output to identify why the CI process exited unsuccessfully.`;
   }
 
   return {

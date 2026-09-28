@@ -104,8 +104,8 @@ const SCOPE_INFERENCE_RULES: Array<{
   pattern: RegExp;
 }> = [
   { scope: 'docs_only', pattern: /\b(?:documentation|readme|typo|spelling|docs?)\b/i },
-  { scope: 'performance', pattern: /\b(?:memory leak|goroutine leak|oom|high memory|cpu spike|performance regression|benchmark|latency)\b/i },
-  { scope: 'runtime_bug', pattern: /\b(?:crash|panic|sigsegv|nullpointer|typeerror|unhandled exception|segmentation fault)\b/i },
+  { scope: 'performance', pattern: /\b(?:memory leak|goroutine leak|oom|high memory|cpu spike|performance(?: regression)?|benchmark|latency)\b/i },
+  { scope: 'runtime_bug', pattern: /\b(?:crash|panic|sigsegv|nullpointer(?:exception)?|null pointer exception|typeerror|unhandled exception|segmentation fault)\b/i },
   { scope: 'complex_refactor', pattern: /\b(?:architecture redesign|major refactor|rewrite|breaking change|migration)\b/i },
   { scope: 'hardware_specific', pattern: /\b(?:gpu|cuda|rocm|bluetooth|hardware|fpga|tpu)\b/i },
 ];
@@ -152,11 +152,13 @@ const PLATFORM_REQUIREMENT_RULES: PlatformRule[] = [
     checkApplicable: (caps) => caps.os !== 'win32',
   },
   {
-    pattern: /\b(?:docker|containerd|k8s|kubernetes|docker-compose)\b/i,
+    pattern: /\bdocker(?:[-\s]+compose)?\b/i,
     riskName: 'docker_integration',
     missingCap: 'docker_runtime',
     penalty: 20,
     checkApplicable: (caps) => !caps.hasDocker,
+    mitigation: (caps) =>
+      caps.hasDocker ? { name: 'docker_available', reducedPenalty: 0 } : null,
   },
   {
     pattern: /\b(?:playwright|cypress|puppeteer|browser tests?)\b/i,

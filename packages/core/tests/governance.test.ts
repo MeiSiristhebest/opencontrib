@@ -330,11 +330,20 @@ describe("Governance & Anti-AI Audit Engine", () => {
       rootCause: "Truncation caused JSON parse error",
       keyChanges: ["Add IsTruncated helper"],
       nativeTemplateContent: nativeTemplate,
+      dcoRequired: true,
+      aiDisclosureRequired: true,
     });
 
     expect(mergedNative).toContain("- [x] Bug fix");
-    expect(mergedNative).toContain("- [x] `make test` passes locally");
-    expect(mergedNative).toContain("- [x] I have signed the CLA");
+    expect(mergedNative).toContain("- [ ] `make test` passes locally");
+    expect(mergedNative).toContain("- [ ] I have signed the CLA");
+    expect(mergedNative).toContain("- [ ] I did not use AI/LLM");
+    expect(mergedNative).toContain(
+      "Automated assistance disclosure: This contribution was prepared using OpenContrib AI-assisted tooling; specific model details were not recorded in this run.",
+    );
+    expect(mergedNative).toContain(
+      "DCO requirement: the commits must include a valid Signed-off-by trailer.",
+    );
     expect(mergedNative).toContain("closes #1581");
     expect(mergedNative).toContain("Handle LLM truncated output");
     expect(mergedNative).not.toContain("<!-- What does this PR do? -->");
@@ -708,6 +717,43 @@ diff --git a/foo_test.go b/foo_test.go
     expect(audit.commentHyperbolePassed).toBe(false);
     expect(audit.remediationSuggestions.join(" ")).toContain("Assertion Quality Gate");
     expect(audit.remediationSuggestions.join(" ")).toContain("Comment Severity Gate");
+  });
+
+  it("preserves cross-platform, defensive, and sibling-file impact findings in governance output", () => {
+    const audit = auditGovernance({
+      patchContent:
+        "+normalized := filepath.ToSlash(input)\n+frame = frame.reset_index()",
+      modifiedFiles: ["internal/parser.go"],
+      repoContextFiles: ["internal/hunk.go", "internal/types.go"],
+      prTitle: "fix(parser): normalize paths and index columns",
+      prBody: "Fix parser path and index handling.",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      lineCount: 2,
+    });
+
+    const findings = audit.impactAnalysisIssues ?? [];
+    expect(audit.impactAnalysisPassed).toBe(false);
+    expect(findings).toHaveLength(4);
+    expect(findings.some((finding) => finding.includes("filepath.ToSlash"))).toBe(
+      true,
+    );
+    expect(
+      findings.some((finding) => finding.includes("DEFENSIVE COLLISION HAZARD")),
+    ).toBe(true);
+    expect(findings.some((finding) => finding.includes("internal/hunk.go"))).toBe(
+      true,
+    );
+    expect(findings.some((finding) => finding.includes("internal/types.go"))).toBe(
+      true,
+    );
   });
 
   it("fails technical gate when patch contains critical cross-platform, collision, or lifecycle impact hazard", () => {

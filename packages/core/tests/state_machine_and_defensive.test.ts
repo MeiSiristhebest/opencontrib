@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { createHash } from "crypto";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
+import { parseCommandSpec } from "../src/sandbox/command-spec.js";
+import { bunCommand } from "./helpers/bun-command.js";
 import {
   analyzePatchImpactAndConsistency,
   parseCiRawLogs,
@@ -288,9 +290,31 @@ diff --git a/internal/tool/code_search.go b/internal/tool/code_search.go
     // Collision-safe loop should pass compliance
     const safeRes = analyzePatchImpactAndConsistency({
       modifiedFiles: ["model.py"],
-      patchContent: "+while col in df.columns:\n+    col += '_'\n+frame = frame.reset_index()",
+      patchContent:
+        "+col = frame.index.name or 'index'\n+while col in frame.columns:\n+    col += '_'\n+frame.index.name = col\n+frame = frame.reset_index()",
     });
     expect(safeRes.isCompliant).toBe(true);
+
+    const dropIndex = analyzePatchImpactAndConsistency({
+      modifiedFiles: ["model.py"],
+      patchContent: "+frame = frame.reset_index(drop=True)",
+    });
+    expect(
+      dropIndex.defensiveRecommendations.some((recommendation) =>
+        recommendation.includes("DEFENSIVE COLLISION HAZARD"),
+      ),
+    ).toBe(false);
+
+    const unrelatedUnique = analyzePatchImpactAndConsistency({
+      modifiedFiles: ["model.py"],
+      patchContent:
+        "+columns_are_unique = model.columns.is_unique\n+frame = frame.reset_index()",
+    });
+    expect(
+      unrelatedUnique.defensiveRecommendations.some((recommendation) =>
+        recommendation.includes("DEFENSIVE COLLISION HAZARD"),
+      ),
+    ).toBe(true);
   });
 
   it("warns about asymmetric training validation changes and fails compliance", () => {
@@ -306,6 +330,28 @@ diff --git a/internal/tool/code_search.go b/internal/tool/code_search.go
     ).toBe(true);
     expect(res.isCompliant).toBe(false);
     expect(res.riskLevel).toBe("HIGH");
+  });
+
+  it("does not let unchanged or other-file predict calls suppress the lifecycle warning", () => {
+    const res = analyzePatchImpactAndConsistency({
+      modifiedFiles: ["training.py", "inference.py"],
+      patchContent: [
+        "diff --git a/training.py b/training.py",
+        "@@ -1,3 +1,5 @@",
+        " model.predict(X)",
+        "+X = validate_data(X)",
+        "+model.fit(X, y)",
+        "diff --git a/inference.py b/inference.py",
+        "@@ -1,2 +1,3 @@",
+        "+logger.info('predict path unchanged')",
+      ].join("\n"),
+    });
+
+    expect(
+      res.consistencyWarnings.some((warning) =>
+        warning.includes("SYMMETRIC LIFECYCLE WARNING"),
+      ),
+    ).toBe(true);
   });
 
   it("detects Windows EBUSY file lock trap when synchronously unlinking in test cleanups", () => {
@@ -362,9 +408,49 @@ Error: Process completed with exit code 1.
     expect(report.failedTests[0].sourceFile).toBe("ansi_test.go");
     expect(report.failedTests[0].sourceLine).toBe(42);
   });
+
+  it("captures compiler diagnostics and Go package headers", () => {
+    const report = parseCiRawLogs(
+      "# example.com/repo/parser\npkg/parser.go:10:2: undefined: lookup\nsrc/test.ts(4,7): error TS2304: Cannot find name 'missing'.",
+    );
+
+    expect(report.hasFailure).toBe(true);
+    expect(report.compilationErrors).toContain(
+      "[COMPILER_PACKAGE] # example.com/repo/parser",
+    );
+    expect(report.compilationErrors).toContain(
+      "pkg/parser.go:10:2: undefined: lookup",
+    );
+    expect(report.compilationErrors).toContain(
+      "src/test.ts(4,7): error TS2304: Cannot find name 'missing'.",
+    );
+  });
+
+  it("does not treat echoed protection text as a native runner failure", () => {
+    const echoed = parseCiRawLogs(
+      "Error: The deployment was rejected or didn't satisfy other protection rules\nBuild completed successfully.",
+    );
+    const runnerError = parseCiRawLogs(
+      "Error: The deployment was rejected or didn't satisfy other protection rules\nError: Process completed with exit code 1.",
+    );
+
+    expect(echoed.hasFailure).toBe(false);
+    expect(runnerError.hasFailure).toBe(true);
+    expect(runnerError.recommendedAction).toContain("No code action required");
+  });
 });
 
 describe("Resilient Sandbox Runner & Targeted Package Resolver", () => {
+  it("round-trips quoted Bun fixture source without losing slashes or newlines", () => {
+    const source = 'const marker = "a\\\\b";\nconsole.log(marker);';
+    const parsed = parseCommandSpec(bunCommand(source));
+
+    expect(parsed.executable).toBe(
+      process.execPath.split(String.fromCharCode(92)).join("/"),
+    );
+    expect(parsed.args).toEqual(["-e", source]);
+  });
+
   it("resolves smallest directory target from modified files", () => {
     const target = resolveTargetedTestPackage([
       "internal/diff/parser.go",

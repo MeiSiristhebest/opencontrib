@@ -21,13 +21,20 @@ export class OctokitIssueSource {
   private cache: ResponseCache;
 
   constructor(opts: OctokitIssueSourceOptions) {
+    const normalizedHost = opts.host
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '')
+      .toLowerCase();
     const isCustomEnterpriseHost =
-      opts.host &&
-      opts.host !== 'github.com' &&
-      opts.host !== 'api.github.com';
+      normalizedHost &&
+      normalizedHost !== 'github.com' &&
+      normalizedHost !== 'api.github.com';
     this.octokit = new Octokit({
       auth: opts.token || undefined,
-      baseUrl: isCustomEnterpriseHost ? `https://${opts.host}/api/v3` : undefined,
+      baseUrl: isCustomEnterpriseHost
+        ? `https://${normalizedHost}/api/v3`
+        : undefined,
     });
     this.cache = opts.cache;
   }
@@ -43,14 +50,14 @@ export class OctokitIssueSource {
     query: string,
     options: { maxPages?: number; refresh?: boolean } = {},
   ): Promise<SearchIssuesResult> {
-    const cacheKey = `search_${query}`;
+    const maxPages = options.maxPages ?? 2;
+    const cacheKey = `search_${query}_${maxPages}`;
     if (!options.refresh) {
       const cached = this.cache.get<SearchIssuesResult>(cacheKey);
       if (cached) return cached;
     }
 
     const items: any[] = [];
-    const maxPages = options.maxPages ?? 2;
     let pagesFetched = 0;
     let failureError: string | undefined;
 
@@ -118,7 +125,7 @@ export class OctokitIssueSource {
     const sort = options.sort || 'updated';
     const direction = options.direction || 'desc';
     const maxPages = options.maxPages ?? 2;
-    const cacheKey = `repo_issues_${owner}_${repo}_${state}_${sort}_${direction}_${options.labels || 'all'}`;
+    const cacheKey = `repo_issues_${owner}_${repo}_${state}_${sort}_${direction}_${options.labels || 'all'}_${maxPages}`;
 
     if (!options.refresh) {
       const cached = this.cache.get<any[]>(cacheKey);
@@ -142,9 +149,6 @@ export class OctokitIssueSource {
       });
 
       if (res.status !== 'OK' || !res.data) {
-        if (allIssues.length > 0) {
-          break;
-        }
         return {
           status: res.status,
           data: [],
@@ -173,7 +177,7 @@ export class OctokitIssueSource {
     issue_number: number,
     maxPages = 2,
   ): Promise<ApiResult<any[]>> {
-    const cacheKey = `comments_${owner}_${repo}_${issue_number}`;
+    const cacheKey = `comments_${owner}_${repo}_${issue_number}_${maxPages}`;
     const cached = this.cache.get<any[]>(cacheKey);
     if (cached) return { status: 'OK', data: cached };
 
@@ -389,7 +393,7 @@ export class OctokitIssueSource {
     issue_number: number,
     maxPages = 2,
   ): Promise<ApiResult<number>> {
-    const cacheKey = `issue_timeline_${owner}_${repo}_${issue_number}`;
+    const cacheKey = `issue_timeline_${owner}_${repo}_${issue_number}_${maxPages}`;
     const cached = this.cache.get<number>(cacheKey);
     if (cached !== null) return { status: 'OK', data: cached };
 

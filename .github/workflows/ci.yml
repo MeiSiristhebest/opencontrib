@@ -40,6 +40,12 @@ on:
       - "turbo.json"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
+    inputs:
+      run_network_tests:
+        description: "Run opt-in live GitHub integration tests"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -55,7 +61,7 @@ jobs:
     timeout-minutes: 15
     env:
       NODE_ENV: test
-      OPENCONTRIB_OFFLINE: "1" # Keep cached unit tests deterministic; network tests remain opt-in.
+      OPENCONTRIB_OFFLINE: "1" # Required cached tests stay offline; use the manual opt-in job for network tests.
     strategy:
       fail-fast: false
       matrix:
@@ -88,3 +94,30 @@ jobs:
 
       - name: Run cached full workspace test suite
         run: bunx turbo run test:workspace:ci --concurrency=1 --log-order=stream
+
+  network-integration:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_network_tests
+    name: Opt-in GitHub Network Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    env:
+      NODE_ENV: test
+      OPENCONTRIB_NETWORK_TESTS: "1"
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+      - name: Run opt-in network integration suite
+        run: bun run test:integration

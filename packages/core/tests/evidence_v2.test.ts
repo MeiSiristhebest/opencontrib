@@ -17,7 +17,7 @@ import {
   type ContributionRunSummary,
 } from "../src/index.js";
 import type { RedEvidence } from "../src/contracts/schemas.js";
-import { bunCommand } from "./helpers/bun-command.js";
+import { bunCommand, stateAssertionCommand } from "./helpers/bun-command.js";
 import {
   countValidatedPatchChangedLines,
   EvidenceService,
@@ -364,15 +364,9 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       }).trim();
 
       // Test command that inspects status.txt without depending on a shell.
-      const statePath = JSON.stringify(stateFile.replace(/\\/g, "/"));
-      const testCmd = bunCommand(
-        [
-          `const state = require("node:fs").readFileSync(${statePath}, "utf8");`,
-          `if (state.includes("FAIL")) {`,
-          `console.log("ASSERTION_ERROR_SAMPLE");`,
-          "process.exitCode = 1;",
-          `} else { console.log("PASS"); }`,
-        ].join(" "),
+      const testCmd = stateAssertionCommand(
+        stateFile,
+        "ASSERTION_ERROR_SAMPLE",
       );
 
       const { ContributionRunManager } =

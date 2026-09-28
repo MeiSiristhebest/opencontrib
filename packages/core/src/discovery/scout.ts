@@ -39,12 +39,18 @@ async function mapConcurrent<T, R>(
   const results: R[] = new Array(items.length);
   let currentIndex = 0;
 
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (currentIndex < items.length) {
-      const idx = currentIndex++;
-      results[idx] = await fn(items[idx]);
-    }
-  });
+  const workers: Promise<void>[] = [];
+  const workerCount = Math.min(concurrency, items.length);
+  for (let workerIndex = 0; workerIndex < workerCount; workerIndex++) {
+    workers.push(
+      (async () => {
+        while (currentIndex < items.length) {
+          const idx = currentIndex++;
+          results[idx] = await fn(items[idx]);
+        }
+      })(),
+    );
+  }
 
   await Promise.all(workers);
   return results;
@@ -156,7 +162,36 @@ export async function scoutOpportunities(
 
   // 3. Tier 2: Bounded Parallel Enrichment (Concurrency = 5)
   const repoDetailsCache = new Map<string, any>();
-  const repoGatePolicyCache = new Map<string, CommunityGatePolicy>();
+  const repoGatePolicyCache = new Map<string, Promise<CommunityGatePolicy>>();
+  const getRepoGatePolicy = (
+    owner: string,
+    repo: string,
+    repoFullName: string,
+  ): Promise<CommunityGatePolicy> => {
+    let pending = repoGatePolicyCache.get(repoFullName);
+    if (!pending) {
+      pending = (async () => {
+        const policyFiles: Array<{ path: string; content: string }> = [];
+        for (const path of COMMUNITY_GATE_POLICY_PATHS) {
+          const result = await resolvedClient.getRepoTextFileResult(
+            owner,
+            repo,
+            path,
+          );
+          if (result.status === 'NOT_FOUND') continue;
+          if (result.status !== 'OK') {
+            throw new Error(
+              `CommunityGatePolicyReadError: ${result.status} while reading ${path}`,
+            );
+          }
+          if (result.data) policyFiles.push({ path, content: result.data });
+        }
+        return detectCommunityGateFromContents(policyFiles);
+      })();
+      repoGatePolicyCache.set(repoFullName, pending);
+    }
+    return pending;
+  };
 
   const candidates = (
     await mapConcurrent(preFiltered, 5, async ({ item, labels }) => {
@@ -179,19 +214,13 @@ export async function scoutOpportunities(
       }
       if (repoDetails.isArchived) return null;
 
-      // Fail-Safe Batch repo community gate policy
-      let gatePolicy = repoGatePolicyCache.get(repoFullName);
-      if (!gatePolicy) {
-        const policyFiles: Array<{ path: string; content: string }> = [];
-        const policyCandidates = ['CONTRIBUTING.md', '.github/CONTRIBUTING.md', 'AGENTS.md'];
-        for (const p of policyCandidates) {
-          const content = await resolvedClient.getRepoTextFile(owner, repo, p);
-          if (content) {
-            policyFiles.push({ path: p, content });
-          }
-        }
-        gatePolicy = detectCommunityGateFromContents(policyFiles);
-        repoGatePolicyCache.set(repoFullName, gatePolicy);
+      // Fail closed if any policy lookup is unavailable; a read failure must
+      // never be mistaken for a repository with no contribution gate.
+      let gatePolicy: CommunityGatePolicy;
+      try {
+        gatePolicy = await getRepoGatePolicy(owner, repo, repoFullName);
+      } catch {
+        return null;
       }
 
       // Paged comments and timeline with rich ApiStatus
@@ -248,30 +277,28 @@ export async function scoutOpportunities(
           }
         }
 
-        // 2. Author association + comment intent detection
+        // 2. Only repository-maintainer associations can authorize contribution.
         for (const c of comments) {
           const assoc = (c.author_association || '').toUpperCase();
           const isMaintainer = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(assoc);
-          const body = (c.body || '').trim().toLowerCase();
+          if (!isMaintainer) continue;
 
-          // Maintainer comment indicating approval / greenlight to contribute
-          if (isMaintainer) {
-            if (/\b(?:lgtmi?|approved|looks good|go ahead|feel free to|welcome to send|assigned to you|\+1)\b/i.test(body)) {
-              approvalSignals.push({
-                source: 'author_association',
-                detail: `Maintainer (@${c.user?.login || 'unknown'}, ${assoc}) approved: "${(c.body || '').slice(0, 80)}"`,
-                confidence: 'high',
-              });
-            }
-          } else {
-            // General comment approval tokens
-            if (/\b(?:lgtmi|approved\s+(?:to\s+work|for\s+pr))\b/i.test(body)) {
-              approvalSignals.push({
-                source: 'comment_keyword',
-                detail: `Approval token found: "${(c.body || '').slice(0, 80)}"`,
-                confidence: 'medium',
-              });
-            }
+          const body = (c.body || '').trim().toLowerCase();
+          const isNegated =
+            /\b(?:not|no|never|don't|doesn't|isn't|cannot|can't|wait|hold off)\b/i.test(
+              body,
+            );
+          const hasApprovalIntent =
+            /\b(?:lgtmi?|approved|looks good|go ahead|feel free to|welcome to send|assigned to you)\b/i.test(
+              body,
+            ) || /(?:^|\s)\+1\b/.test(body);
+
+          if (hasApprovalIntent && !isNegated) {
+            approvalSignals.push({
+              source: 'author_association',
+              detail: `Maintainer (@${c.user?.login || 'unknown'}, ${assoc}) approved: "${(c.body || '').slice(0, 80)}"`,
+              confidence: 'high',
+            });
           }
         }
       }

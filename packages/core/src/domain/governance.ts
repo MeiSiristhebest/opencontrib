@@ -480,6 +480,7 @@ export interface AuditGovernanceInput {
   variantHuntConducted?: boolean;
   impactAnalysisConducted?: boolean;
   modifiedFiles?: string[];
+  repoContextFiles?: string[];
   coreDiffLines?: number;
 }
 
@@ -782,15 +783,14 @@ export function auditGovernance(
     const impactResult = analyzePatchImpactAndConsistency({
       modifiedFiles: input.modifiedFiles || [],
       patchContent: patch,
+      repoContextFiles: input.repoContextFiles || [],
     });
-    if (!impactResult.isCompliant) {
-      impactAnalysisPassed = false;
-      impactAnalysisIssues.push(
-        ...impactResult.crossPlatformHazards,
-        ...impactResult.defensiveRecommendations.filter((r) => r.includes("CRITICAL")),
-        ...impactResult.consistencyWarnings.filter((w) => w.includes("CRITICAL")),
-      );
-    }
+    impactAnalysisPassed = impactResult.isCompliant;
+    impactAnalysisIssues.push(
+      ...impactResult.crossPlatformHazards,
+      ...impactResult.defensiveRecommendations,
+      ...impactResult.consistencyWarnings,
+    );
   }
 
   const isTechnicalGatePassed =
@@ -996,6 +996,195 @@ export interface MasterPrTemplateInput {
   evidence?: PrTemplateEvidence;
 }
 
+interface MarkdownLineRecord {
+  text: string;
+  start: number;
+  end: number;
+  ending: string;
+}
+
+interface MarkdownFence {
+  marker: "`" | "~";
+  length: number;
+}
+
+function markdownLineRecords(content: string): MarkdownLineRecord[] {
+  const records: MarkdownLineRecord[] = [];
+  const newlines = /\r\n|\n|\r/g;
+  let start = 0;
+  let match: RegExpExecArray | null;
+  while ((match = newlines.exec(content)) !== null) {
+    records.push({
+      text: content.slice(start, match.index),
+      start,
+      end: newlines.lastIndex,
+      ending: match[0],
+    });
+    start = newlines.lastIndex;
+  }
+  if (start < content.length || records.length === 0) {
+    records.push({
+      text: content.slice(start),
+      start,
+      end: content.length,
+      ending: "",
+    });
+  }
+  return records;
+}
+
+function markdownFenceOpener(line: string): MarkdownFence | undefined {
+  const match = line.match(/^ {0,3}(`{3,}|~{3,})/);
+  if (!match) return undefined;
+  return { marker: match[1][0] as "`" | "~", length: match[1].length };
+}
+
+function isMarkdownFenceCloser(line: string, fence: MarkdownFence): boolean {
+  const match = line.match(/^ {0,3}(`+|~+)\s*$/);
+  return Boolean(
+    match &&
+      match[1][0] === fence.marker &&
+      match[1].length >= fence.length,
+  );
+}
+
+function findRelatedIssuesSection(content: string): {
+  bodyStart: number;
+  end: number;
+  headingHasNewline: boolean;
+} | undefined {
+  let fence: MarkdownFence | undefined;
+  let section:
+    | { bodyStart: number; end: number; headingHasNewline: boolean }
+    | undefined;
+
+  for (const line of markdownLineRecords(content)) {
+    if (fence) {
+      if (isMarkdownFenceCloser(line.text, fence)) fence = undefined;
+      continue;
+    }
+    const opener = markdownFenceOpener(line.text);
+    if (opener) {
+      fence = opener;
+      continue;
+    }
+
+    const heading = line.text.match(/^ {0,3}(#{1,6})[ \t]+(.+?)\s*$/);
+    if (!heading) continue;
+    const level = heading[1].length;
+    const title = heading[2]
+      .replace(/[ \t]+#+[ \t]*$/, "")
+      .trim()
+      .toLowerCase();
+    if (!section) {
+      if (level === 2 && title === "related issues") {
+        section = {
+          bodyStart: line.end,
+          end: content.length,
+          headingHasNewline: line.ending.length > 0,
+        };
+      }
+    } else if (level <= 2) {
+      section.end = line.start;
+      return section;
+    }
+  }
+  return section;
+}
+
+function rewriteIssueReferences(
+  content: string,
+  issueNumber?: number,
+  includeFencedCode = false,
+): { content: string; replaced: boolean } {
+  let replaced = false;
+  const pattern =
+    issueNumber === undefined
+      ? /\b(fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/gi
+      : /\b(fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i;
+  const rewriteLine = (text: string): string => {
+    if (issueNumber !== undefined && replaced) return text;
+    return text.replace(pattern, (_match, verb: string) => {
+      replaced = true;
+      return issueNumber === undefined ? "" : `${verb} #${issueNumber}`;
+    });
+  };
+
+  let fence: MarkdownFence | undefined;
+  const rewritten = markdownLineRecords(content)
+    .map((line) => {
+      if (fence) {
+        const text = includeFencedCode ? rewriteLine(line.text) : line.text;
+        if (isMarkdownFenceCloser(line.text, fence)) fence = undefined;
+        return `${text}${line.ending}`;
+      }
+      const opener = markdownFenceOpener(line.text);
+      if (opener) {
+        fence = opener;
+        const text = includeFencedCode ? rewriteLine(line.text) : line.text;
+        return `${text}${line.ending}`;
+      }
+      return `${rewriteLine(line.text)}${line.ending}`;
+    })
+    .join("");
+  return { content: rewritten, replaced };
+}
+
+function insertIssueReferenceInSection(
+  content: string,
+  section: { bodyStart: number; headingHasNewline: boolean },
+  reference: string,
+): string {
+  const newline = content.includes("\r\n")
+    ? "\r\n"
+    : content.includes("\r")
+      ? "\r"
+      : "\n";
+  const separator = section.headingHasNewline ? "" : newline;
+  return `${content.slice(0, section.bodyStart)}${separator}${reference}${newline}${content.slice(section.bodyStart)}`;
+}
+
+function updateNativeTemplateIssueReference(
+  content: string,
+  issueReference: string,
+  submissionRoute: "PUBLIC_ISSUE" | "PRIVATE_SECURITY",
+  issueNumber?: number,
+): string {
+  if (submissionRoute === "PRIVATE_SECURITY") {
+    const withoutPublicReferences = rewriteIssueReferences(
+      content,
+      undefined,
+    ).content;
+    const section = findRelatedIssuesSection(withoutPublicReferences);
+    return section
+      ? insertIssueReferenceInSection(
+          withoutPublicReferences,
+          section,
+          issueReference,
+        )
+      : `${issueReference}\n\n${withoutPublicReferences}`;
+  }
+
+  const publicIssueNumber = issueNumber ?? 0;
+  const section = findRelatedIssuesSection(content);
+  if (section) {
+    const body = content.slice(section.bodyStart, section.end);
+    const rewrittenBody = rewriteIssueReferences(body, publicIssueNumber);
+    return rewrittenBody.replaced
+      ? `${content.slice(0, section.bodyStart)}${rewrittenBody.content}${content.slice(section.end)}`
+      : insertIssueReferenceInSection(
+          content,
+          section,
+          `closes #${publicIssueNumber}`,
+        );
+  }
+
+  const rewritten = rewriteIssueReferences(content, publicIssueNumber);
+  return rewritten.replaced
+    ? rewritten.content
+    : `${issueReference}\n\n${content}`;
+}
+
 export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
   const submissionRoute = data.submissionRoute ?? "PUBLIC_ISSUE";
   if (
@@ -1090,40 +1279,12 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     let result = data.nativeTemplateContent;
     result = result.replace(/<!--[\s\S]*?-->/g, ""); // strip comments
 
-    const hasRelatedIssuesSection = /##\s*related issues/i.test(result);
-    if (submissionRoute === "PRIVATE_SECURITY") {
-      result = result.replace(
-        /\b(?:fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/gim,
-        "",
-      );
-      if (hasRelatedIssuesSection) {
-        result = result.replace(
-          /(##\s*related issues[\s\S]*?)(?=##|$)/i,
-          `$1\n${issueReference}\n\n`,
-        );
-      } else {
-        result = `${issueReference}\n\n${result}`;
-      }
-    } else if (hasRelatedIssuesSection) {
-      if (/\b(?:fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i.test(result)) {
-        result = result.replace(
-          /(fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i,
-          `$1 #${data.issueNumber}`,
-        );
-      } else {
-        result = result.replace(
-          /(##\s*related issues[\s\S]*?)(?=##|$)/i,
-          `$1\ncloses #${data.issueNumber}\n\n`,
-        );
-      }
-    } else if (/\b(?:fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i.test(result)) {
-      result = result.replace(
-        /(fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i,
-        `$1 #${data.issueNumber}`,
-      );
-    } else {
-      result = `${issueReference}\n\n` + result;
-    }
+    result = updateNativeTemplateIssueReference(
+      result,
+      issueReference,
+      submissionRoute,
+      data.issueNumber,
+    );
 
     if (
       /## description|## summary|## motivation|### description/i.test(result)
@@ -1158,19 +1319,12 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
       );
     }
 
-    // Auto-check test checklist items
-    result = result.replace(/- \[[ x]\] (`make test` passes locally)/i, "- [x] $1");
-    result = result.replace(/- \[[ x]\] (My code follows the project's coding style[^\r\n]*)/i, "- [x] $1");
-    result = result.replace(/- \[[ x]\] (I have performed a self-review[^\r\n]*)/i, "- [x] $1");
-    result = result.replace(/- \[[ x]\] (I have added tests that prove my fix is effective[^\r\n]*)/i, "- [x] $1");
-    result = result.replace(/- \[[ x]\] (New and existing unit tests pass locally[^\r\n]*)/i, "- [x] $1");
-    result = result.replace(/- \[[ x]\] (I have updated the documentation accordingly[^\r\n]*)/i, "- [x] $1");
-    result = result.replace(/- \[[ x]\] (I have signed the CLA)/i, "- [x] $1");
-    result = result.replace(/- \[[ x]\] (I did not use AI\/LLM to create this PR, or I disclosed[^\r\n]*)/i, "- [x] $1");
+    // Contributor attestations are never inferred from pipeline evidence.
+
 
     const complianceNotes = [
       data.aiDisclosureRequired
-        ? "Automated assistance disclosure is required by the pinned repository policy."
+        ? "Automated assistance disclosure: This contribution was prepared using OpenContrib AI-assisted tooling; specific model details were not recorded in this run."
         : "",
       data.dcoRequired
         ? "DCO requirement: the commits must include a valid Signed-off-by trailer."

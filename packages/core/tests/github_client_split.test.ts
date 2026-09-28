@@ -4,9 +4,162 @@ import {
   requestWithRetry,
 } from '../src/github/retry-strategy.js';
 import { GitHubClient } from '../src/discovery/github-client.js';
+import { OctokitIssueSource } from '../src/github/octokit-issue-source.js';
 import { scoutOpportunities } from '../src/discovery/scout.js';
+import { COMMUNITY_GATE_POLICY_PATHS } from '../src/governance/community-gate.js';
 import type { CredentialsProvider } from '../src/ports/credentials-provider.port.js';
 import type { ResponseCache } from '../src/ports/response-cache.port.js';
+
+function createMemoryCache(): {
+  cache: ResponseCache;
+  reads: string[];
+  writes: string[];
+} {
+  const values = new Map<string, unknown>();
+  const reads: string[] = [];
+  const writes: string[] = [];
+  return {
+    cache: {
+      get<T>(key: string): T | null {
+        reads.push(key);
+        return (values.get(key) as T | undefined) ?? null;
+      },
+      set<T>(key: string, payload: T): void {
+        writes.push(key);
+        values.set(key, payload);
+      },
+    },
+    reads,
+    writes,
+  };
+}
+
+function createMockIssueSource(cache: ResponseCache): OctokitIssueSource {
+  const source = new OctokitIssueSource({
+    token: 'token',
+    host: 'github.com',
+    cache,
+  });
+  (source as any).request = async (operation: () => Promise<unknown>) => {
+    try {
+      return { status: 'OK', data: await operation() };
+    } catch (error) {
+      return {
+        status: 'NETWORK_ERROR',
+        data: null,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+  return source;
+}
+
+interface ScoutFixtureComment {
+  body: string;
+  author_association: string;
+  created_at?: string;
+}
+
+function createScoutFixture(options: {
+  issueCount?: number;
+  policyContent?: string;
+  policyReadFails?: boolean;
+  comments?: ScoutFixtureComment[];
+} = {}) {
+  const now = new Date().toISOString();
+  const policyReads: string[] = [];
+  const issues = Array.from({ length: options.issueCount ?? 1 }, (_, index) => ({
+    number: 42 + index,
+    title: `Fix TypeScript parser bug ${index}`,
+    body: 'Reproducible bug fix for parser input handling in TypeScript.',
+    labels: [],
+    repository_url: 'https://api.github.com/repos/owner/repo',
+    html_url: `https://github.com/owner/repo/issues/${42 + index}`,
+    assignee: null,
+    assignees: [],
+    pull_request: undefined,
+    locked: false,
+    state: 'open',
+    created_at: now,
+    updated_at: now,
+    user: { login: 'issue-author' },
+  }));
+  const comments = (options.comments ?? []).map((comment) => ({
+    ...comment,
+    created_at: comment.created_at ?? now,
+    user: { login: 'reviewer' },
+  }));
+
+  return {
+    policyReads,
+    client: {
+      searchIssues: async () => ({
+        items: issues,
+        status: 'COMPLETE' as const,
+        pagesFetched: 1,
+        pagesRequested: 1,
+      }),
+      listRepoIssues: async () => ({ status: 'OK' as const, data: [] }),
+      getRepoDetails: async () => ({
+        status: 'OK' as const,
+        data: {
+          stars: 120,
+          defaultBranch: 'main',
+          isFork: false,
+          isArchived: false,
+          description: 'Scout fixture',
+        },
+      }),
+      getRepoTextFileResult: async (
+        _owner: string,
+        _repo: string,
+        policyPath: string,
+      ) => {
+        policyReads.push(policyPath);
+        if (options.policyReadFails) {
+          return {
+            status: 'NETWORK_ERROR' as const,
+            data: null,
+            error: 'policy read unavailable',
+          };
+        }
+        if (
+          policyPath === COMMUNITY_GATE_POLICY_PATHS[0] &&
+          options.policyContent !== undefined
+        ) {
+          return { status: 'OK' as const, data: options.policyContent };
+        }
+        return { status: 'NOT_FOUND' as const, data: null };
+      },
+      getRepoTextFile: async () => null,
+      hasActiveLinkedPr: async () => ({
+        status: 'OK' as const,
+        data: false,
+      }),
+      getIssueComments: async () => ({
+        status: 'OK' as const,
+        data: comments,
+      }),
+      getIssueLinkedPrsCount: async () => ({
+        status: 'OK' as const,
+        data: 0,
+      }),
+    },
+  };
+}
+
+async function scoutFixture(client: unknown) {
+  return scoutOpportunities(
+    {
+      techStack: ['typescript'],
+      focusAreas: ['bugfix'],
+      proficiency: 'intermediate',
+      minMatchScore: 50,
+    },
+    { repo: 'owner/repo', minStars: 0 },
+    client as any,
+  );
+}
 
 // ── Retry strategy (extracted, pure) ───────────────────────────────────────────
 describe('retry-strategy (GitHubClient split)', () => {
@@ -95,7 +248,7 @@ describe('GitHubClient composition root seam', () => {
     expect(calls).toEqual([]);
   });
 
-  it('keeps baseUrl undefined for public github.com and api.github.com to hit api.github.com', () => {
+  it('normalizes public and enterprise hosts to their canonical API base URLs', () => {
     const fakeCreds: CredentialsProvider = {
       getToken: () => 'token',
       getTokenScope: () => 'scope',
@@ -113,7 +266,11 @@ describe('GitHubClient composition root seam', () => {
     const octokitDotCom = (dotComClient as any).source.octokit;
     expect(octokitDotCom.request.endpoint.DEFAULTS.baseUrl).toBe('https://api.github.com');
 
-    const enterpriseClient = new GitHubClient({ host: 'github.mycompany.internal' }, { credentials: fakeCreds, cache: fakeCache });
+    const apiHostClient = new GitHubClient({ host: 'api.github.com' }, { credentials: fakeCreds, cache: fakeCache });
+    const octokitApiHost = (apiHostClient as any).source.octokit;
+    expect(octokitApiHost.request.endpoint.DEFAULTS.baseUrl).toBe('https://api.github.com');
+
+    const enterpriseClient = new GitHubClient({ host: 'HTTPS://GitHub.MyCompany.Internal/' }, { credentials: fakeCreds, cache: fakeCache });
     const octokitEnterprise = (enterpriseClient as any).source.octokit;
     expect(octokitEnterprise.request.endpoint.DEFAULTS.baseUrl).toBe('https://github.mycompany.internal/api/v3');
   });
@@ -130,6 +287,112 @@ describe('GitHubClient composition root seam', () => {
 
     const client = new GitHubClient({}, { credentials: fakeCreds, cache: fakeCache });
     expect(typeof client.listRepoIssues).toBe('function');
+  });
+
+  it('includes maxPages in search and repository issue cache identities', async () => {
+    const { cache, writes } = createMemoryCache();
+    const source = createMockIssueSource(cache);
+    const octokit = (source as any).octokit;
+    const searchPages: number[] = [];
+    octokit.request = async (_route: string, params: { page: number }) => {
+      searchPages.push(params.page);
+      return { data: { items: [] } };
+    };
+    await source.searchIssues('repo:org/repo is:issue', { maxPages: 1 });
+    await source.searchIssues('repo:org/repo is:issue', { maxPages: 2 });
+    expect(searchPages).toEqual([1, 1]);
+    expect(writes.filter((key) => key.startsWith('search_'))).toEqual([
+      'search_repo:org/repo is:issue_1',
+      'search_repo:org/repo is:issue_2',
+    ]);
+
+    octokit.rest.issues.listForRepo = async () => ({ data: [] });
+    await source.listRepoIssues('org', 'repo', { maxPages: 1 });
+    await source.listRepoIssues('org', 'repo', { maxPages: 2 });
+    expect(writes.filter((key) => key.startsWith('repo_issues_'))).toEqual([
+      'repo_issues_org_repo_open_updated_desc_all_1',
+      'repo_issues_org_repo_open_updated_desc_all_2',
+    ]);
+  });
+
+  it('returns a failure instead of caching partial repository pagination', async () => {
+    const { cache, writes } = createMemoryCache();
+    const source = createMockIssueSource(cache);
+    const octokit = (source as any).octokit;
+    let pageCalls = 0;
+    octokit.rest.issues.listForRepo = async ({ page }: { page: number }) => {
+      pageCalls += 1;
+      if (page === 1) {
+        return { data: Array.from({ length: 50 }, (_, index) => ({ number: index + 1 })) };
+      }
+      throw new Error('page 2 unavailable');
+    };
+
+    const result = await source.listRepoIssues('org', 'repo', { maxPages: 2 });
+    expect(result.status).toBe('NETWORK_ERROR');
+    expect(result.data).toEqual([]);
+    expect(result.error).toContain('page 2 unavailable');
+    expect(pageCalls).toBe(2);
+    expect(writes).toEqual([]);
+  });
+
+  it('fails closed when a repository policy read is unavailable', async () => {
+    const fixture = createScoutFixture({ policyReadFails: true });
+    const opportunities = await scoutFixture(fixture.client);
+
+    expect(opportunities).toEqual([]);
+    expect(fixture.policyReads).toEqual([COMMUNITY_GATE_POLICY_PATHS[0]]);
+  });
+
+  it('requires maintainer approval for affirmative signals from untrusted or negated comments', async () => {
+    const policyContent = 'New issues are auto-closed by default.';
+    const nonMaintainer = createScoutFixture({
+      policyContent,
+      comments: [
+        { body: 'Approved to work on this issue.', author_association: 'NONE' },
+      ],
+    });
+    const negatedMaintainer = createScoutFixture({
+      policyContent,
+      comments: [
+        {
+          body: 'Not approved yet; wait for maintainer review.',
+          author_association: 'MEMBER',
+        },
+      ],
+    });
+
+    const nonMaintainerResult = await scoutFixture(nonMaintainer.client);
+    const negatedResult = await scoutFixture(negatedMaintainer.client);
+    expect(nonMaintainerResult[0].communityGateStatus).toBe(
+      'REQUIRES_MAINTAINER_APPROVAL',
+    );
+    expect(negatedResult[0].communityGateStatus).toBe(
+      'REQUIRES_MAINTAINER_APPROVAL',
+    );
+  });
+
+  it('accepts a maintainer +1 as affirmative approval', async () => {
+    const fixture = createScoutFixture({
+      policyContent: 'New issues are auto-closed by default.',
+      comments: [{ body: '+1', author_association: 'COLLABORATOR' }],
+    });
+    const opportunities = await scoutFixture(fixture.client);
+
+    expect(opportunities[0].communityGateStatus).toBe(
+      'APPROVED_BY_MAINTAINER',
+    );
+  });
+
+  it('reads shared repository policy once for concurrent issues', async () => {
+    const fixture = createScoutFixture({
+      issueCount: 2,
+      policyContent: 'New issues are auto-closed by default.',
+    });
+    const opportunities = await scoutFixture(fixture.client);
+
+    expect(opportunities).toHaveLength(2);
+    expect(fixture.policyReads).toEqual([...COMMUNITY_GATE_POLICY_PATHS]);
   });
 
   it('scoutOpportunities executes Tri-Route fallback to listRepoIssues when search returns 0 items', async () => {
