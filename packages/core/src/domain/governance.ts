@@ -15,6 +15,7 @@ import {
   type EvidenceReport,
 } from "../contracts/schemas.js";
 import { validateMarkdownIntegrity } from "../governance/markdown-validator.js";
+import { analyzePatchImpactAndConsistency } from "../governance/impact-analyzer.js";
 
 /**
  * Advanced Semantic & Behavioral Anti-AI Patterns
@@ -478,6 +479,7 @@ export interface AuditGovernanceInput {
   isAutonomousPrSubmission?: boolean;
   variantHuntConducted?: boolean;
   impactAnalysisConducted?: boolean;
+  modifiedFiles?: string[];
   coreDiffLines?: number;
 }
 
@@ -773,6 +775,24 @@ export function auditGovernance(
     input.resourceLeakPolicy?.required !== true ||
     input.evidence?.handleLeakCheckPassed === "PASS";
 
+  // 3b. Cross-Platform, Collision & Lifecycle Impact Analysis Check
+  let impactAnalysisPassed = true;
+  const impactAnalysisIssues: string[] = [];
+  if (patch) {
+    const impactResult = analyzePatchImpactAndConsistency({
+      modifiedFiles: input.modifiedFiles || [],
+      patchContent: patch,
+    });
+    if (!impactResult.isCompliant) {
+      impactAnalysisPassed = false;
+      impactAnalysisIssues.push(
+        ...impactResult.crossPlatformHazards,
+        ...impactResult.defensiveRecommendations.filter((r) => r.includes("CRITICAL")),
+        ...impactResult.consistencyWarnings.filter((w) => w.includes("CRITICAL")),
+      );
+    }
+  }
+
   const isTechnicalGatePassed =
     antiAiCheckPassed &&
     markdownIntegrityPassed &&
@@ -781,7 +801,8 @@ export function auditGovernance(
     rfcGatePassed &&
     confidence.isPassed &&
     coverageGatePassed &&
-    resourceLeakGatePassed;
+    resourceLeakGatePassed &&
+    impactAnalysisPassed;
 
   const isGatedPassed = isTechnicalGatePassed;
 
@@ -884,6 +905,12 @@ export function auditGovernance(
     );
   }
 
+  if (!impactAnalysisPassed) {
+    remediationSuggestions.push(
+      `Impact Gate: ${impactAnalysisIssues.join("; ")}`,
+    );
+  }
+
   if (!input.variantHuntConducted) {
     remediationSuggestions.push(
       "In-Domain Defense Recommendation: Run Variant Hunting sweep across sister modules to ensure zero parallel structural defects.",
@@ -913,6 +940,8 @@ export function auditGovernance(
     flaggedTautologicalAssertions,
     commentHyperbolePassed,
     flaggedCommentHyperboles,
+    impactAnalysisPassed,
+    impactAnalysisIssues,
     remediationSuggestions,
     overallConfidence: {
       isPassed: isTechnicalGatePassed,

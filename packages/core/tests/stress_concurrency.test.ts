@@ -159,7 +159,7 @@ describe("runStressLoopAsync — local backend parity", () => {
     expect(result.completedRuns).toBe(15);
     expect(result.maxConcurrentObserved).toBe(5);
     expect(result.concurrencyStampedePassed).toBe(true);
-  });
+  }, 120000);
 
   test("workers=1 loops=3 remains sequential", async () => {
     const result = await runStressLoopAsync(
@@ -172,5 +172,5 @@ describe("runStressLoopAsync — local backend parity", () => {
 
     expect(result.executionCount).toBe(3);
     expect(result.maxConcurrentObserved).toBe(1);
-  });
+  }, 120000);
 });

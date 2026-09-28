@@ -213,6 +213,20 @@ Issues submitted Friday through Sunday are not guaranteed to be reviewed until t
     expect(hashCommunityGateSnapshot(snapshot)).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("detects Contributor License Agreement (CLA) requirement and differentiates from DCO", () => {
+    const claPolicy = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content: "Before we can merge your pull request, you must sign our Contributor License Agreement (CLA). A cla-assistant bot will comment on your PR.",
+      },
+    ]);
+
+    expect(claPolicy.requiresCla).toBe(true);
+    expect(claPolicy.requiresDco).toBe(false);
+    expect(claPolicy.reasons.some((r) => r.includes("Contributor License Agreement (CLA)"))).toBe(true);
+    expect(claPolicy.suggestedContributorAction).toContain("Contributor License Agreement (CLA) signature");
+  });
+
   it("returns permissive policy when no governance files exist", async () => {
     const gate = await detectCommunityGate(tmpDir);
 

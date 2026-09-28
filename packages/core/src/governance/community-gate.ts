@@ -47,7 +47,7 @@ export interface PolicyRule {
   /** Which policy flag this rule contributes to */
   target: keyof Pick<CommunityGatePolicy, 
     'requiresIssueApprovalBeforePr' | 'autoClosesNewIssues' | 'hasLgtmApprovalProtocol' | 
-    'restrictedTriageHours' | 'privateVulnerabilityDisclosure' | 'requiresDco' | 'requiresAiDisclosure'>;
+    'restrictedTriageHours' | 'privateVulnerabilityDisclosure' | 'requiresDco' | 'requiresCla' | 'requiresAiDisclosure'>;
   /** Regex pattern to match against combined policy file content */
   pattern: RegExp;
   /** Human-readable description of what this rule detects */
@@ -97,6 +97,13 @@ export const DEFAULT_POLICY_RULES: PolicyRule[] = [
   { target: 'requiresDco', pattern: /sign[- ]off (?:your )?commits/i, description: 'Sign-off commits', negationAware: true },
   { target: 'requiresDco', pattern: /dco (?:required|sign[- ]off)/i, description: 'DCO required', negationAware: true },
   { target: 'requiresDco', pattern: /commits?\s+(?:must|shall)\s+be\s+sign(?:ed)?[- ]off/i, description: 'Commits must be signed off', negationAware: true },
+
+  { target: 'requiresCla', pattern: /contributor\s+license\s+agreement/i, description: 'Contributor License Agreement', negationAware: true },
+  { target: 'requiresCla', pattern: /cla[- ]assistant/i, description: 'CLA Assistant', negationAware: true },
+  { target: 'requiresCla', pattern: /sign(?:ing)?\s+(?:the\s+)?(?:microsoft|google|cncf|individual|corporate)?\s*cla\b/i, description: 'Sign CLA', negationAware: true },
+  { target: 'requiresCla', pattern: /cla\s+(?:is\s+)?required/i, description: 'CLA required', negationAware: true },
+  { target: 'requiresCla', pattern: /cla\s+bot\b/i, description: 'CLA bot', negationAware: true },
+  { target: 'requiresCla', pattern: /easycla\b/i, description: 'EasyCLA', negationAware: true },
 
   { target: 'requiresAiDisclosure', pattern: /(?:ai|automated|copilot)[ -]?(?:assisted|generated) disclosure/i, description: 'AI disclosure', negationAware: true },
   { target: 'requiresAiDisclosure', pattern: /disclose (?:the use of )?(?:ai|automated|copilot)/i, description: 'Disclose use of AI', negationAware: true },
@@ -193,6 +200,7 @@ export function detectCommunityGateFromContents(
   let restrictedTriageHours = false;
   let privateVulnerabilityDisclosure = false;
   let requiresDco = false;
+  let requiresCla = false;
   let requiresAiDisclosure = false;
   let maxDiffCeiling: number | undefined;
 
@@ -216,6 +224,7 @@ export function detectCommunityGateFromContents(
       else if (rule.target === 'restrictedTriageHours') restrictedTriageHours = true;
       else if (rule.target === 'privateVulnerabilityDisclosure') privateVulnerabilityDisclosure = true;
       else if (rule.target === 'requiresDco') requiresDco = true;
+      else if (rule.target === 'requiresCla') requiresCla = true;
       else if (rule.target === 'requiresAiDisclosure') requiresAiDisclosure = true;
       
       matchedKeywords.push(matchedStr);
@@ -265,6 +274,11 @@ export function detectCommunityGateFromContents(
       "Repository requires Developer Certificate of Origin sign-off on contribution commits.",
     );
   }
+  if (requiresCla) {
+    reasons.push(
+      "Repository requires contributors to sign a Contributor License Agreement (CLA).",
+    );
+  }
   if (requiresAiDisclosure) {
     reasons.push(
       "Repository requires explicit disclosure of AI or automated assistance.",
@@ -290,9 +304,10 @@ export function detectCommunityGateFromContents(
   } else if (requiresIssueApprovalBeforePr || autoClosesNewIssues) {
     suggestedContributorAction =
       'Create and bind the provider-backed Issue first. PAUSE pipeline and wait for maintainer to reopen or comment "lgtmi" before submitting PR.';
-  } else if (requiresDco || requiresAiDisclosure) {
+  } else if (requiresDco || requiresCla || requiresAiDisclosure) {
     const requirements = [
       ...(requiresDco ? ["commit sign-off"] : []),
+      ...(requiresCla ? ["Contributor License Agreement (CLA) signature"] : []),
       ...(requiresAiDisclosure ? ["AI-assistance disclosure"] : []),
     ];
     suggestedContributorAction =
@@ -307,6 +322,7 @@ export function detectCommunityGateFromContents(
     restrictedTriageHours,
     privateVulnerabilityDisclosure,
     requiresDco,
+    requiresCla,
     requiresAiDisclosure,
     maxDiffCeiling,
     reasons,

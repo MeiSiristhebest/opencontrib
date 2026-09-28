@@ -414,4 +414,14 @@ describe("CLI Commands & Subcommands Test Suite", () => {
       }
     }
   });
+
+  it("registers scout options and accepts both [target] positional and --repo option", () => {
+    const repoOption = scoutCommand.options.find((o) => o.attributeName() === "repo");
+    expect(repoOption).toBeDefined();
+    expect(repoOption?.short).toBe("-r");
+
+    const targetArg = scoutCommand.registeredArguments.find((a) => a.name() === "target");
+    expect(targetArg).toBeDefined();
+    expect(targetArg?.required).toBe(false);
+  });
 });

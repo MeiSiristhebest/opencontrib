@@ -89,6 +89,17 @@ export function analyzePatchImpactAndConsistency(input: ImpactAnalysisInput): Im
     );
   }
 
+  // D. Windows EBUSY / file lock cleanup hazard
+  if (
+    (patchContent.includes('fs.unlinkSync') || patchContent.includes('fs.rmSync')) &&
+    !patchContent.includes('retry') &&
+    !patchContent.includes('catch')
+  ) {
+    crossPlatformHazards.push(
+      `POTENTIAL EBUSY FILE LOCK HAZARD: Synchronous unlinking without retry or catch block. On Windows CI, spawned child processes or antivirus scanners hold asynchronous file handles, causing EBUSY/EPERM errors during cleanup. Use retry logic (e.g. maxRetries/retryDelay).`
+    );
+  }
+
   // 3. Defensive checks (try-catch, error handling, namespace collision)
   if (
     (patchContent.includes('.ts') || patchContent.includes('.js')) &&
@@ -109,7 +120,7 @@ export function analyzePatchImpactAndConsistency(input: ImpactAnalysisInput): Im
     !patchContent.includes('get_loc')
   ) {
     defensiveRecommendations.push(
-      `DEFENSIVE COLLISION HAZARD: '.reset_index()' detected without explicit uniqueness verification or collision resolution against existing columns. Verify that promoted index name cannot collide with existing DataFrame columns.`
+      `CRITICAL DEFENSIVE COLLISION HAZARD: '.reset_index()' detected without explicit uniqueness verification or collision resolution against existing columns. Verify that promoted index name cannot collide with existing DataFrame columns (e.g. while col in df: col += '_').`
     );
   }
 
@@ -120,14 +131,29 @@ export function analyzePatchImpactAndConsistency(input: ImpactAnalysisInput): Im
     !patchContent.includes('_normalize')
   ) {
     consistencyWarnings.push(
-      `SYMMETRIC LIFECYCLE WARNING: Patch alters data validation/ingestion in training path. Verify whether identical input shapes (e.g. indexed Series/DataFrames) must also be supported in validation (X_val) or inference (predict) paths.`
+      `CRITICAL SYMMETRIC LIFECYCLE WARNING: Patch alters data validation/ingestion in training path. Verify whether identical input shapes (e.g. indexed Series/DataFrames) must also be supported in validation (X_val) or inference (predict) paths.`
     );
   }
 
-  const hasCriticalHazard = crossPlatformHazards.some((h) => h.includes('CRITICAL'));
+  // F. Symmetric Transformation Lifecycle
+  if (
+    (patchContent.includes('.transform(') || patchContent.includes('def transform(')) &&
+    !patchContent.includes('inverse_transform') &&
+    (patchContent.includes('fit_transform') || patchContent.includes('StandardScaler') || patchContent.includes('Encoder'))
+  ) {
+    consistencyWarnings.push(
+      `SYMMETRIC LIFECYCLE WARNING: Data transformation modified without considering 'inverse_transform' symmetry.`
+    );
+  }
+
+  const hasCriticalHazard =
+    crossPlatformHazards.some((h) => h.includes('CRITICAL')) ||
+    defensiveRecommendations.some((r) => r.includes('CRITICAL')) ||
+    consistencyWarnings.some((w) => w.includes('CRITICAL'));
+
   const riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = hasCriticalHazard
     ? 'HIGH'
-    : crossPlatformHazards.length > 0 || consistencyWarnings.length > 2
+    : crossPlatformHazards.length > 0 || consistencyWarnings.length > 2 || defensiveRecommendations.length > 0
     ? 'MEDIUM'
     : 'LOW';
 

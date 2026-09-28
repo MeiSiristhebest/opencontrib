@@ -89,6 +89,22 @@ export class GitHubClient {
     return this.source.searchIssues(query, options);
   }
 
+  /** Direct repository issues retrieval with central retry and caching. */
+  listRepoIssues(
+    owner: string,
+    repo: string,
+    options?: {
+      state?: 'open' | 'closed' | 'all';
+      labels?: string;
+      sort?: 'created' | 'updated' | 'comments';
+      direction?: 'asc' | 'desc';
+      maxPages?: number;
+      refresh?: boolean;
+    },
+  ): Promise<ApiResult<any[]>> {
+    return this.source.listRepoIssues(owner, repo, options);
+  }
+
   /** Paged comments retrieval with central retry wrapper and rich error status. */
   getIssueComments(
     owner: string,

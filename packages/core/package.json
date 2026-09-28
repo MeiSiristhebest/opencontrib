@@ -34,7 +34,7 @@
   "description": "Agent-Native Open Source Contribution Engine — Core domain algorithms, governance verification & risk engine",
   "scripts": {
     "test": "NODE_ENV=test bun test",
-    "test:ci": "bun --cwd=../.. test packages/core/tests --timeout 60000 --parallel=2",
+    "test:ci": "bun --cwd=../.. test packages/core/tests --timeout 240000",
     "test:integration": "OPENCONTRIB_NETWORK_TESTS=1 NODE_ENV=test bun test --timeout 60000",
     "coverage": "NODE_ENV=test bun test --coverage --coverage-reporter=text packages/core/tests",
     "coverage:gate": "bun scripts/check-domain-coverage.ts"

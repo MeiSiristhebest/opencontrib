@@ -1102,6 +1102,8 @@ export const CommunityGatePolicySchema = z.object({
   privateVulnerabilityDisclosure: z.boolean().optional(),
   /** DCO/sign-off is a commit-level community requirement. */
   requiresDco: z.boolean().optional(),
+  /** Contributor License Agreement (CLA) signature is required by the repository. */
+  requiresCla: z.boolean().optional(),
   /** Repository policy requires explicit AI/automation disclosure. */
   requiresAiDisclosure: z.boolean().optional(),
   maxDiffCeiling: z.number().int().positive().optional(),
@@ -1165,6 +1167,8 @@ export const GovernanceAuditResultSchema = z.object({
   flaggedTautologicalAssertions: z.array(z.string()).default([]).optional(),
   commentHyperbolePassed: z.boolean().default(true).optional(),
   flaggedCommentHyperboles: z.array(z.string()).default([]).optional(),
+  impactAnalysisPassed: z.boolean().default(true).optional(),
+  impactAnalysisIssues: z.array(z.string()).default([]).optional(),
   remediationSuggestions: z.array(z.string()),
   guidance: z
     .object({

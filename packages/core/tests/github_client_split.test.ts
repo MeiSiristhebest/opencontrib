@@ -4,6 +4,7 @@ import {
   requestWithRetry,
 } from '../src/github/retry-strategy.js';
 import { GitHubClient } from '../src/discovery/github-client.js';
+import { scoutOpportunities } from '../src/discovery/scout.js';
 import type { CredentialsProvider } from '../src/ports/credentials-provider.port.js';
 import type { ResponseCache } from '../src/ports/response-cache.port.js';
 
@@ -116,5 +117,96 @@ describe('GitHubClient composition root seam', () => {
     const enterpriseClient = new GitHubClient({ host: 'github.mycompany.internal' }, { credentials: fakeCreds, cache: fakeCache });
     const octokitEnterprise = (enterpriseClient as any).source.octokit;
     expect(octokitEnterprise.request.endpoint.DEFAULTS.baseUrl).toBe('https://github.mycompany.internal/api/v3');
+  });
+
+  it('exposes listRepoIssues method for direct repository issues retrieval', () => {
+    const fakeCreds: CredentialsProvider = {
+      getToken: () => 'token',
+      getTokenScope: () => 'scope',
+    };
+    const fakeCache: ResponseCache = {
+      get: () => null,
+      set: () => {},
+    };
+
+    const client = new GitHubClient({}, { credentials: fakeCreds, cache: fakeCache });
+    expect(typeof client.listRepoIssues).toBe('function');
+  });
+
+  it('scoutOpportunities executes Tri-Route fallback to listRepoIssues when search returns 0 items', async () => {
+    let listRepoIssuesCalled = false;
+    const fakeClient = {
+      searchIssues: async () => ({
+        items: [],
+        status: 'COMPLETE' as const,
+        pagesFetched: 1,
+        pagesRequested: 1,
+      }),
+      listRepoIssues: async (owner: string, repo: string) => {
+        listRepoIssuesCalled = true;
+        return {
+          status: 'OK' as const,
+          data: [
+            {
+              number: 42,
+              title: 'Fix issue in parser',
+              body: 'Parser needs bugfix with typescript',
+              labels: [{ name: 'good first issue' }],
+              repository_url: `https://api.github.com/repos/${owner}/${repo}`,
+              assignee: null,
+              assignees: [],
+              pull_request: undefined,
+              locked: false,
+              state: 'open',
+              created_at: new Date().toISOString(),
+              user: { login: 'alice' },
+            },
+          ],
+        };
+      },
+      getRepoDetails: async () => ({
+        status: 'OK' as const,
+        data: {
+          stars: 120,
+          defaultBranch: 'main',
+          isFork: false,
+          isArchived: false,
+          description: 'A great open-source project',
+        },
+      }),
+      getRepoTextFileResult: async () => ({
+        status: 'OK' as const,
+        data: null,
+      }),
+      getRepoTextFile: async () => null,
+      hasActiveLinkedPr: async () => ({
+        status: 'OK' as const,
+        data: false,
+      }),
+      getIssueComments: async () => ({
+        status: 'OK' as const,
+        data: [],
+      }),
+      getIssueLinkedPrsCount: async () => ({
+        status: 'OK' as const,
+        data: 0,
+      }),
+    };
+
+    const opportunities = await scoutOpportunities(
+      {
+        techStack: ['typescript'],
+        focusAreas: ['bugfix'],
+        proficiency: 'intermediate',
+        minMatchScore: 50,
+      },
+      { repo: 'microsoft/demo-repo', minStars: 50 },
+      fakeClient as any,
+    );
+
+    expect(listRepoIssuesCalled).toBe(true);
+    expect(opportunities.length).toBe(1);
+    expect(opportunities[0].issueNumber).toBe(42);
+    expect(opportunities[0].repoFullName).toBe('microsoft/demo-repo');
   });
 });

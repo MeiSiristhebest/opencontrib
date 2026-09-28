@@ -709,4 +709,34 @@ diff --git a/foo_test.go b/foo_test.go
     expect(audit.remediationSuggestions.join(" ")).toContain("Assertion Quality Gate");
     expect(audit.remediationSuggestions.join(" ")).toContain("Comment Severity Gate");
   });
+
+  it("fails technical gate when patch contains critical cross-platform, collision, or lifecycle impact hazard", () => {
+    const hazardousPatch = `
+diff --git a/model.py b/model.py
+--- a/model.py
++++ b/model.py
+@@ -10,3 +10,3 @@
++df = df.reset_index()
+`;
+    const audit = auditGovernance({
+      patchContent: hazardousPatch,
+      prBody: "Fixes indexing behavior cleanly.",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      lineCount: 2,
+    });
+
+    expect(audit.technicalGate?.status).toBe("FAIL");
+    expect(audit.isGatedPassed).toBe(false);
+    expect(audit.impactAnalysisPassed).toBe(false);
+    expect(audit.impactAnalysisIssues && audit.impactAnalysisIssues.length > 0).toBe(true);
+    expect(audit.remediationSuggestions.join(" ")).toContain("Impact Gate");
+  });
 });

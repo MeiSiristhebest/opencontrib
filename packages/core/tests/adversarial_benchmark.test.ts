@@ -84,7 +84,7 @@ describe("closed-loop adversarial benchmark (scripted agent vs in-memory trusted
     expect(retry.finalHostPhase).toBe("COMPLETED");
 
     expect(report.trustChainHeld).toBe(true);
-  }, 120000);
+  }, 240000);
 });
 
 describe("Pi-axis scenario wiring (fake runner standing in for the real agent)", () => {

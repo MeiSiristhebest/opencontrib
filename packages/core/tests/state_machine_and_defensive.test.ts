@@ -270,6 +270,56 @@ diff --git a/internal/tool/code_search.go b/internal/tool/code_search.go
     expect(res.suggestedSisterFiles).toContain("internal/diff/types.go");
     expect(res.consistencyWarnings.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("recommends checking reset_index column collisions and blocks compliance on unverified reset_index", () => {
+    const res = analyzePatchImpactAndConsistency({
+      modifiedFiles: ["model.py"],
+      patchContent: "+frame = frame.reset_index()",
+    });
+
+    expect(
+      res.defensiveRecommendations.some((recommendation) =>
+        recommendation.includes("DEFENSIVE COLLISION HAZARD"),
+      ),
+    ).toBe(true);
+    expect(res.isCompliant).toBe(false);
+    expect(res.riskLevel).toBe("HIGH");
+
+    // Collision-safe loop should pass compliance
+    const safeRes = analyzePatchImpactAndConsistency({
+      modifiedFiles: ["model.py"],
+      patchContent: "+while col in df.columns:\n+    col += '_'\n+frame = frame.reset_index()",
+    });
+    expect(safeRes.isCompliant).toBe(true);
+  });
+
+  it("warns about asymmetric training validation changes and fails compliance", () => {
+    const res = analyzePatchImpactAndConsistency({
+      modifiedFiles: ["model.py"],
+      patchContent: "+X = validate_data(X)\n+model.fit(X, y)",
+    });
+
+    expect(
+      res.consistencyWarnings.some((warning) =>
+        warning.includes("SYMMETRIC LIFECYCLE WARNING"),
+      ),
+    ).toBe(true);
+    expect(res.isCompliant).toBe(false);
+    expect(res.riskLevel).toBe("HIGH");
+  });
+
+  it("detects Windows EBUSY file lock trap when synchronously unlinking in test cleanups", () => {
+    const res = analyzePatchImpactAndConsistency({
+      modifiedFiles: ["test_cleanup.js"],
+      patchContent: "+fs.unlinkSync(tempBinaryPath)",
+    });
+
+    expect(
+      res.crossPlatformHazards.some((hazard) =>
+        hazard.includes("EBUSY FILE LOCK HAZARD"),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("GitHub Actions CI Raw Log Diagnostics", () => {

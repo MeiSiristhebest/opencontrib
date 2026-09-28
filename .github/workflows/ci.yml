@@ -86,16 +86,5 @@ jobs:
       - name: TypeScript Typecheck
         run: bunx tsc --noEmit
 
-      - name: Run root script tests
-        run: bun test scripts --timeout 60000
-
-      - name: Run affected workspace tests (pull requests)
-        if: github.event_name == 'pull_request'
-        env:
-          TURBO_SCM_BASE: origin/${{ github.event.pull_request.base.ref }}
-        # Keep package tasks serial; parallelize isolated test files within each package.
-        run: bunx turbo run test:ci --affected --concurrency=1 --log-order=stream
-
-      - name: Run full workspace test suite (main and manual runs)
-        if: github.event_name != 'pull_request'
-        run: bunx turbo run test:ci --concurrency=1
+      - name: Run cached full workspace test suite
+        run: bunx turbo run test:workspace:ci --concurrency=1 --log-order=stream

@@ -102,8 +102,30 @@ export async function scoutOpportunities(
       .join(' ');
   }
 
+  let rawItems: any[] = [];
   const searchResult = await resolvedClient.searchIssues(searchQuery, { refresh: options.refresh, maxPages: 2 });
-  const rawItems = searchResult.items || [];
+  if (searchResult.status !== 'FAILED' && searchResult.items && searchResult.items.length > 0) {
+    rawItems = searchResult.items;
+  } else if (discoveryMode === 'targeted_repo' && options.repo) {
+    // Tri-route fallback: GitHub Search API failed or returned 0 items due to search index delay or query constraints.
+    // Fall back to direct repository issues API (listForRepo)
+    const [owner, repo] = options.repo.split('/');
+    if (owner && repo) {
+      const listRes = await resolvedClient.listRepoIssues(owner, repo, {
+        state: 'open',
+        sort: 'updated',
+        maxPages: 2,
+        refresh: options.refresh,
+      });
+      if (listRes.status === 'OK' && Array.isArray(listRes.data)) {
+        rawItems = listRes.data.map((item) => ({
+          ...item,
+          repository_url: item.repository_url || `https://api.github.com/repos/${owner}/${repo}`,
+        }));
+      }
+    }
+  }
+
   if (rawItems.length === 0) {
     return [];
   }
@@ -113,7 +135,7 @@ export async function scoutOpportunities(
   const maxRecall = discoveryMode === 'targeted_repo' ? Math.min(limit * 2, 15) : Math.min(limit * 3, 30);
 
   const preFiltered = rawItems
-    .filter((item) => !item.pull_request && !item.locked)
+    .filter((item) => !item.pull_request && !item.locked && !item.assignee && (!item.assignees || item.assignees.length === 0))
     .map((item) => {
       const labels = (item.labels || []).map((l: any) => (typeof l === 'string' ? l : l.name || ''));
       const text = `${item.title} ${item.body || ''}`;

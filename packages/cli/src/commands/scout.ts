@@ -18,8 +18,9 @@ export const scoutCommand = new Command("scout")
     "Scout high-value, unclaimed contribution opportunities for a repo or org",
   )
   .addArgument(
-    new Argument("<target>", "Repo full name (owner/repo) or org name"),
+    new Argument("[target]", "Repo full name (owner/repo) or org name"),
   )
+  .option("-r, --repo <target>", "Target repository (owner/repo) or org name")
   .option(
     "--tech-stack <list>",
     "Developer tech stack keywords, comma-separated",
@@ -33,8 +34,9 @@ export const scoutCommand = new Command("scout")
   .option("--pretty", "Pretty-print", false)
   .action(
     async (
-      target: string,
+      targetArg: string | undefined,
       opts: {
+        repo?: string;
         techStack?: string[];
         focus?: string[];
         limit?: number;
@@ -45,6 +47,13 @@ export const scoutCommand = new Command("scout")
       },
     ) => {
       try {
+        const target = targetArg || opts.repo;
+        if (!target) {
+          throw new CliExitError(
+            1,
+            "Target repository is required: provide <target> argument or --repo <target>",
+          );
+        }
         const profile = {
           techStack: opts.techStack ?? ["typescript", "javascript"],
           focusAreas: opts.focus ?? ["bugfix", "testing", "docs"],

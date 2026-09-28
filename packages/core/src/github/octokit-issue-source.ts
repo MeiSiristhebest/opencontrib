@@ -100,6 +100,71 @@ export class OctokitIssueSource {
   }
 
   /**
+   * Direct repository issues retrieval (Tri-Route fallback when search API fails or has indexing delay).
+   */
+  async listRepoIssues(
+    owner: string,
+    repo: string,
+    options: {
+      state?: 'open' | 'closed' | 'all';
+      labels?: string;
+      sort?: 'created' | 'updated' | 'comments';
+      direction?: 'asc' | 'desc';
+      maxPages?: number;
+      refresh?: boolean;
+    } = {},
+  ): Promise<ApiResult<any[]>> {
+    const state = options.state || 'open';
+    const sort = options.sort || 'updated';
+    const direction = options.direction || 'desc';
+    const maxPages = options.maxPages ?? 2;
+    const cacheKey = `repo_issues_${owner}_${repo}_${state}_${sort}_${direction}_${options.labels || 'all'}`;
+
+    if (!options.refresh) {
+      const cached = this.cache.get<any[]>(cacheKey);
+      if (cached) return { status: 'OK', data: cached };
+    }
+
+    const allIssues: any[] = [];
+
+    for (let page = 1; page <= maxPages; page++) {
+      const res = await this.request(async () => {
+        return await this.octokit.rest.issues.listForRepo({
+          owner,
+          repo,
+          state,
+          sort,
+          direction,
+          labels: options.labels,
+          per_page: 50,
+          page,
+        });
+      });
+
+      if (res.status !== 'OK' || !res.data) {
+        if (allIssues.length > 0) {
+          break;
+        }
+        return {
+          status: res.status,
+          data: [],
+          error: res.error,
+          statusCode: res.statusCode,
+        };
+      }
+
+      allIssues.push(...res.data.data);
+      if (res.data.data.length < 50) break;
+      if (page < maxPages) {
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    }
+
+    this.cache.set(cacheKey, allIssues);
+    return { status: 'OK', data: allIssues };
+  }
+
+  /**
    * Paged comments retrieval with central retry wrapper and rich error status.
    */
   async getIssueComments(

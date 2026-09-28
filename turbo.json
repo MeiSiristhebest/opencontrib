@@ -16,6 +16,11 @@
       "cache": true,
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": []
+    },
+    "//#test:workspace:ci": {
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": []
     }
   }
 }
