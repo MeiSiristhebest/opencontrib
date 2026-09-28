@@ -175,10 +175,12 @@ function seedIssueBinding(
 function seedGovernanceReadyRun(
   manager: ContributionRunManager,
   runId: string,
+  workspacePath: string,
   body = "pr body",
   communityPolicy: Partial<CommunityGatePolicy> = {},
   traceEnabled = false,
 ): void {
+  mkdirSync(workspacePath, { recursive: true });
   const trace = (stage: string) => {
     if (traceEnabled) console.log(`[ci-trace] seed ${stage}`);
   };
@@ -234,9 +236,9 @@ function seedGovernanceReadyRun(
     runId,
     "workspace",
     {
-      workspacePath: "/tmp",
+      workspacePath,
       branchName: runBranchName(runId),
-      baseRepoPath: "/tmp",
+      baseRepoPath: workspacePath,
       baseBranch: "main",
       baseCommitSha,
       isWorktree: false,
@@ -439,6 +441,7 @@ describe("Trusted private security materialization", () => {
       seedGovernanceReadyRun(
         manager,
         manifest.runId,
+        join(baseDir, "workspace"),
         "Private fix.",
         { privateVulnerabilityDisclosure: true },
         true,
@@ -492,9 +495,13 @@ describe("Trusted private security materialization", () => {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
       const body = "Private security contribution details.";
-      seedGovernanceReadyRun(manager, manifest.runId, body, {
-        privateVulnerabilityDisclosure: true,
-      });
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        body,
+        { privateVulnerabilityDisclosure: true },
+      );
 
       let stage: "DISCLOSED" | "ACKNOWLEDGED" | "PUBLIC_FIX_AUTHORIZED" =
         "DISCLOSED";
@@ -546,9 +553,13 @@ describe("Trusted private security materialization", () => {
       const manifest = manager.createRun({
         repoFullName: "owner/private-repo",
       });
-      seedGovernanceReadyRun(manager, manifest.runId, "Private security fix.", {
-        privateVulnerabilityDisclosure: true,
-      });
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        "Private security fix.",
+        { privateVulnerabilityDisclosure: true },
+      );
 
       let stage: "DISCLOSED" | "ACKNOWLEDGED" | "PUBLIC_FIX_AUTHORIZED" =
         "DISCLOSED";
@@ -610,9 +621,13 @@ describe("Trusted private security materialization", () => {
         repoFullName: "owner/private-repo",
         issueNumber: 73,
       });
-      seedGovernanceReadyRun(manager, manifest.runId, "Private security fix.", {
-        privateVulnerabilityDisclosure: true,
-      });
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        "Private security fix.",
+        { privateVulnerabilityDisclosure: true },
+      );
       let providerLookups = 0;
       const provider = makeSecurityProvider(() => {
         providerLookups += 1;
@@ -646,9 +661,13 @@ describe("Trusted private security materialization", () => {
     try {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
-      seedGovernanceReadyRun(manager, manifest.runId, "Fixes #42", {
-        privateVulnerabilityDisclosure: true,
-      });
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        "Fixes #42",
+        { privateVulnerabilityDisclosure: true },
+      );
       let stage: "DISCLOSED" | "ACKNOWLEDGED" | "PUBLIC_FIX_AUTHORIZED" =
         "DISCLOSED";
       const disclosure = new SecurityDisclosureService(
@@ -725,7 +744,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manifest = manager.createRun({ repoFullName: "org/repo" });
       const originalBody = "Original PR Body";
 
-      seedGovernanceReadyRun(manager, manifest.runId, originalBody);
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        originalBody,
+      );
 
       expect(() => {
         manager.saveArtifact(
@@ -749,7 +773,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
-      seedGovernanceReadyRun(manager, manifest.runId, "body");
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        "body",
+      );
 
       // Create submission intent
       const intentService = new SubmissionIntentService(manager);
@@ -811,7 +840,11 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
     try {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
-      seedGovernanceReadyRun(manager, manifest.runId);
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+      );
       new SubmissionIntentService(manager).createIntent({
         runId: manifest.runId,
         upstreamOwner: "org",
@@ -867,10 +900,13 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
     try {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
-      seedGovernanceReadyRun(manager, manifest.runId, "body", {
-        hasGatingRules: true,
-        hasLgtmApprovalProtocol: true,
-      });
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        "body",
+        { hasGatingRules: true, hasLgtmApprovalProtocol: true },
+      );
       const intent = new SubmissionIntentService(manager).createIntent({
         runId: manifest.runId,
         upstreamOwner: "org",
@@ -899,11 +935,17 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
     try {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
-      seedGovernanceReadyRun(manager, manifest.runId, "pr body", {
-        hasGatingRules: true,
-        requiresIssueApprovalBeforePr: true,
-        reasons: ["maintainer approval is required"],
-      });
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        "pr body",
+        {
+          hasGatingRules: true,
+          requiresIssueApprovalBeforePr: true,
+          reasons: ["maintainer approval is required"],
+        },
+      );
       const intent = new SubmissionIntentService(manager).createIntent({
         runId: manifest.runId,
         upstreamOwner: "org",
@@ -952,7 +994,11 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
-      seedGovernanceReadyRun(manager, manifest.runId);
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+      );
 
       // Fake or missing submission artifact cannot advance to PR_SUBMITTED
       const summaryWithoutSub = manager.getRun(manifest.runId)!;
@@ -1587,7 +1633,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "owner/repo" });
 
-      seedGovernanceReadyRun(manager, manifest.runId, "audited body");
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        "audited body",
+      );
 
       // Tamper with pr_draft on disk
       const prDraftPath = join(baseDir, manifest.runId, "pr_draft.md");
@@ -1615,7 +1666,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "owner/repo" });
 
-      seedGovernanceReadyRun(manager, manifest.runId, "pr body");
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        "pr body",
+      );
 
       const intentService = new SubmissionIntentService(manager);
       // seedGovernanceReadyRun has no baseBranch in workspace, so default is used
@@ -1624,6 +1680,8 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         saveCanonicalArtifact,
       } = require("../src/run/canonical-writer.js");
       const manifest2 = manager.createRun({ repoFullName: "owner/repo2" });
+      const workspacePath = join(baseDir, "workspace-override");
+      mkdirSync(workspacePath, { recursive: true });
       const baseCommitSha = "e".repeat(40);
       const patch = {
         title: "fix",
@@ -1673,7 +1731,8 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         manifest2.runId,
         "workspace",
         {
-          workspacePath: "/tmp",
+          workspacePath,
+          baseRepoPath: workspacePath,
           branchName: "branch2",
           baseBranch: "develop",
           baseCommitSha,
@@ -1794,6 +1853,8 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
     try {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const workspacePath = join(baseDir, "workspace");
+      mkdirSync(workspacePath, { recursive: true });
 
       const {
         saveCanonicalArtifact,
@@ -1847,7 +1908,8 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         manifest.runId,
         "workspace",
         {
-          workspacePath: "/tmp",
+          workspacePath,
+          baseRepoPath: workspacePath,
           branchName: "opencontrib/run-1",
           baseBranch: "main",
           baseCommitSha,
