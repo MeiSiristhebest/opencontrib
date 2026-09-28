@@ -385,10 +385,12 @@ describe("Trusted private security materialization", () => {
   }
 
   it("preserves typed statuses from rejected provider lookups", async () => {
+    console.log("[ci-trace] provider-status start");
     const baseDir = mkdtempSync(join(tmpdir(), "oc-provider-status-"));
     try {
       const manager = isolatedRunManager(baseDir);
       const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
+      console.log("[ci-trace] provider-status run created");
       const rateLimitError = Object.assign(new Error("rate limited"), {
         status: 429,
       });
@@ -404,6 +406,7 @@ describe("Trusted private security materialization", () => {
           issueNumber: 42,
         }),
       ).rejects.toMatchObject({ status: "RATE_LIMITED", retryable: true });
+      console.log("[ci-trace] provider-status issue binding rejected");
 
       const policyLookup = new SecurityDisclosureService(manager, {
         getRepoTextFile: async () => null,
@@ -418,10 +421,12 @@ describe("Trusted private security materialization", () => {
           repoFullName: "owner/private-repo",
         }),
       ).rejects.toThrow(/RATE_LIMITED/);
+      console.log("[ci-trace] provider-status rate-limit policy rejected");
 
       seedGovernanceReadyRun(manager, manifest.runId, "Private fix.", {
         privateVulnerabilityDisclosure: true,
       });
+      console.log("[ci-trace] provider-status governance seeded");
       const policyPaths: string[] = [];
       const legacyPolicyLookup = new SecurityDisclosureService(manager, {
         getRepoTextFile: async (_owner, _repo, path) => {
@@ -438,6 +443,7 @@ describe("Trusted private security materialization", () => {
         runId: manifest.runId,
         repoFullName: "owner/private-repo",
       });
+      console.log("[ci-trace] provider-status legacy policy verified");
       expect(policyPaths).toEqual(["SECURITY.md", ".github/SECURITY.md"]);
 
       const forbiddenError = Object.assign(new Error("forbidden"), {
@@ -456,8 +462,10 @@ describe("Trusted private security materialization", () => {
           repoFullName: "owner/private-repo",
         }),
       ).rejects.toMatchObject({ status: "FORBIDDEN", retryable: false });
+      console.log("[ci-trace] provider-status lifecycle rejected");
     } finally {
       rmSync(baseDir, { recursive: true, force: true });
+      console.log("[ci-trace] provider-status cleanup complete");
     }
   });
 
