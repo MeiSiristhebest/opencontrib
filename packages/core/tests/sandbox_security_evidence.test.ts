@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { bunCommand } from "./helpers/bun-command.js";
 import {
   SandboxRuntime,
   SanitizedLocalSandboxProvider,
   defaultSandboxRuntime,
-  defaultSandboxProvider,
 } from "../src/sandbox/sandbox-runtime.js";
 
 import {
@@ -14,7 +14,6 @@ import {
 import {
   verifyDualStageReproduction,
   parseAddedTestCasesFromDiffText,
-  countAddedTestCasesFromGitDiff,
 } from "../src/evidence/evidence-collector.js";
 import {
   OpenAICompatibleProvider,
@@ -34,8 +33,6 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { z } from "zod";
-
 describe("Sandbox Runtime & Environment Security Hardening", () => {
   test("strictly defines denied credential and token file paths", () => {
     const sandbox = new SandboxRuntime();
@@ -77,17 +74,25 @@ describe("Sandbox Runtime & Environment Security Hardening", () => {
   test("executes harmless commands inside sanitized environment successfully", () => {
     const result = defaultSandboxRuntime.executeInSandbox({
       cwd: process.cwd(),
-      command: process.platform === "win32" ? "powershell" : "echo",
-      args:
-        process.platform === "win32"
-          ? ["-NoProfile", "-Command", 'Write-Output "SANDBOX_OK"']
-          : ['"SANDBOX_OK"'],
+      command: process.execPath,
+      args: ["-e", 'console.log("SANDBOX_OK")'],
       timeoutMs: 10000,
     });
 
     expect(result.isSandboxed).toBe(true);
     expect(result.passed).toBe(true);
     expect(result.output).toContain("SANDBOX_OK");
+  });
+
+  test("preserves exit status from an explicitly addressed executable", async () => {
+    const result = await defaultSandboxRuntime.executeAsync({
+      cwd: process.cwd(),
+      command: bunCommand("process.exitCode = 7"),
+      timeoutMs: 10000,
+    });
+
+    expect(result.exitCode).toBe(7);
+    expect(result.passed).toBe(false);
   });
 });
 
@@ -266,10 +271,7 @@ describe("Pre-Fix to Post-Fix Dual-Stage Empirical Verification", () => {
     try {
       const dualResult = await verifyDualStageReproduction({
         cwd: tempDir,
-        testCommand:
-          process.platform === "win32"
-            ? 'powershell -NoProfile -Command Write-Output "TEST_PASS"'
-            : 'echo "TEST_PASS"',
+        testCommand: bunCommand('console.log("TEST_PASS")'),
         preFixBaselineCaptured: true,
         preFixFailureOutput: "AssertionError: Expected 42 but got undefined",
         stressLoopCount: 3,
@@ -447,7 +449,7 @@ describe("Evidence-Backed Quality Rubric & Subagent Review Decoupling", () => {
     customRegistry.register({
       id: "custom-tap",
       supports: (out) => out.includes("# TAP version 13"),
-      parse: (out) => ({ passed: 99, failed: 1, total: 100 }),
+      parse: () => ({ passed: 99, failed: 1, total: 100 }),
     });
 
     const tapResult = customRegistry.parse("# TAP version 13\n1..100");
@@ -460,7 +462,7 @@ describe("Evidence-Backed Quality Rubric & Subagent Review Decoupling", () => {
       await import("../src/evidence/index.js");
 
     const mockVcsAdapter = {
-      async getDiff(opts: any) {
+      async getDiff() {
         return `+it("handles mock delta", () => {});\n+func TestMock(t *testing.T) {}`;
       },
     };

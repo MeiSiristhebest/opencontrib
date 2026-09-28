@@ -2,15 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { runStressLoopAsync } from "../src/evidence/evidence-collector.js";
 import { runConcurrentRounds } from "../src/evidence/stress-runner.js";
 import { EvidenceReportSchema } from "../src/contracts/schemas.js";
+import { bunCommand } from "./helpers/bun-command.js";
 
-function pickCmd(win: string, posix: string): string {
-  return process.platform === "win32" ? win : posix;
-}
-
-const PASS_CMD = pickCmd(
-  'powershell -NoProfile -Command "Write-Output ok; exit 0"',
-  "echo ok",
-);
+const PASS_CMD = bunCommand('console.log("ok")');
 
 describe("runConcurrentRounds — rounds × workers contract", () => {
   test("one round with five workers executes five workers", async () => {

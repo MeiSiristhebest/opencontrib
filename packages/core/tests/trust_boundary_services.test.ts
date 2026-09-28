@@ -28,10 +28,33 @@ import { SecurityDisclosureService } from "../src/github/security-disclosure-ser
 import { TrustedRunMaterializer } from "../src/run/trusted-run-host.js";
 import { RunTransferBundleSchema } from "../src/run/run-transfer.js";
 import { runBranchName } from "../src/run/run-branch.js";
+import { ActiveSessionManager } from "../src/run/active-session.js";
+import { bunCommand } from "./helpers/bun-command.js";
 import {
   hashCommunityGateSnapshot,
   type CommunityGatePolicy,
 } from "../src/governance/community-gate.js";
+
+function isolatedRunManager(baseDir: string): ContributionRunManager {
+  return new ContributionRunManager({
+    baseDir,
+    activeSession: new ActiveSessionManager(
+      join(baseDir, "active_session.json"),
+    ),
+  });
+}
+
+function stateAssertionCommand(stateFile: string, assertion: string): string {
+  const statePath = JSON.stringify(stateFile.replace(/\\/g, "/"));
+  const source = [
+    `const state = require("node:fs").readFileSync(${statePath}, "utf8");`,
+    `if (state.includes("FAIL")) {`,
+    `console.log(${JSON.stringify(assertion)});`,
+    "process.exitCode = 1;",
+    `} else { console.log("PASS"); }`,
+  ].join(" ");
+  return bunCommand(source);
+}
 
 const testApprovalAuthority = (
   approvalMode:
@@ -364,7 +387,7 @@ describe("Trusted private security materialization", () => {
   it("preserves typed statuses from rejected provider lookups", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-provider-status-"));
     try {
-      const manager = new ContributionRunManager({ baseDir });
+      const manager = isolatedRunManager(baseDir);
       const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
       const rateLimitError = Object.assign(new Error("rate limited"), {
         status: 429,
@@ -1355,10 +1378,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         "WORKSPACE_PREPARED",
       );
 
-      const testCmd =
-        process.platform === "win32"
-          ? `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERR; exit 1 } else { Write-Output PASS; exit 0 }"`
-          : `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERR; exit 1; else echo PASS; exit 0; fi"`;
+      const testCmd = stateAssertionCommand(stateFile, "ASSERTION_ERR");
 
       const evidenceService = new EvidenceService(manager);
       evidenceService.captureRed({
@@ -1474,10 +1494,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         "WORKSPACE_PREPARED",
       );
 
-      const testCmd =
-        process.platform === "win32"
-          ? `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERR; exit 1 } else { Write-Output PASS; exit 0 }"`
-          : `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERR; exit 1; else echo PASS; exit 0; fi"`;
+      const testCmd = stateAssertionCommand(stateFile, "ASSERTION_ERR");
 
       const evidenceService = new EvidenceService(manager);
       evidenceService.captureRed({

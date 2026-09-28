@@ -17,6 +17,7 @@ import {
   type ContributionRunSummary,
 } from "../src/index.js";
 import type { RedEvidence } from "../src/contracts/schemas.js";
+import { bunCommand } from "./helpers/bun-command.js";
 import {
   countValidatedPatchChangedLines,
   EvidenceService,
@@ -41,22 +42,12 @@ function makeSummary(
   } as ContributionRunSummary;
 }
 
-// Cross-platform command selection (Windows uses powershell, POSIX uses sh/echo).
-function pickCmd(win: string, posix: string): string {
-  return process.platform === "win32" ? win : posix;
-}
-
-// A harmless, cross-platform command. Pass/fail is irrelevant to the
-// deterministic assertions below (they don't depend on the command outcome).
-const HARMLESS_CMD = pickCmd(
-  'powershell -NoProfile -Command "Write-Output ok"',
-  "echo ok",
-);
+// A harmless command for deterministic process output without starting a shell.
+const HARMLESS_CMD = bunCommand('console.log("ok")');
 
 // A command that fails (exit 1) and emits an identifiable marker.
-const FAILING_CMD = pickCmd(
-  'powershell -NoProfile -Command "Write-Output ASSERTFAIL; exit 1"',
-  'sh -c "echo ASSERTFAIL; exit 1"',
+const FAILING_CMD = bunCommand(
+  'console.log("ASSERTFAIL"); process.exitCode = 1',
 );
 
 describe("Evidence V2 — RED→GREEN trust boundary", () => {
@@ -372,10 +363,16 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
         encoding: "utf8",
       }).trim();
 
-      // Test command that inspects status.txt
-      const testCmd = pickCmd(
-        `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERROR_SAMPLE; exit 1 } else { Write-Output PASS; exit 0 }"`,
-        `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERROR_SAMPLE; exit 1; else echo PASS; exit 0; fi"`,
+      // Test command that inspects status.txt without depending on a shell.
+      const statePath = JSON.stringify(stateFile.replace(/\\/g, "/"));
+      const testCmd = bunCommand(
+        [
+          `const state = require("node:fs").readFileSync(${statePath}, "utf8");`,
+          `if (state.includes("FAIL")) {`,
+          `console.log("ASSERTION_ERROR_SAMPLE");`,
+          "process.exitCode = 1;",
+          `} else { console.log("PASS"); }`,
+        ].join(" "),
       );
 
       const { ContributionRunManager } =
