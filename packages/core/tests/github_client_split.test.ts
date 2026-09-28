@@ -84,16 +84,15 @@ describe('GitHubClient composition root seam', () => {
       },
     };
 
-    // Must not touch the network at construction time.
+    // Construction must not perform network or cache I/O.
     const client = new GitHubClient({ token: 'injected-token' }, {
       credentials: fakeCreds,
       cache: fakeCache,
     });
     expect(client).toBeInstanceOf(GitHubClient);
-    // A cache miss on a downstream call must flow through the injected cache.
-    client.searchIssues('label:bug').catch(() => {});
-    // Construction should not have performed cache I/O yet; the seam is wired.
-    expect(Array.isArray(calls)).toBe(true);
+    expect((client as any).credentials).toBe(fakeCreds);
+    expect((client as any).cache).toBe(fakeCache);
+    expect(calls).toEqual([]);
   });
 
   it('keeps baseUrl undefined for public github.com and api.github.com to hit api.github.com', () => {
@@ -134,14 +133,18 @@ describe('GitHubClient composition root seam', () => {
   });
 
   it('scoutOpportunities executes Tri-Route fallback to listRepoIssues when search returns 0 items', async () => {
+    let searchIssuesCalled = false;
     let listRepoIssuesCalled = false;
     const fakeClient = {
-      searchIssues: async () => ({
-        items: [],
-        status: 'COMPLETE' as const,
-        pagesFetched: 1,
-        pagesRequested: 1,
-      }),
+      searchIssues: async () => {
+        searchIssuesCalled = true;
+        return {
+          items: [],
+          status: 'COMPLETE' as const,
+          pagesFetched: 1,
+          pagesRequested: 1,
+        };
+      },
       listRepoIssues: async (owner: string, repo: string) => {
         listRepoIssuesCalled = true;
         return {
@@ -204,6 +207,7 @@ describe('GitHubClient composition root seam', () => {
       fakeClient as any,
     );
 
+    expect(searchIssuesCalled).toBe(true);
     expect(listRepoIssuesCalled).toBe(true);
     expect(opportunities.length).toBe(1);
     expect(opportunities[0].issueNumber).toBe(42);
