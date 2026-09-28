@@ -7,7 +7,7 @@
  * doubles — something the old design made impossible. This lock the
  * step-by-step behavior so future refactors can't silently drift.
  */
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -16,20 +16,6 @@ import { MockLLMProvider } from "../src/testkit/mock-llm.js";
 import { LLMService } from "../src/llm/llm-service.js";
 import { ContributionStateMachine } from "../src/orchestration/state-machine.js";
 import type { PipelineDeps } from "../src/orchestration/pipeline/types.js";
-
-// scoutOpportunities reaches GitHub live — mock it so the pipeline runs fully offline.
-mock.module("../src/discovery/scout.js", () => ({
-  scoutOpportunities: async () => [
-    {
-      repoFullName: "octocat/hello-world",
-      issueNumber: 42,
-      title: "Memory leak in listener",
-      body: "There is a memory leak in the event listener.",
-      labels: [],
-      url: "https://github.com/octocat/hello-world/issues/42",
-    } as any,
-  ],
-}));
 
 function buildDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
   const workspacePath = mkdtempSync(join(tmpdir(), "oc-e2e-"));
@@ -42,7 +28,42 @@ function buildDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
 
   const base: PipelineDeps = {
     client: {
-      getRepoDetails: async () => ({ data: { defaultBranch: "main" } }),
+      searchIssues: async () => ({
+        items: [
+          {
+            number: 42,
+            title: "Memory leak in listener",
+            body: "There is a memory leak in the event listener.",
+            labels: [],
+            repository_url: "https://api.github.com/repos/octocat/hello-world",
+            html_url: "https://github.com/octocat/hello-world/issues/42",
+            assignee: null,
+            assignees: [],
+            pull_request: undefined,
+            locked: false,
+            state: "open",
+            created_at: new Date().toISOString(),
+            user: { login: "alice" },
+          },
+        ],
+        status: "COMPLETE" as const,
+        pagesFetched: 1,
+        pagesRequested: 1,
+      }),
+      listRepoIssues: async () => ({ status: "OK" as const, data: [] }),
+      getRepoDetails: async () => ({
+        status: "OK" as const,
+        data: {
+          stars: 120,
+          defaultBranch: "main",
+          isFork: false,
+          isArchived: false,
+          description: "Offline pipeline fixture",
+        },
+      }),
+      getRepoTextFile: async () => null,
+      getIssueComments: async () => ({ status: "OK" as const, data: [] }),
+      getIssueLinkedPrsCount: async () => ({ status: "OK" as const, data: 0 }),
     } as any,
     llmService,
     memory: { recordSuccess: () => {} } as any,
