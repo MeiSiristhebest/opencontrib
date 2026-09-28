@@ -87,8 +87,8 @@ function makeValidatedPatch(
 function seedGovernanceReadyRun(
   manager: ContributionRunManager,
   runId: string,
+  workspacePath: string,
   body = "pr body",
-  workspacePath = "/tmp",
   options: {
     skipWorkspace?: boolean;
     policySnapshot?: TrustedPolicySnapshot;
@@ -137,6 +137,7 @@ function seedGovernanceReadyRun(
   };
   validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
   if (!options.skipWorkspace) {
+    mkdirSync(workspacePath, { recursive: true });
     const policySnapshot =
       options.policySnapshot ??
       ({
@@ -166,7 +167,7 @@ function seedGovernanceReadyRun(
       {
         workspacePath,
         branchName: "fixture-branch",
-        baseRepoPath: "/tmp",
+        baseRepoPath: workspacePath,
         baseBranch: "main",
         baseCommitSha,
         isWorktree: false,
@@ -277,8 +278,8 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       const decision = seedGovernanceReadyRun(
         manager,
         manifest.runId,
+        join(baseDir, "workspace"),
         "pr body",
-        "/tmp",
         {
           policySnapshot: mergeTrustedPolicySnapshots(
             {
@@ -379,8 +380,8 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       const decision = seedGovernanceReadyRun(
         manager,
         manifest.runId,
-        "pr body",
         workspacePath,
+        "pr body",
         { skipWorkspace: true },
       );
 
@@ -554,7 +555,11 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
-      seedGovernanceReadyRun(manager, manifest.runId);
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+      );
 
       const intentService = new SubmissionIntentService(manager);
       const intent = intentService.createIntent({
@@ -682,7 +687,12 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
 
-      seedGovernanceReadyRun(manager, manifest.runId, "Original PR Body");
+      seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        join(baseDir, "workspace"),
+        "Original PR Body",
+      );
 
       const intentService = new SubmissionIntentService(manager);
       const intent = intentService.createIntent({
