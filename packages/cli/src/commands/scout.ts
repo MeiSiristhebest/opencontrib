@@ -31,6 +31,7 @@ export const scoutCommand = new Command("scout")
   .option("--min-stars <n>", "Minimum repository stars", (v) => Number(v), 50)
   .option("--token <token>", "GitHub token (or set GITHUB_TOKEN env)")
   .option("--run-id <id>", "Contribution run ID (defaults to active session)")
+  .option("--include-attempted", "Include issues even if previously attempted in local runs", false)
   .option("--pretty", "Pretty-print", false)
   .action(
     async (
@@ -43,6 +44,7 @@ export const scoutCommand = new Command("scout")
         minStars?: number;
         token?: string;
         runId?: string;
+        includeAttempted?: boolean;
         pretty?: boolean;
       },
     ) => {
@@ -66,6 +68,7 @@ export const scoutCommand = new Command("scout")
           limit: opts.limit ?? 5,
           minStars: opts.minStars ?? (isOrg ? 100 : 0),
           githubToken: opts.token || process.env.GITHUB_TOKEN,
+          excludeCompletedRuns: !opts.includeAttempted,
         });
 
         const runId = getRunManager().resolveRunId(opts.runId);

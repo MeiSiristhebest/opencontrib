@@ -482,6 +482,12 @@ export interface AuditGovernanceInput {
   modifiedFiles?: string[];
   repoContextFiles?: string[];
   coreDiffLines?: number;
+  preflightLintResult?: {
+    executed: boolean;
+    passed: boolean;
+    summary: string;
+    violations?: string[];
+  };
 }
 
 function isNonNegativeLineCount(value: unknown): value is number {
@@ -793,6 +799,19 @@ export function auditGovernance(
     );
   }
 
+  // 3c. Upstream Pre-Flight Lint & Code Style Gate Check
+  let preflightLintPassed = true;
+  const preflightLintIssues: string[] = [];
+  if (input.preflightLintResult && input.preflightLintResult.executed) {
+    preflightLintPassed = input.preflightLintResult.passed;
+    if (!preflightLintPassed) {
+      preflightLintIssues.push(input.preflightLintResult.summary);
+      if (input.preflightLintResult.violations?.length) {
+        preflightLintIssues.push(...input.preflightLintResult.violations);
+      }
+    }
+  }
+
   const isTechnicalGatePassed =
     antiAiCheckPassed &&
     markdownIntegrityPassed &&
@@ -802,7 +821,8 @@ export function auditGovernance(
     confidence.isPassed &&
     coverageGatePassed &&
     resourceLeakGatePassed &&
-    impactAnalysisPassed;
+    impactAnalysisPassed &&
+    preflightLintPassed;
 
   const isGatedPassed = isTechnicalGatePassed;
 
@@ -911,6 +931,12 @@ export function auditGovernance(
     );
   }
 
+  if (!preflightLintPassed) {
+    remediationSuggestions.push(
+      `Pre-Flight Lint Gate: Target repository static check failed. ${preflightLintIssues.slice(0, 3).join("; ")}. Fix code formatting and linting errors locally before opening a pull request.`,
+    );
+  }
+
   if (!input.variantHuntConducted) {
     remediationSuggestions.push(
       "In-Domain Defense Recommendation: Run Variant Hunting sweep across sister modules to ensure zero parallel structural defects.",
@@ -942,6 +968,8 @@ export function auditGovernance(
     flaggedCommentHyperboles,
     impactAnalysisPassed,
     impactAnalysisIssues,
+    preflightLintPassed,
+    preflightLintIssues,
     remediationSuggestions,
     overallConfidence: {
       isPassed: isTechnicalGatePassed,
@@ -1100,13 +1128,24 @@ function rewriteIssueReferences(
   let replaced = false;
   const pattern =
     issueNumber === undefined
-      ? /\b(fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/gi
-      : /\b(fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i;
+      ? /(?:- \[[ x]\]\s+)?\b(fixes|closes|resolves|related issue|issue)[:\s]+#(?:\d+|<[^>\r\n]+>|\[[^\]\r\n]+\]|(?=[ \t\r\n]|$))/gi
+      : /(- \[[ x]\]\s+)?\b(fixes|closes|resolves|related issue|issue)[:\s]+#(?:\d+|<[^>\r\n]+>|\[[^\]\r\n]+\]|(?=[ \t\r\n]|$))/i;
   const rewriteLine = (text: string): string => {
     if (issueNumber !== undefined && replaced) return text;
-    return text.replace(pattern, (_match, verb: string) => {
+    return text.replace(pattern, (match, prefix: string | undefined, verb: string) => {
       replaced = true;
-      return issueNumber === undefined ? "" : `${verb} #${issueNumber}`;
+      if (issueNumber === undefined) return "";
+      const normalizedVerb = /fixes/i.test(verb)
+        ? "Fixes"
+        : /closes/i.test(verb)
+          ? "Closes"
+          : /resolves/i.test(verb)
+            ? "Resolves"
+            : verb;
+      if (prefix) {
+        return `- [x] ${normalizedVerb} #${issueNumber}`;
+      }
+      return `${normalizedVerb} #${issueNumber}`;
     });
   };
 
@@ -1279,6 +1318,11 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
   ) {
     let result = data.nativeTemplateContent;
     result = result.replace(/<!--[\s\S]*?-->/g, ""); // strip comments
+    // Clean common unfilled placeholder brackets
+    result = result.replace(
+      /\[(?:please\s+)?(?:describe|provide|insert|fill\s+in)\b[^\]\r\n]*\]/gi,
+      "",
+    );
 
     result = updateNativeTemplateIssueReference(
       result,
@@ -1292,8 +1336,10 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     ) {
       result = result.replace(
         /(##\s*(?:description|summary|motivation)[\s\S]*?)(?=##|$)/i,
-        (_match, section) =>
-          `${section.trim()}\n\n${problemSummary}\n\n**Root Cause**: ${rootCause}\n\n**Key Changes**:\n${keyChanges.map((c) => `- ${c}`).join("\n")}\n\n`,
+        (_match, section) => {
+          const headerLine = section.split(/\r?\n/)[0];
+          return `${headerLine}\n\n${problemSummary}\n\n**Root Cause**: ${rootCause}\n\n**Key Changes**:\n${keyChanges.map((c) => `- ${c}`).join("\n")}\n\n`;
+        },
       );
     }
 

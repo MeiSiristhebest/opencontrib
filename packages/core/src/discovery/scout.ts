@@ -1,3 +1,5 @@
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type {
   Opportunity,
   UserProfile,
@@ -31,6 +33,56 @@ const COMMUNITY_POLICY_DIRECTORIES = Array.from(
   ),
 ).sort((left, right) => left.length - right.length);
 
+/**
+ * Scans local runs directory to collect previously attempted or completed issue targets.
+ * Returns a Set of canonical lowercase keys: "owner/repo#123".
+ */
+export function collectHistoricalRunIssues(runsDir?: string): Set<string> {
+  const issues = new Set<string>();
+  const targetDir = runsDir
+    ? resolve(runsDir)
+    : resolve(process.cwd(), '.opencontrib', 'runs');
+  if (!existsSync(targetDir)) {
+    return issues;
+  }
+
+  try {
+    const entries = readdirSync(targetDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const runDir = join(targetDir, entry.name);
+      for (const fname of ['context.json', 'run.json', 'manifest.json', 'opportunity.json']) {
+        const fpath = join(runDir, fname);
+        if (!existsSync(fpath)) continue;
+        try {
+          const raw = JSON.parse(readFileSync(fpath, 'utf8'));
+          const repo =
+            raw.problemContext?.repoFullName ||
+            raw.repoFullName ||
+            raw.manifest?.repoFullName ||
+            raw.targetRepo ||
+            raw.target;
+          const issueNum =
+            raw.problemContext?.issueNumber ??
+            raw.issueNumber ??
+            raw.manifest?.issueNumber ??
+            raw.topOpportunity?.issueNumber ??
+            raw.issue;
+          if (repo && typeof issueNum === 'number') {
+            issues.add(`${String(repo).toLowerCase()}#${issueNum}`);
+          }
+        } catch {
+          // ignore corrupted or transient json artifacts
+        }
+      }
+    }
+  } catch {
+    // best-effort discovery
+  }
+
+  return issues;
+}
+
 export interface ScoutOptions {
   repo?: string;
   minStars?: number;
@@ -38,6 +90,9 @@ export interface ScoutOptions {
   limit?: number;
   refresh?: boolean;
   githubToken?: string;
+  excludeIssues?: Array<{ repoFullName: string; issueNumber: number } | string>;
+  excludeCompletedRuns?: boolean;
+  runsDir?: string;
 }
 
 /**
@@ -148,12 +203,45 @@ export async function scoutOpportunities(
     return [];
   }
 
+  // Build excluded issues set (from historical runs or explicit configuration)
+  const excludedSet = new Set<string>();
+  if (options.excludeCompletedRuns) {
+    const historical = collectHistoricalRunIssues(options.runsDir);
+    for (const h of historical) excludedSet.add(h);
+  }
+  if (options.excludeIssues) {
+    for (const entry of options.excludeIssues) {
+      if (typeof entry === 'string') {
+        const trimmed = entry.trim().toLowerCase();
+        if (trimmed.includes('#')) {
+          excludedSet.add(trimmed);
+        } else if (options.repo && /^\d+$/.test(trimmed)) {
+          excludedSet.add(`${options.repo.toLowerCase()}#${trimmed}`);
+        }
+      } else if (entry && entry.repoFullName && typeof entry.issueNumber === 'number') {
+        excludedSet.add(`${entry.repoFullName.toLowerCase()}#${entry.issueNumber}`);
+      }
+    }
+  }
+
   // 2. Tier 1: Cheap Local Pre-Filtering (Bounded Recall Window)
   // For targeted repo exploration, bound recall to (limit * 2) to eliminate 100+ slow network HTTP calls
   const maxRecall = discoveryMode === 'targeted_repo' ? Math.min(limit * 2, 15) : Math.min(limit * 3, 30);
 
   const preFiltered = rawItems
-    .filter((item) => !item.pull_request && !item.locked && !item.assignee && (!item.assignees || item.assignees.length === 0))
+    .filter((item) => {
+      if (item.pull_request || item.locked || item.assignee || (item.assignees && item.assignees.length > 0)) {
+        return false;
+      }
+      if (excludedSet.size > 0) {
+        const repoMatch = item.repository_url?.match(/repos\/(.+?)\/(.+)$/);
+        const itemRepo = options.repo || (repoMatch ? `${repoMatch[1]}/${repoMatch[2]}` : '');
+        if (itemRepo && excludedSet.has(`${itemRepo.toLowerCase()}#${item.number}`)) {
+          return false;
+        }
+      }
+      return true;
+    })
     .map((item) => {
       const labels = (item.labels || []).map((l: any) => (typeof l === 'string' ? l : l.name || ''));
       const text = `${item.title} ${item.body || ''}`;

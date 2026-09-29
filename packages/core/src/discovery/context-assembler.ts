@@ -131,14 +131,26 @@ function detectCompiledEcosystemCommands(files: string[], dirPath: string, comma
     files.includes('setup.py') ||
     files.includes('setup.cfg')
   ) {
+    let pythonLint = 'ruff check .';
+    if (files.includes('.flake8')) {
+      pythonLint = 'flake8';
+    } else if (files.includes('setup.cfg')) {
+      try {
+        const setupCfg = readFileSync(join(dirPath, 'setup.cfg'), 'utf-8');
+        if (setupCfg.includes('[flake8]')) {
+          pythonLint = 'flake8';
+        }
+      } catch {}
+    }
+
     if (files.includes('uv.lock')) {
       commands.packageManager = 'uv';
       commands.testCommand = 'uv run pytest';
-      commands.lintCommand = 'uv run ruff check .';
+      commands.lintCommand = pythonLint === 'flake8' ? 'uv run flake8' : 'uv run ruff check .';
     } else if (files.includes('poetry.lock')) {
       commands.packageManager = 'poetry';
       commands.testCommand = 'poetry run pytest';
-      commands.lintCommand = 'poetry run ruff check .';
+      commands.lintCommand = pythonLint === 'flake8' ? 'poetry run flake8' : 'poetry run ruff check .';
     } else if (files.includes('Pipfile') || files.includes('Pipfile.lock')) {
       commands.packageManager = 'pipenv';
       commands.testCommand = 'pipenv run pytest';
@@ -146,11 +158,11 @@ function detectCompiledEcosystemCommands(files: string[], dirPath: string, comma
     } else if (files.includes('environment.yml')) {
       commands.packageManager = 'conda';
       commands.testCommand = 'conda run pytest';
-      commands.lintCommand = 'ruff check .';
+      commands.lintCommand = pythonLint;
     } else {
       commands.packageManager = 'pytest';
       commands.testCommand = 'pytest';
-      commands.lintCommand = 'ruff check .';
+      commands.lintCommand = pythonLint;
     }
     return;
   }
@@ -262,6 +274,21 @@ export function detectRunnableCommandsFromDir(dirPath: string): RunnableCommands
     detectNodeCommands(files, dirPath, commands);
     if (!commands.testCommand) {
       detectCompiledEcosystemCommands(files, dirPath, commands);
+    }
+
+    // Pre-commit hook configurations override or augment repo-wide linting
+    if (files.includes('.pre-commit-config.yaml') || files.includes('.pre-commit-config.yml')) {
+      commands.lintCommand = 'pre-commit run --all-files';
+    } else if (!commands.lintCommand) {
+      if (files.includes('Makefile') || files.includes('makefile')) {
+        try {
+          const mkPath = join(dirPath, files.includes('Makefile') ? 'Makefile' : 'makefile');
+          const mkContent = readFileSync(mkPath, 'utf-8');
+          if (/^lint\s*:/m.test(mkContent)) {
+            commands.lintCommand = 'make lint';
+          }
+        } catch {}
+      }
     }
   } catch {}
 
