@@ -70,9 +70,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
 
-      - name: Fetch full history for affected tests
-        run: git fetch --unshallow origin
-
       - name: Setup Bun Runtime
         uses: oven-sh/setup-bun@v2
         with:
@@ -92,6 +89,9 @@ jobs:
 
       - name: TypeScript Typecheck
         run: bunx tsc --noEmit
+
+      - name: Fetch full history for affected tests
+        run: git fetch --unshallow origin
 
       - name: Run cached full workspace test suite
         run: bunx turbo run test:workspace:ci --concurrency=1 --log-order=stream
