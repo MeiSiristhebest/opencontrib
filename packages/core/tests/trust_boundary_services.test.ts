@@ -21,6 +21,7 @@ import { ContributionPrService } from "../src/github/contribution-pr-service.js"
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
 import { EvidenceService } from "../src/evidence/evidence-service.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
+import { computeSourceTreeHash } from "../src/evidence/evidence-collector.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
 import { SubmissionArtifactSchema } from "../src/contracts/schemas.js";
@@ -170,6 +171,7 @@ function seedGovernanceReadyRun(
   options: { baseCommitSha?: string; patchPath?: string } = {},
 ) {
   mkdirSync(workspacePath, { recursive: true });
+  const greenTreeSha256 = computeSourceTreeHash(workspacePath);
   const canonicalRepoFullName = manager.getRun(runId)?.manifest.repoFullName;
   if (!canonicalRepoFullName) {
     throw new Error(`Fixture run ${runId} has no canonical repository binding.`);
@@ -202,7 +204,7 @@ function seedGovernanceReadyRun(
     actualDeltaSha256: "b".repeat(64),
     baseCommitSha,
     redTreeSha256: "c".repeat(64),
-    greenTreeSha256: "d".repeat(64),
+    greenTreeSha256,
     artifactSha256: "",
     changedLines: 0,
     files: [
@@ -295,7 +297,7 @@ function seedGovernanceReadyRun(
         exitCode: 0,
         outputSnippet: "passed",
         passed: true,
-        sourceTreeSha256: "d".repeat(64),
+        sourceTreeSha256: greenTreeSha256,
         capturedAt: "2026-01-01T00:01:00.000Z",
         treeChangedComparedToRed: true,
         treeHashMatchesRed: false,
@@ -1717,6 +1719,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manifest2 = manager.createRun({ repoFullName: "owner/repo2" });
       const workspacePath = join(baseDir, "workspace-override");
       mkdirSync(workspacePath, { recursive: true });
+      const greenTreeSha256 = computeSourceTreeHash(workspacePath);
       const baseCommitSha = "e".repeat(40);
       const patch = {
         title: "fix",
@@ -1746,7 +1749,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         actualDeltaSha256: "f".repeat(64),
         baseCommitSha,
         redTreeSha256: "1".repeat(64),
-        greenTreeSha256: "2".repeat(64),
+        greenTreeSha256,
         artifactSha256: "",
         changedLines: 0,
         files: [
@@ -1841,7 +1844,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
             exitCode: 0,
             outputSnippet: "passed",
             passed: true,
-            sourceTreeSha256: "2".repeat(64),
+            sourceTreeSha256: greenTreeSha256,
             capturedAt: "2026-01-01T00:01:00.000Z",
             treeChangedComparedToRed: true,
             treeHashMatchesRed: false,
@@ -1899,6 +1902,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manifest = manager.createRun({ repoFullName: "org/repo" });
       const workspacePath = join(baseDir, "workspace");
       mkdirSync(workspacePath, { recursive: true });
+      const greenTreeSha256 = computeSourceTreeHash(workspacePath);
 
       const {
         saveCanonicalArtifact,
@@ -1932,7 +1936,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         actualDeltaSha256: "b".repeat(64),
         baseCommitSha,
         redTreeSha256: "c".repeat(64),
-        greenTreeSha256: "d".repeat(64),
+        greenTreeSha256,
         artifactSha256: "",
         changedLines: 0,
         files: [
@@ -2026,7 +2030,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
             exitCode: 0,
             outputSnippet: "",
             passed: true,
-            sourceTreeSha256: "d".repeat(64),
+            sourceTreeSha256: greenTreeSha256,
             capturedAt: "2026-01-01T00:01:00.000Z",
             treeChangedComparedToRed: true,
             treeHashMatchesRed: false,

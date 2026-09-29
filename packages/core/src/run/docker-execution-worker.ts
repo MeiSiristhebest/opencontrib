@@ -8,6 +8,8 @@ import type {
   RawRedExecutionResult,
   GreenExecutionJob,
   RawGreenExecutionResult,
+  PreflightLintExecutionJob,
+  RawPreflightLintExecutionResult,
 } from "./trusted-execution.port.js";
 import {
   computeSourceTreeHash,
@@ -161,6 +163,60 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         capturedAt: new Date().toISOString(),
         sourceTreeSha256: computeSourceTreeHash(cwd),
         testIdentity,
+      };
+    } finally {
+      try {
+        rmSync(cidDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
+  }
+
+  async runPreflightLint(
+    job: PreflightLintExecutionJob,
+  ): Promise<RawPreflightLintExecutionResult> {
+    const cwd = job.workspace.workspacePath;
+    const cidDir = mkdtempSync(join(tmpdir(), "docker-cid-"));
+    const cidFile = join(cidDir, "cid");
+    const dockerArgs = [
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--cidfile",
+      cidFile,
+      "--memory",
+      "512m",
+      "--cpus",
+      "1",
+      "--pids-limit",
+      "256",
+      "-v",
+      `${cwd}:/workspace:ro`,
+      "-w",
+      "/workspace",
+      this.image,
+      "sh",
+      "-c",
+      job.command,
+    ];
+
+    try {
+      const timeoutMs = Math.max(1, Math.min(job.timeoutMs, this.timeoutMs));
+      const res = await runDockerProcessAsync(dockerArgs, timeoutMs);
+      if (res.exitCode === 124) {
+        killContainerByCidFile(cidFile);
+      }
+      return {
+        command: job.command,
+        exitCode: res.exitCode,
+        output: res.output,
+        passed: res.exitCode === 0,
       };
     } finally {
       try {

@@ -22,6 +22,7 @@ import {
 } from "../src/llm/llm-service.js";
 
 import { deriveEvidenceBackedQualityRubric } from "../src/governance/governance-auditor.js";
+import { runPreflightLintCheck } from "../src/governance/preflight-linter.js";
 import {
   existsSync,
   lstatSync,
@@ -32,7 +33,7 @@ import {
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 describe("Sandbox Runtime & Environment Security Hardening", () => {
   test("strictly defines denied credential and token file paths", () => {
     const sandbox = new SandboxRuntime();
@@ -93,6 +94,30 @@ describe("Sandbox Runtime & Environment Security Hardening", () => {
 
     expect(result.exitCode).toBe(7);
     expect(result.passed).toBe(false);
+  });
+
+  test("preserves spaces in arguments to Windows PATH-resolved executables", async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "sandbox-command-"));
+    try {
+      writeFileSync(
+        join(workspaceRoot, "lint target.js"),
+        'process.stdout.write("ARGUMENT_BOUNDARY_OK");\n',
+      );
+      const executable =
+        process.platform === "win32"
+          ? basename(process.execPath)
+          : process.execPath;
+      const result = await runPreflightLintCheck({
+        workspaceRoot,
+        lintCommand: `"${executable}" "lint target.js"`,
+        timeoutMs: 10000,
+      });
+
+      expect(result.passed).toBe(true);
+      expect(result.rawOutput).toContain("ARGUMENT_BOUNDARY_OK");
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });
 

@@ -119,6 +119,22 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
       finalDescriptorCount: finalHandles ?? undefined,
     };
   }
+
+  async runPreflightLint(
+    job: import("./trusted-execution.port.js").PreflightLintExecutionJob,
+  ): Promise<import("./trusted-execution.port.js").RawPreflightLintExecutionResult> {
+    const result = await runPreflightLintCheck({
+      workspaceRoot: job.workspace.workspacePath,
+      lintCommand: job.command,
+      timeoutMs: job.timeoutMs,
+    });
+    return {
+      command: job.command,
+      exitCode: result.exitCode ?? (result.passed ? 0 : 1),
+      output: result.rawOutput,
+      passed: result.passed,
+    };
+  }
 }
 
 export interface EvidenceExecutionPolicy {
@@ -322,9 +338,20 @@ export class TrustedRunMaterializer {
       );
       const title =
         patch.title || bundle.manifest.issueTitle || "chore: contribution";
-      const preflightLintResult = await runPreflightLintCheck({
-        workspaceRoot: workspace.context.workspacePath,
-      });
+      const preflightLintResult = await runPreflightLintCheck(
+        { workspaceRoot: workspace.context.workspacePath },
+        (command, timeoutMs) =>
+          this.executionPort.runPreflightLint({
+            runId: bundle.manifest.runId,
+            workspace: {
+              repoFullName: bundle.manifest.repoFullName,
+              baseCommitSha: workspace.artifact.baseCommitSha,
+              workspacePath: workspace.context.workspacePath,
+            },
+            command,
+            timeoutMs,
+          }),
+      );
       new GovernanceService(this.runManager).audit(bundle.manifest.runId, {
         prTitle: title,
         prBody: bundle.prDraft,

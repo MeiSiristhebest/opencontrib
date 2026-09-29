@@ -6,7 +6,14 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import { buildRunTransferBundle } from "../src/run/run-transfer.js";
-import { TrustedRunMaterializer } from "../src/run/trusted-run-host.js";
+import {
+  DevelopmentUnsafeExecutionPort,
+  TrustedRunMaterializer,
+} from "../src/run/trusted-run-host.js";
+import type {
+  PreflightLintExecutionJob,
+  RawPreflightLintExecutionResult,
+} from "../src/run/trusted-execution.port.js";
 import { IssueBindingService } from "../src/github/issue-binding-service.js";
 
 describe("Autonomous Regression-Test Generation & Transfer Host Integration", () => {
@@ -33,6 +40,19 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
       writeFileSync(
         join(agentWorkspace, "math.js"),
         "export function mul(a, b) { return 0; }\n",
+      );
+      // If this repository-controlled script ever executes in the trusted host
+      // process instead of through the injected worker, materialization fails.
+      writeFileSync(
+        join(agentWorkspace, "package.json"),
+        JSON.stringify(
+          {
+            packageManager: "npm@10.8.2",
+            scripts: { lint: 'node -e "process.exit(42)"' },
+          },
+          null,
+          2,
+        ) + "\n",
       );
       execFileSync("git", ["add", "."], {
         cwd: agentWorkspace,
@@ -221,10 +241,26 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
           };
         }
       }
+      class RecordingExecutionPort extends DevelopmentUnsafeExecutionPort {
+        readonly preflightLintJobs: PreflightLintExecutionJob[] = [];
+
+        override runPreflightLint(
+          job: PreflightLintExecutionJob,
+        ): Promise<RawPreflightLintExecutionResult> {
+          this.preflightLintJobs.push(job);
+          return Promise.resolve({
+            command: job.command,
+            exitCode: 0,
+            output: "isolated lint passed",
+            passed: true,
+          });
+        }
+      }
+      const executionPort = new RecordingExecutionPort();
       const materializer = new TrustedRunMaterializer(
         hostRunManager,
         new TestWorktreeManager(),
-        undefined,
+        executionPort,
         undefined,
         hostIssueProvider,
       );
@@ -250,6 +286,11 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         "math.js",
       );
       expect(hostValidatedPatch.changedLines).toBeGreaterThan(0);
+      expect(executionPort.preflightLintJobs).toHaveLength(1);
+      expect(executionPort.preflightLintJobs[0]?.command).toContain("lint");
+      expect(executionPort.preflightLintJobs[0]?.workspace.workspacePath).toBe(
+        hostWorkspace,
+      );
     } finally {
       rmSync(agentWorkspace, { recursive: true, force: true });
       rmSync(hostWorkspace, { recursive: true, force: true });

@@ -52,7 +52,9 @@ import {
 } from "../run/trusted-run-host.js";
 import type {
   GreenExecutionJob,
+  PreflightLintExecutionJob,
   RawGreenExecutionResult,
+  RawPreflightLintExecutionResult,
   RawRedExecutionResult,
   RedExecutionJob,
   TrustedExecutionPort,
@@ -390,6 +392,12 @@ export class FlakyExecutionPort implements TrustedExecutionPort {
         "[flaky] 1/3 stress-loop runs failed (simulated unstable GREEN)",
     };
   }
+
+  runPreflightLint(
+    job: PreflightLintExecutionJob,
+  ): Promise<RawPreflightLintExecutionResult> {
+    return this.delegate.runPreflightLint(job);
+  }
 }
 
 /** Synthesizes hard execution-timeout raw results (exit code 124, no assertion match). */
@@ -426,6 +434,17 @@ export class TimedOutExecutionPort implements TrustedExecutionPort {
       passedUnitTestsCount: 0,
       failedUnitTestsCount: 0,
       handleLeakCheckPassed: "UNAVAILABLE",
+    };
+  }
+
+  async runPreflightLint(
+    job: PreflightLintExecutionJob,
+  ): Promise<RawPreflightLintExecutionResult> {
+    return {
+      command: job.command,
+      exitCode: 124,
+      output: "execution timed out (exit 124)",
+      passed: false,
     };
   }
 }

@@ -38,6 +38,20 @@ export interface GreenExecutionJob {
  concurrencyWorkers?: number;
 }
 
+export interface PreflightLintExecutionJob {
+ runId: string;
+ workspace: ExecutionWorkspaceRef;
+ command: string;
+ timeoutMs: number;
+}
+
+export interface RawPreflightLintExecutionResult {
+ command: string;
+ exitCode: number;
+ output: string;
+ passed: boolean;
+}
+
 export interface RawGreenExecutionResult {
  command: string;
  exitCode: number;
@@ -75,4 +89,7 @@ export interface RawGreenExecutionResult {
 export interface TrustedExecutionPort {
  captureRed(job: RedExecutionJob): Promise<RawRedExecutionResult>;
  verifyGreen(job: GreenExecutionJob): Promise<RawGreenExecutionResult>;
+ runPreflightLint(
+  job: PreflightLintExecutionJob,
+ ): Promise<RawPreflightLintExecutionResult>;
 }

@@ -258,7 +258,13 @@ export class GovernanceService {
         coreFiles,
         validatedPatch.greenTreeSha256,
       );
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith("EvidencePatchProvenanceError: workspace ")
+      ) {
+        throw error;
+      }
       // If canonical counting is unavailable, auditGovernance falls back to
       // the total validated diff size rather than exempting unmeasured lines.
       coreDiffLines = undefined;

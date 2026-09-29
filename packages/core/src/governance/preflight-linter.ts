@@ -1,5 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { defaultSandboxRuntime } from '../sandbox/sandbox-runtime.js';
 import { parseCommandSpec } from '../sandbox/command-spec.js';
 import { detectRunnableCommandsFromDir } from '../discovery/context-assembler.js';
@@ -20,6 +19,11 @@ export interface PreflightLintOptions {
   lintCommand?: string;
   timeoutMs?: number;
 }
+
+export type PreflightLintCommandExecutor = (
+  command: string,
+  timeoutMs: number,
+) => Promise<{ exitCode: number; output: string; passed: boolean }>;
 
 const LINT_VIOLATION_PATTERNS = [
   // Flake8 / Ruff / Pylint: file.py:12:34: E501 line too long
@@ -72,6 +76,7 @@ export function extractLintViolations(output: string): string[] {
  */
 export async function runPreflightLintCheck(
   options: PreflightLintOptions,
+  executor?: PreflightLintCommandExecutor,
 ): Promise<PreflightLintResult> {
   const { workspaceRoot, timeoutMs = 60000 } = options;
 
@@ -108,13 +113,14 @@ export async function runPreflightLintCheck(
   }
 
   try {
-    const spec = parseCommandSpec(commandToRun);
-    const execResult = await defaultSandboxRuntime.executeAsync({
-      cwd: workspaceRoot,
-      workspaceRoot,
-      commandSpec: spec,
-      timeoutMs,
-    });
+    const execResult = executor
+      ? await executor(commandToRun, timeoutMs)
+      : await defaultSandboxRuntime.executeAsync({
+          cwd: workspaceRoot,
+          workspaceRoot,
+          commandSpec: parseCommandSpec(commandToRun),
+          timeoutMs,
+        });
 
     const rawOutput = execResult.output || '';
     const violations = extractLintViolations(rawOutput);

@@ -5,7 +5,7 @@ import {
 } from "node:child_process";
 import { mkdtempSync, existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { parseCommandSpec, type CommandSpec } from "./command-spec.js";
 import { safeRmSync } from "../workspace/worktree-manager.js";
 import { sensitiveDeniedPaths } from "./denied-paths.js";
@@ -255,12 +255,10 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       let stderr = "";
       let timedOut = false;
 
-      // Launch explicit Windows executables directly. Routing an absolute .exe
-      // through cmd.exe corrupts quoted arguments and can mask its exit status.
+      // Launch Windows executables directly, including PATH-resolved and
+      // relative names, so cmd.exe cannot flatten parsed arguments containing spaces.
       const directWindowsExecutable =
-        process.platform === "win32" &&
-        isAbsolute(finalCommand) &&
-        /\.(?:exe|com)$/i.test(finalCommand);
+        process.platform === "win32" && /\.(?:exe|com)$/i.test(finalCommand);
       const child = spawn(finalCommand, finalArgs, {
         cwd: resolvedCwd,
         stdio: ["ignore", "pipe", "pipe"],

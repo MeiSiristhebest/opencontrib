@@ -21,6 +21,7 @@ import {
   GovernanceService,
   type GovernanceAuditRunOptions,
 } from "../src/governance/governance-service.js";
+import { computeSourceTreeHash } from "../src/evidence/evidence-collector.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import {
   hashTrustedPolicySnapshot,
@@ -93,6 +94,7 @@ function seedGovernanceReadyRun(
     skipWorkspace?: boolean;
     policySnapshot?: TrustedPolicySnapshot;
     auditOptions?: GovernanceAuditRunOptions;
+    mutateWorkspaceBeforeAudit?: () => void;
   } = {},
 ) {
   const baseCommitSha = "a".repeat(40);
@@ -116,13 +118,15 @@ function seedGovernanceReadyRun(
   };
   const patchContent = JSON.stringify(patch);
   const patchSha256 = createHash("sha256").update(patchContent).digest("hex");
+  mkdirSync(workspacePath, { recursive: true });
+  const greenTreeSha256 = computeSourceTreeHash(workspacePath);
   const validatedPatch = {
     runId,
     patchSha256,
     actualDeltaSha256: "b".repeat(64),
     baseCommitSha,
     redTreeSha256: "c".repeat(64),
-    greenTreeSha256: "d".repeat(64),
+    greenTreeSha256,
     artifactSha256: "",
     changedLines: 0,
     files: [
@@ -137,7 +141,6 @@ function seedGovernanceReadyRun(
   };
   validatedPatch.artifactSha256 = hashValidatedPatchArtifact(validatedPatch);
   if (!options.skipWorkspace) {
-    mkdirSync(workspacePath, { recursive: true });
     const policySnapshot =
       options.policySnapshot ??
       ({
@@ -241,7 +244,7 @@ function seedGovernanceReadyRun(
         exitCode: 0,
         outputSnippet: "passed",
         passed: true,
-        sourceTreeSha256: "d".repeat(64),
+        sourceTreeSha256: greenTreeSha256,
         capturedAt: "2026-01-01T00:01:00.000Z",
         treeChangedComparedToRed: true,
         treeHashMatchesRed: false,
@@ -261,6 +264,7 @@ function seedGovernanceReadyRun(
     "EVIDENCE_COLLECTED",
   );
   manager.saveArtifact(runId, "pr_draft", body);
+  options.mutateWorkspaceBeforeAudit?.();
   return new GovernanceService(manager).audit(runId, {
     prTitle: "fix: bug",
     prBody: body,
@@ -279,6 +283,33 @@ function seedGovernanceReadyRun(
 }
 
 describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
+  it("rejects workspace mutation after canonical GREEN before governance audit", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-green-tree-mutation-"));
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const workspacePath = join(baseDir, "workspace");
+
+      expect(() =>
+        seedGovernanceReadyRun(
+          manager,
+          manifest.runId,
+          workspacePath,
+          "pr body",
+          {
+            mutateWorkspaceBeforeAudit: () =>
+              writeFileSync(
+                join(workspacePath, "after-green.ts"),
+                "changed\n",
+              ),
+          },
+        ),
+      ).toThrow(/EvidencePatchProvenanceError/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it("promotes the trusted advisory floor when coverage is required without a minimum", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-policy-advisory-floor-"));
     try {
