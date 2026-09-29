@@ -196,13 +196,17 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       "1",
       "--pids-limit",
       "256",
+      // Keep the canonical workspace immutable; build tools write only into
+      // this disposable copy in the container's writable layer.
       "-v",
-      `${cwd}:/workspace:ro`,
+      `${cwd}:/source:ro`,
       "-w",
       "/workspace",
       this.image,
       "sh",
       "-c",
+      'mkdir -p /workspace && cp -R -P /source/. /workspace/ && exec sh -c "$1"',
+      "opencontrib-preflight-lint",
       job.command,
     ];
 
