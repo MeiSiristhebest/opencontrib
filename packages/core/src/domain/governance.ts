@@ -15,6 +15,7 @@ import {
   type EvidenceReport,
 } from "../contracts/schemas.js";
 import { validateMarkdownIntegrity } from "../governance/markdown-validator.js";
+import { analyzePatchImpactAndConsistency } from "../governance/impact-analyzer.js";
 
 /**
  * Advanced Semantic & Behavioral Anti-AI Patterns
@@ -99,17 +100,26 @@ export interface AssertionQualityResult {
   flaggedTautologicalAssertions: string[];
 }
 
-function isTestSourcePath(filePath: string): boolean {
-  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
-  const baseName = normalized.slice(normalized.lastIndexOf("/") + 1);
+function isTestPath(
+  normalizedPath: string,
+  includeTestPrefixedBasename: boolean,
+): boolean {
+  const baseName = normalizedPath.slice(normalizedPath.lastIndexOf("/") + 1);
   return (
-    /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalized) ||
+    /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalizedPath) ||
     /\.(?:test|spec)\.[^/]+$/.test(baseName) ||
     /tests?\.[^/]+$/.test(baseName) ||
     /_test\.[^/]+$/.test(baseName) ||
     /^test_[^/]+\.[^/]+$/.test(baseName) ||
-    /^test[^/]*\.[^/]+$/.test(baseName)
+    (includeTestPrefixedBasename && /^test[^/]*\.[^/]+$/.test(baseName))
   );
+}
+
+function isTestSourcePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  // Assertion analysis treats names such as testUtils.ts as test sources;
+  // supporting-file classification intentionally requires clearer test markers.
+  return isTestPath(normalized, true);
 }
 
 /**
@@ -318,6 +328,7 @@ export function deriveEvidenceBackedQualityRubric(input: {
   passedTestsCount?: number;
   testCoveragePercent?: number;
   diffLines?: number;
+  coreDiffLines?: number;
   styleScore?: number;
   securityScore?: number;
   subagentReviewAvailable?: boolean;
@@ -342,11 +353,12 @@ export function deriveEvidenceBackedQualityRubric(input: {
 
   // Root cause confidence: 95 only if empirical failure reproduction was confirmed, 90 if standard tests passed, 65 if untested
   const rootCause = hasReproductionAssertion ? 95 : testsPassed ? 90 : 65;
-  // Implementation confidence: based on surgical diff size
+  // Implementation confidence: based on core logic diff size
+  const effectiveCoreLines = input.coreDiffLines !== undefined ? input.coreDiffLines : diffLines;
   const implementation =
-    diffLines <= 100
+    effectiveCoreLines <= 100
       ? 94
-      : Math.max(60, 94 - Math.round((diffLines - 100) * 0.25));
+      : Math.max(60, 94 - Math.round((effectiveCoreLines - 100) * 0.25));
   // Regression confidence: based on actual test passes
   const regression = testsPassed ? 93 : 50;
   // Defensive coverage comes from executed tests. Changed-code coverage is a
@@ -467,6 +479,199 @@ export interface AuditGovernanceInput {
   isAutonomousPrSubmission?: boolean;
   variantHuntConducted?: boolean;
   impactAnalysisConducted?: boolean;
+  modifiedFiles?: string[];
+  repoContextFiles?: string[];
+  coreDiffLines?: number;
+  preflightLintResult?: {
+    executed: boolean;
+    passed: boolean;
+    summary: string;
+    violations?: string[];
+  };
+}
+
+function isNonNegativeLineCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+export function isSupportingFile(filePath: string): boolean {
+  if (!filePath) return false;
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  return (
+    isTestPath(normalized, false) ||
+    /\.(?:md|mdx|rst)$/.test(normalized) ||
+    /(^|\/)docs?(?:\/|$)/.test(normalized)
+  );
+}
+
+function parseDiffPath(rawPath: string): string {
+  const path = rawPath.trim();
+  return path.startsWith('"') && path.endsWith('"')
+    ? path.slice(1, -1).replace(/\\(["\\])/g, "$1")
+    : path;
+}
+
+function parseGitDiffPaths(line: string): string[] {
+  const tokens =
+    line
+      .slice("diff --git ".length)
+      .match(/"(?:\\.|[^"])*"|\S+/g) ?? [];
+  return tokens.map(parseDiffPath);
+}
+
+function parseUnifiedDiffPath(line: string): string {
+  return parseDiffPath(line.slice(4).split("\t", 1)[0] ?? "");
+}
+
+interface DiffLineAccountingState {
+  currentFile: string;
+  oldFilePath: string;
+  totalLines: number;
+  coreLines: number;
+  hasFileHeaders: boolean;
+  hasCoreFileHeader: boolean;
+  pendingUnifiedFileHeader: boolean;
+  inHunk: boolean;
+  remainingOldLines: number | undefined;
+  remainingNewLines: number | undefined;
+}
+
+function recordChangedLine(state: DiffLineAccountingState): void {
+  state.totalLines++;
+  if (!state.hasFileHeaders || !isSupportingFile(state.currentFile)) {
+    state.coreLines++;
+  }
+}
+
+function recordDiffFile(state: DiffLineAccountingState, path: string): void {
+  if (path && !isSupportingFile(path)) state.hasCoreFileHeader = true;
+}
+
+function handleGitDiffHeader(
+  state: DiffLineAccountingState,
+  line: string,
+): boolean {
+  if (!line.startsWith("diff --git ")) return false;
+  state.inHunk = false;
+  state.remainingOldLines = undefined;
+  state.remainingNewLines = undefined;
+  state.hasFileHeaders = true;
+  state.pendingUnifiedFileHeader = true;
+  state.oldFilePath = "";
+  const paths = parseGitDiffPaths(line);
+  state.currentFile = paths[1] ?? paths[0] ?? "";
+  recordDiffFile(state, state.currentFile);
+  return true;
+}
+
+function handleHunkHeader(
+  state: DiffLineAccountingState,
+  line: string,
+): boolean {
+  if (!line.startsWith("@@")) return false;
+  state.pendingUnifiedFileHeader = false;
+  const counts = line.match(
+    /^@@\s+-\d+(?:,(\d+))?\s+\+\d+(?:,(\d+))?\s+@@/,
+  );
+  state.inHunk = true;
+  state.remainingOldLines = counts ? Number(counts[1] ?? 1) : undefined;
+  state.remainingNewLines = counts ? Number(counts[2] ?? 1) : undefined;
+  if (state.remainingOldLines === 0 && state.remainingNewLines === 0) {
+    state.inHunk = false;
+  }
+  return true;
+}
+
+function handleUnifiedFileHeader(
+  state: DiffLineAccountingState,
+  line: string,
+): boolean {
+  if (state.inHunk) return false;
+  if (line.startsWith("--- ")) {
+    state.hasFileHeaders = true;
+    state.pendingUnifiedFileHeader = true;
+    state.oldFilePath = parseUnifiedDiffPath(line);
+    if (state.oldFilePath !== "/dev/null") {
+      state.currentFile = state.oldFilePath;
+    }
+    recordDiffFile(state, state.currentFile);
+    return true;
+  }
+  if (state.pendingUnifiedFileHeader && line.startsWith("+++ ")) {
+    state.hasFileHeaders = true;
+    const newFilePath = parseUnifiedDiffPath(line);
+    state.currentFile =
+      newFilePath === "/dev/null" ? state.oldFilePath : newFilePath;
+    state.pendingUnifiedFileHeader = false;
+    recordDiffFile(state, state.currentFile);
+    return true;
+  }
+  return false;
+}
+
+function handleHunkBody(
+  state: DiffLineAccountingState,
+  line: string,
+): boolean {
+  if (!state.inHunk) return false;
+  if (line.startsWith("+")) {
+    recordChangedLine(state);
+    if (state.remainingNewLines !== undefined) state.remainingNewLines--;
+  } else if (line.startsWith("-")) {
+    recordChangedLine(state);
+    if (state.remainingOldLines !== undefined) state.remainingOldLines--;
+  } else if (line.startsWith(" ")) {
+    if (state.remainingOldLines !== undefined) state.remainingOldLines--;
+    if (state.remainingNewLines !== undefined) state.remainingNewLines--;
+  }
+  if (state.remainingOldLines === 0 && state.remainingNewLines === 0) {
+    state.inHunk = false;
+  }
+  return true;
+}
+
+function calculateDiffLines(patch: string): {
+  totalLines: number;
+  coreLines: number;
+} {
+  if (!patch) return { totalLines: 0, coreLines: 0 };
+
+  const state: DiffLineAccountingState = {
+    currentFile: "",
+    oldFilePath: "",
+    totalLines: 0,
+    coreLines: 0,
+    hasFileHeaders: false,
+    hasCoreFileHeader: false,
+    pendingUnifiedFileHeader: false,
+    inHunk: false,
+    remainingOldLines: undefined,
+    remainingNewLines: undefined,
+  };
+
+  const lines = patch.split(/\r?\n/);
+  for (const line of lines) {
+    if (
+      handleGitDiffHeader(state, line) ||
+      handleHunkHeader(state, line) ||
+      handleUnifiedFileHeader(state, line) ||
+      handleHunkBody(state, line)
+    ) {
+      continue;
+    }
+    if (line.startsWith("+") || line.startsWith("-")) {
+      recordChangedLine(state);
+    }
+  }
+
+  if (state.totalLines === 0 && lines.length > 0) {
+    state.totalLines = lines.length;
+    if (!state.hasFileHeaders || state.hasCoreFileHeader) {
+      state.coreLines = lines.length;
+    }
+  }
+
+  return { totalLines: state.totalLines, coreLines: state.coreLines };
 }
 
 export function auditGovernance(
@@ -476,23 +681,18 @@ export function auditGovernance(
 } {
   const patch = input.diffText || input.patchContent || "";
   const prBody = input.prBodyText || input.prBody || "";
-  let lines = typeof input.lineCount === "number" ? input.lineCount : 0;
-  if (typeof input.lineCount !== "number") {
-    if (patch) {
-      // Calculate true added/removed line changes from unified diff hunks
-      const diffHunkLines = patch
-        .split("\n")
-        .filter(
-          (l) =>
-            (l.startsWith("+") || l.startsWith("-")) &&
-            !l.startsWith("+++") &&
-            !l.startsWith("---"),
-        );
-      lines =
-        diffHunkLines.length > 0
-          ? diffHunkLines.length
-          : patch.split("\n").length;
-    }
+  const validatedLineCount = isNonNegativeLineCount(input.lineCount)
+    ? input.lineCount
+    : undefined;
+  const validatedCoreLineCount = isNonNegativeLineCount(input.coreDiffLines)
+    ? input.coreDiffLines
+    : undefined;
+  let lines = validatedLineCount ?? 0;
+  let coreLines = validatedCoreLineCount ?? validatedLineCount ?? 0;
+  if (validatedLineCount === undefined && patch) {
+    const calculated = calculateDiffLines(patch);
+    lines = calculated.totalLines;
+    coreLines = validatedCoreLineCount ?? calculated.coreLines;
   }
   const maxDiffAllowed = input.maxDiffLines ?? 100;
 
@@ -526,6 +726,7 @@ export function auditGovernance(
           ? minimumChangedLineCoverage
           : undefined,
       diffLines: lines,
+      coreDiffLines: coreLines,
       styleScore: input.subagentQualityScore,
       securityScore: input.subagentQualityScore,
       subagentReviewAvailable: typeof input.subagentQualityScore === "number",
@@ -561,7 +762,7 @@ export function auditGovernance(
   const corruptedMarkdownIssues = integrityCheck.corruptedIssues;
 
   // 3. RFC 100-line (or configured maxDiffLines) Gate Check
-  const rfcGatePassed = lines <= maxDiffAllowed;
+  const rfcGatePassed = coreLines <= maxDiffAllowed;
 
   // 4. Mathematical Quality Rubric Calculation
   const confidence = calculateConfidenceScore(breakdown!);
@@ -581,6 +782,37 @@ export function auditGovernance(
     input.resourceLeakPolicy?.required !== true ||
     input.evidence?.handleLeakCheckPassed === "PASS";
 
+  // 3b. Cross-Platform, Collision & Lifecycle Impact Analysis Check
+  let impactAnalysisPassed = true;
+  const impactAnalysisIssues: string[] = [];
+  if (patch) {
+    const impactResult = analyzePatchImpactAndConsistency({
+      modifiedFiles: input.modifiedFiles || [],
+      patchContent: patch,
+      repoContextFiles: input.repoContextFiles || [],
+    });
+    impactAnalysisPassed = impactResult.isCompliant;
+    impactAnalysisIssues.push(
+      ...impactResult.crossPlatformHazards,
+      ...impactResult.defensiveRecommendations,
+      ...impactResult.consistencyWarnings,
+    );
+  }
+
+  // 3c. Upstream Pre-Flight Lint & Code Style Gate Check
+  let preflightLintPassed = input.preflightLintResult?.passed === true;
+  const preflightLintIssues: string[] = [];
+  if (!input.preflightLintResult) {
+    preflightLintIssues.push(
+      'Pre-flight lint result is unavailable; the required check was not supplied.',
+    );
+  } else if (!preflightLintPassed) {
+    preflightLintIssues.push(input.preflightLintResult.summary);
+    if (input.preflightLintResult.violations?.length) {
+      preflightLintIssues.push(...input.preflightLintResult.violations);
+    }
+  }
+
   const isTechnicalGatePassed =
     antiAiCheckPassed &&
     markdownIntegrityPassed &&
@@ -589,7 +821,9 @@ export function auditGovernance(
     rfcGatePassed &&
     confidence.isPassed &&
     coverageGatePassed &&
-    resourceLeakGatePassed;
+    resourceLeakGatePassed &&
+    impactAnalysisPassed &&
+    preflightLintPassed;
 
   const isGatedPassed = isTechnicalGatePassed;
 
@@ -633,7 +867,11 @@ export function auditGovernance(
   }
   if (!rfcGatePassed) {
     remediationSuggestions.push(
-      `Diff exceeds 100 lines (${lines} lines). Split into RFC Discussion issue first.`,
+      `Diff exceeds the configured limit of ${maxDiffAllowed} lines (${coreLines} core lines). Split into RFC Discussion issue first.`,
+    );
+  } else if (lines > maxDiffAllowed) {
+    remediationSuggestions.push(
+      `Supporting Engineering Exemption: Core production logic is within threshold (${coreLines}/${maxDiffAllowed} lines). Additional ${lines - coreLines} lines are test matrices and documentation.`,
     );
   }
   if (!coverageMinimumIsValid) {
@@ -688,6 +926,18 @@ export function auditGovernance(
     );
   }
 
+  if (!impactAnalysisPassed) {
+    remediationSuggestions.push(
+      `Impact Gate: ${impactAnalysisIssues.join("; ")}`,
+    );
+  }
+
+  if (!preflightLintPassed) {
+    remediationSuggestions.push(
+      `Pre-Flight Lint Gate: Target repository static check failed. ${preflightLintIssues.slice(0, 3).join("; ")}. Fix code formatting and linting errors locally before opening a pull request.`,
+    );
+  }
+
   if (!input.variantHuntConducted) {
     remediationSuggestions.push(
       "In-Domain Defense Recommendation: Run Variant Hunting sweep across sister modules to ensure zero parallel structural defects.",
@@ -717,6 +967,10 @@ export function auditGovernance(
     flaggedTautologicalAssertions,
     commentHyperbolePassed,
     flaggedCommentHyperboles,
+    impactAnalysisPassed,
+    impactAnalysisIssues,
+    preflightLintPassed,
+    preflightLintIssues,
     remediationSuggestions,
     overallConfidence: {
       isPassed: isTechnicalGatePassed,
@@ -769,6 +1023,207 @@ export interface MasterPrTemplateInput {
   conditionalAiRequired?: boolean;
   nativeTemplateContent?: string;
   evidence?: PrTemplateEvidence;
+}
+
+interface MarkdownLineRecord {
+  text: string;
+  start: number;
+  end: number;
+  ending: string;
+}
+
+interface MarkdownFence {
+  marker: "`" | "~";
+  length: number;
+}
+
+function markdownLineRecords(content: string): MarkdownLineRecord[] {
+  const records: MarkdownLineRecord[] = [];
+  const newlines = /\r\n|\n|\r/g;
+  let start = 0;
+  let match: RegExpExecArray | null;
+  while ((match = newlines.exec(content)) !== null) {
+    records.push({
+      text: content.slice(start, match.index),
+      start,
+      end: newlines.lastIndex,
+      ending: match[0],
+    });
+    start = newlines.lastIndex;
+  }
+  if (start < content.length || records.length === 0) {
+    records.push({
+      text: content.slice(start),
+      start,
+      end: content.length,
+      ending: "",
+    });
+  }
+  return records;
+}
+
+function markdownFenceOpener(line: string): MarkdownFence | undefined {
+  const match = line.match(/^ {0,3}(`{3,}|~{3,})/);
+  if (!match) return undefined;
+  return { marker: match[1][0] as "`" | "~", length: match[1].length };
+}
+
+function isMarkdownFenceCloser(line: string, fence: MarkdownFence): boolean {
+  const match = line.match(/^ {0,3}(`+|~+)\s*$/);
+  return Boolean(
+    match &&
+      match[1][0] === fence.marker &&
+      match[1].length >= fence.length,
+  );
+}
+
+function findRelatedIssuesSection(content: string): {
+  bodyStart: number;
+  end: number;
+  headingHasNewline: boolean;
+} | undefined {
+  let fence: MarkdownFence | undefined;
+  let section:
+    | { bodyStart: number; end: number; headingHasNewline: boolean }
+    | undefined;
+
+  for (const line of markdownLineRecords(content)) {
+    if (fence) {
+      if (isMarkdownFenceCloser(line.text, fence)) fence = undefined;
+      continue;
+    }
+    const opener = markdownFenceOpener(line.text);
+    if (opener) {
+      fence = opener;
+      continue;
+    }
+
+    const heading = line.text.match(/^ {0,3}(#{1,6})[ \t]+(.+?)\s*$/);
+    if (!heading) continue;
+    const level = heading[1].length;
+    const title = heading[2]
+      .replace(/[ \t]+#+[ \t]*$/, "")
+      .trim()
+      .toLowerCase();
+    if (!section) {
+      if (level === 2 && title === "related issues") {
+        section = {
+          bodyStart: line.end,
+          end: content.length,
+          headingHasNewline: line.ending.length > 0,
+        };
+      }
+    } else if (level <= 2) {
+      section.end = line.start;
+      return section;
+    }
+  }
+  return section;
+}
+
+function rewriteIssueReferences(
+  content: string,
+  issueNumber?: number,
+  includeFencedCode = false,
+): { content: string; replaced: boolean } {
+  let replaced = false;
+  const pattern =
+    issueNumber === undefined
+      ? /(?:- \[[ x]\]\s+)?\b(fixes|closes|resolves|related issue|issue)[:\s]+#(?:\d+|<[^>\r\n]+>|\[[^\]\r\n]+\]|(?=[ \t\r\n]|$))/gi
+      : /(- \[[ x]\]\s+)?\b(fixes|closes|resolves|related issue|issue)[:\s]+#(?:\d+|<[^>\r\n]+>|\[[^\]\r\n]+\]|(?=[ \t\r\n]|$))/i;
+  const rewriteLine = (text: string): string => {
+    if (issueNumber !== undefined && replaced) return text;
+    return text.replace(pattern, (match, prefix: string | undefined, verb: string) => {
+      replaced = true;
+      if (issueNumber === undefined) return "";
+      const normalizedVerb = /fixes/i.test(verb)
+        ? "Fixes"
+        : /closes/i.test(verb)
+          ? "Closes"
+          : /resolves/i.test(verb)
+            ? "Resolves"
+            : verb;
+      if (prefix) {
+        return `- [x] ${normalizedVerb} #${issueNumber}`;
+      }
+      return `${normalizedVerb} #${issueNumber}`;
+    });
+  };
+
+  let fence: MarkdownFence | undefined;
+  const rewritten = markdownLineRecords(content)
+    .map((line) => {
+      if (fence) {
+        const text = includeFencedCode ? rewriteLine(line.text) : line.text;
+        if (isMarkdownFenceCloser(line.text, fence)) fence = undefined;
+        return `${text}${line.ending}`;
+      }
+      const opener = markdownFenceOpener(line.text);
+      if (opener) {
+        fence = opener;
+        const text = includeFencedCode ? rewriteLine(line.text) : line.text;
+        return `${text}${line.ending}`;
+      }
+      return `${rewriteLine(line.text)}${line.ending}`;
+    })
+    .join("");
+  return { content: rewritten, replaced };
+}
+
+function insertIssueReferenceInSection(
+  content: string,
+  section: { bodyStart: number; headingHasNewline: boolean },
+  reference: string,
+): string {
+  const newline = content.includes("\r\n")
+    ? "\r\n"
+    : content.includes("\r")
+      ? "\r"
+      : "\n";
+  const separator = section.headingHasNewline ? "" : newline;
+  return `${content.slice(0, section.bodyStart)}${separator}${reference}${newline}${content.slice(section.bodyStart)}`;
+}
+
+function updateNativeTemplateIssueReference(
+  content: string,
+  issueReference: string,
+  submissionRoute: "PUBLIC_ISSUE" | "PRIVATE_SECURITY",
+  issueNumber?: number,
+): string {
+  if (submissionRoute === "PRIVATE_SECURITY") {
+    const withoutPublicReferences = rewriteIssueReferences(
+      content,
+      undefined,
+      true,
+    ).content;
+    const section = findRelatedIssuesSection(withoutPublicReferences);
+    return section
+      ? insertIssueReferenceInSection(
+          withoutPublicReferences,
+          section,
+          issueReference,
+        )
+      : `${issueReference}\n\n${withoutPublicReferences}`;
+  }
+
+  const publicIssueNumber = issueNumber ?? 0;
+  const section = findRelatedIssuesSection(content);
+  if (section) {
+    const body = content.slice(section.bodyStart, section.end);
+    const rewrittenBody = rewriteIssueReferences(body, publicIssueNumber);
+    return rewrittenBody.replaced
+      ? `${content.slice(0, section.bodyStart)}${rewrittenBody.content}${content.slice(section.end)}`
+      : insertIssueReferenceInSection(
+          content,
+          section,
+          `closes #${publicIssueNumber}`,
+        );
+  }
+
+  const rewritten = rewriteIssueReferences(content, publicIssueNumber);
+  return rewritten.replaced
+    ? rewritten.content
+    : `${issueReference}\n\n${content}`;
 }
 
 export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
@@ -864,29 +1319,38 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
   ) {
     let result = data.nativeTemplateContent;
     result = result.replace(/<!--[\s\S]*?-->/g, ""); // strip comments
-    if (submissionRoute === "PRIVATE_SECURITY") {
-      result = result.replace(
-        /\b(?:fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/gim,
-        "",
-      );
-      result = `${issueReference}\n\n${result}`;
-    } else if (/\b(?:fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i.test(result)) {
-      result = result.replace(
-        /(fixes|closes|resolves)\s+#(?:\d+|<[^>\r\n]+>)/i,
-        `$1 #${data.issueNumber}`,
-      );
-    } else {
-      result = `${issueReference}\n\n` + result;
-    }
+    // Clean common unfilled placeholder brackets
+    result = result.replace(
+      /\[(?:please\s+)?(?:describe|provide|insert|fill\s+in)\b[^\]\r\n]*\]/gi,
+      "",
+    );
+
+    result = updateNativeTemplateIssueReference(
+      result,
+      issueReference,
+      submissionRoute,
+      data.issueNumber,
+    );
+
     if (
       /## description|## summary|## motivation|### description/i.test(result)
     ) {
       result = result.replace(
         /(##\s*(?:description|summary|motivation)[\s\S]*?)(?=##|$)/i,
-        (_match, section) =>
-          `${section}\n${problemSummary}\n\n**Root Cause**: ${rootCause}\n\n**Key Changes**:\n${keyChanges.map((c) => `- ${c}`).join("\n")}\n\n`,
+        (_match, section) => {
+          const headerLine = section.split(/\r?\n/)[0];
+          return `${headerLine}\n\n${problemSummary}\n\n**Root Cause**: ${rootCause}\n\n**Key Changes**:\n${keyChanges.map((c) => `- ${c}`).join("\n")}\n\n`;
+        },
       );
     }
+
+    // Auto-check Type of Change checkboxes
+    if (data.isDocumentationOnly) {
+      result = result.replace(/- \[[ x]\] (Documentation(?: update)?)/i, "- [x] $1");
+    } else {
+      result = result.replace(/- \[[ x]\] (Bug fix[^\r\n]*)/i, "- [x] $1");
+    }
+
     if (
       /## test plan|## verification|## how has this been tested|### test plan/i.test(
         result,
@@ -899,12 +1363,16 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
       result = result.replace(
         /(##\s*(?:test plan|verification|how has this been tested)[\s\S]*?)(?=##|$)/i,
         (_match, section) =>
-          `${section}\n${reproductionDetail}\n${verificationLine}\n- Test Suite: ${testSuite}\n${userValidationNote}\n\n`,
+          `${section.trim()}\n\n${reproductionDetail}\n${verificationLine}\n- Test Suite: ${testSuite}\n${userValidationNote}\n\n`,
       );
     }
+
+    // Contributor attestations are never inferred from pipeline evidence.
+
+
     const complianceNotes = [
       data.aiDisclosureRequired
-        ? "Automated assistance disclosure is required by the pinned repository policy."
+        ? "Automated assistance disclosure: This contribution was prepared using OpenContrib AI-assisted tooling; specific model details were not recorded in this run."
         : "",
       data.dcoRequired
         ? "DCO requirement: the commits must include a valid Signed-off-by trailer."

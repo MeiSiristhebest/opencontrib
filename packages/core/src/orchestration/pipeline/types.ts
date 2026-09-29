@@ -118,6 +118,8 @@ export interface PipelineContext {
   validationStatus?: ValidationStatus;
   appliedFiles?: Array<{ path: string; operation: string }>;
   evidenceReport?: any;
+  coreDiffLines?: number;
+  coreFilesCount?: number;
   toolFeedback?: ToolFeedbackEntry[];
   subagentReview?: OrchestratorSubagentReview;
   qualityRubric?: {

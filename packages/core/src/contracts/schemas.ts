@@ -90,6 +90,21 @@ export const QualificationResultSchema = z.object({
 });
 export type QualificationResult = z.infer<typeof QualificationResultSchema>;
 
+export const CommunityGateStatusSchema = z.enum([
+  'OPEN_FOR_CONTRIBUTION',
+  'REQUIRES_MAINTAINER_APPROVAL',
+  'APPROVED_BY_MAINTAINER',
+  'GATE_UNKNOWN',
+]);
+export type CommunityGateStatus = z.infer<typeof CommunityGateStatusSchema>;
+
+export const MaintainerApprovalSignalSchema = z.object({
+  source: z.enum(['comment_keyword', 'label', 'author_association', 'timeline_event']),
+  detail: z.string(),
+  confidence: z.enum(['high', 'medium', 'low']),
+});
+export type MaintainerApprovalSignal = z.infer<typeof MaintainerApprovalSignalSchema>;
+
 export const OpportunitySchema = z.object({
   repoFullName: z.string(),
   repoStars: z.number(),
@@ -127,6 +142,9 @@ export const OpportunitySchema = z.object({
       actionabilityModifier: z.number(),
     })
     .optional(),
+  communityGateStatus: CommunityGateStatusSchema.optional(),
+  communityGateSignals: z.array(MaintainerApprovalSignalSchema).optional(),
+  communityGateSuggestedAction: z.string().optional(),
 });
 export type Opportunity = z.infer<typeof OpportunitySchema>;
 
@@ -304,21 +322,58 @@ export const ValidatedPatchFileSchema = z.object({
   mode: z.enum(["100644", "100755", "120000"]),
   operation: z.enum(["CREATE", "MODIFY", "DELETE"]),
   contentSha256: z.string(),
+  // Optional only for legacy artifacts; new artifacts bind per-file counts into their hash.
+  changedLines: z.number().int().nonnegative().optional(),
 });
 export type ValidatedPatchFile = z.infer<typeof ValidatedPatchFileSchema>;
 
-export const ValidatedPatchArtifactSchema = z.object({
-  runId: z.string(),
-  patchSha256: z.string(),
-  actualDeltaSha256: z.string(),
-  baseCommitSha: z.string(),
-  redTreeSha256: z.string(),
-  greenTreeSha256: z.string(),
-  artifactSha256: z.string(),
-  changedLines: z.number().int().nonnegative(),
-  files: z.array(ValidatedPatchFileSchema),
-  validatedAt: z.string(),
-});
+export const ValidatedPatchArtifactSchema = z
+  .object({
+    runId: z.string(),
+    patchSha256: z.string(),
+    actualDeltaSha256: z.string(),
+    baseCommitSha: z.string(),
+    redTreeSha256: z.string(),
+    greenTreeSha256: z.string(),
+    artifactSha256: z.string(),
+    changedLines: z.number().int().nonnegative(),
+    files: z.array(ValidatedPatchFileSchema),
+    validatedAt: z.string(),
+  })
+  .superRefine((artifact, context) => {
+    const filesWithLineCounts = artifact.files.filter(
+      (file) => file.changedLines !== undefined,
+    );
+    if (filesWithLineCounts.length === 0) {
+      if (artifact.files.length === 0 && artifact.changedLines !== 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["changedLines"],
+          message: "An empty validated patch must have zero changed lines.",
+        });
+      }
+      return;
+    }
+    if (filesWithLineCounts.length !== artifact.files.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["files"],
+        message: "Per-file changed-line counts must be present for every file.",
+      });
+      return;
+    }
+    const fileChangedLines = filesWithLineCounts.reduce(
+      (total, file) => total + (file.changedLines ?? 0),
+      0,
+    );
+    if (fileChangedLines !== artifact.changedLines) {
+      context.addIssue({
+        code: "custom",
+        path: ["files"],
+        message: "Per-file changed-line counts must sum to the validated total.",
+      });
+    }
+  });
 export type ValidatedPatchArtifact = z.infer<
   typeof ValidatedPatchArtifactSchema
 >;
@@ -1047,6 +1102,8 @@ export const CommunityGatePolicySchema = z.object({
   privateVulnerabilityDisclosure: z.boolean().optional(),
   /** DCO/sign-off is a commit-level community requirement. */
   requiresDco: z.boolean().optional(),
+  /** Contributor License Agreement (CLA) signature is required by the repository. */
+  requiresCla: z.boolean().optional(),
   /** Repository policy requires explicit AI/automation disclosure. */
   requiresAiDisclosure: z.boolean().optional(),
   maxDiffCeiling: z.number().int().positive().optional(),
@@ -1110,6 +1167,10 @@ export const GovernanceAuditResultSchema = z.object({
   flaggedTautologicalAssertions: z.array(z.string()).default([]).optional(),
   commentHyperbolePassed: z.boolean().default(true).optional(),
   flaggedCommentHyperboles: z.array(z.string()).default([]).optional(),
+  impactAnalysisPassed: z.boolean().default(true).optional(),
+  impactAnalysisIssues: z.array(z.string()).default([]).optional(),
+  preflightLintPassed: z.boolean().default(true).optional(),
+  preflightLintIssues: z.array(z.string()).default([]).optional(),
   remediationSuggestions: z.array(z.string()),
   guidance: z
     .object({

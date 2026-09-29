@@ -10,6 +10,7 @@ import {
   renderMasterPrTemplate,
   resolveCanonicalSubmissionRoute,
   RepoMemoryLedger,
+  runPreflightLintCheck,
   type ContributionRunManager,
 } from "@opencontrib/core";
 
@@ -97,6 +98,19 @@ export function registerGovernanceTools(
         ),
     },
     wrapHandler(async (args) => {
+      const run = args.runId ? runManager.getRun(args.runId) : undefined;
+      const workspaceRoot = args.runId
+        ? (
+            run?.artifacts.workspace as
+              | { workspacePath?: unknown }
+              | undefined
+          )?.workspacePath
+        : process.cwd();
+      const preflightLintResult = await runPreflightLintCheck({
+        workspaceRoot:
+          typeof workspaceRoot === "string" ? workspaceRoot : "",
+      });
+
       if (args.runId) {
         const { GovernanceService } = await import("@opencontrib/core");
         const govService = new GovernanceService(runManager);
@@ -107,6 +121,7 @@ export function registerGovernanceTools(
           isAutonomous: args.isAutonomousPrSubmission,
           coveragePolicy: args.coveragePolicy,
           resourceLeakPolicy: args.resourceLeakPolicy,
+          preflightLintResult,
         });
 
         return {
@@ -137,6 +152,7 @@ export function registerGovernanceTools(
         confidenceBreakdown: args.confidenceBreakdown,
         coveragePolicy: args.coveragePolicy,
         resourceLeakPolicy: args.resourceLeakPolicy,
+        preflightLintResult,
       });
 
       return {

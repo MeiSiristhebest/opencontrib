@@ -52,7 +52,9 @@ import {
 } from "../run/trusted-run-host.js";
 import type {
   GreenExecutionJob,
+  PreflightLintExecutionJob,
   RawGreenExecutionResult,
+  RawPreflightLintExecutionResult,
   RawRedExecutionResult,
   RedExecutionJob,
   TrustedExecutionPort,
@@ -76,6 +78,7 @@ import { EvidenceService } from "../evidence/evidence-service.js";
 import { computeSourceTreeHash } from "../evidence/evidence-collector.js";
 import { runBranchName } from "../run/run-branch.js";
 import { GovernanceService } from "../governance/governance-service.js";
+import { runPreflightLintCheck } from "../governance/preflight-linter.js";
 import { SubmissionIntentService } from "../submission/submission-intent-service.js";
 import { IssueBindingService } from "../github/issue-binding-service.js";
 import {
@@ -389,6 +392,12 @@ export class FlakyExecutionPort implements TrustedExecutionPort {
         "[flaky] 1/3 stress-loop runs failed (simulated unstable GREEN)",
     };
   }
+
+  runPreflightLint(
+    job: PreflightLintExecutionJob,
+  ): Promise<RawPreflightLintExecutionResult> {
+    return this.delegate.runPreflightLint(job);
+  }
 }
 
 /** Synthesizes hard execution-timeout raw results (exit code 124, no assertion match). */
@@ -425,6 +434,17 @@ export class TimedOutExecutionPort implements TrustedExecutionPort {
       passedUnitTestsCount: 0,
       failedUnitTestsCount: 0,
       handleLeakCheckPassed: "UNAVAILABLE",
+    };
+  }
+
+  async runPreflightLint(
+    job: PreflightLintExecutionJob,
+  ): Promise<RawPreflightLintExecutionResult> {
+    return {
+      command: job.command,
+      exitCode: 124,
+      output: "execution timed out (exit 124)",
+      passed: false,
     };
   }
 }
@@ -791,9 +811,13 @@ export async function seedScriptedAgent(
   if (options.fullAgentChain) {
     // Full agent-side chain: host re-executes GREEN; the agent's own local
     // GREEN + governance + intent are what the CLI/MCP submission path needs.
+    const preflightLintResult = await runPreflightLintCheck({
+      workspaceRoot: agentWs,
+    });
     const audit = new GovernanceService(agentRunManager).audit(manifest.runId, {
       prTitle: patch.title,
       prBody: fixture.prDraft,
+      preflightLintResult,
       // The harness stands in for the external subagent quality review the
       // pipeline normally obtains before governance; without a recorded
       // review the style/security dimensions degrade and the technical

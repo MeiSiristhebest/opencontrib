@@ -356,7 +356,7 @@ export function rankOpportunitySignals(input: RankOpportunitySignalsInput): Oppo
       environmentFeasibility,
       issueActionability,
       maintenanceRisk,
-      isAuthorClaimed: qualification.disqualifyReason?.includes('Author-first-right') ?? false,
+      isAuthorClaimed: qualification.authorFirstRightActive,
       isQualified: qualification.isQualified,
     },
     reasons,

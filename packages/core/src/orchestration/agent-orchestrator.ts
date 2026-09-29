@@ -100,7 +100,7 @@ export function buildTurnPrompt(ctx: PromptRebuildContext): string {
 
   lines.push("");
   lines.push(
-    'Please generate a minimal surgical patch conforming strictly to PatchDraftSchema JSON with concrete code files in the "files" array.',
+    'Please generate a production-grade patch conforming strictly to PatchDraftSchema JSON with concrete code files in the "files" array. Address the root cause, update docs/comments when behavior changes, check directly related call sites, and add focused regression coverage for important edge cases.',
   );
 
   return lines.join("\n");

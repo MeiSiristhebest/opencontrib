@@ -17,7 +17,11 @@ import {
   type ContributionRunSummary,
 } from "../src/index.js";
 import type { RedEvidence } from "../src/contracts/schemas.js";
-import { EvidenceService } from "../src/evidence/evidence-service.js";
+import { bunCommand, stateAssertionCommand } from "./helpers/bun-command.js";
+import {
+  countValidatedPatchChangedLines,
+  EvidenceService,
+} from "../src/evidence/evidence-service.js";
 
 function makeSummary(
   currentPhase: ContributionRunSummary["manifest"]["currentPhase"],
@@ -38,22 +42,12 @@ function makeSummary(
   } as ContributionRunSummary;
 }
 
-// Cross-platform command selection (Windows uses powershell, POSIX uses sh/echo).
-function pickCmd(win: string, posix: string): string {
-  return process.platform === "win32" ? win : posix;
-}
-
-// A harmless, cross-platform command. Pass/fail is irrelevant to the
-// deterministic assertions below (they don't depend on the command outcome).
-const HARMLESS_CMD = pickCmd(
-  'powershell -NoProfile -Command "Write-Output ok"',
-  "echo ok",
-);
+// A harmless command for deterministic process output without starting a shell.
+const HARMLESS_CMD = bunCommand('console.log("ok")');
 
 // A command that fails (exit 1) and emits an identifiable marker.
-const FAILING_CMD = pickCmd(
-  'powershell -NoProfile -Command "Write-Output ASSERTFAIL; exit 1"',
-  'sh -c "echo ASSERTFAIL; exit 1"',
+const FAILING_CMD = bunCommand(
+  'console.log("ASSERTFAIL"); process.exitCode = 1',
 );
 
 describe("Evidence V2 — RED→GREEN trust boundary", () => {
@@ -71,6 +65,81 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       writeFileSync(join(dir, "a.txt"), "alpha CHANGED\n");
       const h3 = computeSourceTreeHash(dir);
       expect(h3).not.toBe(h1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("counts actual lines across validated CREATE, MODIFY, and DELETE files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "oc-core-diff-count-"));
+    try {
+      writeFileSync(join(dir, "modified.ts"), "const keep = 1;\n");
+      writeFileSync(
+        join(dir, "deleted.ts"),
+        "const old = 1;\nconst gone = 2;\n",
+      );
+      execFileSync("git", ["init"], { cwd: dir, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], {
+        cwd: dir,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "OpenContrib Test"], {
+        cwd: dir,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["add", "."], { cwd: dir, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "baseline"], {
+        cwd: dir,
+        stdio: "ignore",
+      });
+      const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: dir,
+        encoding: "utf8",
+      }).trim();
+
+      writeFileSync(
+        join(dir, "modified.ts"),
+        "const keep = 1;\nconst added = 2;\n",
+      );
+      writeFileSync(
+        join(dir, "new-source.ts"),
+        Array.from({ length: 120 }, (_, index) => `line-${index}`).join("\n") +
+          "\n",
+      );
+      rmSync(join(dir, "deleted.ts"));
+
+      const validatedFiles = [
+        {
+          path: "modified.ts",
+          operation: "MODIFY" as const,
+          mode: "100644",
+          contentSha256: "b".repeat(64),
+        },
+        {
+          path: "new-source.ts",
+          operation: "CREATE" as const,
+          mode: "100644",
+          contentSha256: "c".repeat(64),
+        },
+        {
+          path: "deleted.ts",
+          operation: "DELETE" as const,
+          mode: "100644",
+          contentSha256: "d".repeat(64),
+        },
+      ] as const;
+      expect(
+        countValidatedPatchChangedLines(dir, baseCommitSha, [validatedFiles[0]]),
+      ).toBe(1);
+      expect(
+        countValidatedPatchChangedLines(dir, baseCommitSha, [validatedFiles[1]]),
+      ).toBe(120);
+      expect(
+        countValidatedPatchChangedLines(dir, baseCommitSha, [validatedFiles[2]]),
+      ).toBe(2);
+      expect(
+        countValidatedPatchChangedLines(dir, baseCommitSha, validatedFiles),
+      ).toBe(123);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -294,10 +363,10 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
         encoding: "utf8",
       }).trim();
 
-      // Test command that inspects status.txt
-      const testCmd = pickCmd(
-        `powershell -NoProfile -Command "if ((Get-Content '${stateFile.replace(/\\/g, "/")}') -match 'FAIL') { Write-Output ASSERTION_ERROR_SAMPLE; exit 1 } else { Write-Output PASS; exit 0 }"`,
-        `sh -c "if grep -q FAIL ${stateFile}; then echo ASSERTION_ERROR_SAMPLE; exit 1; else echo PASS; exit 0; fi"`,
+      // Test command that inspects status.txt without depending on a shell.
+      const testCmd = stateAssertionCommand(
+        stateFile,
+        "ASSERTION_ERROR_SAMPLE",
       );
 
       const { ContributionRunManager } =
@@ -376,6 +445,11 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
 
       const updated = manager.getRun(manifest.runId);
       expect(updated?.manifest.currentPhase).toBe("EVIDENCE_COLLECTED");
+      const validatedPatch = updated?.artifacts.validatedPatch as
+        | { changedLines?: number; files?: Array<{ changedLines?: number }> }
+        | undefined;
+      expect(validatedPatch?.changedLines).toBe(2);
+      expect(validatedPatch?.files?.[0]?.changedLines).toBe(2);
     } finally {
       rmSync(wsDir, { recursive: true, force: true });
       rmSync(baseDir, { recursive: true, force: true });

@@ -10,6 +10,7 @@ import {
   rankOpportunitySignals,
 } from "../src/index.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
+import { runBranchName } from "../src/run/run-branch.js";
 
 describe("Contribution Run & Artifact Bundle Primitives", () => {
   const tempDirs: string[] = [];
@@ -24,6 +25,18 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     for (const d of tempDirs.splice(0)) {
       rmSync(d, { recursive: true, force: true });
     }
+  });
+
+  it("keeps run-owned branches under the canonical opencontrib prefix", () => {
+    expect(runBranchName("worker/issue #1")).toBe(
+      "opencontrib/run-worker_issue__1",
+    );
+    expect(runBranchName("run-1", "opencontrib/")).toBe(
+      "opencontrib/run-run-1",
+    );
+    expect(() => runBranchName("run-1", "agent")).toThrow(
+      /RunBranchPrefixError/,
+    );
   });
 
   it("creates an auditable contribution run session with manifest.json", () => {

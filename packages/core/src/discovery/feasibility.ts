@@ -99,24 +99,75 @@ export function detectSystemCapabilities(): SystemCapabilities {
   };
 }
 
+const SCOPE_INFERENCE_RULES: Array<{
+  scope: FeasibilityAssessment['scope'];
+  pattern: RegExp;
+}> = [
+  { scope: 'docs_only', pattern: /\b(?:documentation|readme|typo|spelling|docs?)\b/i },
+  { scope: 'performance', pattern: /\b(?:memory leak|goroutine leak|oom|high memory|cpu spike|performance(?: regression)?|benchmark|latency)\b/i },
+  { scope: 'runtime_bug', pattern: /\b(?:crash|panic|sigsegv|nullpointer(?:exception)?|null pointer exception|typeerror|unhandled exception|segmentation fault)\b/i },
+  { scope: 'complex_refactor', pattern: /\b(?:architecture redesign|major refactor|rewrite|breaking change|migration)\b/i },
+  { scope: 'hardware_specific', pattern: /\b(?:gpu|cuda|rocm|bluetooth|hardware|fpga|tpu)\b/i },
+];
+
 function inferScope(text: string): FeasibilityAssessment['scope'] {
-  if (text.includes('documentation') || text.includes('readme') || text.includes('typo') || text.includes('docs')) {
-    return 'docs_only';
-  }
-  if (text.includes('leak') || text.includes('oom') || text.includes('memory') || text.includes('performance') || text.includes('benchmark')) {
-    return 'performance';
-  }
-  if (text.includes('crash') || text.includes('panic') || text.includes('typeerror') || text.includes('unhandled')) {
-    return 'runtime_bug';
-  }
-  if (text.includes('refactor') || text.includes('architecture') || text.includes('redesign')) {
-    return 'complex_refactor';
-  }
-  if (text.includes('hardware') || text.includes('gpu') || text.includes('cuda') || text.includes('bluetooth')) {
-    return 'hardware_specific';
+  for (const rule of SCOPE_INFERENCE_RULES) {
+    if (rule.pattern.test(text)) {
+      return rule.scope;
+    }
   }
   return 'small_code_change';
 }
+
+interface PlatformRule {
+  pattern: RegExp;
+  riskName: string;
+  missingCap: string;
+  penalty: number;
+  checkApplicable: (caps: SystemCapabilities) => boolean;
+  mitigation?: (caps: SystemCapabilities) => { name: string; reducedPenalty: number } | null;
+}
+
+const PLATFORM_REQUIREMENT_RULES: PlatformRule[] = [
+  {
+    pattern: /\b(?:macos|darwin|apple silicon|\bm[1-4]\b(?:\s+pro|\s+max|\s+ultra)?)\b/i,
+    riskName: 'macos_specific',
+    missingCap: 'macos_surface',
+    penalty: 30,
+    checkApplicable: (caps) => caps.os !== 'darwin',
+  },
+  {
+    pattern: /\b(?:linux|cgroup|systemd|epoll)\b/i,
+    riskName: 'linux_specific',
+    missingCap: 'linux_surface',
+    penalty: 25,
+    checkApplicable: (caps) => caps.os !== 'linux',
+    mitigation: (caps) => (caps.hasWsl ? { name: 'linux_possible_via_wsl', reducedPenalty: 5 } : null),
+  },
+  {
+    pattern: /\b(?:windows|win32|powershell)\b/i,
+    riskName: 'windows_specific',
+    missingCap: 'windows_surface',
+    penalty: 20,
+    checkApplicable: (caps) => caps.os !== 'win32',
+  },
+  {
+    pattern: /\bdocker(?:[-\s]+compose)?\b/i,
+    riskName: 'docker_integration',
+    missingCap: 'docker_runtime',
+    penalty: 20,
+    checkApplicable: (caps) => !caps.hasDocker,
+    mitigation: (caps) =>
+      caps.hasDocker ? { name: 'docker_available', reducedPenalty: 0 } : null,
+  },
+  {
+    pattern: /\b(?:playwright|cypress|puppeteer|browser tests?)\b/i,
+    riskName: 'browser_e2e_tests',
+    missingCap: '',
+    penalty: 5,
+    checkApplicable: () => true,
+  },
+];
 
 function evaluatePlatformRequirements(
   text: string,
@@ -127,48 +178,24 @@ function evaluatePlatformRequirements(
 ): number {
   let penalty = 0;
 
-  if (text.includes('macos') || text.includes('darwin') || text.includes('m1') || text.includes('m2') || text.includes('apple silicon')) {
-    detectedRisks.push('macos_specific');
-    if (caps.os !== 'darwin') {
-      missingCaps.push('macos_surface');
-      penalty += 30;
-    }
-  }
+  for (const rule of PLATFORM_REQUIREMENT_RULES) {
+    if (rule.pattern.test(text)) {
+      detectedRisks.push(rule.riskName);
 
-  if (text.includes('linux') || text.includes('cgroup') || text.includes('systemd') || text.includes('epoll')) {
-    detectedRisks.push('linux_specific');
-    if (caps.os !== 'linux') {
-      if (caps.hasWsl) {
-        mitigations.push('linux_possible_via_wsl');
-        penalty += 5;
-      } else {
-        missingCaps.push('linux_surface');
-        penalty += 25;
+      if (rule.mitigation) {
+        const mit = rule.mitigation(caps);
+        if (mit) {
+          mitigations.push(mit.name);
+          penalty += mit.reducedPenalty;
+          continue;
+        }
+      }
+
+      if (rule.checkApplicable(caps)) {
+        if (rule.missingCap) missingCaps.push(rule.missingCap);
+        penalty += rule.penalty;
       }
     }
-  }
-
-  if (text.includes('windows') || text.includes('win32') || text.includes('powershell')) {
-    detectedRisks.push('windows_specific');
-    if (caps.os !== 'win32') {
-      missingCaps.push('windows_surface');
-      penalty += 20;
-    }
-  }
-
-  if (text.includes('docker') || text.includes('container') || text.includes('k8s') || text.includes('kubernetes')) {
-    detectedRisks.push('docker_integration');
-    if (!caps.hasDocker) {
-      missingCaps.push('docker_runtime');
-      penalty += 20;
-    } else {
-      mitigations.push('docker_available');
-    }
-  }
-
-  if (text.includes('playwright') || text.includes('cypress') || text.includes('puppeteer') || text.includes('e2e')) {
-    detectedRisks.push('browser_e2e_tests');
-    penalty += 5;
   }
 
   return penalty;

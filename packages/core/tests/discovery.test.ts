@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { assessFeasibility, qualifyIssue } from '../src/discovery/index.js';
+import type { IntentRule } from '../src/domain/qualification.js';
 import {
   applyDiversityReranking,
   calculateLatestActivityTimestamp,
@@ -157,11 +158,103 @@ describe('Discovery & Qualification Engine', () => {
     expect(blockedRes.disqualifyReason).toContain('blocking label: duplicate');
   });
 
+  it('normalizes custom blocking labels before exact matching', () => {
+    const res = qualifyIssue({
+      issueNumber: 1026,
+      issueTitle: 'Fix parser behavior',
+      issueBody: 'A reproducible parser bug.',
+      labels: [' Needs_Review '],
+      customBlockingLabels: ['NEEDS-REVIEW'],
+      isOpen: true,
+      assignees: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      comments: [],
+      now: Date.parse('2026-01-01T00:00:00.000Z'),
+    });
+
+    expect(res.isQualified).toBe(false);
+    expect(res.disqualifyReason).toContain('needs-review');
+  });
+
+  it('clones global and sticky custom rules for each intent match', () => {
+    const customRule: IntentRule = {
+      category: 'author_intent',
+      pattern: /i want to fix this/gy,
+      strength: 'strong',
+      description: 'Custom first-person fix intent',
+    };
+    const input = {
+      issueNumber: 1027,
+      issueTitle: 'Parser behavior',
+      issueBody: 'I want to fix this issue.',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      authorLogin: 'alice',
+      comments: [],
+      customIntentRules: [customRule],
+      now: Date.parse('2026-01-02T00:00:00.000Z'),
+    };
+
+    const first = qualifyIssue(input);
+    const second = qualifyIssue(input);
+    expect(first.authorFirstRightActive).toBe(true);
+    expect(second.authorFirstRightActive).toBe(true);
+    expect(customRule.pattern.lastIndex).toBe(0);
+  });
+
+  it('requires first-person intent and preserves plural typo fast-track routing', () => {
+    const now = Date.parse('2026-01-02T00:00:00.000Z');
+    const baseInput = {
+      issueNumber: 1028,
+      issueTitle: 'Parser issue',
+      issueBody: 'A parser issue needs investigation.',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      authorLogin: 'alice',
+      comments: [],
+      now,
+    };
+    const bystanderQuestion = qualifyIssue({
+      ...baseInput,
+      comments: [
+        {
+          id: 1,
+          body: 'Are you opening a PR for this?',
+          user: { login: 'bob' },
+          created_at: '2026-01-02T00:00:00.000Z',
+        },
+      ],
+    });
+    const authorRequestingHelp = qualifyIssue({
+      ...baseInput,
+      issueBody: 'I need help opening a PR for this issue.',
+    });
+    const firstPersonIntent = qualifyIssue({
+      ...baseInput,
+      issueBody: 'I will open a PR to fix this issue.',
+    });
+    const pluralTypos = qualifyIssue({
+      ...baseInput,
+      issueTitle: 'Fix typos in the README',
+      issueBody: 'Several spelling errors are present.',
+    });
+
+    expect(bystanderQuestion.isQualified).toBe(true);
+    expect(bystanderQuestion.hasClaimant).toBe(false);
+    expect(authorRequestingHelp.authorFirstRightActive).toBe(false);
+    expect(firstPersonIntent.authorFirstRightActive).toBe(true);
+    expect(pluralTypos.track).toBe('fast_track');
+  });
+
   it('flags author-first-right if author expressed intent < 7 days ago', () => {
     const res = qualifyIssue({
       issueNumber: 103,
       issueTitle: 'Typo in error message',
-      issueBody: 'Found a typo in logger. Happy to open a PR to fix this!',
+      issueBody: 'Found a typo in logger. I am happy to open a PR to fix this!',
       labels: ['documentation'],
       isOpen: true,
       assignees: [],

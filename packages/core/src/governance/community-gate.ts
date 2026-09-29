@@ -24,6 +24,11 @@ export const COMMUNITY_GATE_POLICY_PATHS = [
   ".github/ISSUE_TEMPLATE/bug.yml",
   ".github/ISSUE_TEMPLATE/bug.yaml",
   ".github/ISSUE_TEMPLATE/bug_report.md",
+  ".github/PULL_REQUEST_TEMPLATE.md",
+  ".github/PULL_REQUEST_TEMPLATE/pull_request_template.md",
+  ".github/pull_request_template.md",
+  "PULL_REQUEST_TEMPLATE.md",
+  "pull_request_template.md",
 ] as const;
 
 export interface CommunityGateFileReader {
@@ -39,68 +44,79 @@ export interface CommunityGateFileReader {
   };
 }
 
-const ISSUE_APPROVAL_PATTERNS = [
-  /auto-closed by default/i,
-  /auto-close/i,
-  /reopen worthwhile ones/i,
-  /\blgtmi\b/i,
-  /\blgtm\b.*issue/i,
-  /approval happens through maintainer/i,
-  /wait for (?:maintainer|author|triager) (?:approval|response|review|reopen)/i,
-  /do not (?:open|submit|create) a pr until/i,
-  /discuss in (?:an )?issue before (?:opening|submitting) (?:a )?pr/i,
-  /must be approved before/i,
-];
+export interface PolicyRule {
+  /** Which policy flag this rule contributes to */
+  target: keyof Pick<CommunityGatePolicy, 
+    'requiresIssueApprovalBeforePr' | 'autoClosesNewIssues' | 'hasLgtmApprovalProtocol' | 
+    'restrictedTriageHours' | 'privateVulnerabilityDisclosure' | 'requiresDco' | 'requiresCla' | 'requiresAiDisclosure'>;
+  /** Regex pattern to match against combined policy file content */
+  pattern: RegExp;
+  /** Human-readable description of what this rule detects */
+  description: string;
+  /** Whether to apply negation-aware matching (findRequiredPolicyMatch) */
+  negationAware?: boolean;
+}
 
-const AUTO_CLOSE_PATTERNS = [
-  /auto-closed by default/i,
-  /new issues.*auto-closed/i,
-  /bot.*automatically close/i,
-  /will be closed automatically/i,
-];
+/** Default built-in policy rules. External callers can extend this set. */
+export const DEFAULT_POLICY_RULES: PolicyRule[] = [
+  { target: 'requiresIssueApprovalBeforePr', pattern: /auto-closed by default/i, description: 'Auto-closed by default' },
+  { target: 'requiresIssueApprovalBeforePr', pattern: /auto-close/i, description: 'Auto-close' },
+  { target: 'requiresIssueApprovalBeforePr', pattern: /reopen worthwhile ones/i, description: 'Reopen worthwhile ones' },
+  { target: 'requiresIssueApprovalBeforePr', pattern: /\blgtmi\b/i, description: 'LGTMI' },
+  { target: 'requiresIssueApprovalBeforePr', pattern: /\blgtm\b.*issue/i, description: 'LGTM on issue' },
+  { target: 'requiresIssueApprovalBeforePr', pattern: /approval happens through maintainer/i, description: 'Approval by maintainer' },
+  { target: 'requiresIssueApprovalBeforePr', pattern: /wait for (?:maintainer|author|triager) (?:approval|response|review|reopen)/i, description: 'Wait for approval' },
+  { target: 'requiresIssueApprovalBeforePr', pattern: /do not (?:open|submit|create) a pr until/i, description: 'Do not open PR until' },
+  { target: 'requiresIssueApprovalBeforePr', pattern: /discuss in (?:an )?issue before (?:opening|submitting) (?:a )?pr/i, description: 'Discuss in issue before PR' },
+  { target: 'requiresIssueApprovalBeforePr', pattern: /must be approved before/i, description: 'Must be approved before' },
 
-const PRIVATE_DISCLOSURE_PATTERNS = [
-  /do not open.*public.*issue/i,
-  /do not.*submit.*public.*issue/i,
-  /do not.*create.*public.*issue/i,
-  /private.*vulnerability.*disclosure/i,
-  /report.*vulnerabilit.*privately/i,
-  /security.*report.*private/i,
-  /contact.*security.*maintainer/i,
-  /private.*security.*channel/i,
-];
+  { target: 'autoClosesNewIssues', pattern: /auto-closed by default/i, description: 'Auto-closed by default' },
+  { target: 'autoClosesNewIssues', pattern: /new issues.*auto-closed/i, description: 'New issues auto-closed' },
+  { target: 'autoClosesNewIssues', pattern: /bot.*automatically close/i, description: 'Bot automatically closes' },
+  { target: 'autoClosesNewIssues', pattern: /will be closed automatically/i, description: 'Will be closed automatically' },
 
-const LGTM_PROTOCOL_PATTERNS = [
-  /\blgtmi\b/i,
-  /\blgtm\b.*approved/i,
-  /approved-contributors/i,
-];
+  { target: 'privateVulnerabilityDisclosure', pattern: /do not open.*public.*issue/i, description: 'Do not open public issue' },
+  { target: 'privateVulnerabilityDisclosure', pattern: /do not.*submit.*public.*issue/i, description: 'Do not submit public issue' },
+  { target: 'privateVulnerabilityDisclosure', pattern: /do not.*create.*public.*issue/i, description: 'Do not create public issue' },
+  { target: 'privateVulnerabilityDisclosure', pattern: /private.*vulnerability.*disclosure/i, description: 'Private vulnerability disclosure' },
+  { target: 'privateVulnerabilityDisclosure', pattern: /report.*vulnerabilit.*privately/i, description: 'Report vulnerabilities privately' },
+  { target: 'privateVulnerabilityDisclosure', pattern: /security.*report.*private/i, description: 'Security report private' },
+  { target: 'privateVulnerabilityDisclosure', pattern: /contact.*security.*maintainer/i, description: 'Contact security maintainer' },
+  { target: 'privateVulnerabilityDisclosure', pattern: /private.*security.*channel/i, description: 'Private security channel' },
 
-const RESTRICTED_HOURS_PATTERNS = [
-  /friday through sunday/i,
-  /weekend.*not guaranteed/i,
-  /working hours/i,
-  /review queue.*monday/i,
-];
+  { target: 'hasLgtmApprovalProtocol', pattern: /\blgtmi\b/i, description: 'LGTMI' },
+  { target: 'hasLgtmApprovalProtocol', pattern: /\blgtm\b.*approved/i, description: 'LGTM approved' },
+  { target: 'hasLgtmApprovalProtocol', pattern: /approved-contributors/i, description: 'Approved contributors' },
 
-const DCO_PATTERNS = [
-  /developer certificate of origin/i,
-  /signed-off-by/i,
-  /sign[- ]off (?:your )?commits/i,
-  /dco (?:required|sign[- ]off)/i,
-  /commits?\s+(?:must|shall)\s+be\s+sign(?:ed)?[- ]off/i,
-];
+  { target: 'restrictedTriageHours', pattern: /friday through sunday/i, description: 'Friday through Sunday' },
+  { target: 'restrictedTriageHours', pattern: /weekend.*not guaranteed/i, description: 'Weekend not guaranteed' },
+  { target: 'restrictedTriageHours', pattern: /working hours/i, description: 'Working hours' },
+  { target: 'restrictedTriageHours', pattern: /review queue.*monday/i, description: 'Review queue Monday' },
 
-const AI_DISCLOSURE_PATTERNS = [
-  /(?:ai|automated|copilot)[ -]?(?:assisted|generated) disclosure/i,
-  /disclose (?:the use of )?(?:ai|automated|copilot)/i,
-  /ai disclosure is required/i,
-  /generated with (?:ai|copilot)/i,
-  /(?:ai|artificial intelligence|copilot)[^.!?\n;]{0,50}\b(?:must|shall|has to|needs? to)\b[^.!?\n;]{0,40}\bdisclos(?:e|ed|ure)\b/i,
+  { target: 'requiresDco', pattern: /developer certificate of origin/i, description: 'Developer Certificate of Origin', negationAware: true },
+  { target: 'requiresDco', pattern: /signed-off-by/i, description: 'Signed-off-by', negationAware: true },
+  { target: 'requiresDco', pattern: /sign[- ]off (?:your )?commits/i, description: 'Sign-off commits', negationAware: true },
+  { target: 'requiresDco', pattern: /dco (?:required|sign[- ]off)/i, description: 'DCO required', negationAware: true },
+  { target: 'requiresDco', pattern: /commits?\s+(?:must|shall)\s+be\s+sign(?:ed)?[- ]off/i, description: 'Commits must be signed off', negationAware: true },
+
+  { target: 'requiresCla', pattern: /contributor\s+license\s+agreement/i, description: 'Contributor License Agreement', negationAware: true },
+  { target: 'requiresCla', pattern: /cla[- ]assistant/i, description: 'CLA Assistant', negationAware: true },
+  { target: 'requiresCla', pattern: /sign(?:ing)?\s+(?:the\s+)?(?:microsoft|google|cncf|individual|corporate)?\s*cla\b/i, description: 'Sign CLA', negationAware: true },
+  { target: 'requiresCla', pattern: /cla\s+(?:is\s+)?required/i, description: 'CLA required', negationAware: true },
+  { target: 'requiresCla', pattern: /cla\s+bot\b/i, description: 'CLA bot', negationAware: true },
+  { target: 'requiresCla', pattern: /easycla\b/i, description: 'EasyCLA', negationAware: true },
+
+  { target: 'requiresAiDisclosure', pattern: /(?:ai|automated|copilot)[ -]?(?:assisted|generated) disclosure/i, description: 'AI disclosure', negationAware: true },
+  { target: 'requiresAiDisclosure', pattern: /disclose (?:the use of )?(?:ai|automated|copilot)/i, description: 'Disclose use of AI', negationAware: true },
+  { target: 'requiresAiDisclosure', pattern: /ai disclosure is required/i, description: 'AI disclosure required', negationAware: true },
+  { target: 'requiresAiDisclosure', pattern: /generated with (?:ai|copilot)/i, description: 'Generated with AI', negationAware: true },
+  { target: 'requiresAiDisclosure', pattern: /(?:ai|artificial intelligence|copilot)[^.!?\n;]{0,50}\b(?:must|shall|has to|needs? to)\b[^.!?\n;]{0,40}\bdisclos(?:e|ed|ure)\b/i, description: 'AI must disclose', negationAware: true },
+  { target: 'requiresAiDisclosure', pattern: /\b(?:must|shall|has to|needs? to)\b[^.!?\n;]{0,50}\bdisclos(?:e|ed|ure)\b[^.!?\n;]{0,50}(?:ai|artificial intelligence|copilot|llm|model)/i, description: 'Must disclose AI', negationAware: true },
+  { target: 'requiresAiDisclosure', pattern: /\bdisclosed\b[^.!?\n;]{0,40}(?:ai|artificial intelligence|copilot|llm|tool\/model|model)/i, description: 'Disclosed AI', negationAware: true },
 ];
 
 const POLICY_NEGATION_PATTERN =
-  /\b(?:not\s+(?:required|mandatory|necessary|needed|expected)|(?:is|are)\s+optional|optional|no\s+(?:such\s+)?requirement|(?:do|does|did)\s+not\s+(?:require|need)|(?:don't|doesn't|didn't)\s+(?:require|need))\b/i;
+  /\b(?:not\s+(?:required|mandatory|necessary|needed|expected)|(?:is|are)\s+optional|optional|no\s+(?:such\s+)?requirement|no\s+longer\s+(?:require|requires|need|needs)|(?:do|does|did)\s+not\s+(?:require|need)|(?:don't|doesn't|didn't)\s+(?:require|need))\b/i;
 
 function findRequiredPolicyMatch(
   content: string,
@@ -165,6 +181,7 @@ function permissivePolicy(reason: string): CommunityGatePolicy {
  */
 export function detectCommunityGateFromContents(
   files: ReadonlyArray<{ path: string; content: string }>,
+  customRules?: PolicyRule[],
 ): CommunityGatePolicy {
   if (files.length === 0) {
     return permissivePolicy(
@@ -184,62 +201,34 @@ export function detectCommunityGateFromContents(
   let restrictedTriageHours = false;
   let privateVulnerabilityDisclosure = false;
   let requiresDco = false;
+  let requiresCla = false;
   let requiresAiDisclosure = false;
   let maxDiffCeiling: number | undefined;
 
-  for (const pattern of ISSUE_APPROVAL_PATTERNS) {
-    const match = combinedContent.match(pattern);
-    if (match) {
-      requiresIssueApprovalBeforePr = true;
-      matchedKeywords.push(match[0]);
-    }
-  }
+  const rules = [...DEFAULT_POLICY_RULES, ...(customRules || [])];
 
-  for (const pattern of AUTO_CLOSE_PATTERNS) {
-    const match = combinedContent.match(pattern);
-    if (match) {
-      autoClosesNewIssues = true;
-      matchedKeywords.push(match[0]);
+  for (const rule of rules) {
+    let matchedStr: string | undefined;
+    if (rule.negationAware) {
+      matchedStr = findRequiredPolicyMatch(combinedContent, rule.pattern);
+    } else {
+      const match = combinedContent.match(rule.pattern);
+      if (match) {
+        matchedStr = match[0];
+      }
     }
-  }
-
-  for (const pattern of LGTM_PROTOCOL_PATTERNS) {
-    const match = combinedContent.match(pattern);
-    if (match) {
-      hasLgtmApprovalProtocol = true;
-      matchedKeywords.push(match[0]);
-    }
-  }
-
-  for (const pattern of RESTRICTED_HOURS_PATTERNS) {
-    const match = combinedContent.match(pattern);
-    if (match) {
-      restrictedTriageHours = true;
-      matchedKeywords.push(match[0]);
-    }
-  }
-
-  for (const pattern of PRIVATE_DISCLOSURE_PATTERNS) {
-    const match = combinedContent.match(pattern);
-    if (match) {
-      privateVulnerabilityDisclosure = true;
-      matchedKeywords.push(match[0]);
-    }
-  }
-
-  for (const pattern of DCO_PATTERNS) {
-    const match = findRequiredPolicyMatch(combinedContent, pattern);
-    if (match) {
-      requiresDco = true;
-      matchedKeywords.push(match);
-    }
-  }
-
-  for (const pattern of AI_DISCLOSURE_PATTERNS) {
-    const match = findRequiredPolicyMatch(combinedContent, pattern);
-    if (match) {
-      requiresAiDisclosure = true;
-      matchedKeywords.push(match);
+    
+    if (matchedStr) {
+      if (rule.target === 'requiresIssueApprovalBeforePr') requiresIssueApprovalBeforePr = true;
+      else if (rule.target === 'autoClosesNewIssues') autoClosesNewIssues = true;
+      else if (rule.target === 'hasLgtmApprovalProtocol') hasLgtmApprovalProtocol = true;
+      else if (rule.target === 'restrictedTriageHours') restrictedTriageHours = true;
+      else if (rule.target === 'privateVulnerabilityDisclosure') privateVulnerabilityDisclosure = true;
+      else if (rule.target === 'requiresDco') requiresDco = true;
+      else if (rule.target === 'requiresCla') requiresCla = true;
+      else if (rule.target === 'requiresAiDisclosure') requiresAiDisclosure = true;
+      
+      matchedKeywords.push(matchedStr);
     }
   }
 
@@ -286,6 +275,11 @@ export function detectCommunityGateFromContents(
       "Repository requires Developer Certificate of Origin sign-off on contribution commits.",
     );
   }
+  if (requiresCla) {
+    reasons.push(
+      "Repository requires contributors to sign a Contributor License Agreement (CLA).",
+    );
+  }
   if (requiresAiDisclosure) {
     reasons.push(
       "Repository requires explicit disclosure of AI or automated assistance.",
@@ -311,9 +305,10 @@ export function detectCommunityGateFromContents(
   } else if (requiresIssueApprovalBeforePr || autoClosesNewIssues) {
     suggestedContributorAction =
       'Create and bind the provider-backed Issue first. PAUSE pipeline and wait for maintainer to reopen or comment "lgtmi" before submitting PR.';
-  } else if (requiresDco || requiresAiDisclosure) {
+  } else if (requiresDco || requiresCla || requiresAiDisclosure) {
     const requirements = [
       ...(requiresDco ? ["commit sign-off"] : []),
+      ...(requiresCla ? ["Contributor License Agreement (CLA) signature"] : []),
       ...(requiresAiDisclosure ? ["AI-assistance disclosure"] : []),
     ];
     suggestedContributorAction =
@@ -328,6 +323,7 @@ export function detectCommunityGateFromContents(
     restrictedTriageHours,
     privateVulnerabilityDisclosure,
     requiresDco,
+    requiresCla,
     requiresAiDisclosure,
     maxDiffCeiling,
     reasons,

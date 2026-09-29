@@ -155,14 +155,69 @@ Issues submitted Friday through Sunday are not guaranteed to be reviewed until t
     ]);
     expect(requiredAfterAnd.requiresAiDisclosure).toBe(true);
 
-    const dcoOnly = detectCommunityGateFromContents([
+    const reversedAiWording = detectCommunityGateFromContents([
       {
-        path: "CONTRIBUTING.md",
-        content: "Commits must be signed off.",
+        path: ".github/pull_request_template.md",
+        content:
+          "I did not use AI/LLM to create this PR, or I disclosed the tool/model below and reviewed its output.",
       },
     ]);
-    expect(dcoOnly.suggestedContributorAction).toContain("commit sign-off");
-    expect(dcoOnly.suggestedContributorAction).not.toContain("AI-assistance");
+    expect(reversedAiWording.requiresAiDisclosure).toBe(true);
+
+    const mustDiscloseAi = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "You must disclose to maintainers that you used AI or LLM tools.",
+      },
+    ]);
+    expect(mustDiscloseAi.requiresAiDisclosure).toBe(true);
+  });
+
+  it("scans nested PR templates and retains the DCO-only contributor action", () => {
+    const templatePath =
+      ".github/PULL_REQUEST_TEMPLATE/pull_request_template.md";
+    const requestedPaths: string[] = [];
+    const snapshot = readCommunityGateAtCommit(
+      {
+        listTree: (policyPath) => {
+          requestedPaths.push(policyPath);
+          return {
+            success: true,
+            stdout: policyPath === templatePath ? `${templatePath}\n` : "",
+            stderr: "",
+          };
+        },
+        show: (policyPath) => ({
+          success: true,
+          stdout:
+            policyPath === templatePath
+              ? "Every commit must include Signed-off-by."
+              : "",
+          stderr: "",
+        }),
+      },
+      "a".repeat(40),
+    );
+
+    expect(requestedPaths).toContain(templatePath);
+    expect(snapshot.policy.requiresDco).toBe(true);
+    expect(snapshot.policy.requiresAiDisclosure).toBe(false);
+    expect(snapshot.policy.suggestedContributorAction).toContain(
+      "commit sign-off",
+    );
+  });
+
+  it("does not require a retired CLA policy", () => {
+    const retired = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content:
+          "We no longer require a Contributor License Agreement (CLA).",
+      },
+    ]);
+
+    expect(retired.requiresCla).toBe(false);
   });
 
   it("fails closed when a baseline community policy read fails", () => {
@@ -202,6 +257,20 @@ Issues submitted Friday through Sunday are not guaranteed to be reviewed until t
 
     expect(snapshot.sourceCommitSha).toBe("a".repeat(40));
     expect(hashCommunityGateSnapshot(snapshot)).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("detects Contributor License Agreement (CLA) requirement and differentiates from DCO", () => {
+    const claPolicy = detectCommunityGateFromContents([
+      {
+        path: "CONTRIBUTING.md",
+        content: "Before we can merge your pull request, you must sign our Contributor License Agreement (CLA). A cla-assistant bot will comment on your PR.",
+      },
+    ]);
+
+    expect(claPolicy.requiresCla).toBe(true);
+    expect(claPolicy.requiresDco).toBe(false);
+    expect(claPolicy.reasons.some((r) => r.includes("Contributor License Agreement (CLA)"))).toBe(true);
+    expect(claPolicy.suggestedContributorAction).toContain("Contributor License Agreement (CLA) signature");
   });
 
   it("returns permissive policy when no governance files exist", async () => {

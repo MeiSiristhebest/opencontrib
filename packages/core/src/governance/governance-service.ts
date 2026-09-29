@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
@@ -7,7 +8,8 @@ import {
   ValidatedPatchArtifactSchema,
   type GovernanceDecisionArtifact,
 } from "../contracts/schemas.js";
-import { auditGovernance } from "./governance-auditor.js";
+import { auditGovernance, isSupportingFile } from "./governance-auditor.js";
+import { countValidatedPatchChangedLinesAtGreenTree } from "../evidence/evidence-service.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 import {
   hashTrustedPolicySnapshot,
@@ -16,6 +18,7 @@ import {
   type TrustedPolicySnapshot,
 } from "../kernel/config.js";
 import { hashCommunityGateSnapshot } from "./community-gate.js";
+import type { PreflightLintResult } from "./preflight-linter.js";
 
 export interface GovernanceAuditRunOptions {
   /** Human-readable title to audit and bind to the later SubmissionIntent. */
@@ -26,12 +29,37 @@ export interface GovernanceAuditRunOptions {
   resourceLeakPolicy?: import("../domain/governance.js").ResourceLeakPolicy;
   isAutonomous?: boolean;
   subagentScore?: number;
+  /** Result from the caller's pre-flight lint check; omission fails closed. */
+  preflightLintResult?: PreflightLintResult;
 }
 
 function hash(value: unknown): string {
   const content =
     typeof value === "string" ? value : JSON.stringify(value ?? "");
   return createHash("sha256").update(content).digest("hex");
+}
+
+function readTrackedFilesAtCommit(
+  repositoryPath: string,
+  baseCommitSha: string,
+): string[] {
+  if (!/^[a-f0-9]{40,64}$/i.test(baseCommitSha)) return [];
+  try {
+    const output = execFileSync(
+      "git",
+      ["-C", repositoryPath, "ls-tree", "-r", "--name-only", "-z", baseCommitSha],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 10_000,
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+    return output.split("\0").filter((filePath) => filePath.length > 0);
+  } catch {
+    // Repository context is advisory; an unavailable tree is never evidence of compliance.
+    return [];
+  }
 }
 
 export class GovernanceService {
@@ -114,7 +142,8 @@ export class GovernanceService {
       "chore: opencontrib contribution";
 
     const workspaceArtifact = run.artifacts.workspace as
-      | {
+        | {
+          workspacePath?: unknown;
           baseCommitSha?: unknown;
           policySnapshot?: unknown;
           policySha256?: unknown;
@@ -203,21 +232,63 @@ export class GovernanceService {
     const effectiveResourceLeakPolicy =
       effectivePolicySnapshot.resourceLeakCheck;
 
+    let coreDiffLines: number | undefined;
+    let repoContextFiles: string[] = [];
+    try {
+      if (
+        typeof workspaceArtifact.workspacePath !== "string" ||
+        workspaceArtifact.workspacePath.trim() === "" ||
+        workspaceArtifact.baseCommitSha !== validatedPatch.baseCommitSha
+      ) {
+        throw new Error(
+          "Canonical workspace path or base commit does not match validated patch evidence.",
+        );
+      }
+      const workspacePath = workspaceArtifact.workspacePath;
+      repoContextFiles = readTrackedFilesAtCommit(
+        workspacePath,
+        validatedPatch.baseCommitSha,
+      );
+      const coreFiles = validatedPatch.files.filter(
+        (file) => !isSupportingFile(file.path),
+      );
+      coreDiffLines = countValidatedPatchChangedLinesAtGreenTree(
+        workspacePath,
+        validatedPatch.baseCommitSha,
+        coreFiles,
+        validatedPatch.greenTreeSha256,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith("EvidencePatchProvenanceError: workspace ")
+      ) {
+        throw error;
+      }
+      // If canonical counting is unavailable, auditGovernance falls back to
+      // the total validated diff size rather than exempting unmeasured lines.
+      coreDiffLines = undefined;
+    }
+
     const auditResult = auditGovernance({
       patchContent,
       prTitle,
       prBody: prDraftRaw,
       evidence: evidenceArtifact as any,
       lineCount: validatedPatch.changedLines,
+      coreDiffLines,
       // Governance is deliberately technical-only. Approval is minted later
       // by an external trusted authority and is not inferred from this audit.
       coveragePolicy: effectiveCoveragePolicy,
       resourceLeakPolicy: effectiveResourceLeakPolicy,
+      modifiedFiles: validatedPatch.files.map((file) => file.path),
+      repoContextFiles,
       maxDiffLines:
         communityGate.policy.maxDiffCeiling === undefined
           ? undefined
           : Math.min(100, communityGate.policy.maxDiffCeiling),
       subagentQualityScore: options.subagentScore,
+      preflightLintResult: options.preflightLintResult,
     });
 
     const policySha256 = hashTrustedPolicySnapshot(effectivePolicySnapshot);

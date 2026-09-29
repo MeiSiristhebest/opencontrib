@@ -21,6 +21,8 @@ export interface ContributionRiskInput {
   validationStatus: ValidationStatus;
   subagentQualityScore: number;
   hasBlockingLabels?: boolean;
+  coreDiffLines?: number;
+  coreFilesCount?: number;
 }
 
 export interface RiskAssessment {
@@ -77,15 +79,18 @@ export function assessContributionRisk(input: ContributionRiskInput): RiskAssess
   }
 
   // 3. Diff Size & Complexity Risk Factor
-  if (diffLines > 100) {
-    const penalty = Math.min(30, Math.round((diffLines - 100) * 0.3));
+  // Distinguish core logic churn from supporting engineering lines (tests, documentation, comments)
+  const effectiveCoreLines = input.coreDiffLines !== undefined ? input.coreDiffLines : diffLines;
+  if (effectiveCoreLines > 100) {
+    const penalty = Math.min(30, Math.round((effectiveCoreLines - 100) * 0.3));
     riskScore += penalty;
-    reasons.push(`Diff size (${diffLines} lines) exceeds 100-line surgical threshold.`);
+    reasons.push(`Core diff size (${effectiveCoreLines} lines) exceeds 100-line threshold.`);
   }
 
-  if (filesCount > 3) {
+  const effectiveFilesCount = input.coreFilesCount !== undefined ? input.coreFilesCount : filesCount;
+  if (effectiveFilesCount > 3) {
     riskScore += 15;
-    reasons.push(`Patch touches ${filesCount} files across repository.`);
+    reasons.push(`Patch touches ${effectiveFilesCount} core files across repository.`);
   }
 
   // 4. Subagent Quality Score Factor

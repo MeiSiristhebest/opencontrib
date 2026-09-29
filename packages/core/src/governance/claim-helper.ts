@@ -51,13 +51,12 @@ export class ClaimProtocol {
     }
     if (authorName) {
       const lower = authorName.toLowerCase();
+      // Recognized bot suffixes and well-known CI / bot patterns
       if (
         lower.endsWith("[bot]") ||
         lower.endsWith("-bot") ||
-        lower === "stale" ||
-        lower.includes("github-actions") ||
-        lower.includes("dependabot") ||
-        lower.includes("codecov")
+        lower.endsWith("_bot") ||
+        /\b(?:stale|github-actions|dependabot|codecov|renovate|greenkeeper|snyk|k8s-ci|probot|semantic-release|changesets)\b/i.test(lower)
       ) {
         return true;
       }

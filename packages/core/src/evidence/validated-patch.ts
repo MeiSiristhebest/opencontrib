@@ -24,6 +24,7 @@ export function hashValidatedPatchArtifact(
       mode: file.mode,
       operation: file.operation,
       contentSha256: file.contentSha256,
+      changedLines: file.changedLines,
     })),
     validatedAt: value.validatedAt,
   };

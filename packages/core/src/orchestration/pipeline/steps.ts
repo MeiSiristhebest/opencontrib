@@ -15,6 +15,7 @@ import {
   PatchAttemptArtifactSchema,
   SubmissionArtifactSchema,
   SubmissionIntentArtifactSchema,
+  ValidatedPatchArtifactSchema,
 } from "../../contracts/schemas.js";
 import type { ApprovalChallenge } from "../../governance/approval-service.js";
 import {
@@ -27,10 +28,18 @@ import {
 import { scoutOpportunities } from "../../discovery/scout.js";
 import { MultiSignalHeuristicRanker } from "../../discovery/ranking.js";
 import { detectSystemCapabilities } from "../../discovery/feasibility.js";
-import { EvidenceService } from "../../evidence/evidence-service.js";
+import { extractNativePrTemplateAtCommit } from "../../discovery/context-assembler.js";
+import {
+  countValidatedPatchChangedLinesAtGreenTree,
+  EvidenceService,
+} from "../../evidence/evidence-service.js";
 import { computeSourceTreeHash } from "../../evidence/evidence-collector.js";
+import { hashValidatedPatchArtifact } from "../../evidence/validated-patch.js";
 import { generateSubagentReviewPrompt } from "../../governance/subagent-reviewer.js";
-import { deriveEvidenceBackedQualityRubric } from "../../governance/governance-auditor.js";
+import {
+  deriveEvidenceBackedQualityRubric,
+  isSupportingFile,
+} from "../../governance/governance-auditor.js";
 import { buildPrDescription } from "../../governance/template-merger.js";
 import {
   assessContributionRisk,
@@ -59,6 +68,91 @@ import type {
 import { halt, continuePipeline } from "./types.js";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+
+function getCoreDiffMetrics(
+  ctx: PipelineContext,
+  deps: PipelineDeps,
+  patch: PatchDraft,
+): { coreDiffLines?: number; coreFilesCount: number } {
+  const fallbackFilesCount = patch.files.length;
+  if (!ctx.runId) return { coreFilesCount: fallbackFilesCount };
+
+  const runManager = deps.runManager ?? defaultRunManager;
+  const run = runManager.getRun(ctx.runId);
+  const patchArtifact = run?.artifacts.patch;
+  if (
+    patchArtifact === undefined ||
+    patchArtifact === null ||
+    (typeof patchArtifact === "string" && patchArtifact.trim() === "")
+  ) {
+    return { coreFilesCount: fallbackFilesCount };
+  }
+
+  let canonicalPatchContent = "";
+  let canonicalPatchSnapshot: unknown;
+  let activePatchSnapshot: unknown;
+  try {
+    canonicalPatchContent =
+      typeof patchArtifact === "string"
+        ? patchArtifact
+        : (JSON.stringify(patchArtifact) ?? "");
+    const activePatchContent = JSON.stringify(patch);
+    if (!canonicalPatchContent.trim() || typeof activePatchContent !== "string") {
+      return { coreFilesCount: fallbackFilesCount };
+    }
+    canonicalPatchSnapshot = JSON.parse(canonicalPatchContent);
+    activePatchSnapshot = JSON.parse(activePatchContent);
+  } catch {
+    return { coreFilesCount: fallbackFilesCount };
+  }
+  if (!isDeepStrictEqual(canonicalPatchSnapshot, activePatchSnapshot)) {
+    return { coreFilesCount: fallbackFilesCount };
+  }
+
+  const parsed = ValidatedPatchArtifactSchema.safeParse(
+    run?.artifacts.validatedPatch,
+  );
+  if (!parsed.success) return { coreFilesCount: fallbackFilesCount };
+
+  const validatedPatch = parsed.data;
+  const sha256 = (content: string) =>
+    createHash("sha256").update(content).digest("hex");
+  if (
+    validatedPatch.runId !== ctx.runId ||
+    validatedPatch.artifactSha256 !==
+      hashValidatedPatchArtifact(validatedPatch) ||
+    validatedPatch.patchSha256 !== sha256(canonicalPatchContent)
+  ) {
+    return { coreFilesCount: fallbackFilesCount };
+  }
+
+  const workspaceArtifact = run?.artifacts.workspace as
+    | { workspacePath?: unknown; baseCommitSha?: unknown }
+    | undefined;
+  if (
+    typeof workspaceArtifact?.workspacePath !== "string" ||
+    workspaceArtifact.workspacePath.trim() === "" ||
+    workspaceArtifact.baseCommitSha !== validatedPatch.baseCommitSha
+  ) {
+    return { coreFilesCount: fallbackFilesCount };
+  }
+
+  const coreFiles = validatedPatch.files.filter(
+    (file) => !isSupportingFile(file.path),
+  );
+  try {
+    const coreDiffLines = countValidatedPatchChangedLinesAtGreenTree(
+      workspaceArtifact.workspacePath,
+      validatedPatch.baseCommitSha,
+      coreFiles,
+      validatedPatch.greenTreeSha256,
+    );
+    return { coreDiffLines, coreFilesCount: coreFiles.length };
+  } catch {
+    return { coreFilesCount: fallbackFilesCount };
+  }
+}
 
 // ── Phase -1: Run Creation (Run-First — must precede all scouting/workspace work) ──
 
@@ -404,7 +498,7 @@ export class PatchGenerationStep implements PipelineStep {
     if (deps.llmService) {
       try {
         const llmResult = await deps.llmService.generateStructured({
-          prompt: `${ctx.prompt}\n\nPlease generate a minimal surgical patch conforming strictly to PatchDraftSchema JSON with concrete code files in the 'files' array.`,
+          prompt: `${ctx.prompt}\n\nPlease generate a production-grade patch conforming strictly to PatchDraftSchema JSON with concrete code files in the 'files' array. Address the root cause, update docs/comments when behavior changes, check directly related call sites, and add focused regression coverage for important edge cases.`,
           schema: PatchDraftSchema,
         });
         // SAFETY: PatchDraftSchema (Zod) validated llmResult.data at runtime;
@@ -521,7 +615,7 @@ export class ImplementValidateLoopStep implements PipelineStep {
               attemptNumber: implementationAttempts,
               maxAttempts,
             })
-          : `${prompt}\n\nPlease generate a minimal surgical patch conforming strictly to PatchDraftSchema JSON with concrete code files in the 'files' array.`;
+          : `${prompt}\n\nPlease generate a production-grade patch conforming strictly to PatchDraftSchema JSON with concrete code files in the 'files' array. Address the root cause, update docs/comments when behavior changes, check directly related call sites, and add focused regression coverage for important edge cases.`;
 
       // Generate (or re-generate on repair turn) the patch draft from the per-turn prompt
       if (implementationAttempts > 1) {
@@ -808,6 +902,9 @@ export class QualityRubricStep implements PipelineStep {
     const validationStatus = ctx.validationStatus!;
     const evidenceReport = ctx.evidenceReport;
     const subagentReview = ctx.subagentReview!;
+    const coreDiffMetrics = getCoreDiffMetrics(ctx, deps, activePatch);
+    ctx.coreDiffLines = coreDiffMetrics.coreDiffLines;
+    ctx.coreFilesCount = coreDiffMetrics.coreFilesCount;
 
     const confidenceBreakdown =
       subagentReview.status === "SUCCESS"
@@ -824,6 +921,7 @@ export class QualityRubricStep implements PipelineStep {
         evidenceReport?.passedUnitTestsCount ||
         (validationStatus === "VALIDATED" ? 1 : 0),
       diffLines: activePatch.estimatedDiffLines,
+      coreDiffLines: coreDiffMetrics.coreDiffLines,
       styleScore: confidenceBreakdown?.styleMatch,
       securityScore: confidenceBreakdown?.securityAudit,
       subagentReviewAvailable: isReviewAvailable,
@@ -855,6 +953,8 @@ export class RiskAssessmentGateStep implements PipelineStep {
       repoFullName: selectedOpp.repoFullName,
       diffLines: activePatch.estimatedDiffLines,
       filesCount: activePatch.files.length,
+      coreDiffLines: ctx.coreDiffLines,
+      coreFilesCount: ctx.coreFilesCount,
       validationStatus,
       subagentQualityScore: qualityRubric.overallScore,
     });
@@ -1129,22 +1229,48 @@ export class PrSubmissionStep implements PipelineStep {
       );
       const effectiveIssueNumber = canonicalRoute.issueBinding?.providerIssueId;
 
-      const prDraftText = buildPrDescription({
-        issueNumber: effectiveIssueNumber,
-        submissionRoute: canonicalRoute.route,
-        aiDisclosureRequired: canonicalRoute.policy.requiresAiDisclosure === true,
-        dcoRequired: canonicalRoute.policy.requiresDco === true,
-        problemSummary: activePatch?.summary || selectedOpp.title,
-        rootCause:
-          activePatch?.rationale || "Unavailable (root cause not recorded)",
-        keyChanges: derivedKeyChanges,
-        verificationCommand: ctx.evidenceReport
-          ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
-            ctx.testCmd ||
-            ""
-          : "",
-        evidence: ctx.evidenceReport,
-      });
+      const workspaceArtifact = canonicalBeforeDisclosure.artifacts.workspace as
+        | { baseRepoPath?: unknown; baseCommitSha?: unknown }
+        | undefined;
+      const validatedPatchResult = ValidatedPatchArtifactSchema.safeParse(
+        canonicalBeforeDisclosure.artifacts.validatedPatch,
+      );
+      const validatedPatch = validatedPatchResult.success
+        ? validatedPatchResult.data
+        : undefined;
+      const nativeTemplateContent =
+        validatedPatch &&
+        validatedPatch.runId === runId &&
+        validatedPatch.artifactSha256 ===
+          hashValidatedPatchArtifact(validatedPatch) &&
+        typeof workspaceArtifact?.baseRepoPath === "string" &&
+        workspaceArtifact.baseCommitSha === validatedPatch.baseCommitSha
+          ? extractNativePrTemplateAtCommit(
+              (args) => deps.worktreeManager.runGit(args),
+              workspaceArtifact.baseRepoPath,
+              validatedPatch.baseCommitSha,
+            )
+          : undefined;
+
+      const prDraftText = buildPrDescription(
+        {
+          issueNumber: effectiveIssueNumber,
+          submissionRoute: canonicalRoute.route,
+          aiDisclosureRequired: canonicalRoute.policy.requiresAiDisclosure === true,
+          dcoRequired: canonicalRoute.policy.requiresDco === true,
+          problemSummary: activePatch?.summary || selectedOpp.title,
+          rootCause:
+            activePatch?.rationale || "Unavailable (root cause not recorded)",
+          keyChanges: derivedKeyChanges,
+          verificationCommand: ctx.evidenceReport
+            ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
+              ctx.testCmd ||
+              ""
+            : "",
+          evidence: ctx.evidenceReport,
+        },
+        nativeTemplateContent,
+      );
 
       // Ensure only non-authoritative stage artifacts are written generically;
       // evidence must already have been produced by EvidenceService.
@@ -1161,11 +1287,24 @@ export class PrSubmissionStep implements PipelineStep {
 
       const { GovernanceService } =
         await import("../../governance/governance-service.js");
+      const { runPreflightLintCheck } =
+        await import("../../governance/preflight-linter.js");
+      const auditRun = runManager.getRun(runId);
+      const workspacePath = (
+        auditRun?.artifacts.workspace as
+          | { workspacePath?: unknown }
+          | undefined
+      )?.workspacePath;
+      const preflightLintResult = await runPreflightLintCheck({
+        workspaceRoot:
+          typeof workspacePath === "string" ? workspacePath : "",
+      });
       const governanceService = new GovernanceService(runManager);
       governanceService.audit(runId, {
         prTitle: `fix: ${selectedOpp.title}`,
         prBody: prDraftText,
         subagentScore: qualityRubric.overallScore,
+        preflightLintResult,
       });
 
       const { SubmissionIntentService } =

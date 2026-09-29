@@ -8,6 +8,8 @@ import type {
   RawRedExecutionResult,
   GreenExecutionJob,
   RawGreenExecutionResult,
+  PreflightLintExecutionJob,
+  RawPreflightLintExecutionResult,
 } from "./trusted-execution.port.js";
 import {
   computeSourceTreeHash,
@@ -161,6 +163,64 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         capturedAt: new Date().toISOString(),
         sourceTreeSha256: computeSourceTreeHash(cwd),
         testIdentity,
+      };
+    } finally {
+      try {
+        rmSync(cidDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
+  }
+
+  async runPreflightLint(
+    job: PreflightLintExecutionJob,
+  ): Promise<RawPreflightLintExecutionResult> {
+    const cwd = job.workspace.workspacePath;
+    const cidDir = mkdtempSync(join(tmpdir(), "docker-cid-"));
+    const cidFile = join(cidDir, "cid");
+    const dockerArgs = [
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--cidfile",
+      cidFile,
+      "--memory",
+      "512m",
+      "--cpus",
+      "1",
+      "--pids-limit",
+      "256",
+      // Keep the canonical workspace immutable; build tools write only into
+      // this disposable copy in the container's writable layer.
+      "-v",
+      `${cwd}:/source:ro`,
+      "-w",
+      "/workspace",
+      this.image,
+      "sh",
+      "-c",
+      'mkdir -p /workspace && cp -R -P /source/. /workspace/ && exec sh -c "$1"',
+      "opencontrib-preflight-lint",
+      job.command,
+    ];
+
+    try {
+      const timeoutMs = Math.max(1, Math.min(job.timeoutMs, this.timeoutMs));
+      const res = await runDockerProcessAsync(dockerArgs, timeoutMs);
+      if (res.exitCode === 124) {
+        killContainerByCidFile(cidFile);
+      }
+      return {
+        command: job.command,
+        exitCode: res.exitCode,
+        output: res.output,
+        passed: res.exitCode === 0,
       };
     } finally {
       try {

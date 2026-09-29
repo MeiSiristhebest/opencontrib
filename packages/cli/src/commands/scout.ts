@@ -18,8 +18,9 @@ export const scoutCommand = new Command("scout")
     "Scout high-value, unclaimed contribution opportunities for a repo or org",
   )
   .addArgument(
-    new Argument("<target>", "Repo full name (owner/repo) or org name"),
+    new Argument("[target]", "Repo full name (owner/repo) or org name"),
   )
+  .option("-r, --repo <target>", "Target repository (owner/repo) or org name")
   .option(
     "--tech-stack <list>",
     "Developer tech stack keywords, comma-separated",
@@ -30,21 +31,31 @@ export const scoutCommand = new Command("scout")
   .option("--min-stars <n>", "Minimum repository stars", (v) => Number(v), 50)
   .option("--token <token>", "GitHub token (or set GITHUB_TOKEN env)")
   .option("--run-id <id>", "Contribution run ID (defaults to active session)")
+  .option("--include-attempted", "Include issues even if previously attempted in local runs", false)
   .option("--pretty", "Pretty-print", false)
   .action(
     async (
-      target: string,
+      targetArg: string | undefined,
       opts: {
+        repo?: string;
         techStack?: string[];
         focus?: string[];
         limit?: number;
         minStars?: number;
         token?: string;
         runId?: string;
+        includeAttempted?: boolean;
         pretty?: boolean;
       },
     ) => {
       try {
+        const target = targetArg || opts.repo;
+        if (!target) {
+          throw new CliExitError(
+            1,
+            "Target repository is required: provide <target> argument or --repo <target>",
+          );
+        }
         const profile = {
           techStack: opts.techStack ?? ["typescript", "javascript"],
           focusAreas: opts.focus ?? ["bugfix", "testing", "docs"],
@@ -57,6 +68,7 @@ export const scoutCommand = new Command("scout")
           limit: opts.limit ?? 5,
           minStars: opts.minStars ?? (isOrg ? 100 : 0),
           githubToken: opts.token || process.env.GITHUB_TOKEN,
+          excludeCompletedRuns: !opts.includeAttempted,
         });
 
         const runId = getRunManager().resolveRunId(opts.runId);

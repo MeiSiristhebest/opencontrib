@@ -1,12 +1,23 @@
 import { describe, expect, it } from "bun:test";
 import {
-  auditGovernance,
+  auditGovernance as auditGovernanceRaw,
   calculateConfidenceScore,
   lintAntiAiText,
   lintAssertionQuality,
   lintPatchCommentHyperbole,
   renderMasterPrTemplate,
 } from "../src/governance/index.js";
+import { isSupportingFile } from "../src/governance/governance-auditor.js";
+
+const auditGovernance: typeof auditGovernanceRaw = (input) =>
+  auditGovernanceRaw({
+    preflightLintResult: {
+      executed: true,
+      passed: true,
+      summary: "Test fixture lint check passed.",
+    },
+    ...input,
+  });
 
 describe("Governance & Anti-AI Audit Engine", () => {
   it("detects forbidden AI phrases in text", () => {
@@ -123,7 +134,148 @@ describe("Governance & Anti-AI Audit Engine", () => {
     expect(auditFailRfc.isGatedPassed).toBe(false);
     expect(auditFailRfc.rfcGatePassed).toBe(false);
     expect(auditFailRfc.remediationSuggestions[0]).toContain(
-      "exceeds 100 lines",
+      "configured limit of 100 lines",
+    );
+  });
+
+  it("applies the RFC size gate to measured core lines while retaining total changed lines", () => {
+    const confidenceBreakdown = {
+      rootCause: 95,
+      implementation: 95,
+      regression: 95,
+      defensiveCoverage: 95,
+      testCoverage: 95,
+      styleMatch: 95,
+      securityAudit: 95,
+    };
+    const result = auditGovernance({
+      prBodyText: "Fixes bug with regression tests and documentation.",
+      lineCount: 150,
+      coreDiffLines: 40,
+      confidenceBreakdown,
+    });
+    const invalidCoreLineCount = auditGovernance({
+      lineCount: 150,
+      coreDiffLines: -1,
+      confidenceBreakdown,
+    });
+
+    expect(result.diffLineCount).toBe(150);
+    expect(result.rfcGatePassed).toBe(true);
+    expect(result.isGatedPassed).toBe(true);
+    expect(result.remediationSuggestions).toContain(
+      "Supporting Engineering Exemption: Core production logic is within threshold (40/100 lines). Additional 110 lines are test matrices and documentation.",
+    );
+    expect(invalidCoreLineCount.rfcGatePassed).toBe(false);
+  });
+
+  it("classifies test and documentation paths without exempting application source", () => {
+    expect(isSupportingFile("packages/core/tests/fixture.json")).toBe(true);
+    expect(isSupportingFile("src/parser.test.py")).toBe(true);
+    expect(isSupportingFile("docs/guide.txt")).toBe(true);
+    expect(isSupportingFile("README.md")).toBe(true);
+    expect(isSupportingFile("apps/web/pages/index.tsx")).toBe(false);
+    expect(isSupportingFile("src/testHarness.ts")).toBe(false);
+    expect(isSupportingFile("docs/guide.mdx")).toBe(true);
+    expect(isSupportingFile("src/config.txt")).toBe(false);
+  });
+
+  it("applies the core limit to parsed supporting and application diff paths", () => {
+    const diffFor = (filePath: string, lineCount: number) =>
+      [
+        `diff --git a/${filePath} b/${filePath}`,
+        `--- a/${filePath}`,
+        `+++ b/${filePath}`,
+        `@@ -0,0 +1,${lineCount} @@`,
+        ...Array.from({ length: lineCount }, (_, index) => `+line-${index}`),
+      ].join("\n");
+    const confidenceBreakdown = {
+      rootCause: 95,
+      implementation: 95,
+      regression: 95,
+      defensiveCoverage: 95,
+      testCoverage: 95,
+      styleMatch: 95,
+      securityAudit: 95,
+    };
+
+    const supportingOnly = auditGovernance({
+      diffText: [
+        diffFor("docs/guide.md", 60),
+        diffFor("tests/guide.test.ts", 60),
+      ].join("\n"),
+      confidenceBreakdown,
+    });
+    const applicationSource = auditGovernance({
+      diffText: diffFor("apps/web/pages/index.tsx", 101),
+      confidenceBreakdown,
+    });
+    const incrementLines = auditGovernance({
+      diffText: [
+        "diff --git a/src/counter.c b/src/counter.c",
+        "--- a/src/counter.c",
+        "+++ b/src/counter.c",
+        "@@ -1 +1 @@",
+        "---counter;",
+        "+++counter;",
+      ].join("\n"),
+      confidenceBreakdown,
+    });
+
+    expect(supportingOnly.diffLineCount).toBe(120);
+    expect(supportingOnly.rfcGatePassed).toBe(true);
+    expect(applicationSource.diffLineCount).toBe(101);
+    expect(applicationSource.rfcGatePassed).toBe(false);
+    expect(incrementLines.diffLineCount).toBe(2);
+  });
+
+  it("tracks unified and quoted paths without treating hunk content as headers", () => {
+    const confidenceBreakdown = {
+      rootCause: 95,
+      implementation: 95,
+      regression: 95,
+      defensiveCoverage: 95,
+      testCoverage: 95,
+      styleMatch: 95,
+      securityAudit: 95,
+    };
+    const supportingDiff = [
+      "--- docs/user guide.md",
+      "+++ docs/user guide.md",
+      "@@ -0,0 +1,2 @@",
+      "+guide line",
+      "+details line",
+      'diff --git "a/tests/用户 guide.test.ts" "b/tests/用户 guide.test.ts"',
+      '--- "a/tests/用户 guide.test.ts"',
+      '+++ "b/tests/用户 guide.test.ts"',
+      "@@ -0,0 +1,2 @@",
+      "+test one",
+      "+test two",
+    ].join("\n");
+    const supportingOnly = auditGovernance({
+      diffText: supportingDiff,
+      maxDiffLines: 1,
+      confidenceBreakdown,
+    });
+    const hunkContentWithHeaderPrefix = auditGovernance({
+      diffText: [
+        "diff --git a/src/core.ts b/src/core.ts",
+        "--- a/src/core.ts",
+        "+++ b/src/core.ts",
+        "@@ -0,0 +1,2 @@",
+        "+++ b/tests/foo.test.ts",
+        "+const coreFix = true;",
+      ].join("\n"),
+      maxDiffLines: 1,
+      confidenceBreakdown,
+    });
+
+    expect(supportingOnly.diffLineCount).toBe(4);
+    expect(supportingOnly.rfcGatePassed).toBe(true);
+    expect(hunkContentWithHeaderPrefix.diffLineCount).toBe(2);
+    expect(hunkContentWithHeaderPrefix.rfcGatePassed).toBe(false);
+    expect(hunkContentWithHeaderPrefix.remediationSuggestions).toContain(
+      "Diff exceeds the configured limit of 1 lines (2 core lines). Split into RFC Discussion issue first.",
     );
   });
 
@@ -162,6 +314,49 @@ describe("Governance & Anti-AI Audit Engine", () => {
     expect(cleanTemplate).toContain(
       "User-provided validation note (not verified)",
     );
+
+    // Test native PR template merger with Checkboxes and Related Issues
+    const nativeTemplate = `
+## Description
+<!-- What does this PR do? -->
+
+## Type of Change
+- [ ] Bug fix (non-breaking change that fixes an issue)
+- [ ] Documentation update
+
+## How Has This Been Tested?
+- [ ] \`make test\` passes locally
+
+## Checklist
+- [ ] I have signed the CLA
+- [ ] I did not use AI/LLM to create this PR, or I disclosed the tool/model below
+
+## Related Issues
+<!-- Link related issues below. -->
+`;
+    const mergedNative = renderMasterPrTemplate({
+      issueNumber: 1581,
+      problemSummary: "Handle LLM truncated output",
+      rootCause: "Truncation caused JSON parse error",
+      keyChanges: ["Add IsTruncated helper"],
+      nativeTemplateContent: nativeTemplate,
+      dcoRequired: true,
+      aiDisclosureRequired: true,
+    });
+
+    expect(mergedNative).toContain("- [x] Bug fix");
+    expect(mergedNative).toContain("- [ ] `make test` passes locally");
+    expect(mergedNative).toContain("- [ ] I have signed the CLA");
+    expect(mergedNative).toContain("- [ ] I did not use AI/LLM");
+    expect(mergedNative).toContain(
+      "Automated assistance disclosure: This contribution was prepared using OpenContrib AI-assisted tooling; specific model details were not recorded in this run.",
+    );
+    expect(mergedNative).toContain(
+      "DCO requirement: the commits must include a valid Signed-off-by trailer.",
+    );
+    expect(mergedNative).toContain("closes #1581");
+    expect(mergedNative).toContain("Handle LLM truncated output");
+    expect(mergedNative).not.toContain("<!-- What does this PR do? -->");
   });
 
   it("detects corrupted Unicode replacement characters and malformed headers", () => {
@@ -532,5 +727,72 @@ diff --git a/foo_test.go b/foo_test.go
     expect(audit.commentHyperbolePassed).toBe(false);
     expect(audit.remediationSuggestions.join(" ")).toContain("Assertion Quality Gate");
     expect(audit.remediationSuggestions.join(" ")).toContain("Comment Severity Gate");
+  });
+
+  it("preserves cross-platform, defensive, and sibling-file impact findings in governance output", () => {
+    const audit = auditGovernance({
+      patchContent:
+        "+normalized := filepath.ToSlash(input)\n+frame = frame.reset_index()",
+      modifiedFiles: ["internal/parser.go"],
+      repoContextFiles: ["internal/hunk.go", "internal/types.go"],
+      prTitle: "fix(parser): normalize paths and index columns",
+      prBody: "Fix parser path and index handling.",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      lineCount: 2,
+    });
+
+    const findings = audit.impactAnalysisIssues ?? [];
+    expect(audit.impactAnalysisPassed).toBe(false);
+    expect(findings).toHaveLength(4);
+    expect(findings.some((finding) => finding.includes("filepath.ToSlash"))).toBe(
+      true,
+    );
+    expect(
+      findings.some((finding) => finding.includes("DEFENSIVE COLLISION HAZARD")),
+    ).toBe(true);
+    expect(findings.some((finding) => finding.includes("internal/hunk.go"))).toBe(
+      true,
+    );
+    expect(findings.some((finding) => finding.includes("internal/types.go"))).toBe(
+      true,
+    );
+  });
+
+  it("fails technical gate when patch contains critical cross-platform, collision, or lifecycle impact hazard", () => {
+    const hazardousPatch = `
+diff --git a/model.py b/model.py
+--- a/model.py
++++ b/model.py
+@@ -10,3 +10,3 @@
++df = df.reset_index()
+`;
+    const audit = auditGovernance({
+      patchContent: hazardousPatch,
+      prBody: "Fixes indexing behavior cleanly.",
+      confidenceBreakdown: {
+        rootCause: 95,
+        implementation: 95,
+        regression: 95,
+        defensiveCoverage: 95,
+        testCoverage: 95,
+        styleMatch: 95,
+        securityAudit: 95,
+      },
+      lineCount: 2,
+    });
+
+    expect(audit.technicalGate?.status).toBe("FAIL");
+    expect(audit.isGatedPassed).toBe(false);
+    expect(audit.impactAnalysisPassed).toBe(false);
+    expect(audit.impactAnalysisIssues && audit.impactAnalysisIssues.length > 0).toBe(true);
+    expect(audit.remediationSuggestions.join(" ")).toContain("Impact Gate");
   });
 });

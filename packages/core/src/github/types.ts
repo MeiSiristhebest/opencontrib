@@ -46,6 +46,11 @@ export interface RepoDetails {
   description: string;
 }
 
+export interface RepoDirectoryEntry {
+  path: string;
+  type: "file" | "dir";
+}
+
 export type IssueOrOpportunity = any;
 
 export interface GitHubClientOptions {

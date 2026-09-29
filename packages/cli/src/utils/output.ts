@@ -211,7 +211,7 @@ export function printDefectCard(options: DefectCardOptions): void {
   }
   const note =
     options.atomicSingleConcernNote ||
-    "Atomic focus: 1 single issue, minimal targeted patch (<=30 lines)";
+    "Atomic focus: one issue; add relevant tests/docs";
   console.log(`│ 🎯 Invariant:     ${note.slice(0, 58).padEnd(58)} │`);
   console.log("└" + "─".repeat(76) + "┘\n");
 }

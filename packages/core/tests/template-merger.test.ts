@@ -117,6 +117,53 @@ describe("Native Template Merger & Fallback", () => {
     expect(conflictingGreen).toContain("- **Verification**: Not recorded.");
   });
 
+  it("updates only live Markdown issue references and removes public references for private submissions", () => {
+    const nativeTemplate = [
+      "## Description",
+      "Describe the change.",
+      "",
+      "## Example",
+      "Example syntax:",
+      "```md",
+      "## Related Issues",
+      "Fixes #99",
+      "```",
+      "",
+      "## Related Issues",
+      "Fixes #1",
+      "Closes #2",
+      "",
+      "## Checklist",
+      "- [ ] tests pass",
+    ].join("\n");
+    const baseData = {
+      problemSummary: "Repair the parser",
+      rootCause: "Input normalization was incomplete",
+      keyChanges: ["Normalize input"],
+    };
+
+    const publicBody = buildPrDescription(
+      { ...baseData, issueNumber: 42 },
+      nativeTemplate,
+    );
+    expect(publicBody).toContain("## Related Issues");
+    expect(publicBody).toContain("Fixes #42");
+    expect(publicBody).toContain("Closes #2");
+    expect(publicBody).toContain("```md\n## Related Issues\nFixes #99\n```");
+
+    const privateBody = buildPrDescription(
+      {
+        ...baseData,
+        submissionRoute: "PRIVATE_SECURITY",
+      },
+      nativeTemplate,
+    );
+    expect(privateBody).toContain(
+      "Security disclosure: provider-verified private channel",
+    );
+    expect(privateBody).not.toMatch(/(?:Fixes|Closes|Resolves) #/i);
+  });
+
   it("falls back to master PR template when native template is empty or absent", () => {
     const prData = {
       issueNumber: 99,

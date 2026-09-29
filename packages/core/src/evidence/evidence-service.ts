@@ -485,7 +485,8 @@ function collectActualDelta(cwd: string, baseCommitSha: string): DeltaFile[] {
 function countChangedLinesFromActualDelta(
   cwd: string,
   baseCommitSha: string,
-  deltaFiles: DeltaFile[],
+  deltaFiles: readonly DeltaFile[],
+  changedLineCountsByPath?: Map<string, number>,
 ): number {
   let total = 0;
   for (const file of deltaFiles) {
@@ -534,7 +535,9 @@ function countChangedLinesFromActualDelta(
               `EvidencePatchProvenanceError: git numstat returned invalid numbers for created file '${file.path}': ${stat.trim()}`,
             );
           }
-          total += added + deleted;
+          const changedFileLines = added + deleted;
+          total += changedFileLines;
+          changedLineCountsByPath?.set(file.path, changedFileLines);
         } else {
           throw new Error(
             `EvidencePatchProvenanceError: git numstat returned unexpected format for created file '${file.path}': ${stat.trim()}`,
@@ -563,7 +566,9 @@ function countChangedLinesFromActualDelta(
             `EvidencePatchProvenanceError: git numstat returned invalid numbers for deleted file '${file.path}': ${stat.trim()}`,
           );
         }
-        total += added + deleted;
+        const changedFileLines = added + deleted;
+        total += changedFileLines;
+        changedLineCountsByPath?.set(file.path, changedFileLines);
       } else {
         throw new Error(
           `EvidencePatchProvenanceError: git numstat returned unexpected format for deleted file '${file.path}': ${stat.trim()}`,
@@ -585,7 +590,9 @@ function countChangedLinesFromActualDelta(
             `EvidencePatchProvenanceError: git numstat returned invalid numbers for modified file '${file.path}': ${stat.trim()}`,
           );
         }
-        total += added + deleted;
+        const changedFileLines = added + deleted;
+        total += changedFileLines;
+        changedLineCountsByPath?.set(file.path, changedFileLines);
       } else {
         throw new Error(
           `EvidencePatchProvenanceError: git numstat returned unexpected format for modified file '${file.path}': ${stat.trim()}`,
@@ -594,6 +601,126 @@ function countChangedLinesFromActualDelta(
     }
   }
   return total;
+}
+
+function requireChangedLineCount(
+  changedLineCountsByPath: ReadonlyMap<string, number>,
+  filePath: string,
+): number {
+  const changedLines = changedLineCountsByPath.get(filePath);
+  if (changedLines === undefined) {
+    throw new Error(
+      `EvidencePatchProvenanceError: no changed-line count was recorded for '${filePath}'.`,
+    );
+  }
+  return changedLines;
+}
+
+export function countValidatedPatchChangedLines(
+  cwd: string,
+  baseCommitSha: string,
+  files: readonly ValidatedPatchFile[],
+): number {
+  return countChangedLinesFromActualDelta(cwd, baseCommitSha, files);
+}
+
+const validatedPatchChangedLineCountCache = new Map<string, number>();
+const VALIDATED_PATCH_CHANGED_LINE_CACHE_LIMIT = 128;
+
+function hasBoundChangedLineCount(
+  file: ValidatedPatchFile,
+): file is ValidatedPatchFile & { changedLines: number } {
+  return (
+    file.changedLines !== undefined &&
+    Number.isSafeInteger(file.changedLines) &&
+    file.changedLines >= 0
+  );
+}
+
+function cacheValidatedPatchChangedLineCount(
+  cacheKey: string,
+  changedLines: number,
+): void {
+  if (
+    validatedPatchChangedLineCountCache.size >=
+    VALIDATED_PATCH_CHANGED_LINE_CACHE_LIMIT
+  ) {
+    const oldestCacheKey = validatedPatchChangedLineCountCache.keys().next().value;
+    if (oldestCacheKey !== undefined) {
+      validatedPatchChangedLineCountCache.delete(oldestCacheKey);
+    }
+  }
+  validatedPatchChangedLineCountCache.set(cacheKey, changedLines);
+}
+
+/** Count lines only while the workspace remains bound to canonical GREEN evidence. */
+export function countValidatedPatchChangedLinesAtGreenTree(
+  cwd: string,
+  baseCommitSha: string,
+  files: readonly ValidatedPatchFile[],
+  expectedGreenTreeSha256: string,
+): number {
+  const cacheKey = createHash("sha256")
+    .update(
+      JSON.stringify({
+        cwd: resolve(cwd),
+        baseCommitSha,
+        expectedGreenTreeSha256,
+        files: files.map((file) => [
+          file.path,
+          file.mode,
+          file.operation,
+          file.contentSha256,
+          file.changedLines,
+        ]),
+      }),
+    )
+    .digest("hex");
+  const cachedLineCount = validatedPatchChangedLineCountCache.get(cacheKey);
+  if (cachedLineCount !== undefined) {
+    // A cached measurement is reusable only while the workspace still matches
+    // its bound GREEN tree; this avoids repeating per-file git diff processes.
+    if (computeSourceTreeHash(cwd) !== expectedGreenTreeSha256) {
+      throw new Error(
+        "EvidencePatchProvenanceError: workspace differs from canonical GREEN tree before cached diff measurement.",
+      );
+    }
+    validatedPatchChangedLineCountCache.delete(cacheKey);
+    validatedPatchChangedLineCountCache.set(cacheKey, cachedLineCount);
+    return cachedLineCount;
+  }
+
+  if (files.every(hasBoundChangedLineCount)) {
+    if (computeSourceTreeHash(cwd) !== expectedGreenTreeSha256) {
+      throw new Error(
+        "EvidencePatchProvenanceError: workspace differs from canonical GREEN tree before reading bound per-file line counts.",
+      );
+    }
+    const changedLines = files.reduce(
+      (total, file) => total + file.changedLines,
+      0,
+    );
+    cacheValidatedPatchChangedLineCount(cacheKey, changedLines);
+    return changedLines;
+  }
+
+  if (computeSourceTreeHash(cwd) !== expectedGreenTreeSha256) {
+    throw new Error(
+      "EvidencePatchProvenanceError: workspace differs from canonical GREEN tree before diff measurement.",
+    );
+  }
+  const changedLines = countChangedLinesFromActualDelta(
+    cwd,
+    baseCommitSha,
+    files,
+  );
+  if (computeSourceTreeHash(cwd) !== expectedGreenTreeSha256) {
+    throw new Error(
+      "EvidencePatchProvenanceError: workspace changed during validated diff measurement.",
+    );
+  }
+  cacheValidatedPatchChangedLineCount(cacheKey, changedLines);
+  return changedLines;
 }
 
 function computeFinalTreeHash(cwd: string): string {
@@ -902,11 +1029,18 @@ export class EvidenceService {
       allTestsPassing: true,
     };
 
+    const changedLineCountsByPath = new Map<string, number>();
     const changedLines = countChangedLinesFromActualDelta(
       targetCwd,
       baselineCommitSha,
       exactDelta.files,
+      changedLineCountsByPath,
     );
+    if (computeFinalTreeHash(targetCwd) !== finalGreenTreeSha256) {
+      throw new Error(
+        "EvidencePatchProvenanceError: workspace changed during validated changed-line measurement.",
+      );
+    }
 
     if (report.reproductionVerified === true) {
       const existingValidatedPatch = this.runManager.getRun(input.runId)?.artifacts.validatedPatch as ValidatedPatchArtifact | undefined;
@@ -929,6 +1063,10 @@ export class EvidenceService {
           operation: file.operation,
           mode: file.mode,
           contentSha256: file.contentSha256,
+          changedLines: requireChangedLineCount(
+            changedLineCountsByPath,
+            file.path,
+          ),
         })),
         validatedAt,
       };
@@ -1318,13 +1456,19 @@ export class EvidenceService {
       reproductionVerified,
     };
 
-    const changedLines = countChangedLinesFromActualDelta(
-      targetCwd,
-      baselineCommitSha,
-      exactDelta.files,
-    );
-
     if (report.reproductionVerified === true) {
+      const changedLineCountsByPath = new Map<string, number>();
+      const changedLines = countChangedLinesFromActualDelta(
+        targetCwd,
+        baselineCommitSha,
+        exactDelta.files,
+        changedLineCountsByPath,
+      );
+      if (computeFinalTreeHash(targetCwd) !== finalGreenTreeSha256) {
+        throw new Error(
+          "EvidencePatchProvenanceError: workspace changed during validated changed-line measurement.",
+        );
+      }
       const validatedPatch: ValidatedPatchArtifact = {
         runId,
         patchSha256: appliedPatchSha256,
@@ -1339,6 +1483,10 @@ export class EvidenceService {
           operation: file.operation,
           mode: file.mode,
           contentSha256: file.contentSha256,
+          changedLines: requireChangedLineCount(
+            changedLineCountsByPath,
+            file.path,
+          ),
         })),
         validatedAt: new Date().toISOString(),
       };
