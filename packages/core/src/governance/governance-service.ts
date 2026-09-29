@@ -52,7 +52,7 @@ function readTrackedFilesAtCommit(
         maxBuffer: 16 * 1024 * 1024,
       },
     );
-    return output.split("\\0").filter((filePath) => filePath.length > 0);
+    return output.split("\0").filter((filePath) => filePath.length > 0);
   } catch {
     // Repository context is advisory; an unavailable tree is never evidence of compliance.
     return [];

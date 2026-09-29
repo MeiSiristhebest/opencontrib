@@ -62,12 +62,14 @@ interface ScoutFixtureComment {
 
 function createScoutFixture(options: {
   issueCount?: number;
+  policyPath?: string;
   policyContent?: string;
   policyReadFails?: boolean;
   comments?: ScoutFixtureComment[];
 } = {}) {
   const now = new Date().toISOString();
   const policyReads: string[] = [];
+  const directoryReads: string[] = [];
   const issues = Array.from({ length: options.issueCount ?? 1 }, (_, index) => ({
     number: 42 + index,
     title: `Fix TypeScript parser bug ${index}`,
@@ -92,6 +94,7 @@ function createScoutFixture(options: {
 
   return {
     policyReads,
+    directoryReads,
     client: {
       searchIssues: async () => ({
         items: issues,
@@ -110,6 +113,35 @@ function createScoutFixture(options: {
           description: 'Scout fixture',
         },
       }),
+      getRepoDirectoryContentsResult: async (
+        _owner: string,
+        _repo: string,
+        directoryPath: string,
+      ) => {
+        directoryReads.push(directoryPath);
+        const policyIsPresent =
+          options.policyContent !== undefined || options.policyReadFails;
+        if (!policyIsPresent) return { status: 'OK' as const, data: [] };
+
+        const policyPath =
+          options.policyPath ?? COMMUNITY_GATE_POLICY_PATHS[0];
+        const directoryPrefix = directoryPath ? `${directoryPath}/` : '';
+        if (!policyPath.startsWith(directoryPrefix)) {
+          return { status: 'OK' as const, data: [] };
+        }
+        const remainingPath = policyPath.slice(directoryPrefix.length);
+        const [segment, ...rest] = remainingPath.split('/');
+        const entryPath = `${directoryPrefix}${segment}`;
+        return rest.length > 0
+          ? {
+              status: 'OK' as const,
+              data: [{ path: entryPath, type: 'dir' as const }],
+            }
+          : {
+              status: 'OK' as const,
+              data: [{ path: policyPath, type: 'file' as const }],
+            };
+      },
       getRepoTextFileResult: async (
         _owner: string,
         _repo: string,
@@ -124,7 +156,8 @@ function createScoutFixture(options: {
           };
         }
         if (
-          policyPath === COMMUNITY_GATE_POLICY_PATHS[0] &&
+          policyPath ===
+            (options.policyPath ?? COMMUNITY_GATE_POLICY_PATHS[0]) &&
           options.policyContent !== undefined
         ) {
           return { status: 'OK' as const, data: options.policyContent };
@@ -289,6 +322,36 @@ describe('GitHubClient composition root seam', () => {
     expect(typeof client.listRepoIssues).toBe('function');
   });
 
+  it('lists repository directory entries for community policy discovery', async () => {
+    const { cache } = createMemoryCache();
+    const source = createMockIssueSource(cache);
+    const octokit = (source as any).octokit;
+    octokit.rest.repos.getContent = async ({ path }: { path: string }) => {
+      expect(path).toBe('');
+      return {
+        data: [
+          { type: 'file', path: 'CONTRIBUTING.md' },
+          { type: 'dir', path: '.github' },
+          { type: 'symlink', path: 'linked-policy' },
+        ],
+      };
+    };
+
+    const result = await source.getRepoDirectoryContentsResult(
+      'org',
+      'repo',
+      '',
+    );
+
+    expect(result).toEqual({
+      status: 'OK',
+      data: [
+        { path: 'CONTRIBUTING.md', type: 'file' },
+        { path: '.github', type: 'dir' },
+      ],
+    });
+  });
+
   it('includes maxPages in search and repository issue cache identities', async () => {
     const { cache, writes } = createMemoryCache();
     const source = createMockIssueSource(cache);
@@ -392,7 +455,27 @@ describe('GitHubClient composition root seam', () => {
     const opportunities = await scoutFixture(fixture.client);
 
     expect(opportunities).toHaveLength(2);
-    expect(fixture.policyReads).toEqual([...COMMUNITY_GATE_POLICY_PATHS]);
+    expect(fixture.policyReads).toEqual([COMMUNITY_GATE_POLICY_PATHS[0]]);
+    expect(fixture.directoryReads).toEqual(['']);
+  });
+
+  it('discovers nested policy files through directory listings', async () => {
+    const policyPath =
+      '.github/PULL_REQUEST_TEMPLATE/pull_request_template.md';
+    const fixture = createScoutFixture({
+      policyPath,
+      policyContent: 'New issues are auto-closed by default.',
+    });
+
+    const opportunities = await scoutFixture(fixture.client);
+
+    expect(opportunities).toHaveLength(1);
+    expect(fixture.directoryReads).toEqual([
+      '',
+      '.github',
+      '.github/PULL_REQUEST_TEMPLATE',
+    ]);
+    expect(fixture.policyReads).toEqual([policyPath]);
   });
 
   it('scoutOpportunities executes Tri-Route fallback to listRepoIssues when search returns 0 items', async () => {
@@ -439,6 +522,10 @@ describe('GitHubClient composition root seam', () => {
           isArchived: false,
           description: 'A great open-source project',
         },
+      }),
+      getRepoDirectoryContentsResult: async () => ({
+        status: 'OK' as const,
+        data: [],
       }),
       getRepoTextFileResult: async () => ({
         status: 'OK' as const,

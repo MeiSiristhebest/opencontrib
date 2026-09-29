@@ -200,7 +200,7 @@ export function analyzePatchImpactAndConsistency(input: ImpactAnalysisInput): Im
       if (/\bdrop\s*=\s*True\b/i.test(match[2])) continue;
       const receiver = match[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const hasRelevantCollisionGuard = new RegExp(
-        `(?:while|if)\\s+[^\\n]*\\b${receiver}\\.columns\\b[\\s\\S]{0,200}?\\b${receiver}\\.reset_index\\s*\\(`,
+        `\\b([A-Za-z_]\\w*)\\s*=\\s*${receiver}\\.index\\.name\\b[\\s\\S]{0,200}?(?:while|if)\\s+\\1\\s+in\\s+${receiver}\\.columns\\b[\\s\\S]{0,200}?\\b${receiver}\\.index\\.name\\s*=\\s*\\1[\\s\\S]{0,200}?\\b${receiver}\\.reset_index\\s*\\(`,
         "i",
       ).test(scope.contextCode);
       if (!hasRelevantCollisionGuard) hasUnsafeIndexPromotion = true;

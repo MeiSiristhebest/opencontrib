@@ -31,7 +31,7 @@ function isCompilerDiagnostic(line: string): boolean {
   return (
     !INFRASTRUCTURE_FAILURE_PATTERN.test(line) &&
     !RUNNER_PROCESS_EXIT_PATTERN.test(line) &&
-    (/^\s*(?:error(?:\s+TS\d+|\s*\[E\d+\])?:|fatal error:|syntax error:|SyntaxError:)/i.test(
+    (/^\s*(?:error(?:\s+TS\d+|\s*\[E\d+\]):|fatal error:|syntax error:|SyntaxError:)/i.test(
       line,
     ) ||
       /^\s*[^\s:]+\.(?:go|ts|tsx|js|jsx|py|rs|c|cc|cpp|cxx|h|hpp|java|kt|cs):\d+(?::\d+)?:\s*(?:error\b|fatal error\b|syntax error\b|undefined:|cannot\b|expected\b|unknown\b|no such file\b|invalid operation\b|not enough\b)/i.test(

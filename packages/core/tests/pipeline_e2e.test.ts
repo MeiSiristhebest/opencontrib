@@ -61,6 +61,10 @@ function buildDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
           description: "Offline pipeline fixture",
         },
       }),
+      getRepoDirectoryContentsResult: async () => ({
+        status: "OK" as const,
+        data: [],
+      }),
       getRepoTextFileResult: async () => ({
         status: "OK" as const,
         data: null,

@@ -161,10 +161,7 @@ describe("Native Template Merger & Fallback", () => {
     expect(privateBody).toContain(
       "Security disclosure: provider-verified private channel",
     );
-    expect(privateBody).toContain("```md\n## Related Issues\nFixes #99\n```");
-    expect(
-      privateBody.replace(/```[\s\S]*?```/g, ""),
-    ).not.toMatch(/(?:Fixes|Closes|Resolves) #/i);
+    expect(privateBody).not.toMatch(/(?:Fixes|Closes|Resolves) #/i);
   });
 
   it("falls back to master PR template when native template is empty or absent", () => {

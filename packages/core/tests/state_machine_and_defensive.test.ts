@@ -295,6 +295,17 @@ diff --git a/internal/tool/code_search.go b/internal/tool/code_search.go
     });
     expect(safeRes.isCompliant).toBe(true);
 
+    const unrelatedGuard = analyzePatchImpactAndConsistency({
+      modifiedFiles: ["model.py"],
+      patchContent:
+        "+col = 'index'\n+while col in frame.columns:\n+    col += '_'\n+frame = frame.reset_index()",
+    });
+    expect(
+      unrelatedGuard.defensiveRecommendations.some((recommendation) =>
+        recommendation.includes("DEFENSIVE COLLISION HAZARD"),
+      ),
+    ).toBe(true);
+
     const dropIndex = analyzePatchImpactAndConsistency({
       modifiedFiles: ["model.py"],
       patchContent: "+frame = frame.reset_index(drop=True)",
@@ -430,11 +441,15 @@ Error: Process completed with exit code 1.
     const echoed = parseCiRawLogs(
       "Error: The deployment was rejected or didn't satisfy other protection rules\nBuild completed successfully.",
     );
+    const runtimeError = parseCiRawLogs(
+      "Error: temporary API request failed\nBuild completed successfully.",
+    );
     const runnerError = parseCiRawLogs(
       "Error: The deployment was rejected or didn't satisfy other protection rules\nError: Process completed with exit code 1.",
     );
 
     expect(echoed.hasFailure).toBe(false);
+    expect(runtimeError.hasFailure).toBe(false);
     expect(runnerError.hasFailure).toBe(true);
     expect(runnerError.recommendedAction).toContain("No code action required");
   });

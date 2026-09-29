@@ -19,6 +19,15 @@ import {
   scoreCandidateIssue,
 } from './scoring-engine.js';
 
+const COMMUNITY_POLICY_DIRECTORIES = Array.from(
+  new Set(
+    COMMUNITY_GATE_POLICY_PATHS.map((policyPath) => {
+      const separator = policyPath.lastIndexOf('/');
+      return separator === -1 ? '' : policyPath.slice(0, separator);
+    }),
+  ),
+).sort((left, right) => left.length - right.length);
+
 export interface ScoutOptions {
   repo?: string;
   minStars?: number;
@@ -171,14 +180,66 @@ export async function scoutOpportunities(
     let pending = repoGatePolicyCache.get(repoFullName);
     if (!pending) {
       pending = (async () => {
-        const policyFiles: Array<{ path: string; content: string }> = [];
-        for (const path of COMMUNITY_GATE_POLICY_PATHS) {
-          const result = await resolvedClient.getRepoTextFileResult(
+        const directoryContents = new Map<
+          string,
+          Array<{ path: string; type: 'file' | 'dir' }>
+        >();
+        const rootContents = await resolvedClient.getRepoDirectoryContentsResult(
+          owner,
+          repo,
+          '',
+        );
+        if (rootContents.status !== 'OK') {
+          throw new Error(
+            `CommunityGatePolicyReadError: ${rootContents.status} while listing repository root`,
+          );
+        }
+        directoryContents.set('', rootContents.data);
+
+        for (const directory of COMMUNITY_POLICY_DIRECTORIES) {
+          if (directory === '') continue;
+          const separator = directory.lastIndexOf('/');
+          const parent = separator === -1 ? '' : directory.slice(0, separator);
+          const parentEntries = directoryContents.get(parent) ?? [];
+          if (
+            !parentEntries.some(
+              (entry) => entry.path === directory && entry.type === 'dir',
+            )
+          ) {
+            continue;
+          }
+
+          const result = await resolvedClient.getRepoDirectoryContentsResult(
             owner,
             repo,
-            path,
+            directory,
           );
-          if (result.status === 'NOT_FOUND') continue;
+          if (result.status !== 'OK') {
+            throw new Error(
+              `CommunityGatePolicyReadError: ${result.status} while listing ${directory}`,
+            );
+          }
+          directoryContents.set(directory, result.data);
+        }
+
+        const discoveredPaths = new Set<string>();
+        for (const entries of directoryContents.values()) {
+          for (const entry of entries) {
+            if (entry.type === 'file') discoveredPaths.add(entry.path);
+          }
+        }
+        const candidatePaths = COMMUNITY_GATE_POLICY_PATHS.filter((path) =>
+          discoveredPaths.has(path),
+        );
+        const policyResults = await Promise.all(
+          candidatePaths.map((path) =>
+            resolvedClient.getRepoTextFileResult(owner, repo, path),
+          ),
+        );
+        const policyFiles: Array<{ path: string; content: string }> = [];
+        for (let index = 0; index < candidatePaths.length; index++) {
+          const path = candidatePaths[index];
+          const result = policyResults[index];
           if (result.status !== 'OK') {
             throw new Error(
               `CommunityGatePolicyReadError: ${result.status} while reading ${path}`,

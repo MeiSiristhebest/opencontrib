@@ -1154,6 +1154,7 @@ function updateNativeTemplateIssueReference(
     const withoutPublicReferences = rewriteIssueReferences(
       content,
       undefined,
+      true,
     ).content;
     const section = findRelatedIssuesSection(withoutPublicReferences);
     return section

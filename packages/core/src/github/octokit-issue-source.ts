@@ -1,5 +1,11 @@
 import { Octokit } from '@octokit/rest';
-import type { ApiResult, ProviderIssue, RepoDetails, SearchIssuesResult } from './types.js';
+import type {
+  ApiResult,
+  ProviderIssue,
+  RepoDetails,
+  RepoDirectoryEntry,
+  SearchIssuesResult,
+} from './types.js';
 import type { ResponseCache } from '../ports/response-cache.port.js';
 import { requestWithRetry } from './retry-strategy.js';
 
@@ -275,6 +281,44 @@ export class OctokitIssueSource {
         state: issue.state === "open" ? "open" : "closed",
         htmlUrl: String(issue.html_url || ""),
       },
+    };
+  }
+
+  async getRepoDirectoryContentsResult(
+    owner: string,
+    repo: string,
+    path: string,
+  ): Promise<ApiResult<RepoDirectoryEntry[]>> {
+    const res = await this.request(async () => {
+      return await this.octokit.rest.repos.getContent({
+        owner,
+        repo,
+        path,
+      });
+    });
+
+    if (res.status !== 'OK' || !res.data) {
+      return {
+        status: res.status,
+        data: [],
+        error: res.error,
+        statusCode: res.statusCode,
+      };
+    }
+
+    const entries = res.data.data;
+    if (!Array.isArray(entries)) return { status: 'OK', data: [] };
+    return {
+      status: 'OK',
+      data: entries.flatMap((entry) => {
+        if (
+          (entry.type !== 'file' && entry.type !== 'dir') ||
+          typeof entry.path !== 'string'
+        ) {
+          return [];
+        }
+        return [{ path: entry.path, type: entry.type }];
+      }),
     };
   }
 

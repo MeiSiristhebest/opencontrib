@@ -332,6 +332,7 @@ describe("Governance audit impact context", () => {
       mkdirSync(join(repoPath, "src"), { recursive: true });
       writeFileSync(join(repoPath, "src", "parser.ts"), "export const parser = 1;\n");
       writeFileSync(join(repoPath, "src", "hunk.ts"), "export type Hunk = {};\n");
+      writeFileSync(join(repoPath, "src", "types.ts"), "export type Node = {};\n");
       execFileSync("git", ["init"], { cwd: repoPath, stdio: "ignore" });
       execFileSync("git", ["config", "user.email", "test@example.com"], {
         cwd: repoPath,
@@ -362,11 +363,16 @@ describe("Governance audit impact context", () => {
         { baseCommitSha, patchPath: "src/parser.ts" },
       );
 
+      const impactIssues = audit.auditResult.impactAnalysisIssues ?? [];
       expect(
-        audit.auditResult.impactAnalysisIssues?.some((issue: string) =>
-          issue.includes("src/hunk.ts"),
-        ),
+        impactIssues.some((issue: string) => issue.includes("'src/hunk.ts'")),
       ).toBe(true);
+      expect(
+        impactIssues.some((issue: string) => issue.includes("'src/types.ts'")),
+      ).toBe(true);
+      expect(impactIssues.every((issue: string) => !issue.includes("\0"))).toBe(
+        true,
+      );
       expect(audit.auditResult.impactAnalysisPassed).toBe(true);
     } finally {
       rmSync(baseDir, { recursive: true, force: true });

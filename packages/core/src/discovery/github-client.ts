@@ -5,11 +5,10 @@ import { CredentialsProvider } from "../ports/credentials-provider.port.js";
 import { ResponseCache } from "../ports/response-cache.port.js";
 import type {
   ApiResult,
-  ApiStatus,
   GitHubClientOptions,
-  IssueOrOpportunity,
   ProviderIssue,
   RepoDetails,
+  RepoDirectoryEntry,
   SearchIssuesResult,
 } from "../github/types.js";
 
@@ -22,6 +21,7 @@ export type {
   IssueOrOpportunity,
   ProviderIssue,
   RepoDetails,
+  RepoDirectoryEntry,
   SearchIssuesResult,
 } from "../github/types.js";
 
@@ -130,6 +130,14 @@ export class GitHubClient {
     input: { title: string; body: string },
   ): Promise<ApiResult<ProviderIssue>> {
     return this.source.createIssue(owner, repo, input);
+  }
+
+  getRepoDirectoryContentsResult(
+    owner: string,
+    repo: string,
+    path: string,
+  ): Promise<ApiResult<RepoDirectoryEntry[]>> {
+    return this.source.getRepoDirectoryContentsResult(owner, repo, path);
   }
 
   getRepoTextFileResult(
