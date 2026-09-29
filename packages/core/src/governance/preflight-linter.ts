@@ -28,6 +28,8 @@ const LINT_VIOLATION_PATTERNS = [
   /^\s*(?:[a-zA-Z0-9_\-./\\]+\.(?:py|ts|tsx|js|jsx|go|rs|cs|java|c|cpp|h)):(\d+):(?:\d+:)?\s*(?:[A-Z]\d+|error\b|warning\b|convention\b|refactor\b)[:\s]\s*(.+)/im,
   // ESLint / Biome: /path/to/file.ts:12:34: error: message [rule-name]
   /^\s*(?:[a-zA-Z0-9_\-./\\]+\.(?:ts|tsx|js|jsx|vue|svelte)):(\d+):(\d+)\s+(?:error|warning)\s+(.+)/im,
+  // ESLint's stylish formatter puts the filename on a separate line.
+  /^\s*\d+:\d+\s+(?:error|warning)\s+.+/i,
   // Black / Prettier: would reformat / Code style issues found in
   /(?:would reformat\s+([^\r\n]+)|Code style issues found in\s+([^\r\n]+))/i,
   // Go / golangci-lint: file.go:12:34: message (linter-name)
@@ -73,6 +75,17 @@ export async function runPreflightLintCheck(
 ): Promise<PreflightLintResult> {
   const { workspaceRoot, timeoutMs = 60000 } = options;
 
+  if (!existsSync(workspaceRoot)) {
+    return {
+      executed: false,
+      passed: false,
+      rawOutput: '',
+      violationCount: 1,
+      violations: [`Workspace root does not exist: ${workspaceRoot}`],
+      summary: `Pre-flight lint gate is unavailable because workspace root '${workspaceRoot}' does not exist.`,
+    };
+  }
+
   let commandToRun = options.lintCommand?.trim();
 
   // If no explicit lint command was provided, detect automatically from repository manifest
@@ -96,12 +109,11 @@ export async function runPreflightLintCheck(
 
   try {
     const spec = parseCommandSpec(commandToRun);
-    const execResult = defaultSandboxRuntime.executeInSandbox({
+    const execResult = await defaultSandboxRuntime.executeAsync({
       cwd: workspaceRoot,
       workspaceRoot,
       commandSpec: spec,
       timeoutMs,
-      allowHostFallback: true,
     });
 
     const rawOutput = execResult.output || '';

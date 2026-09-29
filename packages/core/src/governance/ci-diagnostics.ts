@@ -62,7 +62,7 @@ function isLintStyleDiagnostic(line: string): boolean {
   // Python Flake8: path/file.py:12:34: E501 line too long
   if (/^\s*[^\s:]+\.py:\d+:\d+:\s*(?:[FEW]\d+|C\d+|N\d+)\s+/i.test(line)) return true;
   // ESLint / Biome: path/file.ts:12:34: error: ...
-  if (/^\s*[^\s:]+\.[cm]?[jt]sx?:\d+:\d+:\s*(?:error|warning)\s+/i.test(line)) return true;
+  if (/^\s*[^\s:]+\.[cm]?[jt]sx?:\d+:\d+:\s*error\s+/i.test(line)) return true;
   // Black / Prettier: would reformat / Code style issues
   if (/^\s*would reformat\s+/i.test(line) || /Code style issues found in/i.test(line)) return true;
   // Isort: Imports are incorrectly sorted

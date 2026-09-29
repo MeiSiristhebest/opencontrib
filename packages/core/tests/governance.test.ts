@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
-  auditGovernance,
+  auditGovernance as auditGovernanceRaw,
   calculateConfidenceScore,
   lintAntiAiText,
   lintAssertionQuality,
@@ -8,6 +8,16 @@ import {
   renderMasterPrTemplate,
 } from "../src/governance/index.js";
 import { isSupportingFile } from "../src/governance/governance-auditor.js";
+
+const auditGovernance: typeof auditGovernanceRaw = (input) =>
+  auditGovernanceRaw({
+    preflightLintResult: {
+      executed: true,
+      passed: true,
+      summary: "Test fixture lint check passed.",
+    },
+    ...input,
+  });
 
 describe("Governance & Anti-AI Audit Engine", () => {
   it("detects forbidden AI phrases in text", () => {

@@ -76,6 +76,7 @@ import { EvidenceService } from "../evidence/evidence-service.js";
 import { computeSourceTreeHash } from "../evidence/evidence-collector.js";
 import { runBranchName } from "../run/run-branch.js";
 import { GovernanceService } from "../governance/governance-service.js";
+import { runPreflightLintCheck } from "../governance/preflight-linter.js";
 import { SubmissionIntentService } from "../submission/submission-intent-service.js";
 import { IssueBindingService } from "../github/issue-binding-service.js";
 import {
@@ -791,9 +792,13 @@ export async function seedScriptedAgent(
   if (options.fullAgentChain) {
     // Full agent-side chain: host re-executes GREEN; the agent's own local
     // GREEN + governance + intent are what the CLI/MCP submission path needs.
+    const preflightLintResult = await runPreflightLintCheck({
+      workspaceRoot: agentWs,
+    });
     const audit = new GovernanceService(agentRunManager).audit(manifest.runId, {
       prTitle: patch.title,
       prBody: fixture.prDraft,
+      preflightLintResult,
       // The harness stands in for the external subagent quality review the
       // pipeline normally obtains before governance; without a recorded
       // review the style/security dimensions degrade and the technical

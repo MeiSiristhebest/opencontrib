@@ -1287,11 +1287,24 @@ export class PrSubmissionStep implements PipelineStep {
 
       const { GovernanceService } =
         await import("../../governance/governance-service.js");
+      const { runPreflightLintCheck } =
+        await import("../../governance/preflight-linter.js");
+      const auditRun = runManager.getRun(runId);
+      const workspacePath = (
+        auditRun?.artifacts.workspace as
+          | { workspacePath?: unknown }
+          | undefined
+      )?.workspacePath;
+      const preflightLintResult = await runPreflightLintCheck({
+        workspaceRoot:
+          typeof workspacePath === "string" ? workspacePath : "",
+      });
       const governanceService = new GovernanceService(runManager);
       governanceService.audit(runId, {
         prTitle: `fix: ${selectedOpp.title}`,
         prBody: prDraftText,
         subagentScore: qualityRubric.overallScore,
+        preflightLintResult,
       });
 
       const { SubmissionIntentService } =

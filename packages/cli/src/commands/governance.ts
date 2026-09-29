@@ -11,6 +11,7 @@ import {
   buildContributionRunManager,
   detectCommunityGate,
   getOpenContribDataDir,
+  runPreflightLintCheck,
   ActiveSessionManager,
   type ContributionRunManager,
 } from "@opencontrib/core";
@@ -211,6 +212,19 @@ const auditCommand = new Command("audit")
           }
         }
 
+        const auditRun = runId ? getRunManager().getRun(runId) : undefined;
+        const workspaceRoot = runId
+          ? (
+              auditRun?.artifacts.workspace as
+                | { workspacePath?: unknown }
+                | undefined
+            )?.workspacePath
+          : process.cwd();
+        const preflightLintResult = await runPreflightLintCheck({
+          workspaceRoot:
+            typeof workspaceRoot === "string" ? workspaceRoot : "",
+        });
+
         const audit = auditGovernance({
           patchContent,
           prTitle: opts.prTitle,
@@ -225,6 +239,7 @@ const auditCommand = new Command("audit")
           },
           subagentQualityScore: opts.subagentScore,
           isAutonomousPrSubmission: opts.isAutonomous ?? false,
+          preflightLintResult,
         });
 
         let canonicalDecision: any;
@@ -245,6 +260,7 @@ const auditCommand = new Command("audit")
             resourceLeakPolicy: {
               required: opts.requireResourceLeakCheck ?? false,
             },
+            preflightLintResult,
           });
           // When running against a tracked run, the authoritative GovernanceService decision is the source of truth
           isPassed = Boolean(canonicalDecision?.passed);

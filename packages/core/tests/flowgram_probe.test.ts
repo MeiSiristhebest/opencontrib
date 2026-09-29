@@ -71,6 +71,11 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
         styleMatch: 95,
         securityAudit: 95,
       },
+      preflightLintResult: {
+        executed: true,
+        passed: true,
+        summary: "Fixture lint check passed.",
+      },
     });
 
     expect(audit.isGatedPassed).toBe(true);

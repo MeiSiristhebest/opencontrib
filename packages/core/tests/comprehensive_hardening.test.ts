@@ -17,10 +17,9 @@ import {
   auditGovernance,
   renderMasterPrTemplate,
 } from '../src/domain/governance.js';
-import {
-  parseCiRawLogs,
-  type CiFailureCategory,
-} from '../src/governance/ci-diagnostics.js';
+import { parseCiRawLogs } from '../src/governance/ci-diagnostics.js';
+import { getOpenContribDataDir } from '../src/kernel/home.js';
+import { defaultSandboxRuntime } from '../src/sandbox/sandbox-runtime.js';
 import type { UserProfile } from '../src/contracts/schemas.js';
 
 describe('Comprehensive Industrial Hardening Suite', () => {
@@ -57,6 +56,35 @@ describe('Comprehensive Industrial Hardening Suite', () => {
         expect(historical.has('microsoft/flaml#9999')).toBe(false);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('uses canonical persistent storage and the opportunity repository for deduplication', () => {
+      const home = mkdtempSync(join(tmpdir(), 'oc-scout-home-'));
+      const previousHome = process.env.OPENCONTRIB_HOME;
+      try {
+        process.env.OPENCONTRIB_HOME = home;
+        const runDir = join(getOpenContribDataDir(), 'runs', 'org-run');
+        mkdirSync(runDir, { recursive: true });
+        writeFileSync(
+          join(runDir, 'opportunity.json'),
+          JSON.stringify({
+            target: 'microsoft',
+            topOpportunity: {
+              repoFullName: 'microsoft/FLAML',
+              issueNumber: 1614,
+            },
+          }),
+        );
+
+        expect(collectHistoricalRunIssues().has('microsoft/flaml#1614')).toBe(
+          true,
+        );
+        expect(collectHistoricalRunIssues().has('microsoft#1614')).toBe(false);
+      } finally {
+        if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+        else process.env.OPENCONTRIB_HOME = previousHome;
+        rmSync(home, { recursive: true, force: true });
       }
     });
 
@@ -145,7 +173,26 @@ describe('Comprehensive Industrial Hardening Suite', () => {
         writeFileSync(join(tempDir, '.pre-commit-config.yaml'), 'repos: []\n');
         rmSync(join(tempDir, '.flake8'));
         const preCommitCommands = detectRunnableCommandsFromDir(tempDir);
-        expect(preCommitCommands.lintCommand).toBe('pre-commit run --all-files');
+        expect(preCommitCommands.lintCommand).toBe('ruff check .');
+
+        writeFileSync(
+          join(tempDir, '.pre-commit-config.yaml'),
+          'repos:\n  - repo: local\n    hooks:\n      - id: lint\n        name: lint\n        entry: ruff check .\n        language: system\n',
+        );
+        expect(detectRunnableCommandsFromDir(tempDir).lintCommand).toBe(
+          'pre-commit run --all-files',
+        );
+
+        const nodeProject = join(tempDir, 'node-project');
+        mkdirSync(nodeProject, { recursive: true });
+        writeFileSync(
+          join(nodeProject, 'package.json'),
+          JSON.stringify({ scripts: { test: 'node test.js' } }),
+        );
+        writeFileSync(join(nodeProject, 'GNUmakefile'), 'lint:\n\techo lint\n');
+        expect(detectRunnableCommandsFromDir(nodeProject).lintCommand).toBe(
+          'make lint',
+        );
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
@@ -165,6 +212,41 @@ flaml/automl/task/ts_forecast.py:240:80: E501 line too long (88 > 79 characters)
       const blackViolations = extractLintViolations(blackOutput);
       expect(blackViolations.length).toBe(1);
       expect(blackViolations[0]).toContain('would reformat src/main.py');
+
+      const eslintOutput = `src/main.ts\n  1:1  warning  Unexpected console statement  no-console\n\u2716 1 problem (0 errors, 1 warning)`;
+      const eslintViolations = extractLintViolations(eslintOutput);
+      expect(eslintViolations).toHaveLength(1);
+      expect(eslintViolations[0]).toContain('1:1  warning');
+    });
+
+    it('uses asynchronous sandbox execution for preflight lint commands', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-lint-async-'));
+      const originalExecuteAsync = defaultSandboxRuntime.executeAsync;
+      let usedAsyncExecutor = false;
+      defaultSandboxRuntime.executeAsync = async () => {
+        usedAsyncExecutor = true;
+        return {
+          command: 'lint',
+          exitCode: 0,
+          passed: true,
+          stdout: '',
+          stderr: '',
+          output: '',
+          isSandboxed: true,
+          isolationWarnings: [],
+        };
+      };
+      try {
+        const result = await runPreflightLintCheck({
+          workspaceRoot: tempDir,
+          lintCommand: 'lint',
+        });
+        expect(usedAsyncExecutor).toBe(true);
+        expect(result.passed).toBe(true);
+      } finally {
+        defaultSandboxRuntime.executeAsync = originalExecuteAsync;
+        rmSync(tempDir, { recursive: true, force: true });
+      }
     });
 
     it('enforces preflight lint failure in governance technical audit gate', () => {
@@ -213,6 +295,26 @@ flaml/automl/task/ts_forecast.py:240:80: E501 line too long (88 > 79 characters)
       expect(failResult.technicalGate?.passed).toBe(false);
       expect(failResult.preflightLintPassed).toBe(false);
       expect(failResult.remediationSuggestions.some((s) => s.includes('Pre-Flight Lint Gate'))).toBe(true);
+
+      const unavailableResult = auditGovernance({
+        diffText: 'const x = 1;',
+        prBodyText: 'Fixes bug cleanly.',
+        confidenceBreakdown: {
+          rootCause: 95,
+          implementation: 95,
+          regression: 90,
+          defensiveCoverage: 90,
+          testCoverage: 90,
+          styleMatch: 95,
+          securityAudit: 95,
+        },
+        lineCount: 10,
+      });
+      expect(unavailableResult.preflightLintPassed).toBe(false);
+      expect(unavailableResult.technicalGate?.passed).toBe(false);
+      expect((unavailableResult.preflightLintIssues ?? []).join(' ')).toContain(
+        'result is unavailable',
+      );
     });
   });
 
@@ -226,6 +328,13 @@ flaml/automl/task/ts_forecast.py:240:80: E501 line too long (88 > 79 characters)
       const report = parseCiRawLogs(log);
       expect(report.failureCategory).toBe('INFRASTRUCTURE_OR_PERMISSIONS');
       expect(report.recommendedAction).toContain('upstream infrastructure privilege limitation on fork PRs');
+    });
+
+    it('does not classify non-fatal ESLint warnings as CI failures', () => {
+      const report = parseCiRawLogs(`src/main.ts:1:1: warning Unexpected console statement`);
+      expect(report.hasFailure).toBe(false);
+      expect(report.failureCategory).toBe('NONE');
+      expect(report.lintErrors).toHaveLength(0);
     });
 
     it('accurately categorizes flake8/lint errors as LINT_STYLE_FAILURE', () => {

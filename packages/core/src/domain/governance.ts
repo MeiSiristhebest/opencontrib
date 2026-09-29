@@ -800,15 +800,16 @@ export function auditGovernance(
   }
 
   // 3c. Upstream Pre-Flight Lint & Code Style Gate Check
-  let preflightLintPassed = true;
+  let preflightLintPassed = input.preflightLintResult?.passed === true;
   const preflightLintIssues: string[] = [];
-  if (input.preflightLintResult && input.preflightLintResult.executed) {
-    preflightLintPassed = input.preflightLintResult.passed;
-    if (!preflightLintPassed) {
-      preflightLintIssues.push(input.preflightLintResult.summary);
-      if (input.preflightLintResult.violations?.length) {
-        preflightLintIssues.push(...input.preflightLintResult.violations);
-      }
+  if (!input.preflightLintResult) {
+    preflightLintIssues.push(
+      'Pre-flight lint result is unavailable; the required check was not supplied.',
+    );
+  } else if (!preflightLintPassed) {
+    preflightLintIssues.push(input.preflightLintResult.summary);
+    if (input.preflightLintResult.violations?.length) {
+      preflightLintIssues.push(...input.preflightLintResult.violations);
     }
   }
 

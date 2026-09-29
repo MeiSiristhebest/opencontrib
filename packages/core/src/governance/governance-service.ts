@@ -18,6 +18,7 @@ import {
   type TrustedPolicySnapshot,
 } from "../kernel/config.js";
 import { hashCommunityGateSnapshot } from "./community-gate.js";
+import type { PreflightLintResult } from "./preflight-linter.js";
 
 export interface GovernanceAuditRunOptions {
   /** Human-readable title to audit and bind to the later SubmissionIntent. */
@@ -28,6 +29,8 @@ export interface GovernanceAuditRunOptions {
   resourceLeakPolicy?: import("../domain/governance.js").ResourceLeakPolicy;
   isAutonomous?: boolean;
   subagentScore?: number;
+  /** Result from the caller's pre-flight lint check; omission fails closed. */
+  preflightLintResult?: PreflightLintResult;
 }
 
 function hash(value: unknown): string {
@@ -279,6 +282,7 @@ export class GovernanceService {
           ? undefined
           : Math.min(100, communityGate.policy.maxDiffCeiling),
       subagentQualityScore: options.subagentScore,
+      preflightLintResult: options.preflightLintResult,
     });
 
     const policySha256 = hashTrustedPolicySnapshot(effectivePolicySnapshot);

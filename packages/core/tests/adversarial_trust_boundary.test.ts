@@ -265,6 +265,15 @@ function seedGovernanceReadyRun(
     prTitle: "fix: bug",
     prBody: body,
     subagentScore: 100,
+    preflightLintResult: {
+      executed: true,
+      passed: true,
+      exitCode: 0,
+      rawOutput: "",
+      violationCount: 0,
+      violations: [],
+      summary: "Fixture lint check passed.",
+    },
     ...options.auditOptions,
   });
 }

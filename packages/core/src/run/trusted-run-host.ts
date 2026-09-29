@@ -4,6 +4,7 @@ import {
   SubmissionIntentArtifactSchema,
 } from "../contracts/schemas.js";
 import { GovernanceService } from "../governance/governance-service.js";
+import { runPreflightLintCheck } from "../governance/preflight-linter.js";
 import { SubmissionIntentService } from "../submission/submission-intent-service.js";
 import {
   IssueBindingProviderLookupError,
@@ -321,9 +322,13 @@ export class TrustedRunMaterializer {
       );
       const title =
         patch.title || bundle.manifest.issueTitle || "chore: contribution";
+      const preflightLintResult = await runPreflightLintCheck({
+        workspaceRoot: workspace.context.workspacePath,
+      });
       new GovernanceService(this.runManager).audit(bundle.manifest.runId, {
         prTitle: title,
         prBody: bundle.prDraft,
+        preflightLintResult,
       });
 
       return await this.finalizeGovernanceReadyRun(bundle.manifest.runId);

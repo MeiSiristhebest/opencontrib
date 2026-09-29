@@ -320,6 +320,15 @@ function seedGovernanceReadyRun(
     prTitle: "fix: bug",
     prBody: body,
     subagentScore: 100,
+    preflightLintResult: {
+      executed: true,
+      passed: true,
+      exitCode: 0,
+      rawOutput: "",
+      violationCount: 0,
+      violations: [],
+      summary: "Fixture lint check passed.",
+    },
   });
   return audit;
 }
@@ -1856,6 +1865,15 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         prTitle: "fix: bug",
         prBody: "body2",
         subagentScore: 100,
+        preflightLintResult: {
+          executed: true,
+          passed: true,
+          exitCode: 0,
+          rawOutput: "",
+          violationCount: 0,
+          violations: [],
+          summary: "Fixture lint check passed.",
+        },
       });
 
       // Calling createIntent with baseBranch 'main' must fail because workspace was prepared on 'develop'
@@ -2033,6 +2051,15 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         prTitle: "fix: bug",
         prBody: "pr body",
         subagentScore: 100,
+        preflightLintResult: {
+          executed: true,
+          passed: true,
+          exitCode: 0,
+          rawOutput: "",
+          violationCount: 0,
+          violations: [],
+          summary: "Fixture lint check passed.",
+        },
       });
 
       const intentService = new SubmissionIntentService(manager);

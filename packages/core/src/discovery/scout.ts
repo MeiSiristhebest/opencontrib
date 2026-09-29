@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { getOpenContribDataDir } from '../kernel/home.js';
 import type {
   Opportunity,
   UserProfile,
@@ -41,7 +42,7 @@ export function collectHistoricalRunIssues(runsDir?: string): Set<string> {
   const issues = new Set<string>();
   const targetDir = runsDir
     ? resolve(runsDir)
-    : resolve(process.cwd(), '.opencontrib', 'runs');
+    : resolve(getOpenContribDataDir(), 'runs');
   if (!existsSync(targetDir)) {
     return issues;
   }
@@ -58,6 +59,7 @@ export function collectHistoricalRunIssues(runsDir?: string): Set<string> {
           const raw = JSON.parse(readFileSync(fpath, 'utf8'));
           const repo =
             raw.problemContext?.repoFullName ||
+            raw.topOpportunity?.repoFullName ||
             raw.repoFullName ||
             raw.manifest?.repoFullName ||
             raw.targetRepo ||

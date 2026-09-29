@@ -276,14 +276,29 @@ export function detectRunnableCommandsFromDir(dirPath: string): RunnableCommands
       detectCompiledEcosystemCommands(files, dirPath, commands);
     }
 
-    // Pre-commit hook configurations override or augment repo-wide linting
-    if (files.includes('.pre-commit-config.yaml') || files.includes('.pre-commit-config.yml')) {
+    // A pre-commit config only replaces repository linting when it defines hooks.
+    const preCommitConfigName = [
+      '.pre-commit-config.yaml',
+      '.pre-commit-config.yml',
+    ].find((name) => files.includes(name));
+    let hasPreCommitHooks = false;
+    if (preCommitConfigName) {
+      try {
+        const config = readFileSync(join(dirPath, preCommitConfigName), 'utf-8');
+        hasPreCommitHooks = /^\s*-\s+(?:repo|id):\s*\S+/m.test(config);
+      } catch {}
+    }
+    if (hasPreCommitHooks) {
       commands.lintCommand = 'pre-commit run --all-files';
-    } else if (!commands.lintCommand) {
-      if (files.includes('Makefile') || files.includes('makefile')) {
+    }
+
+    if (!commands.lintCommand) {
+      const makefileName = ['Makefile', 'makefile', 'GNUmakefile'].find((name) =>
+        files.includes(name),
+      );
+      if (makefileName) {
         try {
-          const mkPath = join(dirPath, files.includes('Makefile') ? 'Makefile' : 'makefile');
-          const mkContent = readFileSync(mkPath, 'utf-8');
+          const mkContent = readFileSync(join(dirPath, makefileName), 'utf-8');
           if (/^lint\s*:/m.test(mkContent)) {
             commands.lintCommand = 'make lint';
           }
