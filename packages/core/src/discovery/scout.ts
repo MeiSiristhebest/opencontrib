@@ -19,6 +19,9 @@ import {
   scoreCandidateIssue,
 } from './scoring-engine.js';
 
+// The Contents API caps directory listings at 1,000 entries; a full listing may omit policy paths.
+const MAX_GITHUB_DIRECTORY_ENTRIES = 1000;
+
 const COMMUNITY_POLICY_DIRECTORIES = Array.from(
   new Set(
     COMMUNITY_GATE_POLICY_PATHS.map((policyPath) => {
@@ -228,8 +231,13 @@ export async function scoutOpportunities(
             if (entry.type === 'file') discoveredPaths.add(entry.path);
           }
         }
-        const candidatePaths = COMMUNITY_GATE_POLICY_PATHS.filter((path) =>
-          discoveredPaths.has(path),
+        const hasPossiblyTruncatedDirectory = Array.from(
+          directoryContents.values(),
+        ).some(
+          (entries) => entries.length >= MAX_GITHUB_DIRECTORY_ENTRIES,
+        );
+        const candidatePaths = COMMUNITY_GATE_POLICY_PATHS.filter(
+          (path) => hasPossiblyTruncatedDirectory || discoveredPaths.has(path),
         );
         const policyResults = await Promise.all(
           candidatePaths.map((path) =>
@@ -240,6 +248,9 @@ export async function scoutOpportunities(
         for (let index = 0; index < candidatePaths.length; index++) {
           const path = candidatePaths[index];
           const result = policyResults[index];
+          if (result.status === 'NOT_FOUND' && !discoveredPaths.has(path)) {
+            continue;
+          }
           if (result.status !== 'OK') {
             throw new Error(
               `CommunityGatePolicyReadError: ${result.status} while reading ${path}`,

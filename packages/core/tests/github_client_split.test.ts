@@ -65,6 +65,7 @@ function createScoutFixture(options: {
   policyPath?: string;
   policyContent?: string;
   policyReadFails?: boolean;
+  directoryListingTruncated?: boolean;
   comments?: ScoutFixtureComment[];
 } = {}) {
   const now = new Date().toISOString();
@@ -119,6 +120,15 @@ function createScoutFixture(options: {
         directoryPath: string,
       ) => {
         directoryReads.push(directoryPath);
+        if (directoryPath === '' && options.directoryListingTruncated) {
+          return {
+            status: 'OK' as const,
+            data: Array.from({ length: 1000 }, (_, index) => ({
+              path: `unrelated-${index}.md`,
+              type: 'file' as const,
+            })),
+          };
+        }
         const policyIsPresent =
           options.policyContent !== undefined || options.policyReadFails;
         if (!policyIsPresent) return { status: 'OK' as const, data: [] };
@@ -476,6 +486,26 @@ describe('GitHubClient composition root seam', () => {
       '.github/PULL_REQUEST_TEMPLATE',
     ]);
     expect(fixture.policyReads).toEqual([policyPath]);
+  });
+
+  it('probes configured policy paths when a directory listing reaches the API cap', async () => {
+    const policyPath =
+      '.github/PULL_REQUEST_TEMPLATE/pull_request_template.md';
+    const fixture = createScoutFixture({
+      policyPath,
+      policyContent: 'New issues are auto-closed by default.',
+      directoryListingTruncated: true,
+    });
+
+    const opportunities = await scoutFixture(fixture.client);
+
+    expect(opportunities).toHaveLength(1);
+    expect(opportunities[0].communityGateStatus).toBe(
+      'REQUIRES_MAINTAINER_APPROVAL',
+    );
+    expect(fixture.directoryReads).toEqual(['']);
+    expect(fixture.policyReads).toHaveLength(COMMUNITY_GATE_POLICY_PATHS.length);
+    expect(fixture.policyReads).toContain(policyPath);
   });
 
   it('scoutOpportunities executes Tri-Route fallback to listRepoIssues when search returns 0 items', async () => {
