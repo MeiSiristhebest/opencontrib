@@ -20,11 +20,16 @@ export type RunContributionInput = Parameters<AgentOrchestrator['runPipeline']>[
  * tools construct this once and call `run` — the orchestrator, its pipeline
  * steps, and all injected ports remain an implementation detail behind it.
  */
-export class ContributionPipeline {
-  private orchestrator: AgentOrchestrator;
+type PipelineOrchestrator = Pick<AgentOrchestrator, 'runPipeline'>;
 
-  constructor(options: AgentOrchestratorOptions = {}) {
-    this.orchestrator = new AgentOrchestrator(options);
+export class ContributionPipeline {
+  private orchestrator: PipelineOrchestrator;
+
+  constructor(
+    options: AgentOrchestratorOptions = {},
+    orchestrator?: PipelineOrchestrator,
+  ) {
+    this.orchestrator = orchestrator ?? new AgentOrchestrator(options);
   }
 
   run(input: RunContributionInput): ReturnType<AgentOrchestrator['runPipeline']> {
