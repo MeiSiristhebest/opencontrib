@@ -106,6 +106,40 @@ diff --git a/src/launcher.ts b/src/launcher.ts
       expect(result.violations.some((v) => v.rule === 'ABSOLUTE_ENVIRONMENT_PATH')).toBe(true);
     });
 
+    it('allows URL routes without treating them as machine-local paths', () => {
+      const routePatch = `
+diff --git a/src/routes.ts b/src/routes.ts
+--- a/src/routes.ts
++++ b/src/routes.ts
+@@ -0,0 +1 @@
++const routePath = "/api/users";
+`;
+      const result = lintAntiHardcode(routePatch);
+
+      expect(result.isClean).toBe(true);
+      expect(result.violations).toEqual([]);
+    });
+
+    it('detects environment paths in ordinary string literals and calls', () => {
+      const uncPath = '\\\\build-server\\tools\\runner.exe';
+      const patch = `
+diff --git a/src/launcher.ts b/src/launcher.ts
+--- a/src/launcher.ts
++++ b/src/launcher.ts
+@@ -0,0 +1,2 @@
++const setting = "/var/lib/agent/config.json";
++exec(${JSON.stringify(uncPath)});
+`;
+      const result = lintAntiHardcode(patch);
+
+      expect(result.isClean).toBe(false);
+      expect(
+        result.violations.filter(
+          (violation) => violation.rule === 'ABSOLUTE_ENVIRONMENT_PATH',
+        ),
+      ).toHaveLength(2);
+    });
+
     it('allows repository names and sample paths inside test files without false positives', () => {
       const cleanTestPatch = `
 diff --git a/test/test_repo_service.py b/test/test_repo_service.py

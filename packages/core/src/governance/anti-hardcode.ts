@@ -239,11 +239,13 @@ function analyzeFileChanges(
         'i',
       )
     : undefined;
-  const absolutePathPattern = /^(?:[a-z]:[\\/]|\/(?!\/)|~[\\/])/i;
-  const pathAssignmentPattern =
-    /\b[\w$]*(?:path|file|dir|directory|bin|tool|cwd|root|workspace)[\w$]*\s*(?:=|:)\s*(__STR_\d+__)/i;
-  const pathCallPattern =
-    /\b(?:open|readFile|readFileSync|writeFile|writeFileSync|execFile|spawn|resolve)\s*\(\s*(__STR_\d+__)/i;
+  const absolutePathPatterns = [
+    /^[a-z]:[\\/]/i,
+    /^\\\\[^\\/]+[\\/][^\\/]+/,
+    /^~[\\/]/,
+    /^\/(?:home|root|tmp|var|etc|usr|opt|mnt|media|private|volumes|library|system|applications|workspace|workspaces|dev|proc|run|srv|bin|sbin|lib)(?:\/|$)/i,
+    /^\/Users(?:\/|$)/,
+  ];
 
   for (const record of records) {
     if (!record.added) continue;
@@ -286,10 +288,9 @@ function analyzeFileChanges(
       continue;
     }
 
-    const pathMatch = pathAssignmentPattern.exec(code) || pathCallPattern.exec(code);
-    if (pathMatch) {
-      const value = stringValues.get(pathMatch[1])?.replace(/\\\\/g, '\\');
-      if (value && absolutePathPattern.test(value.trim())) {
+    for (const pathToken of new Set(code.match(/__STR_\d+__/g) || [])) {
+      const value = stringValues.get(pathToken)?.replace(/\\\\/g, '\\').trim();
+      if (value && absolutePathPatterns.some((pattern) => pattern.test(value))) {
         addViolation(
           violations,
           filePath,
