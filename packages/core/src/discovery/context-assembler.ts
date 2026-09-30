@@ -502,6 +502,7 @@ export class ContextAssembler {
     ciWorkflow?: string;
     primaryLanguage?: string;
     workspacePath?: string;
+    runGit?: (args: string[]) => { success: boolean; stdout: string };
     skeletonFiles?: string[];
     doctorReport?: DoctorReport;
   }): AssembledContributionContext {
@@ -515,6 +516,7 @@ export class ContextAssembler {
       ciWorkflow,
       primaryLanguage = 'TypeScript',
       workspacePath,
+      runGit,
       skeletonFiles,
       doctorReport,
     } = input;
@@ -591,6 +593,7 @@ export class ContextAssembler {
         engineeringFingerprint = analyzeRepoEngineeringFingerprint({
           repoPath: workspacePath,
           repoFullName,
+          runGit,
         });
       } catch {}
     }
@@ -598,6 +601,7 @@ export class ContextAssembler {
     const combinatorialMatrix = generateCombinatorialMatrix({
       issueTitle,
       issueBody,
+      primaryLanguage,
     });
 
     // 5. Generate Exploration Guidance (suggested reading order, target tests, risk surface)
@@ -783,6 +787,7 @@ export class ContextAssembler {
       ciWorkflow: manifests.ciWorkflow,
       primaryLanguage: repoDetails.primaryLanguage || 'TypeScript',
       workspacePath: input.workspacePath,
+      runGit: input.runGit,
       skeletonFiles: virtualSkeleton.length > 0 ? virtualSkeleton : undefined,
     });
   }

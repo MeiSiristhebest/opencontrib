@@ -334,6 +334,7 @@ export class ContextAssemblyStep implements PipelineStep {
       issueTitle: selectedOpp.title,
       issueBody: selectedOpp.body,
       workspacePath: ctx.workspace?.workspacePath,
+      runGit: (args) => deps.worktreeManager.runGit(args),
     });
     const prompt = deps.contextAssembler.formatContextPrompt(assembledContext);
 

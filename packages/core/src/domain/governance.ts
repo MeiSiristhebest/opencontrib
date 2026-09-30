@@ -827,7 +827,9 @@ export function auditGovernance(
     antiHardcodePassed = hardcodeResult.isClean;
     if (!antiHardcodePassed) {
       flaggedHardcodeIssues.push(
-        ...hardcodeResult.violations.map((v) => `${v.file}: [${v.rule}] ${v.reason}`),
+        ...hardcodeResult.violations.map(
+          (v) => `${v.file}: [${v.rule}] ${v.reason} (line: ${v.line.trim()})`,
+        ),
       );
     }
   }

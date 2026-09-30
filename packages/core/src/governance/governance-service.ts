@@ -274,6 +274,8 @@ export class GovernanceService {
       patchContent,
       prTitle,
       prBody: prDraftRaw,
+      targetRepo: run.manifest.repoFullName,
+      issueNumber: run.manifest.issueNumber,
       evidence: evidenceArtifact as any,
       lineCount: validatedPatch.changedLines,
       coreDiffLines,

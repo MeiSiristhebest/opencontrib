@@ -37,6 +37,7 @@ export interface CombinatorialMatrixInput {
   diffText?: string;
   issueTitle?: string;
   issueBody?: string;
+  primaryLanguage?: string;
 }
 
 function detectDomain(input: CombinatorialMatrixInput): {
@@ -63,22 +64,9 @@ function detectDomain(input: CombinatorialMatrixInput): {
     };
   }
 
-  // Text Chunking / NLP / Tokenization detection
-  if (
-    /(?:chunk|chunker|split_lines|tokenizer|max_tokens|token_count|delimiter|paragraph|all_resolved|text_chunker)/i.test(
-      fullText,
-    )
-  ) {
-    return {
-      domain: 'text_chunking',
-      rationale:
-        'Detected text chunking or tokenization logic. Premature loop termination, delimiter starvation, and oversized unbroken text blocks are frequent defect sources.',
-    };
-  }
-
   // Concurrency / Stream / Async detection
   if (
-    /(?:mutex|lock|semaphore|channel|goroutine|async|await|deadlock|race|concurrent|workerpool|ebusy)/i.test(
+    /\b(?:mutex|locks?|semaphores?|channels?|goroutines?|async|await|asynchronous|deadlocks?|races?|concurrency|concurrent|worker[\s-]*pool|stream(?:s|ing)?|ebusy)\b/i.test(
       fullText,
     )
   ) {
@@ -89,10 +77,193 @@ function detectDomain(input: CombinatorialMatrixInput): {
     };
   }
 
+  // Text Chunking / NLP / Tokenization detection
+  if (
+    /\b(?:chunk(?:s|er|ing)?|split_lines|tokenizer|tokenization|nlp|max_tokens|token_count|delimiter|paragraph|all_resolved|text_chunker)\b/i.test(
+      fullText,
+    )
+  ) {
+    return {
+      domain: 'text_chunking',
+      rationale:
+        'Detected text chunking or tokenization logic. Premature loop termination, delimiter starvation, and oversized unbroken text blocks are frequent defect sources.',
+    };
+  }
+
   return {
     domain: 'general_data_structure',
     rationale:
       'Standard general data structure. Boundary cases like empty collections, single elements, null/undefined, and extreme scale must be verified.',
+  };
+}
+
+type MatrixTemplateLanguage = 'javascript' | 'python' | 'go' | 'rust' | 'generic';
+
+function templateLanguage(primaryLanguage?: string): MatrixTemplateLanguage {
+  const language = primaryLanguage?.toLowerCase() ?? '';
+  if (language.includes('python')) return 'python';
+  if (language === 'go' || language.includes('golang')) return 'go';
+  if (language.includes('rust')) return 'rust';
+  if (
+    language.includes('typescript') ||
+    language.includes('javascript') ||
+    language === 'ts' ||
+    language === 'js'
+  ) {
+    return 'javascript';
+  }
+  return primaryLanguage ? 'generic' : 'javascript';
+}
+
+function concurrencyTemplate(
+  language: MatrixTemplateLanguage,
+  highContention = true,
+): string {
+  const workerCount = highContention ? 20 : 1;
+  if (language === 'go') {
+    return `workerCount := ${workerCount}\nvar workers sync.WaitGroup\nfor i := 0; i < workerCount; i++ {\n  workers.Add(1)\n  go func() { defer workers.Done(); processNext() }()\n}\nworkers.Wait()\nif leakChecker.HasDanglingHandles() { t.Fatal("resource leak") }`;
+  }
+  if (language === 'rust') {
+    return `let tasks = make_tasks(${workerCount});\nlet workers: Vec<_> = tasks.into_iter().map(|task| std::thread::spawn(move || process(task))).collect();\nfor worker in workers { worker.join().expect("worker failed"); }\nassert!(!leak_checker.has_dangling_handles());`;
+  }
+  if (language === 'python') {
+    return `with ThreadPoolExecutor(max_workers=${workerCount}) as pool:\n    results = list(pool.map(process, tasks))\nassert not leak_checker.has_dangling_handles()`;
+  }
+  if (language === 'generic') {
+    return highContention
+      ? 'Run the work with multiple workers, wait for every worker to finish, then verify that no handles remain open.'
+      : 'Run the work with one worker, wait for it to finish, then verify that no handles remain open.';
+  }
+  return `// Run ${workerCount} worker(s), await every exit, and verify cleanup\nconst workers = tasks.slice(0, ${workerCount}).map((task) => spawnWorker(task));\nawait Promise.all(workers.map((worker) => worker.exit));\nexpect(leakChecker.hasDanglingHandles()).toBe(false);`;
+}
+
+function interruptedCleanupTemplate(language: MatrixTemplateLanguage): string {
+  if (language === 'python') {
+    return 'process = subprocess.Popen(command)\nprocess.terminate()\nprocess.wait(timeout=5)\nshutil.rmtree(test_dir)\nassert not os.path.exists(test_dir)';
+  }
+  if (language === 'go') {
+    return 'cmd := exec.CommandContext(ctx, command)\nif err := cmd.Start(); err != nil { t.Fatal(err) }\n_ = cmd.Process.Kill()\n_ = cmd.Wait()\nif err := os.RemoveAll(testDir); err != nil { t.Fatal(err) }';
+  }
+  if (language === 'rust') {
+    return 'let mut child = Command::new(command).spawn()?;\nchild.kill()?;\nlet _ = child.wait()?;\nstd::fs::remove_dir_all(&test_dir)?;\nassert!(!test_dir.exists());';
+  }
+  if (language === 'generic') {
+    return 'Start a child process, cancel it, wait for its exit, remove its temporary directory, and verify cleanup succeeds on Windows.';
+  }
+  return 'const child = spawn(command, args);\nconst exited = new Promise((resolve) => child.once("exit", resolve));\nchild.kill();\nawait exited;\nexpect(() => rmSync(testDir, { recursive: true })).not.toThrow();';
+}
+
+function emptyTextTemplate(language: MatrixTemplateLanguage): string {
+  if (language === 'python') {
+    return 'assert chunker.split_lines("", max_tokens=100) == []\nassert chunker.split_lines("\\n\\n\\n", max_tokens=100) == []';
+  }
+  if (language === 'go') {
+    return 'if got := chunker.SplitLines("", 100); len(got) != 0 { t.Fatalf("got %v", got) }\nif got := chunker.SplitLines("\\n\\n\\n", 100); len(got) != 0 { t.Fatalf("got %v", got) }';
+  }
+  if (language === 'rust') {
+    return 'assert!(chunker.split_lines("", 100).is_empty());\nassert!(chunker.split_lines("\\n\\n\\n", 100).is_empty());';
+  }
+  if (language === 'generic') {
+    return 'Verify that empty input and delimiter-only input return an empty result.';
+  }
+  return 'expect(chunker.splitLines("", 100)).toEqual([]);\nexpect(chunker.splitLines("\\n\\n\\n", 100)).toEqual([]);';
+}
+
+function generalBoundaryTemplates(language: MatrixTemplateLanguage): {
+  empty: string;
+  singleton: string;
+  assertions: string[];
+} {
+  if (language === 'python') {
+    return {
+      empty: 'assert handle_input([]) == []',
+      singleton: 'assert handle_input([single_item]) == [single_item]',
+      assertions: ['assert result is not None', 'assert handle_input([]) == []'],
+    };
+  }
+  if (language === 'go') {
+    return {
+      empty: 'if got := handleInput([]Item{}); len(got) != 0 { t.Fatalf("got %v", got) }',
+      singleton: 'if got := handleInput([]Item{singleItem}); len(got) != 1 { t.Fatalf("got %v", got) }',
+      assertions: [
+        'if result == nil { t.Fatal("result is nil") }',
+        'if got := handleInput([]Item{}); len(got) != 0 { t.Fatalf("got %v", got) }',
+      ],
+    };
+  }
+  if (language === 'rust') {
+    return {
+      empty: 'assert_eq!(handle_input(&[]), Vec::new())',
+      singleton: 'assert_eq!(handle_input(&[single_item]), vec![single_item])',
+      assertions: ['assert!(result.is_some())', 'assert_eq!(handle_input(&[]), Vec::new())'],
+    };
+  }
+  if (language === 'generic') {
+    return {
+      empty: 'Verify that handling an empty input returns an empty result.',
+      singleton: 'Verify that handling one item returns that item once.',
+      assertions: [
+        'Verify that a result is produced.',
+        'Verify that empty input completes without an exception.',
+      ],
+    };
+  }
+  return {
+    empty: 'expect(handleInput([])).toEqual([])',
+    singleton: 'expect(handleInput([singleItem])).toEqual([singleItem])',
+    assertions: [
+      'expect(result).toBeDefined()',
+      'expect(() => execute(emptyInput)).not.toThrow()',
+    ],
+  };
+}
+
+function textChunkingTemplate(language: MatrixTemplateLanguage): {
+  exactBoundary: string;
+  assertions: string[];
+} {
+  if (language === 'python') {
+    return {
+      exactBoundary: 'text = "Word " * max_tokens\nchunks = chunker.split_lines(text, max_tokens=max_tokens)\nassert all(token_len(chunk) <= max_tokens for chunk in chunks)',
+      assertions: [
+        'assert all(token_len(chunk) <= max_tokens for chunk in chunks), "Chunk exceeded max token bound"',
+        'assert "".join(chunks).replace(" ", "") == original.replace(" ", ""), "Data loss detected during chunking"',
+      ],
+    };
+  }
+  if (language === 'go') {
+    return {
+      exactBoundary: 'text := strings.Repeat("word ", maxTokens)\nchunks := chunker.SplitLines(text, maxTokens)\nfor _, chunk := range chunks { if tokenLen(chunk) > maxTokens { t.Fatal("chunk exceeded token bound") } }',
+      assertions: [
+        'for _, chunk := range chunks { if tokenLen(chunk) > maxTokens { t.Fatal("chunk exceeded token bound") } }',
+        'if strings.Join(chunks, "") != original { t.Fatal("chunking lost text") }',
+      ],
+    };
+  }
+  if (language === 'rust') {
+    return {
+      exactBoundary: 'let text = "word ".repeat(max_tokens);\nlet chunks = chunker.split_lines(&text, max_tokens);\nassert!(chunks.iter().all(|chunk| token_len(chunk) <= max_tokens));',
+      assertions: [
+        'assert!(chunks.iter().all(|chunk| token_len(chunk) <= max_tokens));',
+        'assert_eq!(chunks.concat(), original);',
+      ],
+    };
+  }
+  if (language === 'generic') {
+    return {
+      exactBoundary: 'Verify that input exactly at the token limit is accepted without being split unnecessarily.',
+      assertions: [
+        'Verify that no output chunk exceeds the configured token limit.',
+        'Verify that joining output chunks preserves the input text.',
+      ],
+    };
+  }
+  return {
+    exactBoundary: 'const text = "word ".repeat(maxTokens);\nconst chunks = chunker.splitLines(text, maxTokens);\nexpect(chunks.every((chunk) => tokenLen(chunk) <= maxTokens)).toBe(true);',
+    assertions: [
+      'expect(chunks.every((chunk) => tokenLen(chunk) <= maxTokens)).toBe(true)',
+      'expect(chunks.join("").replaceAll(" ", "")).toBe(original.replaceAll(" ", ""))',
+    ],
   };
 }
 
@@ -104,6 +275,7 @@ export function generateCombinatorialMatrix(
   input: CombinatorialMatrixInput,
 ): CombinatorialMatrixReport {
   const { domain, rationale } = detectDomain(input);
+  const language = templateLanguage(input.primaryLanguage);
 
   if (domain === 'tabular_time_series') {
     const dimensions: MatrixDimension[] = [
@@ -189,6 +361,18 @@ export function generateCombinatorialMatrix(
         riskSurface:
           'Temporal ordering must be respected without silent data corruption or invalid forward-fill.',
       },
+      {
+        scenarioId: 'PERIOD_FEATURE_POSITIONAL_TARGET',
+        description: 'Features use a PeriodIndex while the target is aligned positionally.',
+        variantCombination: {
+          FeatureFrameIndex: 'PeriodIndex',
+          TargetSeriesIndex: 'RangeIndex_positional',
+        },
+        testTemplateSnippet:
+          'X = pd.DataFrame({"val": values}, index=periods)\ny = pd.Series(target_values)\n# assert alignment is explicit and preserves the intended row order',
+        riskSurface:
+          'Implicitly aligning distinct index types can drop rows or pair feature and target values incorrectly.',
+      },
     ];
 
     return {
@@ -205,6 +389,7 @@ export function generateCombinatorialMatrix(
   }
 
   if (domain === 'text_chunking') {
+    const templates = textChunkingTemplate(language);
     const dimensions: MatrixDimension[] = [
       {
         name: 'TextScaleVsLimit',
@@ -254,7 +439,9 @@ export function generateCombinatorialMatrix(
           DelimiterDensity: 'NormalParagraphs',
         },
         testTemplateSnippet:
-          'text = ("Word " * 200) + "\\n\\n" + ("VeryLongContinuousString" * 50)\nchunks = chunker.split_lines(text, max_tokens=100)\nassert all(len(c) <= 100 for c in chunks)',
+          language === 'python'
+            ? 'max_tokens = 100\ntext = ("Word " * 200) + "\\n\\n" + ("VeryLongContinuousString" * 50)\nchunks = chunker.split_lines(text, max_tokens=max_tokens)\nassert all(token_len(chunk) <= max_tokens for chunk in chunks)'
+            : templates.exactBoundary,
         riskSurface:
           'Premature loop exit caused by returning all_resolved=True when a subsequent chunk was only partially partitioned.',
       },
@@ -266,8 +453,33 @@ export function generateCombinatorialMatrix(
           DelimiterDensity: 'ConsecutiveDelimiters',
         },
         testTemplateSnippet:
-          'assert chunker.split_lines("", max_tokens=100) == []\nassert chunker.split_lines("\\n\\n\\n", max_tokens=100) == []',
+          emptyTextTemplate(language),
         riskSurface: 'Off-by-one errors or infinite recursion on empty remainder strings.',
+      },
+      {
+        scenarioId: 'EXACT_TOKEN_BOUNDARY',
+        description: 'Input length is exactly the configured token limit.',
+        variantCombination: {
+          TextScaleVsLimit: 'ExactBoundary',
+          DelimiterDensity: 'NormalParagraphs',
+        },
+        testTemplateSnippet: templates.exactBoundary,
+        riskSurface: 'An inclusive limit may be handled as exclusive, causing unnecessary splitting or rejection.',
+      },
+      {
+        scenarioId: 'PUNCTUATION_ONLY_DELIMITERS',
+        description: 'Text can split only at punctuation delimiters without whitespace.',
+        variantCombination: {
+          TextScaleVsLimit: 'UnderLimit',
+          DelimiterDensity: 'SingleTokenDelimitersOnly',
+        },
+        testTemplateSnippet:
+          language === 'python'
+            ? 'text = "漢字。句子！次の文？"\nchunks = chunker.split_lines(text, max_tokens=100)\nassert "".join(chunks) == text'
+            : language === 'generic'
+              ? 'Verify that punctuation-only text splits or remains intact without losing characters.'
+              : 'const text = "漢字。句子！次の文？";\nconst chunks = chunker.splitLines(text, maxTokens);\nexpect(chunks.join("")).toBe(text);',
+        riskSurface: 'A delimiter tokenizer that assumes whitespace can drop or merge punctuation-only segments.',
       },
     ];
 
@@ -276,10 +488,7 @@ export function generateCombinatorialMatrix(
       domainRationale: rationale,
       dimensions,
       scenarios,
-      recommendedAssertions: [
-        'assert all(token_len(c) <= max_tokens for c in chunks), "Chunk exceeded max token bound"',
-        'assert "".join(chunks).replace(" ", "") == original.replace(" ", ""), "Data loss detected during chunking"',
-      ],
+      recommendedAssertions: templates.assertions,
     };
   }
 
@@ -318,19 +527,48 @@ export function generateCombinatorialMatrix(
             LifecycleInterruption: 'MidStreamAbort',
           },
           testTemplateSnippet:
-            '// Spawn subprocess, kill immediately, verify unlink does not throw EBUSY\nconst proc = spawn("...");\nproc.kill();\nawait waitForProcessExit(proc);\nrmSync(testDir, { recursive: true });',
+            interruptedCleanupTemplate(language),
           riskSurface:
             'Windows holding process handle open causing EBUSY unlink errors during test teardown.',
         },
+        {
+          scenarioId: 'SEQUENTIAL_GRACEFUL_COMPLETION',
+          description: 'One worker completes normally without cancellation or contention.',
+          variantCombination: {
+            WorkerConcurrency: 'SingleThread',
+            LifecycleInterruption: 'GracefulComplete',
+          },
+          testTemplateSnippet: concurrencyTemplate(language, false),
+          riskSurface: 'Normal completion should release resources and return every result exactly once.',
+        },
       ],
-      recommendedAssertions: [
-        'expect(leakChecker.hasDanglingHandles()).toBe(false)',
-        'expect(raceDetector.collisions).toBe(0)',
-      ],
+      recommendedAssertions:
+        language === 'go'
+          ? [
+              'if leakChecker.HasDanglingHandles() { t.Fatal("resource leak") }',
+              'if raceDetector.Collisions() != 0 { t.Fatal("race detected") }',
+            ]
+          : language === 'rust'
+            ? [
+                'assert!(!leak_checker.has_dangling_handles())',
+                'assert_eq!(race_detector.collisions(), 0)',
+              ]
+            : language === 'python'
+              ? [
+                  'assert not leak_checker.has_dangling_handles()',
+                  'assert race_detector.collisions == 0',
+                ]
+              : language === 'generic'
+                ? ['Verify that all workers finish.', 'Verify that no resource handles remain open.']
+                : [
+                    'expect(leakChecker.hasDanglingHandles()).toBe(false)',
+                    'expect(raceDetector.collisions).toBe(0)',
+                  ],
     };
   }
 
   // General boundary domain
+  const generalTemplates = generalBoundaryTemplates(language);
   return {
     domain,
     domainRationale: rationale,
@@ -361,7 +599,7 @@ export function generateCombinatorialMatrix(
           BoundaryScales: 'Empty',
           Nullability: 'NullOptionals',
         },
-        testTemplateSnippet: 'expect(handleInput([])).toEqual([])',
+        testTemplateSnippet: generalTemplates.empty,
         riskSurface: 'Unchecked index access [0] on empty collections.',
       },
       {
@@ -371,13 +609,29 @@ export function generateCombinatorialMatrix(
           BoundaryScales: 'Single',
           Nullability: 'FullyPopulated',
         },
-        testTemplateSnippet: 'expect(handleInput([singleItem])).toEqual([singleItem])',
+        testTemplateSnippet: generalTemplates.singleton,
         riskSurface: 'Loops expecting >1 item failing on single-element bounds.',
       },
+      {
+        scenarioId: 'EXTREME_SCALE',
+        description: 'A large input remains bounded and completes without exhausting resources.',
+        variantCombination: {
+          BoundaryScales: 'Extreme',
+          Nullability: 'FullyPopulated',
+        },
+        testTemplateSnippet:
+          language === 'generic'
+            ? 'Verify that processing more than 10,000 populated items completes within resource limits.'
+            : language === 'python'
+              ? 'result = handle_input(list(range(10_001)))\nassert len(result) == 10_001'
+              : language === 'go'
+                ? 'result := handleInput(makeItems(10_001))\nif len(result) != 10_001 { t.Fatalf("got %d", len(result)) }'
+                : language === 'rust'
+                  ? 'let items = (0..10_001).collect::<Vec<_>>();\nlet result = handle_input(&items);\nassert_eq!(result.len(), 10_001);'
+                  : 'const result = handleInput(Array.from({ length: 10_001 }, (_, i) => i));\nexpect(result).toHaveLength(10_001);',
+        riskSurface: 'Large inputs can reveal unbounded allocations, quadratic loops, or premature truncation.',
+      },
     ],
-    recommendedAssertions: [
-      'expect(result).toBeDefined()',
-      'expect(() => execute(emptyInput)).not.toThrow()',
-    ],
+    recommendedAssertions: generalTemplates.assertions,
   };
 }
