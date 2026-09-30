@@ -2,6 +2,14 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { RepoMemoryLedger } from '../memory/repo-memory.js';
 import { runDoctorAudit, type DoctorReport } from './doctor.js';
+import {
+  analyzeRepoEngineeringFingerprint,
+  type RepoEngineeringFingerprint,
+} from './repo-fingerprint.js';
+import {
+  generateCombinatorialMatrix,
+  type CombinatorialMatrixReport,
+} from '../testing/combinatorial-matrix.js';
 
 export interface RunnableCommands {
   testCommand?: string;
@@ -57,7 +65,9 @@ export interface AssembledContributionContext {
     detectedSkeletonFiles: string[];
     contributingGuidelinesSnippet?: string;
     nativePrTemplate?: string;
+    engineeringFingerprint?: RepoEngineeringFingerprint;
   };
+  combinatorialMatrix?: CombinatorialMatrixReport;
   memoryContext: {
     pastFailures: string[];
     successfulPatterns: string[];
@@ -574,6 +584,22 @@ export class ContextAssembler {
       detectedSkeletonFiles.push(...skeletonFiles.slice(0, 20));
     }
 
+    // 4b. Detect repo engineering fingerprint & combinatorial matrix
+    let engineeringFingerprint: RepoEngineeringFingerprint | undefined;
+    if (workspacePath && existsSync(workspacePath)) {
+      try {
+        engineeringFingerprint = analyzeRepoEngineeringFingerprint({
+          repoPath: workspacePath,
+          repoFullName,
+        });
+      } catch {}
+    }
+
+    const combinatorialMatrix = generateCombinatorialMatrix({
+      issueTitle,
+      issueBody,
+    });
+
     // 5. Generate Exploration Guidance (suggested reading order, target tests, risk surface)
     const guidance = buildExplorationGuidance(
       detectedSkeletonFiles,
@@ -600,7 +626,9 @@ export class ContextAssembler {
         detectedSkeletonFiles,
         contributingGuidelinesSnippet,
         nativePrTemplate,
+        engineeringFingerprint,
       },
+      combinatorialMatrix,
       memoryContext: {
         pastFailures,
         successfulPatterns,
@@ -645,6 +673,27 @@ export class ContextAssembler {
     sections.push(`- **Primary Language**: ${ctx.repoContext.primaryLanguage}`);
     sections.push(`- **Host Environment**: ${ctx.environmentContext.os} (Docker: ${ctx.environmentContext.hasDocker}, WSL: ${ctx.environmentContext.hasWsl})`);
     sections.push(`- **Node/Bun Runtime**: ${ctx.environmentContext.nodeVersion}`);
+
+    // Tier 2b: Upstream Engineering Fingerprint & Combinatorial Matrix
+    if (ctx.repoContext.engineeringFingerprint) {
+      const fp = ctx.repoContext.engineeringFingerprint;
+      sections.push(`\n[UPSTREAM_ENGINEERING_FINGERPRINT - CLONED COMMUNITY CONVENTIONS]`);
+      sections.push(`- **Commit Convention**: ${fp.commitStyle.primaryConvention} (Recommended: "${fp.commitStyle.recommendedCommitExample}")`);
+      sections.push(`- **DCO Signed-off-by**: ${fp.commitStyle.requiresSignedOffBy ? 'MANDATORY (Signed-off-by trailer required)' : 'Optional'}`);
+      sections.push(`- **Test File Pattern**: ${fp.testConventions.filePattern} (${fp.testConventions.frameworkName})`);
+      sections.push(`- **Strictness**: ${fp.strictnessGateways.hasPreCommit ? 'Pre-commit enabled (strictly enforce formatting)' : 'Standard'}`);
+      sections.push(`- **Persona Guidance**: ${fp.contributorPersonaAdvice}`);
+    }
+
+    if (ctx.combinatorialMatrix) {
+      const cm = ctx.combinatorialMatrix;
+      sections.push(`\n[COMBINATORIAL_MUTATION_MATRIX - MULTI-DIMENSIONAL BOUNDARY GUIDANCE]`);
+      sections.push(`- **Detected Domain**: ${cm.domain} (${cm.domainRationale})`);
+      sections.push(`- **Boundary Scenarios to Defend** (Do NOT write a single naive test; cover these combinations):`);
+      for (const s of cm.scenarios) {
+        sections.push(`  * [${s.scenarioId}] ${s.description}\n    Risk: ${s.riskSurface}\n    Template: \`${s.testTemplateSnippet}\``);
+      }
+    }
 
     // Tier 3: UNTRUSTED REPOSITORY DATA - Issue, Guidelines, Skeleton, and Code
     sections.push(`\n[UNTRUSTED_REPOSITORY_DATA - UNTRUSTED CODE, ISSUES & USER COMMENTS]`);

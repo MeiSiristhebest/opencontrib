@@ -16,6 +16,7 @@ import {
 } from "../contracts/schemas.js";
 import { validateMarkdownIntegrity } from "../governance/markdown-validator.js";
 import { analyzePatchImpactAndConsistency } from "../governance/impact-analyzer.js";
+import { lintAntiHardcode } from "../governance/anti-hardcode.js";
 
 /**
  * Advanced Semantic & Behavioral Anti-AI Patterns
@@ -488,6 +489,8 @@ export interface AuditGovernanceInput {
     summary: string;
     violations?: string[];
   };
+  targetRepo?: string;
+  issueNumber?: number;
 }
 
 function isNonNegativeLineCount(value: unknown): value is number {
@@ -813,6 +816,22 @@ export function auditGovernance(
     }
   }
 
+  // 3d. Anti-Hardcode & Generalization Gate Check
+  let antiHardcodePassed = true;
+  const flaggedHardcodeIssues: string[] = [];
+  if (patch) {
+    const hardcodeResult = lintAntiHardcode(patch, {
+      targetRepo: input.targetRepo,
+      issueNumber: input.issueNumber,
+    });
+    antiHardcodePassed = hardcodeResult.isClean;
+    if (!antiHardcodePassed) {
+      flaggedHardcodeIssues.push(
+        ...hardcodeResult.violations.map((v) => `${v.file}: [${v.rule}] ${v.reason}`),
+      );
+    }
+  }
+
   const isTechnicalGatePassed =
     antiAiCheckPassed &&
     markdownIntegrityPassed &&
@@ -823,7 +842,8 @@ export function auditGovernance(
     coverageGatePassed &&
     resourceLeakGatePassed &&
     impactAnalysisPassed &&
-    preflightLintPassed;
+    preflightLintPassed &&
+    antiHardcodePassed;
 
   const isGatedPassed = isTechnicalGatePassed;
 
@@ -938,6 +958,12 @@ export function auditGovernance(
     );
   }
 
+  if (!antiHardcodePassed) {
+    remediationSuggestions.push(
+      `Anti-Hardcode Gate: Detected lazy model shortcuts or hardcoded literals in production logic: ${flaggedHardcodeIssues.slice(0, 3).join("; ")}. Generalize your implementation.`,
+    );
+  }
+
   if (!input.variantHuntConducted) {
     remediationSuggestions.push(
       "In-Domain Defense Recommendation: Run Variant Hunting sweep across sister modules to ensure zero parallel structural defects.",
@@ -971,6 +997,8 @@ export function auditGovernance(
     impactAnalysisIssues,
     preflightLintPassed,
     preflightLintIssues,
+    antiHardcodePassed,
+    flaggedHardcodeIssues,
     remediationSuggestions,
     overallConfidence: {
       isPassed: isTechnicalGatePassed,

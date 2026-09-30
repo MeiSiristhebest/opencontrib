@@ -1171,6 +1171,8 @@ export const GovernanceAuditResultSchema = z.object({
   impactAnalysisIssues: z.array(z.string()).default([]).optional(),
   preflightLintPassed: z.boolean().default(true).optional(),
   preflightLintIssues: z.array(z.string()).default([]).optional(),
+  antiHardcodePassed: z.boolean().default(true).optional(),
+  flaggedHardcodeIssues: z.array(z.string()).default([]).optional(),
   remediationSuggestions: z.array(z.string()),
   guidance: z
     .object({
