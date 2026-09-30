@@ -139,6 +139,79 @@ function isHashCommentLanguage(filePath: string): boolean {
   return /\.(?:py|sh|bash|zsh|ps1|rb)$/i.test(filePath);
 }
 
+function extractTemplateExpressions(templateBody: string): string[] {
+  const expressions: string[] = [];
+
+  for (let index = 0; index < templateBody.length; index++) {
+    if (templateBody[index] === '\\') {
+      index++;
+      continue;
+    }
+    if (templateBody[index] !== '$' || templateBody[index + 1] !== '{') {
+      continue;
+    }
+
+    const expressionStart = index + 2;
+    let braceDepth = 1;
+    let quote: string | undefined;
+    let inLineComment = false;
+    let inBlockComment = false;
+    let expressionEnd = -1;
+
+    for (let cursor = expressionStart; cursor < templateBody.length; cursor++) {
+      const current = templateBody[cursor];
+      const next = templateBody[cursor + 1];
+
+      if (inLineComment) {
+        if (current === '\n') inLineComment = false;
+        continue;
+      }
+      if (inBlockComment) {
+        if (current === '*' && next === '/') {
+          inBlockComment = false;
+          cursor++;
+        }
+        continue;
+      }
+      if (quote) {
+        if (current === '\\') {
+          cursor++;
+        } else if (current === quote) {
+          quote = undefined;
+        }
+        continue;
+      }
+
+      if (current === '/' && next === '/') {
+        inLineComment = true;
+        cursor++;
+        continue;
+      }
+      if (current === '/' && next === '*') {
+        inBlockComment = true;
+        cursor++;
+        continue;
+      }
+      if (current === '"' || current === "'" || current === '`') {
+        quote = current;
+        continue;
+      }
+      if (current === '{') {
+        braceDepth++;
+      } else if (current === '}' && --braceDepth === 0) {
+        expressionEnd = cursor;
+        break;
+      }
+    }
+
+    if (expressionEnd < 0) break;
+    expressions.push(templateBody.slice(expressionStart, expressionEnd));
+    index = expressionEnd;
+  }
+
+  return expressions;
+}
+
 function scanDiffSourceLine(
   line: string,
   filePath: string,
@@ -165,7 +238,18 @@ function scanDiffSourceLine(
         index += 2;
       } else if (line.startsWith(state.stringDelimiter, index)) {
         if (state.stringTokenId) {
-        stringValues.set(`__STR_${state.stringTokenId}__`, state.stringValue);
+          stringValues.set(`__STR_${state.stringTokenId}__`, state.stringValue);
+          if (state.stringDelimiter === '`') {
+            for (const expression of extractTemplateExpressions(state.stringValue)) {
+              const expressionState: DiffLexerState = {
+                inBlockComment: false,
+                stringValue: '',
+                nextToken: state.nextToken,
+              };
+              code += ` ${scanDiffSourceLine(expression, filePath, expressionState, stringValues)} `;
+              state.nextToken = expressionState.nextToken;
+            }
+          }
         }
         index += state.stringDelimiter.length;
         state.stringDelimiter = undefined;
@@ -206,6 +290,7 @@ function scanDiffSourceLine(
     index++;
   }
 
+  if (state.stringDelimiter === '`') state.stringValue += '\n';
   if (state.stringTokenId) {
     stringValues.set(`__STR_${state.stringTokenId}__`, state.stringValue);
   }
