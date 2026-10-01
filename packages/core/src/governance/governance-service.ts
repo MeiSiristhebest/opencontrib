@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
+
+const MAX_BASE_SOURCE_CONTENT_BYTES = 64 * 1024 * 1024;
 import {
   CommunityGateSnapshotSchema,
   GovernanceDecisionArtifactSchema,
@@ -73,7 +75,7 @@ function readSourceFileContentsAtCommit(
   if (!/^[a-f0-9]{40,64}$/i.test(baseCommitSha)) return contents;
 
   for (const filePath of paths) {
-    if (!sourceExtension.test(filePath)) continue;
+    if (/\.[^/]+$/.test(filePath) && !sourceExtension.test(filePath)) continue;
     try {
       const source = execFileSync(
         "git",
@@ -82,11 +84,20 @@ function readSourceFileContentsAtCommit(
           encoding: "utf8",
           stdio: ["ignore", "pipe", "ignore"],
           timeout: 10_000,
-          maxBuffer: 4 * 1024 * 1024,
+          maxBuffer: MAX_BASE_SOURCE_CONTENT_BYTES,
         },
       );
       contents.set(filePath.replace(/\\/g, "/"), source);
-    } catch {
+    } catch (error) {
+      const errorCode =
+        error && typeof error === "object" && "code" in error
+          ? error.code
+          : undefined;
+      if (errorCode === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+        throw new Error(
+          `GovernanceBaseContentUnavailableError: base source '${filePath}' exceeds the safe read limit.`,
+        );
+      }
       // New files have no base content to use for lexical-state seeding.
     }
   }
@@ -298,7 +309,8 @@ export class GovernanceService {
     } catch (error) {
       if (
         error instanceof Error &&
-        error.message.startsWith("EvidencePatchProvenanceError: workspace ")
+        (error.message.startsWith("EvidencePatchProvenanceError: workspace ") ||
+          error.message.startsWith("GovernanceBaseContentUnavailableError:"))
       ) {
         throw error;
       }

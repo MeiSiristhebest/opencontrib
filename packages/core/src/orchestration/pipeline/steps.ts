@@ -334,6 +334,7 @@ export class ContextAssemblyStep implements PipelineStep {
       issueTitle: selectedOpp.title,
       issueBody: selectedOpp.body,
       primaryLanguage: selectedOpp.primaryLanguage,
+      isDocsOnly: selectedOpp.feasibility?.scope === "docs_only",
       workspacePath: ctx.workspace?.workspacePath,
       runGit: (args) => deps.worktreeManager.runGit(args),
     });

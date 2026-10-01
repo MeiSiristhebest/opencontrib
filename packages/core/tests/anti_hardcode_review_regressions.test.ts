@@ -42,6 +42,16 @@ describe("anti-hardcode review regressions", () => {
         diff("README", '+if (repo === "org/project") return fallback();'),
       ).isClean,
     ).toBe(true);
+    expect(
+      lintAntiHardcode(
+        diff("src/readme.js", '+if (repo === "org/project") return fallback();'),
+      ).isClean,
+    ).toBe(false);
+    expect(
+      lintAntiHardcode(
+        diff("src/README.md", '+if (repo === "org/project") return fallback();'),
+      ).isClean,
+    ).toBe(true);
   });
 
   it("scans leading plus source lines and comparisons split across added lines", () => {
@@ -50,15 +60,83 @@ describe("anti-hardcode review regressions", () => {
       "--- a/src/feature.ts",
       "+++ b/src/feature.ts",
       "@@ -1,0 +1,5 @@",
-      '+++attempts; if (repo == "org/project") return fallback();',
+      "+++attempts;",
       "+if (",
       "+  repo ===",
       '+  "org/other"',
       "+) return fallback();",
     ].join("\n");
     const result = lintAntiHardcode(patch, { targetRepo: "org/project" });
-    expect(result.isClean).toBe(false);
-    expect(result.violations.some((entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION")).toBe(true);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]?.rule).toBe("REPO_LITERAL_DISCRIMINATION");
+  });
+
+  it("detects reversed sample guards and returns added beneath unchanged guards", () => {
+    const reversedGuard = diff(
+      "src/feature.ts",
+      '+if ("test-sample" === input) return cannedResult;',
+    );
+    expect(
+      lintAntiHardcode(reversedGuard).violations.some(
+        (entry) => entry.rule === "TEST_SAMPLE_SHORT_CIRCUIT",
+      ),
+    ).toBe(true);
+
+    const returnAddedToExistingGuard = [
+      "diff --git a/src/feature.ts b/src/feature.ts",
+      "--- a/src/feature.ts",
+      "+++ b/src/feature.ts",
+      "@@ -1,2 +1,3 @@",
+      ' if (input === "test-sample") {',
+      "+  return cannedResult;",
+      " }",
+    ].join("\n");
+    expect(
+      lintAntiHardcode(returnAddedToExistingGuard).violations.some(
+        (entry) => entry.rule === "TEST_SAMPLE_SHORT_CIRCUIT",
+      ),
+    ).toBe(true);
+  });
+
+  it("scans executable Python f-string expressions", () => {
+    const patch = diff(
+      "src/feature.py",
+      '+message = f"{special() if repo == \'owner/repo\' else normal()}"',
+    );
+    const result = lintAntiHardcode(patch, { targetRepo: "owner/repo" });
+    expect(result.violations.some((entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION")).toBe(
+      true,
+    );
+  });
+
+  it("resets lexer state between unseeded hunks and tolerates short base content", () => {
+    const multipleHunks = [
+      "diff --git a/src/feature.ts b/src/feature.ts",
+      "--- a/src/feature.ts",
+      "+++ b/src/feature.ts",
+      "@@ -1 +1 @@",
+      "+/*",
+      "@@ -10 +10 @@",
+      '+if (repo === "org/project") return fallback();',
+    ].join("\n");
+    expect(
+      lintAntiHardcode(multipleHunks).violations.some(
+        (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+      ),
+    ).toBe(true);
+
+    const staleBasePatch = [
+      "diff --git a/src/feature.ts b/src/feature.ts",
+      "--- a/src/feature.ts",
+      "+++ b/src/feature.ts",
+      "@@ -5,0 +5,1 @@",
+      "+const ready = true;",
+    ].join("\n");
+    expect(() =>
+      lintAntiHardcode(staleBasePatch, {
+        baseFileContents: new Map([["src/feature.ts", "short file"]]),
+      }),
+    ).not.toThrow();
   });
 
   it("tracks added interpolation provenance inside a multiline template", () => {

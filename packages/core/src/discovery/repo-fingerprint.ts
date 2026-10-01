@@ -141,7 +141,7 @@ export function classifyCommitConvention(messages: string[]): {
     capitalizedCount,
   );
 
-  if (strongestStyleCount / authoredMessages.length < 0.5) {
+  if (strongestStyleCount / authoredMessages.length <= 0.5) {
     return { convention: 'unstructured', requiresSignedOffBy };
   }
   if (conventionalCount >= bracketedCount && conventionalCount >= capitalizedCount && conventionalCount > 0) {
@@ -279,7 +279,7 @@ export function analyzeRepoEngineeringFingerprint(
 
   // Detect strictness gateways
   const runnable = existsSync(repoPath) ? detectRunnableCommandsFromDir(repoPath) : {};
-  const hasPreCommit = existsSync(join(repoPath, '.pre-commit-config.yaml')) || existsSync(join(repoPath, '.pre-commit-config.yml'));
+  const hasPreCommit = runnable.lintCommand === 'pre-commit run --all-files';
   const linterCommands: string[] = [];
   if (runnable.lintCommand) {
     linterCommands.push(runnable.lintCommand);

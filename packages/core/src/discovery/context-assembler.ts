@@ -501,6 +501,7 @@ export class ContextAssembler {
     packageManifest?: string;
     ciWorkflow?: string;
     primaryLanguage?: string;
+    isDocsOnly?: boolean;
     workspacePath?: string;
     runGit?: (args: string[]) => { success: boolean; stdout: string };
     skeletonFiles?: string[];
@@ -515,6 +516,7 @@ export class ContextAssembler {
       packageManifest,
       ciWorkflow,
       primaryLanguage = 'TypeScript',
+      isDocsOnly = false,
       workspacePath,
       runGit,
       skeletonFiles,
@@ -598,11 +600,13 @@ export class ContextAssembler {
       } catch {}
     }
 
-    const combinatorialMatrix = generateCombinatorialMatrix({
-      issueTitle,
-      issueBody,
-      primaryLanguage,
-    });
+    const combinatorialMatrix = isDocsOnly
+      ? undefined
+      : generateCombinatorialMatrix({
+          issueTitle,
+          issueBody,
+          primaryLanguage,
+        });
 
     // 5. Generate Exploration Guidance (suggested reading order, target tests, risk surface)
     const guidance = buildExplorationGuidance(
