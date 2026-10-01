@@ -123,6 +123,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "INITIALIZED",
       "OPPORTUNITY_SCOUTED",
       "PROBE_COMPLETED",
+      "WORKSPACE_PREPARED",
     ],
     requiredArtifacts: ["context"],
     cli: {

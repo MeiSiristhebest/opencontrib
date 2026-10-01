@@ -380,8 +380,15 @@ diff --git a/src/core.ts b/src/core.ts
       expect(generateCombinatorialMatrix({ issueTitle: 'Streaming parser updates' }).domain).toBe(
         'concurrency_stream',
       );
-      expect(generateCombinatorialMatrix({ issueTitle: 'Block invalid parser inputs' }).domain).toBe(
-        'general_data_structure',
+      for (const issueTitle of [
+        'Block invalid parser inputs',
+        'Blocking parser requests',
+        'Check the clock before parsing',
+      ]) {
+        expect(generateCombinatorialMatrix({ issueTitle }).domain).toBe('general_data_structure');
+      }
+      expect(generateCombinatorialMatrix({ issueTitle: 'Acquire a lock before parsing' }).domain).toBe(
+        'concurrency_stream',
       );
       expect(generateCombinatorialMatrix({ issueTitle: 'Add stack trace to parser errors' }).domain).toBe(
         'general_data_structure',
@@ -415,6 +422,132 @@ diff --git a/src/core.ts b/src/core.ts
       );
       expect(exactBoundary?.testTemplateSnippet).toContain('token_len(chunk) <= max_tokens');
       expect(pythonText.recommendedAssertions[0]).toContain('token_len(chunk) <= max_tokens');
+    });
+
+    it('exercises concurrent interrupted cleanup in each language template', () => {
+      const fixtures = [
+        {
+          language: 'Python',
+          workerMarker: 'range(20)',
+          interruptMarker: 'process.terminate()',
+          waitMarker: 'process.wait(timeout=5)',
+          cleanupMarker: 'shutil.rmtree(test_dir)',
+        },
+        {
+          language: 'Go',
+          workerMarker: 'make([]*exec.Cmd, 20)',
+          interruptMarker: 'cmd.Process.Kill()',
+          waitMarker: 'cmd.Wait()',
+          cleanupMarker: 'os.RemoveAll(testDir)',
+        },
+        {
+          language: 'Rust',
+          workerMarker: '0..20',
+          interruptMarker: 'child.kill()',
+          waitMarker: 'child.wait()',
+          cleanupMarker: 'remove_dir_all(&test_dir)',
+        },
+        {
+          language: 'TypeScript',
+          workerMarker: 'length: 20',
+          interruptMarker: 'child.kill()',
+          waitMarker: 'Promise.all(exited)',
+          cleanupMarker: 'rmSync(testDir',
+        },
+        {
+          language: 'Kotlin',
+          workerMarker: '20 child processes',
+          interruptMarker: 'cancel them',
+          waitMarker: 'wait for every exit',
+          cleanupMarker: 'remove their shared temporary directory',
+        },
+      ];
+
+      for (const fixture of fixtures) {
+        const matrix = generateCombinatorialMatrix({
+          primaryLanguage: fixture.language,
+          issueTitle: 'Concurrent worker pool cleanup can fail with EBUSY',
+        });
+        const scenario = matrix.scenarios.find(
+          (candidate) => candidate.scenarioId === 'WINDOWS_EBUSY_HANDLE_RACE',
+        );
+        const snippet = scenario?.testTemplateSnippet ?? '';
+
+        expect(scenario?.variantCombination).toEqual({
+          WorkerConcurrency: 'HighContention',
+          LifecycleInterruption: 'MidStreamAbort',
+        });
+        expect(snippet).toContain(fixture.workerMarker);
+        expect(snippet).toContain(fixture.interruptMarker);
+        expect(snippet).toContain(fixture.waitMarker);
+        expect(snippet).toContain(fixture.cleanupMarker);
+        expect(snippet.indexOf(fixture.workerMarker)).toBeLessThan(snippet.indexOf(fixture.interruptMarker));
+        expect(snippet.indexOf(fixture.waitMarker)).toBeLessThan(snippet.indexOf(fixture.cleanupMarker));
+      }
+    });
+
+    it('uses language-correct Unicode and unresolved-chunk templates for every supported language', () => {
+      const fixtures = [
+        {
+          language: 'Python',
+          punctuationMarker: 'chunker.split_lines',
+          tokenBoundMarker: 'token_len(chunk) <= max_tokens',
+        },
+        {
+          language: 'Go',
+          punctuationMarker: 'strings.Join(chunks, "")',
+          tokenBoundMarker: 'tokenLen(chunk) > maxTokens',
+        },
+        {
+          language: 'Rust',
+          punctuationMarker: 'assert_eq!(chunks.concat(), text)',
+          tokenBoundMarker: 'token_len(chunk) <= max_tokens',
+        },
+        {
+          language: 'TypeScript',
+          punctuationMarker: 'expect(chunks.join("")).toBe(text)',
+          tokenBoundMarker: 'tokenLen(chunk) <= maxTokens',
+        },
+        {
+          language: 'Kotlin',
+          punctuationMarker: 'Verify that punctuation-only text',
+          tokenBoundMarker: 'token limit',
+        },
+      ];
+
+      for (const fixture of fixtures) {
+        const matrix = generateCombinatorialMatrix({
+          primaryLanguage: fixture.language,
+          issueTitle: 'NLP tokenization boundary regression',
+        });
+        const unresolved = matrix.scenarios.find(
+          (scenario) => scenario.scenarioId === 'SK_EARLY_EXIT_UNRESOLVED_TRAP',
+        );
+        const exactBoundary = matrix.scenarios.find(
+          (scenario) => scenario.scenarioId === 'EXACT_TOKEN_BOUNDARY',
+        );
+        const punctuation = matrix.scenarios.find(
+          (scenario) => scenario.scenarioId === 'PUNCTUATION_ONLY_DELIMITERS',
+        );
+        const unresolvedSnippet = unresolved?.testTemplateSnippet ?? '';
+        const punctuationSnippet = punctuation?.testTemplateSnippet ?? '';
+
+        expect(unresolvedSnippet).not.toBe(exactBoundary?.testTemplateSnippet);
+        expect(unresolved?.variantCombination.TextScaleVsLimit).toBe('OverLimitNoDelimiters');
+        expect(unresolvedSnippet).toContain(fixture.tokenBoundMarker);
+        expect(unresolvedSnippet).toMatch(/VeryLongContinuousString|unbreakable remainder/);
+        expect(punctuationSnippet).toContain(fixture.punctuationMarker);
+        if (fixture.language !== 'Kotlin') {
+          expect(punctuationSnippet).toContain('漢字。句子！次の文？');
+        }
+      }
+
+      const rustGeneral = generateCombinatorialMatrix({
+        primaryLanguage: 'Rust',
+        issueTitle: 'Validate parser input boundaries',
+      });
+      expect(rustGeneral.recommendedAssertions).toContain('assert!(!result.is_empty())');
+      expect(rustGeneral.recommendedAssertions.some((assertion) => assertion.includes('is_some()'))).toBe(false);
     });
 
     it('includes every declared matrix variant in at least one scenario', () => {
@@ -451,6 +584,53 @@ diff --git a/src/core.ts b/src/core.ts
         convention: 'unstructured',
         requiresSignedOffBy: false,
       });
+    });
+
+    it('does not infer a test runner when the repository has no test files', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-fp-no-tests-'));
+      try {
+        writeFileSync(join(tempDir, 'go.mod'), 'module example/parser\n');
+
+        const fingerprint = analyzeRepoEngineeringFingerprint({ repoPath: tempDir });
+
+        expect(fingerprint.testConventions).toEqual({
+          filePattern: 'unknown',
+          frameworkName: 'unknown',
+          sampleTestPath: undefined,
+        });
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('uses an upward-rounded DCO threshold and requires a majority for commit style', () => {
+      const signed = (subject: string) => `${subject}\n\nSigned-off-by: Dev <dev@example.com>`;
+      const sparseHistory = [
+        signed('fix: isolated parser case'),
+        'update parser behavior',
+        'adjust stream cleanup',
+        'handle empty input',
+        'rename parser helper',
+        'document edge case',
+      ];
+
+      expect(classifyCommitConvention(sparseHistory)).toEqual({
+        convention: 'unstructured',
+        requiresSignedOffBy: false,
+      });
+      expect(
+        classifyCommitConvention([
+          ...sparseHistory.slice(0, 1),
+          signed('docs: explain parser cases'),
+          ...sparseHistory.slice(2),
+        ]).requiresSignedOffBy,
+      ).toBe(true);
+
+      const mostlyUnstructured = [
+        'fix: isolated parser case',
+        ...Array.from({ length: 19 }, (_, index) => `update parser behavior ${index}`),
+      ];
+      expect(classifyCommitConvention(mostlyUnstructured).convention).toBe('unstructured');
     });
 
     it('classifies Conventional Commits accurately', () => {

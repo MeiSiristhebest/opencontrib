@@ -373,6 +373,38 @@ diff --git a/src/fix.ts b/src/fix.ts
     }
   });
 
+  it("does not infer an issue-specific workaround from a different issue number", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-issue-hardcode-mismatch-"));
+    try {
+      const repoPath = join(baseDir, "repo");
+      const manager = isolatedRunManager(join(baseDir, "runs"));
+      const manifest = manager.createRun({
+        repoFullName: "org/repo",
+        issueNumber: 1614,
+      });
+      const patchContent = `
+diff --git a/src/fix.ts b/src/fix.ts
+--- a/src/fix.ts
++++ b/src/fix.ts
+@@ -1,0 +1,1 @@
++if (issueNumber === 1615) return workaround();
+`;
+
+      const decision = seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        repoPath,
+        "pr body",
+        {},
+        { patchContent },
+      );
+
+      expect(decision.auditResult.antiHardcodePassed).toBe(true);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it("passes validated patch paths and the base tree into sibling-file analysis", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-impact-"));
     const repoPath = join(baseDir, "repo");

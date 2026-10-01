@@ -15,6 +15,7 @@ import { FixedClock } from "../src/ports/clock.port.js";
 import { MockLLMProvider } from "../src/testkit/mock-llm.js";
 import { LLMService } from "../src/llm/llm-service.js";
 import { ContributionStateMachine } from "../src/orchestration/state-machine.js";
+import { ContextAssembler } from "../src/discovery/context-assembler.js";
 import type { PipelineDeps } from "../src/orchestration/pipeline/types.js";
 
 function buildDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
@@ -147,27 +148,39 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
     expect(result.reportSummary).toContain("Dry run completed");
   });
 
-  it("passes the worktree Git runner into context assembly", async () => {
-    const deps = buildDeps();
+  it("passes workspace history and language into context assembly", async () => {
+    const deps = buildDeps({
+      contextAssembler: new ContextAssembler({ getMemory: () => null } as any),
+    });
     const gitCalls: string[][] = [];
+    let createdWorkspacePath: string | undefined;
+    (deps.client as any).getRepoDetails = async () => ({
+      status: "OK",
+      data: {
+        stars: 120,
+        defaultBranch: "main",
+        isFork: false,
+        isArchived: false,
+        description: "Offline pipeline fixture",
+        primaryLanguage: "Go",
+      },
+    });
+    const createWorkspace = (deps.worktreeManager as any).createIsolatedWorkspace;
+    (deps.worktreeManager as any).createIsolatedWorkspace = (...args: any[]) => {
+      const result = createWorkspace(...args);
+      createdWorkspacePath = result.workspacePath;
+      return result;
+    };
     (deps.worktreeManager as any).runGit = (args: string[]) => {
       gitCalls.push(args);
       return {
         success: true,
-        stdout: args.length === 1 && args[0] === "log" ? "history" : "",
+        stdout: args.includes("--format=%B---COMMIT_SEP---")
+          ? "[Go] Fix sample---COMMIT_SEP---"
+          : "",
         stderr: "",
       };
     };
-
-    const baseContextAssembler = deps.contextAssembler as any;
-    let assembledInput: any;
-    deps.contextAssembler = {
-      assemble: async (input: any) => {
-        assembledInput = input;
-        return baseContextAssembler.assemble(input);
-      },
-      formatContextPrompt: baseContextAssembler.formatContextPrompt,
-    } as any;
 
     const { AgentOrchestrator } =
       await import("../src/orchestration/agent-orchestrator.js");
@@ -178,10 +191,21 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
     });
 
     expect(result.status).toBe("DRY_RUN_COMPLETED");
-    expect(typeof assembledInput?.runGit).toBe("function");
-    expect(assembledInput.runGit(["log"]).stdout).toBe("history");
-    expect(gitCalls).toContainEqual(["log"]);
-  });
+    const workspacePath = createdWorkspacePath;
+    if (!workspacePath) {
+      throw new Error("Workspace allocation did not produce a path");
+    }
+    expect(gitCalls).toContainEqual([
+      "-C",
+      workspacePath,
+      "log",
+      "-n",
+      "20",
+      "--no-merges",
+      "--format=%B---COMMIT_SEP---",
+    ]);
+    expect(result.selectedOpportunity?.primaryLanguage).toBe("Go");
+  }, 15000);
 
   it("halts at HUMAN_GATE in interactive mode when not approved", async () => {
     const { AgentOrchestrator } =

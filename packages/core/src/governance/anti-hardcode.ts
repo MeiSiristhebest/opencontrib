@@ -20,6 +20,8 @@ export interface AntiHardcodeAuditResult {
 export interface AntiHardcodeOptions {
   targetRepo?: string;
   issueNumber?: number;
+  /** Base contents for modified files, used to seed lexical state at diff hunks. */
+  baseFileContents?: ReadonlyMap<string, string>;
 }
 
 interface DiffPathToken {
@@ -32,6 +34,8 @@ interface DiffLexerState {
   stringDelimiter?: string;
   stringTokenId?: string;
   stringValue: string;
+  stringAddedFlags: boolean[];
+  stringSourceLines: string[];
   nextToken: number;
 }
 
@@ -46,6 +50,10 @@ const SOURCE_FILE_EXTENSION =
   /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|kts|swift|cs|c|h|cc|cpp|hpp|php|rb|sh|bash|zsh|ps1|scala|sc|dart|ex|exs|lua|sql|sol)$/i;
 
 function isSourceCodeFile(filePath: string): boolean {
+  const basename = filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase() || '';
+  if (/^(?:readme|contributing|contributing\.md|changelog|changes|history|license|notice|authors|copying|install|code_of_conduct)(?:\.[a-z0-9]+)?$/.test(basename)) {
+    return false;
+  }
   if (!filePath || !/\.[^/]+$/.test(filePath)) return true;
   return SOURCE_FILE_EXTENSION.test(filePath);
 }
@@ -53,7 +61,7 @@ function isSourceCodeFile(filePath: string): boolean {
 function isTestOrDocFile(filePath: string): boolean {
   const norm = filePath.replace(/\\/g, '/').toLowerCase();
   return (
-    /(?:^|\/)(?:tests?|__tests__|fixtures?)(?:\/|$)/.test(norm) ||
+    /(?:^|\/)(?:tests?|__tests__|fixtures?|mocks?)(?:\/|$)/.test(norm) ||
     /\.(?:test|spec)\.[a-z0-9]+$/i.test(norm) ||
     /_test\.[a-z0-9]+$/i.test(norm) ||
     /(?:^|\/)test_[a-z0-9_]+\.[a-z0-9]+$/i.test(norm) ||
@@ -135,12 +143,20 @@ function parseUnifiedNewPath(header: string): string | undefined {
   return stripDiffPrefix(token.value);
 }
 
+function parseHunkOldRange(header: string): { start: number; count: number } | undefined {
+  const match = header.match(/^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/);
+  if (!match) return undefined;
+  return { start: Number(match[1]), count: match[2] === undefined ? 1 : Number(match[2]) };
+}
+
 function isHashCommentLanguage(filePath: string): boolean {
   return /\.(?:py|sh|bash|zsh|ps1|rb)$/i.test(filePath);
 }
 
-function extractTemplateExpressions(templateBody: string): string[] {
-  const expressions: string[] = [];
+function extractTemplateExpressions(
+  templateBody: string,
+): Array<{ expression: string; start: number; end: number }> {
+  const expressions: Array<{ expression: string; start: number; end: number }> = [];
 
   for (let index = 0; index < templateBody.length; index++) {
     if (templateBody[index] === '\\') {
@@ -205,7 +221,11 @@ function extractTemplateExpressions(templateBody: string): string[] {
     }
 
     if (expressionEnd < 0) break;
-    expressions.push(templateBody.slice(expressionStart, expressionEnd));
+    expressions.push({
+      expression: templateBody.slice(expressionStart, expressionEnd),
+      start: expressionStart,
+      end: expressionEnd,
+    });
     index = expressionEnd;
   }
 
@@ -217,11 +237,25 @@ function scanDiffSourceLine(
   filePath: string,
   state: DiffLexerState,
   stringValues: Map<string, string>,
+  lineAdded: boolean,
+  sourceLine: string,
+  embeddedRecords: DiffLineRecord[],
+  hunk: number,
 ): string {
   let index = 0;
   let code = '';
   const hashComments = isHashCommentLanguage(filePath);
   const supportsTripleQuotes = /\.py$/i.test(filePath);
+
+  const appendStringContent = (value: string) => {
+    state.stringValue += value;
+    if (state.stringDelimiter === '`') {
+      for (let offset = 0; offset < value.length; offset++) {
+        state.stringAddedFlags.push(lineAdded);
+        state.stringSourceLines.push(sourceLine);
+      }
+    }
+  };
 
   while (index < line.length) {
     if (state.inBlockComment) {
@@ -234,19 +268,43 @@ function scanDiffSourceLine(
 
     if (state.stringDelimiter) {
       if (line[index] === '\\' && index + 1 < line.length) {
-        state.stringValue += line.slice(index, index + 2);
+        appendStringContent(line.slice(index, index + 2));
         index += 2;
       } else if (line.startsWith(state.stringDelimiter, index)) {
         if (state.stringTokenId) {
           stringValues.set(`__STR_${state.stringTokenId}__`, state.stringValue);
           if (state.stringDelimiter === '`') {
             for (const expression of extractTemplateExpressions(state.stringValue)) {
+              const addedOffset = state.stringAddedFlags
+                .slice(expression.start, expression.end)
+                .findIndex(Boolean);
+              if (addedOffset < 0) continue;
+              const sourceIndex = expression.start + addedOffset;
+              const expressionSourceLine =
+                state.stringSourceLines[sourceIndex] || sourceLine;
               const expressionState: DiffLexerState = {
                 inBlockComment: false,
                 stringValue: '',
+                stringAddedFlags: [],
+                stringSourceLines: [],
                 nextToken: state.nextToken,
               };
-              code += ` ${scanDiffSourceLine(expression, filePath, expressionState, stringValues)} `;
+              const expressionCode = scanDiffSourceLine(
+                expression.expression,
+                filePath,
+                expressionState,
+                stringValues,
+                true,
+                expressionSourceLine,
+                embeddedRecords,
+                hunk,
+              );
+              embeddedRecords.push({
+                added: true,
+                hunk,
+                content: expressionSourceLine,
+                code: expressionCode,
+              });
               state.nextToken = expressionState.nextToken;
             }
           }
@@ -255,8 +313,10 @@ function scanDiffSourceLine(
         state.stringDelimiter = undefined;
         state.stringTokenId = undefined;
         state.stringValue = '';
+        state.stringAddedFlags = [];
+        state.stringSourceLines = [];
       } else {
-        state.stringValue += line[index];
+        appendStringContent(line[index]);
         index++;
       }
       continue;
@@ -280,6 +340,8 @@ function scanDiffSourceLine(
       state.stringDelimiter = delimiter;
       state.stringTokenId = tokenId;
       state.stringValue = '';
+      state.stringAddedFlags = [];
+      state.stringSourceLines = [];
       stringValues.set(`__STR_${tokenId}__`, '');
       code += `__STR_${tokenId}__`;
       index += delimiter.length;
@@ -290,7 +352,7 @@ function scanDiffSourceLine(
     index++;
   }
 
-  if (state.stringDelimiter === '`') state.stringValue += '\n';
+  if (state.stringDelimiter === '`') appendStringContent('\n');
   if (state.stringTokenId) {
     stringValues.set(`__STR_${state.stringTokenId}__`, state.stringValue);
   }
@@ -307,6 +369,60 @@ function addViolation(
   violations.push({ file, line, rule, reason });
 }
 
+function buildHunkSource(records: DiffLineRecord[]): {
+  code: string;
+  hasAddedCode(start: number, end: number): boolean;
+  firstAddedRecord(start: number, end: number): DiffLineRecord | undefined;
+} {
+  const spans: Array<{ start: number; end: number; record: DiffLineRecord }> = [];
+  let code = '';
+  for (const record of records) {
+    const start = code.length;
+    code += `${record.code}\n`;
+    spans.push({ start, end: code.length - 1, record });
+  }
+  const matchingSpans = (start: number, end: number) =>
+    spans.filter((span) => span.end >= start && span.start <= end);
+  return {
+    code,
+    hasAddedCode: (start, end) => matchingSpans(start, end).some((span) => span.record.added),
+    firstAddedRecord: (start, end) =>
+      matchingSpans(start, end).find((span) => span.record.added)?.record,
+  };
+}
+
+function branchContainsReturn(source: string, conditionEnd: number): boolean {
+  const tail = source.slice(conditionEnd);
+  const firstToken = tail.match(/^\s*(\{|:)?/);
+  const opener = firstToken?.[1];
+  const afterOpener = tail.slice(firstToken?.[0].length || 0);
+
+  if (opener === '{') {
+    let depth = 1;
+    const tokenPattern = /[{}]|\breturn\b/g;
+    for (const token of afterOpener.matchAll(tokenPattern)) {
+      if (token[0] === '{') depth++;
+      else if (token[0] === '}' && --depth === 0) return false;
+      else if (token[0] === 'return') return true;
+    }
+    return false;
+  }
+
+  if (opener === ':') {
+    const conditionStart = source.lastIndexOf('\n', conditionEnd) + 1;
+    const conditionIndent = source.slice(conditionStart, conditionEnd).match(/^\s*/)?.[0].length || 0;
+    for (const line of afterOpener.split('\n')) {
+      if (!line.trim()) continue;
+      const indent = line.match(/^\s*/)?.[0].length || 0;
+      if (indent <= conditionIndent) return false;
+      if (/\breturn\b/.test(line)) return true;
+    }
+    return false;
+  }
+
+  return /^\s*\breturn\b/.test(afterOpener);
+}
+
 function analyzeFileChanges(
   filePath: string,
   records: DiffLineRecord[],
@@ -316,12 +432,19 @@ function analyzeFileChanges(
 ): void {
   if (!isSourceCodeFile(filePath) || isTestOrDocFile(filePath)) return;
 
-  const repoReference =
-    /\b(?:target)?(?:repo|repository|origin|upstream)(?:Name|FullName)?\s*(?:=+|!==?|\.includes\s*\()\s*(__STR_\d+__)/i;
+  const repoVariable =
+    String.raw`\b(?:target)?(?:repo|repository|origin|upstream)(?:Name|FullName)?\b`;
+  const stringToken = String.raw`__STR_\d+__`;
+  const repoReference = new RegExp(
+    `(?:${repoVariable}\\s*(?:=+|!==?)\\s*(${stringToken})|(${stringToken})\\s*(?:===|==)\\s*${repoVariable}|${repoVariable}\\s*\\.includes\\s*\\(\\s*(${stringToken}))`,
+    'gi',
+  );
+  const issueVariable =
+    String.raw`\b(?:issue(?:Number|Id)?|prNumber|ticket|bugId)(?:\s*(?:\?\.|\.)\s*(?:number|id))?\b`;
   const issueNumberPattern = options.issueNumber
     ? new RegExp(
-        `\\b(?:issue(?:Number|Id)?|prNumber|ticket|bugId)(?:\\s*(?:\\?\\.|\\.)\\s*(?:number|id))?\\s*(?:===|==)\\s*${options.issueNumber}\\b`,
-        'i',
+        `(?:${issueVariable}\\s*(?:===|==)\\s*${options.issueNumber}\\b|\\b${options.issueNumber}\\s*(?:===|==)\\s*${issueVariable})`,
+        'gi',
       )
     : undefined;
   const absolutePathPatterns = [
@@ -336,42 +459,6 @@ function analyzeFileChanges(
     if (!record.added) continue;
     const code = record.code.trim();
     if (!code) continue;
-
-    const repoMatch = repoReference.exec(code);
-    if (repoMatch) {
-      const literal = stringValues.get(repoMatch[1]);
-      if (literal && options.targetRepo && literal.toLowerCase() === options.targetRepo.toLowerCase()) {
-        addViolation(
-          violations,
-          filePath,
-          record.content.trim(),
-          'REPO_LITERAL_DISCRIMINATION',
-          `Production logic hardcodes target repository name '${options.targetRepo}'. Solutions must be generalized and decoupled from repository-specific string literals.`,
-        );
-        continue;
-      }
-      if (literal && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(literal)) {
-        addViolation(
-          violations,
-          filePath,
-          record.content.trim(),
-          'REPO_LITERAL_DISCRIMINATION',
-          'Detected repository-name literal comparison in production code. Use capability/manifest feature detection rather than repo-name discrimination.',
-        );
-        continue;
-      }
-    }
-
-    if (issueNumberPattern?.test(code)) {
-      addViolation(
-        violations,
-        filePath,
-        record.content.trim(),
-        'ISSUE_NUMBER_HARDCODING',
-        `Production logic explicitly branches on issue #${options.issueNumber}. A fix must resolve the underlying logic defect universally rather than special-casing the bug identifier.`,
-      );
-      continue;
-    }
 
     for (const pathToken of new Set(code.match(/__STR_\d+__/g) || [])) {
       const value = stringValues.get(pathToken)?.replace(/\\\\/g, '\\').trim();
@@ -399,13 +486,49 @@ function analyzeFileChanges(
   const sampleValuePattern = /^(?:test[-_]sample|mock[-_]input|sample[-_]data|placeholder)$/i;
 
   for (const hunkRecords of hunks.values()) {
-    const hunkCode = hunkRecords.map((record) => record.code).join('\n');
-    for (const match of hunkCode.matchAll(new RegExp(shortCircuitPattern, 'gi'))) {
-      const tokenId = match[1];
+    const source = buildHunkSource(hunkRecords);
+    for (const match of source.code.matchAll(repoReference)) {
+      const tokenId = match[1] || match[2] || match[3];
       const sampleValue = stringValues.get(tokenId);
-      const condition = hunkRecords.find(
-        (record) => record.added && record.code.includes(tokenId),
-      );
+      const matchedRecord = source.firstAddedRecord(match.index, match.index + match[0].length);
+      if (!matchedRecord) continue;
+      if (sampleValue && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(sampleValue)) {
+        const isTarget = options.targetRepo && sampleValue.toLowerCase() === options.targetRepo.toLowerCase();
+        addViolation(
+          violations,
+          filePath,
+          matchedRecord.content.trim(),
+          'REPO_LITERAL_DISCRIMINATION',
+          isTarget
+            ? `Production logic hardcodes target repository name '${options.targetRepo}'. Solutions must be generalized and decoupled from repository-specific string literals.`
+            : 'Detected repository-name literal comparison in production code. Use capability/manifest feature detection rather than repo-name discrimination.',
+        );
+      }
+    }
+
+    if (issueNumberPattern) {
+      for (const match of source.code.matchAll(issueNumberPattern)) {
+        const matchedRecord = source.firstAddedRecord(match.index, match.index + match[0].length);
+        if (!matchedRecord) continue;
+        addViolation(
+          violations,
+          filePath,
+          matchedRecord.content.trim(),
+          'ISSUE_NUMBER_HARDCODING',
+          `Production logic explicitly branches on issue #${options.issueNumber}. A fix must resolve the underlying logic defect universally rather than special-casing the bug identifier.`,
+        );
+      }
+    }
+
+    const sampleComparison = new RegExp(
+      `\\bif\\s*(?:\\(\\s*)?(?:${issueVariable}|[a-zA-Z_$][\\w$]*(?:(?:\\?\\.|\\.)[a-zA-Z_$][\\w$]*)*)\\s*(?:===|==)\\s*(${stringToken})\\s*\\)?`,
+      'gi',
+    );
+    for (const match of source.code.matchAll(sampleComparison)) {
+      const conditionEnd = (match.index ?? 0) + match[0].length;
+      if (!source.hasAddedCode(match.index ?? 0, conditionEnd) || !branchContainsReturn(source.code, conditionEnd)) continue;
+      const sampleValue = stringValues.get(match[1]);
+      const condition = source.firstAddedRecord(match.index ?? 0, conditionEnd);
       if (!sampleValue || !sampleValuePattern.test(sampleValue) || !condition) continue;
       addViolation(
         violations,
@@ -440,9 +563,13 @@ export function lintAntiHardcode(
   let currentHunk = 0;
   let records: DiffLineRecord[] = [];
   let stringValues = new Map<string, string>();
+  let baseLines: string[] | undefined;
+  let baseLineCursor = 0;
   let lexerState: DiffLexerState = {
     inBlockComment: false,
     stringValue: '',
+    stringAddedFlags: [],
+    stringSourceLines: [],
     nextToken: 1,
   };
 
@@ -453,7 +580,17 @@ export function lintAntiHardcode(
     currentFile = filePath;
     records = [];
     stringValues = new Map<string, string>();
-    lexerState = { inBlockComment: false, stringValue: '', nextToken: 1 };
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const baseContents = options.baseFileContents?.get(normalizedPath);
+    baseLines = baseContents === undefined ? undefined : baseContents.split(/\r?\n/);
+    baseLineCursor = 0;
+    lexerState = {
+      inBlockComment: false,
+      stringValue: '',
+      stringAddedFlags: [],
+      stringSourceLines: [],
+      nextToken: 1,
+    };
     inHunk = false;
     currentHunk = 0;
   };
@@ -475,9 +612,26 @@ export function lintAntiHardcode(
     }
 
     if (rawLine.startsWith('@@')) {
+      const range = parseHunkOldRange(rawLine);
+      if (range && baseLines && isSourceCodeFile(currentFile) && !isTestOrDocFile(currentFile)) {
+        const unchangedUntil = Math.max(baseLineCursor, range.start - 1);
+        for (let lineIndex = baseLineCursor; lineIndex < unchangedUntil; lineIndex++) {
+          const content = baseLines[lineIndex];
+          scanDiffSourceLine(
+            content,
+            currentFile,
+            lexerState,
+            stringValues,
+            false,
+            content,
+            records,
+            currentHunk,
+          );
+        }
+        baseLineCursor = Math.max(baseLineCursor, range.start - 1 + range.count);
+      }
       inHunk = true;
       currentHunk++;
-      lexerState = { inBlockComment: false, stringValue: '', nextToken: lexerState.nextToken };
       continue;
     }
 
@@ -485,12 +639,21 @@ export function lintAntiHardcode(
       continue;
     }
 
-    const added = rawLine.startsWith('+') && !rawLine.startsWith('+++');
+    const added = rawLine.startsWith('+');
     const context = rawLine.startsWith(' ');
     if (!added && !context) continue;
 
     const content = rawLine.slice(1);
-    const code = scanDiffSourceLine(content, currentFile, lexerState, stringValues);
+    const code = scanDiffSourceLine(
+      content,
+      currentFile,
+      lexerState,
+      stringValues,
+      added,
+      content,
+      records,
+      currentHunk,
+    );
     records.push({ added, hunk: currentHunk, content, code });
   }
 

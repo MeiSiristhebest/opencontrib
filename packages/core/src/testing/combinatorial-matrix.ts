@@ -139,18 +139,34 @@ function concurrencyTemplate(
 
 function interruptedCleanupTemplate(language: MatrixTemplateLanguage): string {
   if (language === 'python') {
-    return 'process = subprocess.Popen(command)\nprocess.terminate()\nprocess.wait(timeout=5)\nshutil.rmtree(test_dir)\nassert not os.path.exists(test_dir)';
+    return 'processes = [subprocess.Popen(command) for _ in range(20)]\nfor process in processes:\n    process.terminate()\nfor process in processes:\n    process.wait(timeout=5)\nshutil.rmtree(test_dir)\nassert not os.path.exists(test_dir)';
   }
   if (language === 'go') {
-    return 'cmd := exec.CommandContext(ctx, command)\nif err := cmd.Start(); err != nil { t.Fatal(err) }\n_ = cmd.Process.Kill()\n_ = cmd.Wait()\nif err := os.RemoveAll(testDir); err != nil { t.Fatal(err) }';
+    return 'commands := make([]*exec.Cmd, 20)\nfor i := range commands { commands[i] = exec.CommandContext(ctx, command); if err := commands[i].Start(); err != nil { t.Fatal(err) } }\nfor _, cmd := range commands { _ = cmd.Process.Kill() }\nfor _, cmd := range commands { _ = cmd.Wait() }\nif err := os.RemoveAll(testDir); err != nil { t.Fatal(err) }';
   }
   if (language === 'rust') {
-    return 'let mut child = Command::new(command).spawn()?;\nchild.kill()?;\nlet _ = child.wait()?;\nstd::fs::remove_dir_all(&test_dir)?;\nassert!(!test_dir.exists());';
+    return 'let mut children: Vec<_> = (0..20).map(|_| Command::new(command).spawn().expect("spawn worker")).collect();\nfor child in &mut children { child.kill()?; }\nfor child in &mut children { child.wait()?; }\nstd::fs::remove_dir_all(&test_dir)?;\nassert!(!test_dir.exists());';
   }
   if (language === 'generic') {
-    return 'Start a child process, cancel it, wait for its exit, remove its temporary directory, and verify cleanup succeeds on Windows.';
+    return 'Start 20 child processes, cancel them, wait for every exit, remove their shared temporary directory, and verify cleanup succeeds on Windows.';
   }
-  return 'const child = spawn(command, args);\nconst exited = new Promise((resolve) => child.once("exit", resolve));\nchild.kill();\nawait exited;\nexpect(() => rmSync(testDir, { recursive: true })).not.toThrow();';
+  return 'const children = Array.from({ length: 20 }, () => spawn(command, args));\nconst exited = children.map((child) => new Promise((resolve) => child.once("exit", resolve)));\nfor (const child of children) child.kill();\nawait Promise.all(exited);\nexpect(() => rmSync(testDir, { recursive: true })).not.toThrow();';
+}
+
+function unresolvedChunkingTemplate(language: MatrixTemplateLanguage): string {
+  if (language === 'python') {
+    return 'max_tokens = 100\ntext = ("Word " * 200) + "\\n\\n" + ("VeryLongContinuousString" * 50)\nchunks = chunker.split_lines(text, max_tokens=max_tokens)\nassert "".join(chunks) == text\nassert all(token_len(chunk) <= max_tokens for chunk in chunks)';
+  }
+  if (language === 'go') {
+    return 'maxTokens := 100\ntext := strings.Repeat("Word ", 200) + "\\n\\n" + strings.Repeat("VeryLongContinuousString", 50)\nchunks := chunker.SplitLines(text, maxTokens)\nif strings.Join(chunks, "") != text { t.Fatal("chunking lost the unresolved remainder") }\nfor _, chunk := range chunks { if tokenLen(chunk) > maxTokens { t.Fatal("chunk exceeded token bound") } }';
+  }
+  if (language === 'rust') {
+    return 'let max_tokens = 100;\nlet text = format!("{}\\n\\n{}", "Word ".repeat(200), "VeryLongContinuousString".repeat(50));\nlet chunks = chunker.split_lines(&text, max_tokens);\nassert_eq!(chunks.concat(), text);\nassert!(chunks.iter().all(|chunk| token_len(chunk) <= max_tokens));';
+  }
+  if (language === 'generic') {
+    return 'Provide several over-limit chunks, then append an unbreakable remainder after a delimiter. Verify the remainder is preserved and no output chunk exceeds the token limit.';
+  }
+  return 'const maxTokens = 100;\nconst text = "Word ".repeat(200) + "\\n\\n" + "VeryLongContinuousString".repeat(50);\nconst chunks = chunker.splitLines(text, maxTokens);\nexpect(chunks.join("")).toBe(text);\nexpect(chunks.every((chunk) => tokenLen(chunk) <= maxTokens)).toBe(true);';
 }
 
 function emptyTextTemplate(language: MatrixTemplateLanguage): string {
@@ -195,7 +211,7 @@ function generalBoundaryTemplates(language: MatrixTemplateLanguage): {
     return {
       empty: 'assert_eq!(handle_input(&[]), Vec::new())',
       singleton: 'assert_eq!(handle_input(&[single_item]), vec![single_item])',
-      assertions: ['assert!(result.is_some())', 'assert_eq!(handle_input(&[]), Vec::new())'],
+      assertions: ['assert!(!result.is_empty())', 'assert_eq!(handle_input(&[]), Vec::new())'],
     };
   }
   if (language === 'generic') {
@@ -438,10 +454,7 @@ export function generateCombinatorialMatrix(
           TextScaleVsLimit: 'OverLimitNoDelimiters',
           DelimiterDensity: 'NormalParagraphs',
         },
-        testTemplateSnippet:
-          language === 'python'
-            ? 'max_tokens = 100\ntext = ("Word " * 200) + "\\n\\n" + ("VeryLongContinuousString" * 50)\nchunks = chunker.split_lines(text, max_tokens=max_tokens)\nassert all(token_len(chunk) <= max_tokens for chunk in chunks)'
-            : templates.exactBoundary,
+        testTemplateSnippet: unresolvedChunkingTemplate(language),
         riskSurface:
           'Premature loop exit caused by returning all_resolved=True when a subsequent chunk was only partially partitioned.',
       },
@@ -476,9 +489,13 @@ export function generateCombinatorialMatrix(
         testTemplateSnippet:
           language === 'python'
             ? 'text = "漢字。句子！次の文？"\nchunks = chunker.split_lines(text, max_tokens=100)\nassert "".join(chunks) == text'
-            : language === 'generic'
-              ? 'Verify that punctuation-only text splits or remains intact without losing characters.'
-              : 'const text = "漢字。句子！次の文？";\nconst chunks = chunker.splitLines(text, maxTokens);\nexpect(chunks.join("")).toBe(text);',
+            : language === 'go'
+              ? 'text := "漢字。句子！次の文？"\nchunks := chunker.SplitLines(text, 100)\nif strings.Join(chunks, "") != text { t.Fatal("chunking lost punctuation") }'
+              : language === 'rust'
+                ? 'let text = "漢字。句子！次の文？";\nlet chunks = chunker.split_lines(text, 100);\nassert_eq!(chunks.concat(), text);'
+                : language === 'generic'
+                  ? 'Verify that punctuation-only text splits or remains intact without losing characters.'
+                  : 'const text = "漢字。句子！次の文？";\nconst chunks = chunker.splitLines(text, maxTokens);\nexpect(chunks.join("")).toBe(text);',
         riskSurface: 'A delimiter tokenizer that assumes whitespace can drop or merge punctuation-only segments.',
       },
     ];

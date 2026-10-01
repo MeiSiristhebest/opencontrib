@@ -333,6 +333,7 @@ export class ContextAssemblyStep implements PipelineStep {
       issueNumber: selectedOpp.issueNumber,
       issueTitle: selectedOpp.title,
       issueBody: selectedOpp.body,
+      primaryLanguage: selectedOpp.primaryLanguage,
       workspacePath: ctx.workspace?.workspacePath,
       runGit: (args) => deps.worktreeManager.runGit(args),
     });
@@ -1483,8 +1484,8 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   new RunCreationStep(),
   new DiscoveryScoutStep(),
   new RankingStep(),
-  new ContextAssemblyStep(),
   new WorkspaceAllocationStep(),
+  new ContextAssemblyStep(),
   new ReproductionDesignStep(),
   new PatchGenerationStep(),
   new ImplementValidateLoopStep(),
