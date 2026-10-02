@@ -468,8 +468,32 @@ diff --git a/src/core.ts b/src/core.ts
       const exactBoundary = pythonText.scenarios.find(
         (scenario) => scenario.scenarioId === 'EXACT_TOKEN_BOUNDARY',
       );
+      expect(exactBoundary?.testTemplateSnippet).toContain(
+        'assert token_len(text) == max_tokens',
+      );
       expect(exactBoundary?.testTemplateSnippet).toContain('token_len(chunk) <= max_tokens');
+      expect(exactBoundary?.testTemplateSnippet).not.toContain('replace(" ", "")');
       expect(pythonText.recommendedAssertions[0]).toContain('token_len(chunk) <= max_tokens');
+      expect(pythonText.recommendedAssertions).toContain(
+        'assert "".join(chunks) == text, "Data loss detected during chunking"',
+      );
+
+      const javascriptText = generateCombinatorialMatrix({
+        primaryLanguage: 'TypeScript',
+        issueTitle: 'NLP tokenization boundary handling',
+      });
+      const javascriptExactBoundary = javascriptText.scenarios.find(
+        (scenario) => scenario.scenarioId === 'EXACT_TOKEN_BOUNDARY',
+      );
+      expect(javascriptExactBoundary?.testTemplateSnippet).toContain(
+        'expect(tokenLen(text)).toBe(maxTokens)',
+      );
+      expect(javascriptText.recommendedAssertions).toContain(
+        'expect(chunks.join("")).toBe(text)',
+      );
+      expect(javascriptText.recommendedAssertions.join('\n')).not.toContain(
+        'replaceAll(" ", "")',
+      );
     });
 
     it('includes cleanup in syntax templates and generic fallback guidance', () => {
@@ -849,6 +873,52 @@ diff --git a/src/core.ts b/src/core.ts
         expect(fingerprint.contributorPersonaAdvice).toContain('history is shallow');
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('reports scan failures separately from entry-limit truncation', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-fp-read-error-'));
+      const filePath = join(tempDir, 'not-a-directory');
+      writeFileSync(filePath, '');
+
+      try {
+        const fingerprint = analyzeRepoEngineeringFingerprint({
+          repoPath: filePath,
+          runGit: () => ({ success: false, stdout: '' }),
+        });
+
+        expect(fingerprint.testConventions.searchLimited).toBe(false);
+        expect(fingerprint.contributorPersonaAdvice).not.toContain(
+          'search hit its entry limit',
+        );
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('formats shallow-history DCO policy as unknown', () => {
+      const repoDir = mkdtempSync(join(tmpdir(), 'oc-fp-shallow-context-'));
+      const memoryDir = mkdtempSync(join(tmpdir(), 'oc-fp-shallow-memory-'));
+      try {
+        const assembler = new ContextAssembler(new RepoMemoryLedger(memoryDir));
+        const context = assembler.assemble({
+          repoFullName: 'example/parser',
+          issueTitle: 'Fix parser handling',
+          issueBody: '',
+          primaryLanguage: 'TypeScript',
+          workspacePath: repoDir,
+          runGit: (args) => ({
+            success: true,
+            stdout: args.includes('--is-shallow-repository') ? 'true' : '',
+          }),
+        });
+
+        expect(assembler.formatContextPrompt(context)).toContain(
+          '**DCO Signed-off-by**: Unknown (shallow history)',
+        );
+      } finally {
+        rmSync(repoDir, { recursive: true, force: true });
+        rmSync(memoryDir, { recursive: true, force: true });
       }
     });
 

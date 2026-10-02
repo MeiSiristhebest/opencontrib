@@ -119,6 +119,19 @@ describe("Public Issue reference detection", () => {
 });
 
 describe("Benchmark canonical invariants", () => {
+  it("prepares the Track B workspace before assembling context", () => {
+    const scenario = STANDARD_BENCHMARK_SCENARIOS.find(
+      (entry) => entry.track === "TRACK_B_ISSUE_DISCOVERY",
+    );
+    expect(scenario).toBeDefined();
+
+    const workspaceIndex = scenario!.requiredActions.indexOf("PREPARE_WORKSPACE");
+    const contextIndex = scenario!.requiredActions.indexOf("ASSEMBLE_CONTEXT");
+    expect(workspaceIndex).toBeGreaterThanOrEqual(0);
+    expect(contextIndex).toBeGreaterThanOrEqual(0);
+    expect(workspaceIndex).toBeLessThan(contextIndex);
+  });
+
   it("CREATE_RUN must be the first protocol action", () => {
     const scenario = STANDARD_BENCHMARK_SCENARIOS[0]; // Track A
     const actions: ProtocolAction[] = [

@@ -309,9 +309,7 @@ export function analyzeRepoEngineeringFingerprint(
       };
 
       sampleTestPath = walkAndFindTest(repoPath);
-    } catch {
-      testSearchLimited = true;
-    }
+    } catch {}
   }
 
   // Detect strictness gateways

@@ -68,7 +68,43 @@ import type {
 import { halt, continuePipeline } from "./types.js";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { posix as posixPath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+
+export function deriveTargetedReproductionTestCommand(
+  repositoryCommand: string,
+  testFiles: readonly string[],
+): string | undefined {
+  const command = repositoryCommand.trim();
+  if (command !== "go test ./...") {
+    if (/^go test\b/.test(command) && /(?:^|\s)\.\/\.\.\.(?:\s|$)/.test(command)) {
+      return undefined;
+    }
+    return command;
+  }
+
+  const packageDirectories = new Set<string>();
+  for (const testFile of testFiles) {
+    const normalized = testFile.replace(/\\/g, "/").replace(/^\.\//, "");
+    if (
+      !normalized ||
+      normalized.startsWith("/") ||
+      /^[a-z]:/i.test(normalized) ||
+      normalized.split("/").some((part) => part === "..") ||
+      !/^[a-zA-Z0-9._/-]+$/.test(normalized) ||
+      !/\.go$/i.test(normalized)
+    ) {
+      return undefined;
+    }
+    packageDirectories.add(posixPath.dirname(normalized));
+  }
+
+  if (packageDirectories.size === 0) return undefined;
+  const packages = [...packageDirectories]
+    .sort()
+    .map((directory) => (directory === "." ? "." : `./${directory}`));
+  return `go test ${packages.join(" ")}`;
+}
 
 function getCoreDiffMetrics(
   ctx: PipelineContext,
@@ -324,6 +360,7 @@ export class ContextAssemblyStep implements PipelineStep {
     deps: PipelineDeps,
   ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
+    const isDocsOnly = selectedOpp.feasibility?.scope === "docs_only";
     deps.stateMachine.transition(
       "PATCH_DESIGN",
       "Assembling multi-dimensional context",
@@ -334,15 +371,16 @@ export class ContextAssemblyStep implements PipelineStep {
       issueTitle: selectedOpp.title,
       issueBody: selectedOpp.body,
       primaryLanguage: selectedOpp.primaryLanguage,
-      isDocsOnly: selectedOpp.feasibility?.scope === "docs_only",
+      isDocsOnly,
       workspacePath: ctx.workspace?.workspacePath,
       runGit: (args) => deps.worktreeManager.runGit(args),
     });
     const prompt = deps.contextAssembler.formatContextPrompt(assembledContext);
 
-    const testCmd =
-      assembledContext.repoContext.runnableCommands.testCommand ||
-      assembledContext.repoContext.testCommandHint;
+    const testCmd = isDocsOnly
+      ? undefined
+      : assembledContext.repoContext.runnableCommands.testCommand ||
+        assembledContext.repoContext.testCommandHint;
 
     ctx.assembledContext = assembledContext;
     ctx.prompt = prompt;
@@ -369,7 +407,8 @@ export class ReproductionDesignStep implements PipelineStep {
     ctx: PipelineContext,
     deps: PipelineDeps,
   ): Promise<StepOutcome> {
-    if (!ctx.testCmd) {
+    const repositoryTestCommand = ctx.testCmd;
+    if (!repositoryTestCommand) {
       // Documentation-only or testless runs remain eligible for dry-run output,
       // but cannot advance their canonical run into PATCH_DRAFTED.
       return continuePipeline();
@@ -392,7 +431,7 @@ export class ReproductionDesignStep implements PipelineStep {
     let design: ReproductionDesign;
     try {
       const result = await deps.llmService.generateStructured({
-        prompt: `${ctx.prompt}\n\nDesign the target RED reproduction only. Return JSON conforming to ReproductionDesignSchema with the exact test command, a non-empty expected failure assertion, at least one concrete test file, and a short rationale. Do not describe the patch.`,
+        prompt: `${ctx.prompt}\n\nDesign the target RED reproduction only. Return JSON conforming to ReproductionDesignSchema with the exact test command, a non-empty expected failure assertion, at least one concrete test file, and a short rationale. Do not describe the patch. When the repository command is 'go test ./...', choose test files in the target package and use 'go test .' for root-package files or 'go test ./<package>' for subpackages; never use 'go test ./...' for RED.`,
         schema: ReproductionDesignSchema,
       });
       design = result.data as ReproductionDesign;
@@ -408,7 +447,26 @@ export class ReproductionDesignStep implements PipelineStep {
       });
     }
 
-    if (design.command.trim() !== ctx.testCmd.trim()) {
+    const expectedTestCommand = deriveTargetedReproductionTestCommand(
+      repositoryTestCommand,
+      design.testFiles,
+    );
+    if (!expectedTestCommand) {
+      deps.stateMachine.transition(
+        "BLOCKED",
+        "Repository-wide Go tests could not be scoped to the RED test files",
+      );
+      return halt({
+        status: "BLOCKED",
+        stage: "PATCH_DESIGN",
+        selectedOpportunity: ctx.selectedOpp,
+        workspacePath: ctx.workspace?.workspacePath,
+        reportSummary:
+          "Pipeline halted: the generated Go test files did not identify a safe target package for RED.",
+      });
+    }
+
+    if (design.command.trim() !== expectedTestCommand) {
       deps.stateMachine.transition(
         "BLOCKED",
         "RED command changed by reproduction design",
@@ -419,9 +477,10 @@ export class ReproductionDesignStep implements PipelineStep {
         selectedOpportunity: ctx.selectedOpp,
         workspacePath: ctx.workspace?.workspacePath,
         reportSummary:
-          "Pipeline halted: reproduction design must use the repository-derived test command exactly.",
+          `Pipeline halted: reproduction design must use the scoped repository test command '${expectedTestCommand}'.`,
       });
     }
+    ctx.testCmd = expectedTestCommand;
 
     // If reproduction design provides newly generated regression test files,
     // apply them to the workspace BEFORE capturing the RED baseline!
