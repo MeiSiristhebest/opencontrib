@@ -11,6 +11,7 @@ import {
 } from "../src/index.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import { runBranchName } from "../src/run/run-branch.js";
+import { InMemoryRunRepository } from "../src/testkit/index.js";
 
 describe("Contribution Run & Artifact Bundle Primitives", () => {
   const tempDirs: string[] = [];
@@ -68,6 +69,46 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
 
     expect(() => manager.saveArtifact(manifest.runId, "pr_draft", "premature"))
       .toThrow(/first PR draft must be created in EVIDENCE_COLLECTED/);
+  });
+
+  it("saves context after canonical workspace preparation", () => {
+    const customBase = makeTempDir();
+    const manager = new ContributionRunManager({ baseDir: customBase });
+    const manifest = manager.createRun({ repoFullName: "example/parser" });
+
+    saveCanonicalArtifact(
+      manager,
+      manifest.runId,
+      "workspace",
+      {
+        workspacePath: "/tmp/workspaces/parser",
+        branchName: "fixture-branch",
+        isWorktree: false,
+        baseRepoPath: "/tmp/workspaces/parser",
+        baseCommitSha: "a".repeat(40),
+        repoFullName: "example/parser",
+        createdAt: "2026-10-01T00:00:00.000Z",
+      },
+      "WORKSPACE_PREPARED",
+    );
+
+    manager.saveArtifact(manifest.runId, "context", { assembled: true });
+
+    expect(manager.getRun(manifest.runId)?.manifest.currentPhase).toBe(
+      "CONTEXT_ASSEMBLED",
+    );
+  });
+
+  it("allows optional PoC after context assembly in the in-memory repository", () => {
+    const repository = new InMemoryRunRepository();
+    const manifest = repository.createRun({ repoFullName: "example/parser" });
+
+    repository.saveArtifact(manifest.runId, "context", { assembled: true });
+    repository.saveArtifact(manifest.runId, "poc", { testFile: "repro.test.ts" });
+
+    expect(repository.getRun(manifest.runId)?.manifest.currentPhase).toBe(
+      "POC_GENERATED",
+    );
   });
 
   it("saves discrete stage artifacts and advances run phase seamlessly", () => {

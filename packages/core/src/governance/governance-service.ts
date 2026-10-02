@@ -10,8 +10,12 @@ import {
   ValidatedPatchArtifactSchema,
   type GovernanceDecisionArtifact,
 } from "../contracts/schemas.js";
+import { PatchDraftSchema } from "../contracts/llm-schemas.js";
 import { auditGovernance, isSupportingFile } from "./governance-auditor.js";
-import { countValidatedPatchChangedLinesAtGreenTree } from "../evidence/evidence-service.js";
+import {
+  countValidatedPatchChangedLinesAtGreenTree,
+  getValidatedPatchUnifiedDiffAtGreenTree,
+} from "../evidence/evidence-service.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 import {
   hashTrustedPolicySnapshot,
@@ -39,6 +43,32 @@ function hash(value: unknown): string {
   const content =
     typeof value === "string" ? value : JSON.stringify(value ?? "");
   return createHash("sha256").update(content).digest("hex");
+}
+
+function parseCanonicalPatchDraft(value: unknown) {
+  let candidate = value;
+  if (typeof candidate === "string") {
+    try {
+      candidate = JSON.parse(candidate);
+    } catch {
+      return undefined;
+    }
+  }
+  if (
+    !candidate ||
+    typeof candidate !== "object" ||
+    Array.isArray(candidate) ||
+    !Object.prototype.hasOwnProperty.call(candidate, "files")
+  ) {
+    return undefined;
+  }
+  const parsed = PatchDraftSchema.safeParse(candidate);
+  if (!parsed.success) {
+    throw new Error(
+      "GovernancePatchDraftError: canonical patch artifact does not satisfy PatchDraftSchema.",
+    );
+  }
+  return parsed.data;
 }
 
 function readTrackedFilesAtCommit(
@@ -155,6 +185,7 @@ export class GovernanceService {
         `GovernanceProvenanceError: current patch or ValidatedPatchArtifact integrity does not match the canonical GREEN result for run ${runId}.`,
       );
     }
+    const canonicalPatchDraft = parseCanonicalPatchDraft(patchRaw);
     const evidenceArtifact = run.artifacts.evidence;
     if (!evidenceArtifact) {
       throw new Error(
@@ -277,6 +308,9 @@ export class GovernanceService {
     let coreDiffLines: number | undefined;
     let repoContextFiles: string[] = [];
     let baseFileContents = new Map<string, string>();
+    let governanceDiffText: string | undefined = canonicalPatchDraft
+      ? undefined
+      : patchContent;
     try {
       if (
         typeof workspaceArtifact.workspacePath !== "string" ||
@@ -288,6 +322,14 @@ export class GovernanceService {
         );
       }
       const workspacePath = workspaceArtifact.workspacePath;
+      if (canonicalPatchDraft) {
+        governanceDiffText = getValidatedPatchUnifiedDiffAtGreenTree(
+          workspacePath,
+          validatedPatch.baseCommitSha,
+          validatedPatch.files,
+          validatedPatch.greenTreeSha256,
+        );
+      }
       repoContextFiles = readTrackedFilesAtCommit(
         workspacePath,
         validatedPatch.baseCommitSha,
@@ -314,12 +356,16 @@ export class GovernanceService {
       ) {
         throw error;
       }
+      if (canonicalPatchDraft && governanceDiffText === undefined) {
+        throw error;
+      }
       // If canonical counting is unavailable, auditGovernance falls back to
       // the total validated diff size rather than exempting unmeasured lines.
       coreDiffLines = undefined;
     }
 
     const auditResult = auditGovernance({
+      diffText: governanceDiffText,
       patchContent,
       prTitle,
       prBody: prDraftRaw,

@@ -683,7 +683,7 @@ export function auditGovernance(
 ): GovernanceAuditResult & {
   overallConfidence: { isPassed: boolean; overallScore: number };
 } {
-  const patch = input.diffText || input.patchContent || "";
+  const patch = input.diffText ?? input.patchContent ?? "";
   const prBody = input.prBodyText || input.prBody || "";
   const validatedLineCount = isNonNegativeLineCount(input.lineCount)
     ? input.lineCount

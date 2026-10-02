@@ -114,6 +114,21 @@ describe("Audit Fixes: Lifecycle State Machine with PROBE and POC phases", () =>
     };
 
     expect(() => validatePhaseGate(summary, "POC_GENERATED")).not.toThrow();
+
+    const contextAssembledSummary: ContributionRunSummary = {
+      ...summary,
+      manifest: {
+        ...summary.manifest,
+        currentPhase: "CONTEXT_ASSEMBLED",
+      },
+      artifacts: {
+        ...summary.artifacts,
+        context: { assembled: true },
+      },
+    };
+    expect(() =>
+      validatePhaseGate(contextAssembledSummary, "POC_GENERATED"),
+    ).not.toThrow();
   });
 });
 

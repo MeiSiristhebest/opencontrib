@@ -124,7 +124,7 @@ export class InMemoryRunRepository implements RunRepository {
       "PROBE_COMPLETED",
       "WORKSPACE_PREPARED",
     ],
-    POC_GENERATED: ["WORKSPACE_PREPARED"],
+    POC_GENERATED: ["WORKSPACE_PREPARED", "CONTEXT_ASSEMBLED"],
     PATCH_DRAFTED: ["RED_CAPTURED"],
   };
 

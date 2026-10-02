@@ -329,6 +329,23 @@ diff --git a/src/core.ts b/src/core.ts
       expect(matrix.recommendedAssertions.some((a) => a.includes('isna()'))).toBe(true);
     });
 
+    it('uses non-Python guidance for tabular issues in other repositories', () => {
+      for (const language of ['Go', 'Rust', 'TypeScript']) {
+        const matrix = generateCombinatorialMatrix({
+          primaryLanguage: language,
+          issueTitle: 'Fix DataFrame reindex alignment for timestamp rows',
+        });
+        const guidance = [
+          ...matrix.scenarios.map((scenario) => scenario.testTemplateSnippet),
+          ...matrix.recommendedAssertions,
+        ].join('\n');
+
+        expect(matrix.domain).toBe('tabular_time_series');
+        expect(guidance).not.toMatch(/pd\.|np\.|assert(?:\s+all|\()/);
+        expect(guidance).toContain('timestamp');
+      }
+    });
+
     it('generates Semantic Kernel token-scale and delimiter matrix for text chunking', () => {
       const matrix = generateCombinatorialMatrix({
         issueTitle: 'Text chunker early exit when all_resolved is True',
@@ -789,6 +806,30 @@ diff --git a/src/core.ts b/src/core.ts
           filePattern: '*.spec.js',
           frameworkName: 'unknown',
           sampleTestPath: join(tempDir, 'parser.spec.js'),
+        });
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('finds test files in monorepo trees deeper than three directories', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-fp-deep-tests-'));
+      const nestedTestDir = join(
+        tempDir,
+        'packages',
+        'foo',
+        'src',
+        '__tests__',
+      );
+      const nestedTestPath = join(nestedTestDir, 'parser.test.ts');
+      mkdirSync(nestedTestDir, { recursive: true });
+      writeFileSync(nestedTestPath, 'test("parser", () => {});');
+
+      try {
+        const fingerprint = analyzeRepoEngineeringFingerprint({ repoPath: tempDir });
+        expect(fingerprint.testConventions).toMatchObject({
+          filePattern: '*.test.ts',
+          sampleTestPath: nestedTestPath,
         });
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
