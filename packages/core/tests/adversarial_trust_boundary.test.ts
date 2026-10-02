@@ -1,6 +1,13 @@
 import { describe, it, expect } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
@@ -43,6 +50,37 @@ const testApprovalAuthority = () =>
       artifact.signingKeyId === "test-key" &&
       artifact.signature === "test-signature",
   });
+
+function initializeFixtureGitBase(workspacePath: string): string {
+  const gitPath = join(workspacePath, ".git");
+  if (!existsSync(gitPath)) {
+    const fixtureFile = join(workspacePath, "src", "fix.ts");
+    mkdirSync(join(workspacePath, "src"), { recursive: true });
+    if (!existsSync(fixtureFile)) {
+      writeFileSync(fixtureFile, "before\n", "utf8");
+    }
+
+    execFileSync("git", ["-C", workspacePath, "init", "--quiet"]);
+    execFileSync("git", ["-C", workspacePath, "add", "--all"]);
+    execFileSync("git", [
+      "-C",
+      workspacePath,
+      "-c",
+      "user.name=OpenContrib Test",
+      "-c",
+      "user.email=opencontrib-test@example.invalid",
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "fixture base",
+    ]);
+  }
+
+  return execFileSync("git", ["-C", workspacePath, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+}
 
 function seedIssueBinding(
   manager: ContributionRunManager,
@@ -97,7 +135,8 @@ function seedGovernanceReadyRun(
     mutateWorkspaceBeforeAudit?: () => void;
   } = {},
 ) {
-  const baseCommitSha = "a".repeat(40);
+  mkdirSync(workspacePath, { recursive: true });
+  const baseCommitSha = initializeFixtureGitBase(workspacePath);
   const patch = {
     title: "fix: bug",
     summary: "fix",
@@ -118,7 +157,7 @@ function seedGovernanceReadyRun(
   };
   const patchContent = JSON.stringify(patch);
   const patchSha256 = createHash("sha256").update(patchContent).digest("hex");
-  mkdirSync(workspacePath, { recursive: true });
+  writeFileSync(join(workspacePath, "src", "fix.ts"), "fixed", "utf8");
   const greenTreeSha256 = computeSourceTreeHash(workspacePath);
   const validatedPatch = {
     runId,
@@ -356,8 +395,21 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-policy-snapshot-"));
     const workspacePath = join(baseDir, "workspace");
     const previousHome = process.env.OPENCONTRIB_HOME;
-    process.env.OPENCONTRIB_HOME = join(baseDir, "host-home");
     mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(
+      join(workspacePath, ".opencontrib.json"),
+      JSON.stringify({
+        policy: {
+          coverage: {
+            required: true,
+            minimumChangedLineCoverage: 90,
+          },
+        },
+      }),
+      "utf8",
+    );
+    const baseCommitSha = initializeFixtureGitBase(workspacePath);
+    process.env.OPENCONTRIB_HOME = join(baseDir, "host-home");
     try {
       const manager = new ContributionRunManager({ baseDir });
       const manifest = manager.createRun({ repoFullName: "org/repo" });
@@ -393,7 +445,7 @@ describe("Adversarial Pen-Testing: P0 Trust Boundaries & Invariants", () => {
           branchName: "fixture-branch",
           isWorktree: false,
           baseRepoPath: workspacePath,
-          baseCommitSha: "a".repeat(40),
+          baseCommitSha,
           baseBranch: "main",
         }),
         detectDefaultBranch: () => "main",
