@@ -154,6 +154,10 @@ function isHashCommentLanguage(filePath: string): boolean {
   return /\.(?:py|sh|bash|zsh|ps1|rb)$/i.test(filePath);
 }
 
+function isDashCommentLanguage(filePath: string): boolean {
+  return /\.(?:lua|sql)$/i.test(filePath);
+}
+
 function extractTemplateExpressions(
   templateBody: string,
 ): Array<{ expression: string; start: number; end: number }> {
@@ -303,6 +307,43 @@ function isPythonFStringPrefix(line: string, quoteIndex: number): boolean {
   return prefix !== undefined;
 }
 
+function stringPrefixBeforeQuote(line: string, quoteIndex: number, filePath: string): string {
+  const preceding = line.slice(0, quoteIndex);
+  let match: RegExpMatchArray | null = null;
+  if (/\.py$/i.test(filePath)) {
+    match = preceding.match(/(?:^|[^a-zA-Z0-9_])(br|rb|fr|rf|r|u|b|f)$/i);
+  } else if (/\.rs$/i.test(filePath)) {
+    match = preceding.match(/(?:^|[^a-zA-Z0-9_])((?:br|r)#+|br|r|b|c)$/);
+  } else if (/\.(?:c|h|cc|cpp|hpp)$/i.test(filePath)) {
+    match = preceding.match(/(?:^|[^a-zA-Z0-9_])(u8|u|U|L)$/);
+  }
+  return match?.[1] || '';
+}
+
+function cppRawStringBeforeQuote(
+  line: string,
+  quoteIndex: number,
+  filePath: string,
+): { prefix: string; contentStart: number; closingDelimiter: string } | undefined {
+  if (!/\.(?:c|h|cc|cpp|hpp)$/i.test(filePath)) return undefined;
+  const match = line
+    .slice(0, quoteIndex)
+    .match(/(?:^|[^a-zA-Z0-9_])((?:u8|u|U|L)?R)$/);
+  if (!match) return undefined;
+
+  const delimiterStart = quoteIndex + 1;
+  const openParen = line.indexOf('(', delimiterStart);
+  if (openParen < 0 || openParen - delimiterStart > 16) return undefined;
+  const delimiter = line.slice(delimiterStart, openParen);
+  if (/[\s()\\]/.test(delimiter)) return undefined;
+
+  return {
+    prefix: match[1],
+    contentStart: openParen + 1,
+    closingDelimiter: `)${delimiter}"`,
+  };
+}
+
 function scanDiffSourceLine(
   line: string,
   filePath: string,
@@ -316,6 +357,7 @@ function scanDiffSourceLine(
   let index = 0;
   let code = '';
   const hashComments = isHashCommentLanguage(filePath);
+  const dashComments = isDashCommentLanguage(filePath);
   const supportsTripleQuotes = /\.py$/i.test(filePath);
 
   const appendStringContent = (value: string) => {
@@ -406,9 +448,28 @@ function scanDiffSourceLine(
     }
     if (!hashComments && line.startsWith('//', index)) break;
     if (hashComments && line[index] === '#') break;
+    if (dashComments && line.startsWith('--', index)) break;
 
     const quote = line[index];
     if (quote === '"' || quote === "'" || quote === '`') {
+      const cppRawString = cppRawStringBeforeQuote(line, index, filePath);
+      if (cppRawString) {
+        code = code.slice(0, -cppRawString.prefix.length);
+        const tokenId = String(state.nextToken++);
+        state.stringDelimiter = cppRawString.closingDelimiter;
+        state.stringTokenId = tokenId;
+        state.stringValue = '';
+        state.stringAddedFlags = [];
+        state.stringSourceLines = [];
+        state.stringIsFString = false;
+        stringValues.set(`__STR_${tokenId}__`, '');
+        code += `__STR_${tokenId}__`;
+        index = cppRawString.contentStart;
+        continue;
+      }
+
+      const stringPrefix = stringPrefixBeforeQuote(line, index, filePath);
+      if (stringPrefix) code = code.slice(0, -stringPrefix.length);
       const delimiter =
         supportsTripleQuotes && line.startsWith(quote.repeat(3), index)
           ? quote.repeat(3)
@@ -616,7 +677,7 @@ function analyzeFileChanges(
     const comparisonVariable =
       `(?:${issueVariable}|[a-zA-Z_$][\\w$]*(?:(?:\\?\\.|\\.)[a-zA-Z_$][\\w$]*)*)`;
     const sampleComparison = new RegExp(
-      `\\bif\\s*(?:\\(\\s*)?(?:(${comparisonVariable})\\s*(?:===|==)\\s*(${stringToken})|(${stringToken})\\s*(?:===|==)\\s*(${comparisonVariable}))\\s*\\)?`,
+      `\\b(?:if|elif)\\s*(?:\\(\\s*)?(?:(${comparisonVariable})\\s*(?:===|==)\\s*(${stringToken})|(${stringToken})\\s*(?:===|==)\\s*(${comparisonVariable}))\\s*\\)?`,
       'gi',
     );
     for (const match of source.code.matchAll(sampleComparison)) {
@@ -624,7 +685,8 @@ function analyzeFileChanges(
       const returnIndex = branchReturnIndex(source.code, conditionEnd);
       if (
         returnIndex === undefined ||
-        !source.hasAddedCode(returnIndex, returnIndex + 'return'.length)
+        (!source.hasAddedCode(match.index ?? 0, conditionEnd) &&
+          !source.hasAddedCode(returnIndex, returnIndex + 'return'.length))
       ) {
         continue;
       }

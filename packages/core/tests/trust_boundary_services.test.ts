@@ -19,8 +19,12 @@ import {
 } from "../src/index.js";
 import { ContributionPrService } from "../src/github/contribution-pr-service.js";
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
-import { EvidenceService } from "../src/evidence/evidence-service.js";
+import {
+  EvidenceService,
+  getValidatedPatchUnifiedDiffAtGreenTree,
+} from "../src/evidence/evidence-service.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
+import { auditGovernance } from "../src/domain/governance.js";
 import { computeSourceTreeHash } from "../src/evidence/evidence-collector.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
@@ -167,30 +171,50 @@ function writeGreenFileAfterBaseCommit(
   workspacePath: string,
   content: string,
   relativePath = "src/fix.ts",
+  baseContent: string | null = "const before = true;\n",
 ): string {
   const sourcePath = join(workspacePath, relativePath);
   mkdirSync(dirname(sourcePath), { recursive: true });
-  writeFileSync(sourcePath, "const before = true;\n");
-  execFileSync("git", ["init"], { cwd: workspacePath, stdio: "ignore" });
-  execFileSync("git", ["config", "user.email", "test@example.com"], {
+  if (baseContent !== null) writeFileSync(sourcePath, baseContent);
+  const hooksPath = join(workspacePath, ".opencontrib-test-hooks");
+  mkdirSync(hooksPath, { recursive: true });
+  execFileSync("git", ["init", "--quiet"], {
     cwd: workspacePath,
     stdio: "ignore",
+    timeout: 10_000,
   });
-  execFileSync("git", ["config", "user.name", "OpenContrib Test"], {
+  execFileSync("git", ["add", "--all"], {
     cwd: workspacePath,
     stdio: "ignore",
+    timeout: 10_000,
   });
-  execFileSync("git", ["add", "--", relativePath], {
+  execFileSync("git", [
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "user.name=OpenContrib Test",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "commit.template=",
+    "-c",
+    `core.hooksPath=${hooksPath}`,
+    "commit",
+    "--quiet",
+    "--allow-empty",
+    "--no-verify",
+    "--no-gpg-sign",
+    "-m",
+    "base",
+  ], {
     cwd: workspacePath,
     stdio: "ignore",
-  });
-  execFileSync("git", ["commit", "-m", "base"], {
-    cwd: workspacePath,
-    stdio: "ignore",
+    timeout: 10_000,
   });
   const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: workspacePath,
     encoding: "utf8",
+    timeout: 10_000,
   }).trim();
   writeFileSync(sourcePath, content);
   return baseCommitSha;
@@ -208,6 +232,8 @@ function seedGovernanceReadyRun(
     patchContent?: string;
     patchDraft?: PatchDraft;
     changedLines?: number;
+    baseContent?: string;
+    providerIssueId?: number;
   } = {},
 ) {
   mkdirSync(workspacePath, { recursive: true });
@@ -236,6 +262,11 @@ function seedGovernanceReadyRun(
   };
   const patchFile = patch.files.find((file) => file.path === patchPath);
   if (!patchFile) throw new Error(`Fixture patch has no file at '${patchPath}'.`);
+  if (patchFile.operation === "DELETE" && options.baseContent === undefined) {
+    throw new Error(
+      `DELETE fixture '${patchPath}' must provide its actual baseContent.`,
+    );
+  }
   const patchContent = options.patchContent ?? JSON.stringify(patch);
   const baseCommitSha =
     options.baseCommitSha ??
@@ -245,6 +276,10 @@ function seedGovernanceReadyRun(
           workspacePath,
           patchFile.content,
           patchPath,
+          options.baseContent ??
+            (patchFile.operation === "CREATE"
+              ? null
+              : "const before = true;\n"),
         ));
   const greenFilePath = join(workspacePath, patchPath);
   if (patchFile.operation === "DELETE") {
@@ -297,7 +332,12 @@ function seedGovernanceReadyRun(
     "WORKSPACE_PREPARED",
   );
   if (communityPolicy.privateVulnerabilityDisclosure !== true) {
-    seedIssueBinding(manager, runId, canonicalRepoFullName);
+    seedIssueBinding(
+      manager,
+      runId,
+      canonicalRepoFullName,
+      options.providerIssueId ?? 42,
+    );
   }
   saveCanonicalArtifact(
     manager,
@@ -395,7 +435,135 @@ function seedGovernanceReadyRun(
   return audit;
 }
 
+describe("Validated base-to-GREEN governance diffs", () => {
+  it("keeps the real removed content for delete diffs", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-validated-delete-diff-"));
+    const workspacePath = join(baseDir, "repo");
+    const relativePath = "src/remove.ts";
+    const baseContent = 'if (repository === "org/repo") return old();\n';
+    try {
+      const baseCommitSha = writeGreenFileAfterBaseCommit(
+        workspacePath,
+        "",
+        relativePath,
+        baseContent,
+      );
+      rmSync(join(workspacePath, relativePath));
+      const diff = getValidatedPatchUnifiedDiffAtGreenTree(
+        workspacePath,
+        baseCommitSha,
+        [
+          {
+            path: relativePath,
+            operation: "DELETE",
+            mode: "100644",
+            contentSha256: createHash("sha256").update("").digest("hex"),
+          },
+        ],
+        computeSourceTreeHash(workspacePath),
+      );
+
+      expect(diff).toContain('-if (repository === "org/repo") return old();');
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads validated diffs larger than Node's default child-process buffer", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-validated-large-diff-"));
+    const workspacePath = join(baseDir, "repo");
+    const relativePath = "src/large.ts";
+    const content = `export const large = "${"x".repeat(1_100_000)}";\n`;
+    try {
+      const baseCommitSha = writeGreenFileAfterBaseCommit(
+        workspacePath,
+        content,
+        relativePath,
+        "export const large = \"before\";\n",
+      );
+      const diff = getValidatedPatchUnifiedDiffAtGreenTree(
+        workspacePath,
+        baseCommitSha,
+        [
+          {
+            path: relativePath,
+            operation: "MODIFY",
+            mode: "100644",
+            contentSha256: createHash("sha256").update(content).digest("hex"),
+          },
+        ],
+        computeSourceTreeHash(workspacePath),
+      );
+
+      expect(diff.length).toBeGreaterThan(1_048_576);
+      expect(diff).toContain("x".repeat(128));
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  if (process.platform !== "win32") {
+    it("passes filenames with Git pathspec magic as literal paths", () => {
+      const baseDir = mkdtempSync(join(tmpdir(), "oc-validated-literal-path-"));
+      const workspacePath = join(baseDir, "repo");
+      const relativePath = ":(glob)nope.ts";
+      const content = "export const after = true;\n";
+      try {
+        const baseCommitSha = writeGreenFileAfterBaseCommit(
+          workspacePath,
+          content,
+          relativePath,
+          "export const before = true;\n",
+        );
+        const diff = getValidatedPatchUnifiedDiffAtGreenTree(
+          workspacePath,
+          baseCommitSha,
+          [
+            {
+              path: relativePath,
+              operation: "MODIFY",
+              mode: "100644",
+              contentSha256: createHash("sha256").update(content).digest("hex"),
+            },
+          ],
+          computeSourceTreeHash(workspacePath),
+        );
+
+        expect(diff).toContain("+export const after = true;");
+      } finally {
+        rmSync(baseDir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 describe("Governance audit impact context", () => {
+  it("does not report hazards that appear only in removed diff lines", () => {
+    const audit = auditGovernance({
+      diffText: [
+        "diff --git a/internal/tool/code_search.go b/internal/tool/code_search.go",
+        "--- a/internal/tool/code_search.go",
+        "+++ b/internal/tool/code_search.go",
+        "@@ -1 +1 @@",
+        "-normalized := filepath.ToSlash(input)",
+        "+normalized := filepath.FromSlash(input)",
+      ].join("\n"),
+      patchContent: JSON.stringify({
+        files: [
+          {
+            path: "internal/tool/code_search.go",
+            content: "normalized := filepath.FromSlash(input)",
+          },
+        ],
+      }),
+      modifiedFiles: ["internal/tool/code_search.go"],
+      lineCount: 1,
+      coreDiffLines: 1,
+    });
+
+    expect(audit.impactAnalysisPassed).toBe(true);
+  });
+
   it("checks hardcoded repository branches in canonical PatchDraft files", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-patch-draft-hardcode-"));
     try {
@@ -508,7 +676,7 @@ diff --git a/src/fix.ts b/src/fix.ts
         repoPath,
         "pr body",
         {},
-        { patchContent },
+        { patchContent, providerIssueId: 1614 },
       );
 
       expect(decision.auditResult.antiHardcodePassed).toBe(false);
@@ -522,7 +690,7 @@ diff --git a/src/fix.ts b/src/fix.ts
     }
   });
 
-  it("does not infer an issue-specific workaround from a different issue number", () => {
+  it("does not infer an issue-specific workaround from the manifest issue number alone", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-issue-hardcode-mismatch-"));
     try {
       const repoPath = join(baseDir, "repo");
@@ -536,7 +704,7 @@ diff --git a/src/fix.ts b/src/fix.ts
 --- a/src/fix.ts
 +++ b/src/fix.ts
 @@ -1,0 +1,1 @@
-+if (issueNumber === 1615) return workaround();
++if (issueNumber === 1614) return workaround();
 `;
 
       const decision = seedGovernanceReadyRun(

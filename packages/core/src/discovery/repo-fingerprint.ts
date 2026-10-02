@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { detectRunnableCommandsFromDir } from './context-assembler.js';
 
 export type CommitConventionType =
+  | 'unknown'
   | 'conventional'
   | 'bracketed_component'
   | 'capitalized_imperative'
@@ -13,13 +14,15 @@ export interface RepoEngineeringFingerprint {
   commitStyle: {
     primaryConvention: CommitConventionType;
     sampleRecentCommits: string[];
-    requiresSignedOffBy: boolean;
+    requiresSignedOffBy?: boolean;
+    historyShallow: boolean;
     recommendedCommitExample: string;
   };
   testConventions: {
     filePattern: string;
     frameworkName: string;
     sampleTestPath?: string;
+    searchLimited: boolean;
   };
   strictnessGateways: {
     hasPreCommit: boolean;
@@ -167,24 +170,34 @@ export function analyzeRepoEngineeringFingerprint(
   const { repoPath, repoFullName } = options;
 
   let messages = options.recentCommitMessages || [];
+  let historyShallow = false;
 
   // If commit messages weren't provided directly, attempt to read via runGit
-  if (messages.length === 0 && options.runGit && existsSync(repoPath)) {
+  if (options.runGit && existsSync(repoPath)) {
     try {
-      const gitRes = options.runGit([
+      const shallowRes = options.runGit([
         '-C',
         repoPath,
-        'log',
-        '-n',
-        '20',
-        '--no-merges',
-        '--format=%B---COMMIT_SEP---',
+        'rev-parse',
+        '--is-shallow-repository',
       ]);
-      if (gitRes.success && gitRes.stdout) {
-        messages = gitRes.stdout
-          .split('---COMMIT_SEP---')
-          .map((m) => m.trim())
-          .filter(Boolean);
+      historyShallow = shallowRes.success && shallowRes.stdout.trim() === 'true';
+      if (messages.length === 0) {
+        const gitRes = options.runGit([
+          '-C',
+          repoPath,
+          'log',
+          '-n',
+          '20',
+          '--no-merges',
+          '--format=%B---COMMIT_SEP---',
+        ]);
+        if (gitRes.success && gitRes.stdout) {
+          messages = gitRes.stdout
+            .split('---COMMIT_SEP---')
+            .map((m) => m.trim())
+            .filter(Boolean);
+        }
       }
     } catch {
       // best-effort
@@ -195,9 +208,15 @@ export function analyzeRepoEngineeringFingerprint(
     const title = message.trim().split(/\r?\n/, 1)[0] || '';
     return title.length > 0 && !/^merge\b/i.test(title);
   });
-  const { convention, requiresSignedOffBy } = classifyCommitConvention(messages);
+  const classifiedConvention = classifyCommitConvention(messages);
+  const convention = historyShallow ? 'unknown' : classifiedConvention.convention;
+  const requiresSignedOffBy = historyShallow
+    ? undefined
+    : classifiedConvention.requiresSignedOffBy;
 
-  let recommendedCommitExample = 'fix(core): handle edge-case null pointer in stream reader';
+  let recommendedCommitExample = historyShallow
+    ? 'Review repository contribution rules before choosing a commit format.'
+    : 'fix(core): handle edge-case null pointer in stream reader';
   if (convention === 'bracketed_component') {
     recommendedCommitExample = '[Core] Fix edge-case null pointer in stream reader';
   } else if (convention === 'capitalized_imperative') {
@@ -208,6 +227,7 @@ export function analyzeRepoEngineeringFingerprint(
   let filePattern = 'unknown';
   let frameworkName = 'unknown';
   let sampleTestPath: string | undefined;
+  let testSearchLimited = false;
 
   if (existsSync(repoPath)) {
     try {
@@ -248,7 +268,10 @@ export function analyzeRepoEngineeringFingerprint(
           const dir = directories[nextDirectory++];
           const entries = readdirSync(dir, { withFileTypes: true });
           for (const entry of entries) {
-            if (scannedEntries >= maxScannedEntries) return undefined;
+            if (scannedEntries >= maxScannedEntries) {
+              testSearchLimited = true;
+              return undefined;
+            }
             scannedEntries += 1;
             if (skippedDirectories.has(entry.name.toLowerCase())) continue;
             const full = join(dir, entry.name);
@@ -281,11 +304,14 @@ export function analyzeRepoEngineeringFingerprint(
             }
           }
         }
+        if (nextDirectory < directories.length) testSearchLimited = true;
         return undefined;
       };
 
       sampleTestPath = walkAndFindTest(repoPath);
-    } catch {}
+    } catch {
+      testSearchLimited = true;
+    }
   }
 
   // Detect strictness gateways
@@ -296,9 +322,14 @@ export function analyzeRepoEngineeringFingerprint(
     linterCommands.push(runnable.lintCommand);
   }
 
-  let personaAdvice = `Target repository favors ${convention} commit messages. Write concise, declarative commits.`;
+  let personaAdvice = historyShallow
+    ? 'Commit style and DCO policy could not be inferred because repository history is shallow. Check the repository contribution rules.'
+    : `Target repository favors ${convention} commit messages. Write concise, declarative commits.`;
   if (requiresSignedOffBy) {
     personaAdvice += ' Every commit must include a valid `Signed-off-by` trailer (DCO requirement).';
+  }
+  if (testSearchLimited) {
+    personaAdvice += ' Test convention search hit its entry limit; a missing sample is incomplete evidence.';
   }
   if (hasPreCommit) {
     personaAdvice += ' Pre-commit hooks are configured; inspect and follow their checks before pushing.';
@@ -310,12 +341,14 @@ export function analyzeRepoEngineeringFingerprint(
       primaryConvention: convention,
       sampleRecentCommits: messages.slice(0, 5),
       requiresSignedOffBy,
+      historyShallow,
       recommendedCommitExample,
     },
     testConventions: {
       filePattern,
       frameworkName,
       sampleTestPath,
+      searchLimited: testSearchLimited,
     },
     strictnessGateways: {
       hasPreCommit,
