@@ -77,6 +77,45 @@ describe("Pipeline RED command selection", () => {
 
     expect(ctx.testCmd).toBeUndefined();
   });
+
+  it("keeps the repository test command separate from scoped RED", async () => {
+    const ctx: any = {
+      selectedOpp: {
+        repoFullName: "owner/repo",
+        issueNumber: 2,
+        title: "Fix parser regression",
+        body: "",
+        primaryLanguage: "Go",
+        feasibility: { scope: "logic" },
+      },
+      workspace: { workspacePath: "/tmp/workspace" },
+      runId: "run_parser_fix",
+    };
+    const deps: any = {
+      stateMachine: { transition: () => {} },
+      contextAssembler: {
+        assemble: async () => ({
+          repoContext: {
+            runnableCommands: { testCommand: "go test ./..." },
+            testCommandHint: "go test ./...",
+          },
+        }),
+        formatContextPrompt: () => "prompt",
+      },
+      runManager: {
+        getRun: () => ({ runId: "run_parser_fix" }),
+        saveArtifact: () => {},
+      },
+    };
+
+    await new ContextAssemblyStep().execute(ctx, deps);
+    ctx.testCmd = deriveTargetedReproductionTestCommand("go test ./...", [
+      "pkg/parser/parser_test.go",
+    ]);
+
+    expect(ctx.testCmd).toBe("go test ./pkg/parser");
+    expect(ctx.repositoryTestCmd).toBe("go test ./...");
+  });
 });
 
 function buildDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
