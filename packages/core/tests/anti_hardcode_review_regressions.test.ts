@@ -305,6 +305,24 @@ describe("anti-hardcode review regressions", () => {
     ).toBe(true);
   });
 
+  it("does not treat script regexes as template comments", () => {
+    for (const filePath of ["src/App.vue", "src/App.svelte"]) {
+      const result = lintAntiHardcode(
+        diff(
+          filePath,
+          '+<script>const marker = /<!--/; if (repo === "owner/repo") return fallback();</script>',
+        ),
+        { targetRepo: "owner/repo" },
+      );
+
+      expect(
+        result.violations.some(
+          (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+        ),
+      ).toBe(true);
+    }
+  });
+
   it("keeps Rust lifetimes and Kotlin raw strings from hiding later code", () => {
     const rust = [
       "diff --git a/src/feature.rs b/src/feature.rs",
