@@ -87,7 +87,7 @@ function isWebRoutePathReference(code: string, pathToken: string): boolean {
   return (
     /<Route\b[^>]*\bpath\s*=\s*\{?\s*$/i.test(prefix) ||
     /\b(?:route|routePath|pathname|href|url)\s*[:=]\s*\{?\s*$/i.test(prefix) ||
-    /\b(?:routes|router)\b[^;\n]*\bpath\s*:\s*\{?\s*$/i.test(prefix)
+    /\b(?:route|routes|router)\b[^;\n]*\bpath\s*:\s*\{?\s*$/i.test(prefix)
   );
 }
 
