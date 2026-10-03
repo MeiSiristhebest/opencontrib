@@ -249,7 +249,7 @@ function textChunkingTemplate(language: MatrixTemplateLanguage): {
   }
   if (language === 'go') {
     return {
-      exactBoundary: 'tokens := tokenizer.Encode(strings.Repeat("word ", maxTokens*2))\ntext := tokenizer.Decode(tokens[:maxTokens])\nif tokenLen(text) != maxTokens { t.Fatal("fixture did not reach token boundary") }\nchunks := chunker.SplitLines(text, maxTokens)\nfor _, chunk := range chunks { if tokenLen(chunk) > maxTokens { t.Fatal("chunk exceeded token bound") } }',
+      exactBoundary: 'tokens := tokenizer.Encode(strings.Repeat("word ", maxTokens*2))\nif len(tokens) < maxTokens { t.Fatal("fixture did not produce enough tokens") }\ntext := tokenizer.Decode(tokens[:maxTokens])\nif tokenLen(text) != maxTokens { t.Fatal("fixture did not reach token boundary") }\nchunks := chunker.SplitLines(text, maxTokens)\nfor _, chunk := range chunks { if tokenLen(chunk) > maxTokens { t.Fatal("chunk exceeded token bound") } }',
       assertions: [
         'for _, chunk := range chunks { if tokenLen(chunk) > maxTokens { t.Fatal("chunk exceeded token bound") } }',
         'if strings.Join(chunks, "") != text { t.Fatal("chunking lost text") }',
@@ -258,7 +258,7 @@ function textChunkingTemplate(language: MatrixTemplateLanguage): {
   }
   if (language === 'rust') {
     return {
-      exactBoundary: 'let tokens = tokenizer.encode(&"word ".repeat(max_tokens * 2));\nlet text = tokenizer.decode(&tokens[..max_tokens]);\nassert_eq!(token_len(&text), max_tokens);\nlet chunks = chunker.split_lines(&text, max_tokens);\nassert!(chunks.iter().all(|chunk| token_len(chunk) <= max_tokens));',
+      exactBoundary: 'let tokens = tokenizer.encode(&"word ".repeat(max_tokens * 2));\nassert!(tokens.len() >= max_tokens, "fixture did not produce enough tokens");\nlet text = tokenizer.decode(&tokens[..max_tokens]);\nassert_eq!(token_len(&text), max_tokens);\nlet chunks = chunker.split_lines(&text, max_tokens);\nassert!(chunks.iter().all(|chunk| token_len(chunk) <= max_tokens));',
       assertions: [
         'assert!(chunks.iter().all(|chunk| token_len(chunk) <= max_tokens));',
         'assert_eq!(chunks.concat(), text);',
