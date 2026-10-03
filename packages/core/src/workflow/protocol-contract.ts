@@ -119,11 +119,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "Context Assembled",
     description:
       "Minimal deterministic context bundle assembled without repository-wide token dump.",
-    allowedFromPhases: [
-      "INITIALIZED",
-      "OPPORTUNITY_SCOUTED",
-      "PROBE_COMPLETED",
-    ],
+    allowedFromPhases: ["WORKSPACE_PREPARED"],
     requiredArtifacts: ["context"],
     cli: {
       command: "discovery",
@@ -140,7 +136,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Context bundle must be minimal, structured, and contain exploration guidance.",
     ],
-    suggestedNextAction: "prepare_workspace",
+    suggestedNextAction: "capture_red",
   },
   WORKSPACE_PREPARED: {
     phase: "WORKSPACE_PREPARED",
@@ -151,7 +147,6 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "INITIALIZED",
       "OPPORTUNITY_SCOUTED",
       "PROBE_COMPLETED",
-      "CONTEXT_ASSEMBLED",
     ],
     requiredArtifacts: ["workspace"],
     cli: {
@@ -178,7 +173,11 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "RED Baseline Captured",
     description:
       "A trusted host execution recorded the target assertion failing on the immutable workspace baseline.",
-    allowedFromPhases: ["WORKSPACE_PREPARED", "POC_GENERATED"],
+    allowedFromPhases: [
+      "WORKSPACE_PREPARED",
+      "CONTEXT_ASSEMBLED",
+      "POC_GENERATED",
+    ],
     requiredArtifacts: ["workspace", "evidence_red"],
     cli: {
       command: "evidence",
@@ -205,7 +204,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "Reproduction PoC Generated",
     description:
       "Standalone reproducible test or script demonstrating the bug before fix.",
-    allowedFromPhases: ["WORKSPACE_PREPARED"],
+    allowedFromPhases: ["WORKSPACE_PREPARED", "CONTEXT_ASSEMBLED"],
     requiredArtifacts: ["workspace", "poc"],
     cli: {
       command: "verify",

@@ -118,12 +118,8 @@ export class InMemoryRunRepository implements RunRepository {
   private static readonly allowedDraftSources: Record<string, string[]> = {
     OPPORTUNITY_SCOUTED: ["INITIALIZED"],
     PROBE_COMPLETED: ["INITIALIZED", "OPPORTUNITY_SCOUTED"],
-    CONTEXT_ASSEMBLED: [
-      "INITIALIZED",
-      "OPPORTUNITY_SCOUTED",
-      "PROBE_COMPLETED",
-    ],
-    POC_GENERATED: ["WORKSPACE_PREPARED"],
+    CONTEXT_ASSEMBLED: ["WORKSPACE_PREPARED"],
+    POC_GENERATED: ["WORKSPACE_PREPARED", "CONTEXT_ASSEMBLED"],
     PATCH_DRAFTED: ["RED_CAPTURED"],
   };
 

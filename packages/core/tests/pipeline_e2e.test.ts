@@ -15,7 +15,108 @@ import { FixedClock } from "../src/ports/clock.port.js";
 import { MockLLMProvider } from "../src/testkit/mock-llm.js";
 import { LLMService } from "../src/llm/llm-service.js";
 import { ContributionStateMachine } from "../src/orchestration/state-machine.js";
+import { ContextAssembler } from "../src/discovery/context-assembler.js";
 import type { PipelineDeps } from "../src/orchestration/pipeline/types.js";
+import {
+  ContextAssemblyStep,
+  deriveTargetedReproductionTestCommand,
+} from "../src/orchestration/pipeline/steps.js";
+
+describe("Pipeline RED command selection", () => {
+  it("scopes a recursive Go test command to generated test-file packages", () => {
+    expect(
+      deriveTargetedReproductionTestCommand("go test ./...", [
+        "internal/worker/worker_test.go",
+        "pkg/parser/parser_test.go",
+      ]),
+    ).toBe("go test ./internal/worker ./pkg/parser");
+    expect(
+      deriveTargetedReproductionTestCommand("go test ./...", ["worker_test.go"]),
+    ).toBe("go test .");
+    expect(
+      deriveTargetedReproductionTestCommand("go test ./...", ["../outside_test.go"]),
+    ).toBeUndefined();
+    expect(
+      deriveTargetedReproductionTestCommand("go test ./...", [
+        "internal/.../worker_test.go",
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("does not schedule RED execution for documentation-only opportunities", async () => {
+    const ctx: any = {
+      selectedOpp: {
+        repoFullName: "owner/repo",
+        issueNumber: 1,
+        title: "Fix README typo",
+        body: "",
+        primaryLanguage: "Go",
+        feasibility: { scope: "docs_only" },
+      },
+      workspace: { workspacePath: "/tmp/workspace" },
+      runId: "run_docs_only",
+    };
+    const deps: any = {
+      stateMachine: { transition: () => {} },
+      contextAssembler: {
+        assemble: async () => ({
+          repoContext: {
+            runnableCommands: { testCommand: "go test ./..." },
+            testCommandHint: "go test ./...",
+          },
+        }),
+        formatContextPrompt: () => "prompt",
+      },
+      runManager: {
+        getRun: () => ({ runId: "run_docs_only" }),
+        saveArtifact: () => {},
+      },
+    };
+
+    await new ContextAssemblyStep().execute(ctx, deps);
+
+    expect(ctx.testCmd).toBeUndefined();
+  });
+
+  it("keeps the repository test command separate from scoped RED", async () => {
+    const ctx: any = {
+      selectedOpp: {
+        repoFullName: "owner/repo",
+        issueNumber: 2,
+        title: "Fix parser regression",
+        body: "",
+        primaryLanguage: "Go",
+        feasibility: { scope: "logic" },
+      },
+      workspace: { workspacePath: "/tmp/workspace" },
+      runId: "run_parser_fix",
+    };
+    const deps: any = {
+      stateMachine: { transition: () => {} },
+      contextAssembler: {
+        assemble: async () => ({
+          repoContext: {
+            runnableCommands: { testCommand: "go test ./..." },
+            testCommandHint: "go test ./...",
+          },
+        }),
+        formatContextPrompt: () => "prompt",
+      },
+      runManager: {
+        getRun: () => ({ runId: "run_parser_fix" }),
+        saveArtifact: () => {},
+      },
+    };
+
+    await new ContextAssemblyStep().execute(ctx, deps);
+    ctx.testCmd = deriveTargetedReproductionTestCommand("go test ./...", [
+      "pkg/parser/parser_test.go",
+    ]);
+
+    expect(ctx.testCmd).toBe("go test ./pkg/parser");
+    expect(ctx.repositoryTestCmd).toBe("go test ./...");
+  });
+});
 
 function buildDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
   const workspacePath = mkdtempSync(join(tmpdir(), "oc-e2e-"));
@@ -146,6 +247,77 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
     expect(result.confidenceScore).toBeGreaterThanOrEqual(70);
     expect(result.reportSummary).toContain("Dry run completed");
   });
+
+  it("passes workspace history and language into context assembly", async () => {
+    const contextAssembler = new ContextAssembler({ getMemory: () => null } as any);
+    let assembledContext: ReturnType<typeof contextAssembler.assemble> | undefined;
+    const assemble = contextAssembler.assemble.bind(contextAssembler);
+    contextAssembler.assemble = (input) => {
+      const context = assemble(input);
+      assembledContext = context;
+      return context;
+    };
+    const deps = buildDeps({ contextAssembler });
+    const gitCalls: string[][] = [];
+    let createdWorkspacePath: string | undefined;
+    (deps.client as any).getRepoDetails = async () => ({
+      status: "OK",
+      data: {
+        stars: 120,
+        defaultBranch: "main",
+        isFork: false,
+        isArchived: false,
+        description: "Offline pipeline fixture",
+        primaryLanguage: "Go",
+      },
+    });
+    const createWorkspace = (deps.worktreeManager as any).createIsolatedWorkspace;
+    (deps.worktreeManager as any).createIsolatedWorkspace = (...args: any[]) => {
+      const result = createWorkspace(...args);
+      createdWorkspacePath = result.workspacePath;
+      return result;
+    };
+    (deps.worktreeManager as any).runGit = (args: string[]) => {
+      gitCalls.push(args);
+      return {
+        success: true,
+        stdout: args.includes("--format=%B---COMMIT_SEP---")
+          ? "[Go] Fix sample---COMMIT_SEP---"
+          : "",
+        stderr: "",
+      };
+    };
+
+    const { AgentOrchestrator } =
+      await import("../src/orchestration/agent-orchestrator.js");
+    const orchestrator = new AgentOrchestrator({ deps });
+    const result = await orchestrator.runPipeline({
+      profile: profile(),
+      targetRepo: "octocat/hello-world",
+    });
+
+    expect(result.status).toBe("DRY_RUN_COMPLETED");
+    const workspacePath = createdWorkspacePath;
+    if (!workspacePath) {
+      throw new Error("Workspace allocation did not produce a path");
+    }
+    expect(gitCalls).toContainEqual([
+      "-C",
+      workspacePath,
+      "log",
+      "-n",
+      "20",
+      "--no-merges",
+      "--format=%B---COMMIT_SEP---",
+    ]);
+    expect(result.selectedOpportunity?.primaryLanguage).toBe("Go");
+    expect(
+      assembledContext?.repoContext.engineeringFingerprint?.commitStyle.primaryConvention,
+    ).toBe("bracketed_component");
+    expect(
+      assembledContext?.repoContext.engineeringFingerprint?.commitStyle.sampleRecentCommits,
+    ).toContain("[Go] Fix sample");
+  }, 15000);
 
   it("halts at HUMAN_GATE in interactive mode when not approved", async () => {
     const { AgentOrchestrator } =

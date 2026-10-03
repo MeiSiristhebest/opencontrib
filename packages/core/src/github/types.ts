@@ -44,6 +44,7 @@ export interface RepoDetails {
   isFork: boolean;
   isArchived: boolean;
   description: string;
+  primaryLanguage?: string;
 }
 
 export interface RepoDirectoryEntry {
