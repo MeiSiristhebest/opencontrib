@@ -168,7 +168,7 @@ function seedGovernanceReadyRun(
   workspacePath: string,
   body = "pr body",
   communityPolicy: Partial<CommunityGatePolicy> = {},
-  options: { baseCommitSha?: string; patchPath?: string } = {},
+  options: { baseCommitSha?: string; patchPath?: string; patchContent?: string } = {},
 ) {
   mkdirSync(workspacePath, { recursive: true });
   const greenTreeSha256 = computeSourceTreeHash(workspacePath);
@@ -196,7 +196,7 @@ function seedGovernanceReadyRun(
     regressionTestPlan: ["bun test"],
     estimatedDiffLines: 1,
   };
-  const patchContent = JSON.stringify(patch);
+  const patchContent = options.patchContent ?? JSON.stringify(patch);
   const patchSha256 = createHash("sha256").update(patchContent).digest("hex");
   const validatedPatch = {
     runId,
@@ -336,6 +336,43 @@ function seedGovernanceReadyRun(
 }
 
 describe("Governance audit impact context", () => {
+  it("passes canonical run issue metadata into the anti-hardcode gate", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-issue-hardcode-"));
+    try {
+      const repoPath = join(baseDir, "repo");
+      const manager = isolatedRunManager(join(baseDir, "runs"));
+      const manifest = manager.createRun({
+        repoFullName: "org/repo",
+        issueNumber: 1614,
+      });
+      const patchContent = `
+diff --git a/src/fix.ts b/src/fix.ts
+--- a/src/fix.ts
++++ b/src/fix.ts
+@@ -1,0 +1,1 @@
++if (issueNumber === 1614) return workaround();
+`;
+
+      const decision = seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        repoPath,
+        "pr body",
+        {},
+        { patchContent },
+      );
+
+      expect(decision.auditResult.antiHardcodePassed).toBe(false);
+      expect(
+        decision.auditResult.flaggedHardcodeIssues.some((issue: string) =>
+          issue.includes("issue #1614"),
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it("passes validated patch paths and the base tree into sibling-file analysis", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-impact-"));
     const repoPath = join(baseDir, "repo");

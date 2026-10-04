@@ -147,6 +147,42 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
     expect(result.reportSummary).toContain("Dry run completed");
   });
 
+  it("passes the worktree Git runner into context assembly", async () => {
+    const deps = buildDeps();
+    const gitCalls: string[][] = [];
+    (deps.worktreeManager as any).runGit = (args: string[]) => {
+      gitCalls.push(args);
+      return {
+        success: true,
+        stdout: args.length === 1 && args[0] === "log" ? "history" : "",
+        stderr: "",
+      };
+    };
+
+    const baseContextAssembler = deps.contextAssembler as any;
+    let assembledInput: any;
+    deps.contextAssembler = {
+      assemble: async (input: any) => {
+        assembledInput = input;
+        return baseContextAssembler.assemble(input);
+      },
+      formatContextPrompt: baseContextAssembler.formatContextPrompt,
+    } as any;
+
+    const { AgentOrchestrator } =
+      await import("../src/orchestration/agent-orchestrator.js");
+    const orchestrator = new AgentOrchestrator({ deps });
+    const result = await orchestrator.runPipeline({
+      profile: profile(),
+      targetRepo: "octocat/hello-world",
+    });
+
+    expect(result.status).toBe("DRY_RUN_COMPLETED");
+    expect(typeof assembledInput?.runGit).toBe("function");
+    expect(assembledInput.runGit(["log"]).stdout).toBe("history");
+    expect(gitCalls).toContainEqual(["log"]);
+  });
+
   it("halts at HUMAN_GATE in interactive mode when not approved", async () => {
     const { AgentOrchestrator } =
       await import("../src/orchestration/agent-orchestrator.js");

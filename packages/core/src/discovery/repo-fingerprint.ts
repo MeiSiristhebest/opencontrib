@@ -36,6 +36,51 @@ export interface AnalyzeFingerprintOptions {
   runGit?: (args: string[]) => { success: boolean; stdout: string };
 }
 
+function detectJavaScriptTestFramework(repoPath: string): string {
+  try {
+    const rootEntries = readdirSync(repoPath);
+    const packagePath = join(repoPath, 'package.json');
+    let dependencyNames: string[] = [];
+    let testScript = '';
+
+    if (existsSync(packagePath)) {
+      try {
+        const packageJson = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+          dependencies?: Record<string, unknown>;
+          devDependencies?: Record<string, unknown>;
+          peerDependencies?: Record<string, unknown>;
+          scripts?: Record<string, unknown>;
+        };
+        dependencyNames = [
+          ...Object.keys(packageJson.dependencies || {}),
+          ...Object.keys(packageJson.devDependencies || {}),
+          ...Object.keys(packageJson.peerDependencies || {}),
+        ];
+        testScript = String(packageJson.scripts?.test || '').toLowerCase();
+      } catch {
+        // An unreadable package manifest does not establish a test runner.
+      }
+    }
+
+    const hasConfig = (name: string) =>
+      rootEntries.some((entry) => entry.toLowerCase().startsWith(name.toLowerCase()));
+    const hasDependency = (name: string) =>
+      dependencyNames.some((dependency) => dependency.toLowerCase() === name.toLowerCase());
+
+    if (hasDependency('vitest') || hasConfig('vitest.config.')) return 'vitest';
+    if (hasDependency('jest') || hasConfig('jest.config.')) return 'jest';
+    if (hasDependency('mocha') || hasConfig('.mocharc')) return 'mocha';
+    if (hasDependency('ava')) return 'ava';
+    if (/\bbun\s+test\b/.test(testScript)) return 'bun test';
+    if (/\bnode\s+--test\b/.test(testScript)) return 'node:test';
+    if (/\b(?:npm|pnpm|yarn)\s+exec\s+vitest\b/.test(testScript)) return 'vitest';
+    if (/\b(?:npm|pnpm|yarn)\s+exec\s+jest\b/.test(testScript)) return 'jest';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 /**
  * Classifies commit message convention based on statistical pattern matching.
  */
@@ -43,7 +88,12 @@ export function classifyCommitConvention(messages: string[]): {
   convention: CommitConventionType;
   requiresSignedOffBy: boolean;
 } {
-  if (!messages || messages.length === 0) {
+  const authoredMessages = (messages || []).filter((message) => {
+    const title = message.trim().split(/\r?\n/, 1)[0] || '';
+    return title.length > 0 && !/^merge\b/i.test(title);
+  });
+
+  if (authoredMessages.length === 0) {
     return {
       convention: 'conventional',
       requiresSignedOffBy: false,
@@ -55,7 +105,7 @@ export function classifyCommitConvention(messages: string[]): {
   let capitalizedCount = 0;
   let signedOffByCount = 0;
 
-  for (const raw of messages) {
+  for (const raw of authoredMessages) {
     const lines = raw.trim().split(/\r?\n/);
     const title = lines[0] || '';
     if (!title) continue;
@@ -83,7 +133,8 @@ export function classifyCommitConvention(messages: string[]): {
     }
   }
 
-  const requiresSignedOffBy = signedOffByCount >= Math.max(1, Math.floor(messages.length * 0.3));
+  const requiresSignedOffBy =
+    signedOffByCount >= Math.max(1, Math.floor(authoredMessages.length * 0.3));
 
   if (conventionalCount >= bracketedCount && conventionalCount >= capitalizedCount && conventionalCount > 0) {
     return { convention: 'conventional', requiresSignedOffBy };
@@ -118,6 +169,7 @@ export function analyzeRepoEngineeringFingerprint(
         'log',
         '-n',
         '20',
+        '--no-merges',
         '--format=%B---COMMIT_SEP---',
       ]);
       if (gitRes.success && gitRes.stdout) {
@@ -131,6 +183,10 @@ export function analyzeRepoEngineeringFingerprint(
     }
   }
 
+  messages = messages.filter((message) => {
+    const title = message.trim().split(/\r?\n/, 1)[0] || '';
+    return title.length > 0 && !/^merge\b/i.test(title);
+  });
   const { convention, requiresSignedOffBy } = classifyCommitConvention(messages);
 
   let recommendedCommitExample = 'fix(core): handle edge-case null pointer in stream reader';
@@ -147,16 +203,43 @@ export function analyzeRepoEngineeringFingerprint(
 
   if (existsSync(repoPath)) {
     try {
+      const skippedDirectories = new Set([
+        'node_modules',
+        '.git',
+        'dist',
+        'build',
+        '.opencontrib',
+        '.venv',
+        'venv',
+        'vendor',
+        '.yarn',
+        '.pnpm-store',
+        '.pytest_cache',
+        '.mypy_cache',
+        '.ruff_cache',
+        '.tox',
+        '__pycache__',
+        '.cache',
+        'coverage',
+        '.next',
+        '.nuxt',
+        '.turbo',
+        'target',
+      ]);
+      const javascriptFramework = detectJavaScriptTestFramework(repoPath);
       const walkAndFindTest = (dir: string, depth = 0): string | undefined => {
         if (depth > 3) return undefined;
         const entries = readdirSync(dir, { withFileTypes: true });
         for (const entry of entries) {
-          if (['node_modules', '.git', 'dist', 'build', '.opencontrib'].includes(entry.name)) continue;
+          if (skippedDirectories.has(entry.name.toLowerCase())) continue;
           const full = join(dir, entry.name);
           if (entry.isFile()) {
-            if (/\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(entry.name)) {
-              filePattern = '*.test.ts';
-              frameworkName = 'vitest/jest';
+            const javascriptTestMatch = entry.name.match(
+              /^.+\.(test|spec)\.([cm]?[jt]sx?)$/i,
+            );
+            if (javascriptTestMatch) {
+              filePattern = `*.${javascriptTestMatch[1].toLowerCase()}.${javascriptTestMatch[2].toLowerCase()}`;
+              frameworkName = javascriptFramework;
               return full;
             }
             if (/^test_[a-zA-Z0-9_]+\.py$/i.test(entry.name)) {
@@ -199,7 +282,7 @@ export function analyzeRepoEngineeringFingerprint(
     personaAdvice += ' Every commit must include a valid `Signed-off-by` trailer (DCO requirement).';
   }
   if (hasPreCommit) {
-    personaAdvice += ' Pre-commit hooks are configured; all files must pass strict formatting before pushing.';
+    personaAdvice += ' Pre-commit hooks are configured; inspect and follow their checks before pushing.';
   }
 
   return {
@@ -217,7 +300,7 @@ export function analyzeRepoEngineeringFingerprint(
     },
     strictnessGateways: {
       hasPreCommit,
-      hasStrictLint: hasPreCommit || linterCommands.length > 0,
+      hasStrictLint: linterCommands.length > 0,
       linterCommands,
     },
     contributorPersonaAdvice: personaAdvice,
