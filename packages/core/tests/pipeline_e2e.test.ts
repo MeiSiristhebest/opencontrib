@@ -149,9 +149,15 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
   });
 
   it("passes workspace history and language into context assembly", async () => {
-    const deps = buildDeps({
-      contextAssembler: new ContextAssembler({ getMemory: () => null } as any),
-    });
+    const contextAssembler = new ContextAssembler({ getMemory: () => null } as any);
+    let assembledContext: ReturnType<typeof contextAssembler.assemble> | undefined;
+    const assemble = contextAssembler.assemble.bind(contextAssembler);
+    contextAssembler.assemble = (input) => {
+      const context = assemble(input);
+      assembledContext = context;
+      return context;
+    };
+    const deps = buildDeps({ contextAssembler });
     const gitCalls: string[][] = [];
     let createdWorkspacePath: string | undefined;
     (deps.client as any).getRepoDetails = async () => ({
@@ -205,6 +211,12 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
       "--format=%B---COMMIT_SEP---",
     ]);
     expect(result.selectedOpportunity?.primaryLanguage).toBe("Go");
+    expect(
+      assembledContext?.repoContext.engineeringFingerprint?.commitStyle.primaryConvention,
+    ).toBe("bracketed_component");
+    expect(
+      assembledContext?.repoContext.engineeringFingerprint?.commitStyle.sampleRecentCommits,
+    ).toContain("[Go] Fix sample");
   }, 15000);
 
   it("halts at HUMAN_GATE in interactive mode when not approved", async () => {

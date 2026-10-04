@@ -141,7 +141,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Context bundle must be minimal, structured, and contain exploration guidance.",
     ],
-    suggestedNextAction: "prepare_workspace",
+    suggestedNextAction: "capture_red",
   },
   WORKSPACE_PREPARED: {
     phase: "WORKSPACE_PREPARED",
@@ -179,7 +179,11 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "RED Baseline Captured",
     description:
       "A trusted host execution recorded the target assertion failing on the immutable workspace baseline.",
-    allowedFromPhases: ["WORKSPACE_PREPARED", "POC_GENERATED"],
+    allowedFromPhases: [
+      "WORKSPACE_PREPARED",
+      "CONTEXT_ASSEMBLED",
+      "POC_GENERATED",
+    ],
     requiredArtifacts: ["workspace", "evidence_red"],
     cli: {
       command: "evidence",

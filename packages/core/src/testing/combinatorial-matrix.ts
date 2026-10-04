@@ -139,10 +139,10 @@ function concurrencyTemplate(
 
 function interruptedCleanupTemplate(language: MatrixTemplateLanguage): string {
   if (language === 'python') {
-    return 'processes = [subprocess.Popen(command) for _ in range(20)]\nfor process in processes:\n    process.terminate()\nfor process in processes:\n    process.wait(timeout=5)\nshutil.rmtree(test_dir)\nassert not os.path.exists(test_dir)';
+    return 'processes = []\ntry:\n    for _ in range(20):\n        processes.append(subprocess.Popen(command))\nfinally:\n    for process in processes:\n        if process.poll() is None:\n            process.terminate()\n    for process in processes:\n        try:\n            process.wait(timeout=5)\n        except subprocess.TimeoutExpired:\n            process.kill()\n            process.wait()\n    shutil.rmtree(test_dir)\n    assert not os.path.exists(test_dir)';
   }
   if (language === 'go') {
-    return 'commands := make([]*exec.Cmd, 20)\nfor i := range commands { commands[i] = exec.CommandContext(ctx, command); if err := commands[i].Start(); err != nil { t.Fatal(err) } }\nfor _, cmd := range commands { _ = cmd.Process.Kill() }\nfor _, cmd := range commands { _ = cmd.Wait() }\nif err := os.RemoveAll(testDir); err != nil { t.Fatal(err) }';
+    return 'commands := make([]*exec.Cmd, 0, 20)\ncleanup := func() { for _, cmd := range commands { if cmd.ProcessState == nil { _ = cmd.Process.Kill() } }; for _, cmd := range commands { _ = cmd.Wait() }; if err := os.RemoveAll(testDir); err != nil { t.Error(err) } }\ndefer cleanup()\nfor i := 0; i < 20; i++ { cmd := exec.CommandContext(ctx, command); if err := cmd.Start(); err != nil { t.Fatal(err) }; commands = append(commands, cmd) }';
   }
   if (language === 'rust') {
     return 'let mut children: Vec<_> = (0..20).map(|_| Command::new(command).spawn().expect("spawn worker")).collect();\nfor child in &mut children { child.kill()?; }\nfor child in &mut children { child.wait()?; }\nstd::fs::remove_dir_all(&test_dir)?;\nassert!(!test_dir.exists());';

@@ -18,6 +18,7 @@ import { ContextAssembler } from '../src/discovery/context-assembler.js';
 import { auditGovernance } from '../src/domain/governance.js';
 import { GovernanceAuditResultSchema } from '../src/contracts/schemas.js';
 import { RepoMemoryLedger } from '../src/memory/repo-memory.js';
+import { InMemoryRunRepository } from '../src/testkit/index.js';
 
 describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
   // ─── 1. Anti-Hardcode & Generalization Gate Tests ───
@@ -424,18 +425,20 @@ diff --git a/src/core.ts b/src/core.ts
       expect(pythonText.recommendedAssertions[0]).toContain('token_len(chunk) <= max_tokens');
     });
 
-    it('exercises concurrent interrupted cleanup in each language template', () => {
+    it('includes cleanup in syntax templates and generic fallback guidance', () => {
       const fixtures = [
         {
           language: 'Python',
           workerMarker: 'range(20)',
+          setupCleanupMarker: 'finally:',
           interruptMarker: 'process.terminate()',
           waitMarker: 'process.wait(timeout=5)',
           cleanupMarker: 'shutil.rmtree(test_dir)',
         },
         {
           language: 'Go',
-          workerMarker: 'make([]*exec.Cmd, 20)',
+          workerMarker: 'make([]*exec.Cmd, 0, 20)',
+          setupCleanupMarker: 'defer cleanup()',
           interruptMarker: 'cmd.Process.Kill()',
           waitMarker: 'cmd.Wait()',
           cleanupMarker: 'os.RemoveAll(testDir)',
@@ -443,6 +446,7 @@ diff --git a/src/core.ts b/src/core.ts
         {
           language: 'Rust',
           workerMarker: '0..20',
+          setupCleanupMarker: '',
           interruptMarker: 'child.kill()',
           waitMarker: 'child.wait()',
           cleanupMarker: 'remove_dir_all(&test_dir)',
@@ -450,16 +454,10 @@ diff --git a/src/core.ts b/src/core.ts
         {
           language: 'TypeScript',
           workerMarker: 'length: 20',
+          setupCleanupMarker: '',
           interruptMarker: 'child.kill()',
           waitMarker: 'Promise.all(exited)',
           cleanupMarker: 'rmSync(testDir',
-        },
-        {
-          language: 'Kotlin',
-          workerMarker: '20 child processes',
-          interruptMarker: 'cancel them',
-          waitMarker: 'wait for every exit',
-          cleanupMarker: 'remove their shared temporary directory',
         },
       ];
 
@@ -478,15 +476,30 @@ diff --git a/src/core.ts b/src/core.ts
           LifecycleInterruption: 'MidStreamAbort',
         });
         expect(snippet).toContain(fixture.workerMarker);
+        if (fixture.setupCleanupMarker) {
+          expect(snippet).toContain(fixture.setupCleanupMarker);
+        }
         expect(snippet).toContain(fixture.interruptMarker);
         expect(snippet).toContain(fixture.waitMarker);
         expect(snippet).toContain(fixture.cleanupMarker);
+        if (fixture.language === 'Python') {
+          expect(snippet).toContain('except subprocess.TimeoutExpired:');
+          expect(snippet).toContain('process.kill()');
+        }
         expect(snippet.indexOf(fixture.workerMarker)).toBeLessThan(snippet.indexOf(fixture.interruptMarker));
         expect(snippet.indexOf(fixture.waitMarker)).toBeLessThan(snippet.indexOf(fixture.cleanupMarker));
       }
+
+      const kotlinFallback = generateCombinatorialMatrix({
+        primaryLanguage: 'Kotlin',
+        issueTitle: 'Concurrent worker pool cleanup can fail with EBUSY',
+      }).scenarios.find((scenario) => scenario.scenarioId === 'WINDOWS_EBUSY_HANDLE_RACE');
+      expect(kotlinFallback?.testTemplateSnippet).toBe(
+        'Start 20 child processes, cancel them, wait for every exit, remove their shared temporary directory, and verify cleanup succeeds on Windows.',
+      );
     });
 
-    it('uses language-correct Unicode and unresolved-chunk templates for every supported language', () => {
+    it('uses syntax-specific Unicode and unresolved-chunk templates for supported languages', () => {
       const fixtures = [
         {
           language: 'Python',
@@ -507,11 +520,6 @@ diff --git a/src/core.ts b/src/core.ts
           language: 'TypeScript',
           punctuationMarker: 'expect(chunks.join("")).toBe(text)',
           tokenBoundMarker: 'tokenLen(chunk) <= maxTokens',
-        },
-        {
-          language: 'Kotlin',
-          punctuationMarker: 'Verify that punctuation-only text',
-          tokenBoundMarker: 'token limit',
         },
       ];
 
@@ -537,9 +545,7 @@ diff --git a/src/core.ts b/src/core.ts
         expect(unresolvedSnippet).toContain(fixture.tokenBoundMarker);
         expect(unresolvedSnippet).toMatch(/VeryLongContinuousString|unbreakable remainder/);
         expect(punctuationSnippet).toContain(fixture.punctuationMarker);
-        if (fixture.language !== 'Kotlin') {
-          expect(punctuationSnippet).toContain('漢字。句子！次の文？');
-        }
+        expect(punctuationSnippet).toContain('漢字。句子！次の文？');
       }
 
       const rustGeneral = generateCombinatorialMatrix({
@@ -548,6 +554,25 @@ diff --git a/src/core.ts b/src/core.ts
       });
       expect(rustGeneral.recommendedAssertions).toContain('assert!(!result.is_empty())');
       expect(rustGeneral.recommendedAssertions.some((assertion) => assertion.includes('is_some()'))).toBe(false);
+    });
+
+    it('uses generic text guidance for unsupported language templates', () => {
+      const matrix = generateCombinatorialMatrix({
+        primaryLanguage: 'Kotlin',
+        issueTitle: 'NLP tokenization boundary regression',
+      });
+      const unresolved = matrix.scenarios.find(
+        (scenario) => scenario.scenarioId === 'SK_EARLY_EXIT_UNRESOLVED_TRAP',
+      );
+      const punctuation = matrix.scenarios.find(
+        (scenario) => scenario.scenarioId === 'PUNCTUATION_ONLY_DELIMITERS',
+      );
+
+      expect(unresolved?.testTemplateSnippet).toContain('unbreakable remainder');
+      expect(unresolved?.testTemplateSnippet).toContain('token limit');
+      expect(punctuation?.testTemplateSnippet).toBe(
+        'Verify that punctuation-only text splits or remains intact without losing characters.',
+      );
     });
 
     it('includes every declared matrix variant in at least one scenario', () => {
@@ -584,6 +609,12 @@ diff --git a/src/core.ts b/src/core.ts
         convention: 'unstructured',
         requiresSignedOffBy: false,
       });
+    });
+
+    it('requires a strict majority to select a primary commit convention', () => {
+      expect(
+        classifyCommitConvention(['feat: add parser', 'Fix parser behavior']).convention,
+      ).toBe('unstructured');
     });
 
     it('does not infer a test runner when the repository has no test files', () => {
@@ -680,10 +711,10 @@ diff --git a/src/core.ts b/src/core.ts
         });
 
         expect(fingerprint.commitStyle.primaryConvention).toBe('capitalized_imperative');
-        expect(fingerprint.strictnessGateways.hasPreCommit).toBe(true);
+        expect(fingerprint.strictnessGateways.hasPreCommit).toBe(false);
         expect(fingerprint.strictnessGateways.hasStrictLint).toBe(false);
         expect(fingerprint.testConventions.filePattern).toBe('test_*.py');
-        expect(fingerprint.contributorPersonaAdvice).toContain('Pre-commit hooks are configured');
+        expect(fingerprint.contributorPersonaAdvice).not.toContain('Pre-commit hooks are configured');
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
@@ -855,6 +886,16 @@ diff --git a/src/core.ts b/src/core.ts
         expect(context.combinatorialMatrix?.scenarios[0].testTemplateSnippet).toContain(
           'handleInput([]Item{})',
         );
+        const docsOnlyContext = assembler.assemble({
+          repoFullName: 'example/parser',
+          issueTitle: 'Fix README typo',
+          issueBody: '',
+          isDocsOnly: true,
+        });
+        expect(docsOnlyContext.combinatorialMatrix).toBeUndefined();
+        expect(assembler.formatContextPrompt(docsOnlyContext)).not.toContain(
+          '[COMBINATORIAL_MUTATION_MATRIX - MULTI-DIMENSIONAL BOUNDARY GUIDANCE]',
+        );
         expect(prompt).toContain('[UPSTREAM_ENGINEERING_FINGERPRINT - CLONED COMMUNITY CONVENTIONS]');
         expect(prompt).toContain('[COMBINATORIAL_MUTATION_MATRIX - MULTI-DIMENSIONAL BOUNDARY GUIDANCE]');
         expect(prompt).toContain('[EMPTY_COLLECTION_SAFETY]');
@@ -863,5 +904,15 @@ diff --git a/src/core.ts b/src/core.ts
         rmSync(memoryDir, { recursive: true, force: true });
       }
     });
+  });
+
+  it('allows the in-memory run repository to save context after workspace preparation', () => {
+    const repository = new InMemoryRunRepository();
+    const run = repository.createRun({ repoFullName: 'example/parser' });
+    run.currentPhase = 'WORKSPACE_PREPARED';
+
+    repository.saveArtifact(run.runId, 'context', { assembled: true });
+
+    expect(repository.getRun(run.runId)?.manifest.currentPhase).toBe('CONTEXT_ASSEMBLED');
   });
 });

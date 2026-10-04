@@ -36,6 +36,7 @@ interface DiffLexerState {
   stringValue: string;
   stringAddedFlags: boolean[];
   stringSourceLines: string[];
+  stringIsFString: boolean;
   nextToken: number;
 }
 
@@ -51,7 +52,7 @@ const SOURCE_FILE_EXTENSION =
 
 function isSourceCodeFile(filePath: string): boolean {
   const basename = filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase() || '';
-  if (/^(?:readme|contributing|contributing\.md|changelog|changes|history|license|notice|authors|copying|install|code_of_conduct)(?:\.[a-z0-9]+)?$/.test(basename)) {
+  if (/^(?:readme|contributing|changelog|changes|history|license|notice|authors|copying|install|code_of_conduct)(?:\.(?:md|mdx|rst|txt))?$/.test(basename)) {
     return false;
   }
   if (!filePath || !/\.[^/]+$/.test(filePath)) return true;
@@ -232,6 +233,76 @@ function extractTemplateExpressions(
   return expressions;
 }
 
+function extractPythonFStringExpressions(
+  stringBody: string,
+): Array<{ expression: string; start: number; end: number }> {
+  const expressions: Array<{ expression: string; start: number; end: number }> = [];
+
+  for (let index = 0; index < stringBody.length; index++) {
+    if (stringBody[index] !== '{') continue;
+    if (stringBody[index + 1] === '{') {
+      index++;
+      continue;
+    }
+
+    const expressionStart = index + 1;
+    let braceDepth = 1;
+    let quote: string | undefined;
+    let inLineComment = false;
+    let expressionEnd = -1;
+
+    for (let cursor = expressionStart; cursor < stringBody.length; cursor++) {
+      const current = stringBody[cursor];
+      if (inLineComment) {
+        if (current === '\n') inLineComment = false;
+        continue;
+      }
+      if (quote) {
+        if (current === '\\') {
+          cursor++;
+        } else if (stringBody.startsWith(quote, cursor)) {
+          cursor += quote.length - 1;
+          quote = undefined;
+        }
+        continue;
+      }
+      if (current === '#') {
+        inLineComment = true;
+        continue;
+      }
+      if (current === '"' || current === "'") {
+        quote = stringBody.startsWith(current.repeat(3), cursor)
+          ? current.repeat(3)
+          : current;
+        continue;
+      }
+      if (current === '{') {
+        braceDepth++;
+      } else if (current === '}' && --braceDepth === 0) {
+        expressionEnd = cursor;
+        break;
+      }
+    }
+
+    if (expressionEnd < 0) break;
+    expressions.push({
+      expression: stringBody.slice(expressionStart, expressionEnd),
+      start: expressionStart,
+      end: expressionEnd,
+    });
+    index = expressionEnd;
+  }
+
+  return expressions;
+}
+
+function isPythonFStringPrefix(line: string, quoteIndex: number): boolean {
+  const prefix = line
+    .slice(0, quoteIndex)
+    .match(/(?:^|[^a-zA-Z0-9_])(f|fr|rf)$/i)?.[1];
+  return prefix !== undefined;
+}
+
 function scanDiffSourceLine(
   line: string,
   filePath: string,
@@ -249,7 +320,7 @@ function scanDiffSourceLine(
 
   const appendStringContent = (value: string) => {
     state.stringValue += value;
-    if (state.stringDelimiter === '`') {
+    if (state.stringDelimiter === '`' || state.stringIsFString) {
       for (let offset = 0; offset < value.length; offset++) {
         state.stringAddedFlags.push(lineAdded);
         state.stringSourceLines.push(sourceLine);
@@ -273,8 +344,13 @@ function scanDiffSourceLine(
       } else if (line.startsWith(state.stringDelimiter, index)) {
         if (state.stringTokenId) {
           stringValues.set(`__STR_${state.stringTokenId}__`, state.stringValue);
-          if (state.stringDelimiter === '`') {
-            for (const expression of extractTemplateExpressions(state.stringValue)) {
+          const expressions =
+            state.stringDelimiter === '`'
+              ? extractTemplateExpressions(state.stringValue)
+              : state.stringIsFString
+                ? extractPythonFStringExpressions(state.stringValue)
+                : [];
+          for (const expression of expressions) {
               const addedOffset = state.stringAddedFlags
                 .slice(expression.start, expression.end)
                 .findIndex(Boolean);
@@ -287,6 +363,7 @@ function scanDiffSourceLine(
                 stringValue: '',
                 stringAddedFlags: [],
                 stringSourceLines: [],
+                stringIsFString: false,
                 nextToken: state.nextToken,
               };
               const expressionCode = scanDiffSourceLine(
@@ -306,7 +383,6 @@ function scanDiffSourceLine(
                 code: expressionCode,
               });
               state.nextToken = expressionState.nextToken;
-            }
           }
         }
         index += state.stringDelimiter.length;
@@ -315,6 +391,7 @@ function scanDiffSourceLine(
         state.stringValue = '';
         state.stringAddedFlags = [];
         state.stringSourceLines = [];
+        state.stringIsFString = false;
       } else {
         appendStringContent(line[index]);
         index++;
@@ -342,6 +419,7 @@ function scanDiffSourceLine(
       state.stringValue = '';
       state.stringAddedFlags = [];
       state.stringSourceLines = [];
+      state.stringIsFString = supportsTripleQuotes && isPythonFStringPrefix(line, index);
       stringValues.set(`__STR_${tokenId}__`, '');
       code += `__STR_${tokenId}__`;
       index += delimiter.length;
@@ -352,7 +430,12 @@ function scanDiffSourceLine(
     index++;
   }
 
-  if (state.stringDelimiter === '`') appendStringContent('\n');
+  if (
+    state.stringDelimiter === '`' ||
+    (state.stringIsFString && state.stringDelimiter?.length === 3)
+  ) {
+    appendStringContent('\n');
+  }
   if (state.stringTokenId) {
     stringValues.set(`__STR_${state.stringTokenId}__`, state.stringValue);
   }
@@ -391,36 +474,46 @@ function buildHunkSource(records: DiffLineRecord[]): {
   };
 }
 
-function branchContainsReturn(source: string, conditionEnd: number): boolean {
+function branchReturnIndex(source: string, conditionEnd: number): number | undefined {
   const tail = source.slice(conditionEnd);
   const firstToken = tail.match(/^\s*(\{|:)?/);
   const opener = firstToken?.[1];
   const afterOpener = tail.slice(firstToken?.[0].length || 0);
+  const afterOpenerStart = conditionEnd + (firstToken?.[0].length || 0);
 
   if (opener === '{') {
     let depth = 1;
     const tokenPattern = /[{}]|\breturn\b/g;
     for (const token of afterOpener.matchAll(tokenPattern)) {
       if (token[0] === '{') depth++;
-      else if (token[0] === '}' && --depth === 0) return false;
-      else if (token[0] === 'return') return true;
+      else if (token[0] === '}' && --depth === 0) return undefined;
+      else if (token[0] === 'return') return afterOpenerStart + (token.index ?? 0);
     }
-    return false;
+    return undefined;
   }
 
   if (opener === ':') {
     const conditionStart = source.lastIndexOf('\n', conditionEnd) + 1;
     const conditionIndent = source.slice(conditionStart, conditionEnd).match(/^\s*/)?.[0].length || 0;
+    let lineOffset = 0;
     for (const line of afterOpener.split('\n')) {
-      if (!line.trim()) continue;
+      if (!line.trim()) {
+        lineOffset += line.length + 1;
+        continue;
+      }
       const indent = line.match(/^\s*/)?.[0].length || 0;
-      if (indent <= conditionIndent) return false;
-      if (/\breturn\b/.test(line)) return true;
+      if (indent <= conditionIndent) return undefined;
+      const returnMatch = line.match(/\breturn\b/);
+      if (returnMatch) return afterOpenerStart + lineOffset + returnMatch.index!;
+      lineOffset += line.length + 1;
     }
-    return false;
+    return undefined;
   }
 
-  return /^\s*\breturn\b/.test(afterOpener);
+  const returnMatch = afterOpener.match(/^\s*\breturn\b/);
+  return returnMatch
+    ? afterOpenerStart + returnMatch[0].search(/\breturn\b/)
+    : undefined;
 }
 
 function analyzeFileChanges(
@@ -520,15 +613,25 @@ function analyzeFileChanges(
       }
     }
 
+    const comparisonVariable =
+      `(?:${issueVariable}|[a-zA-Z_$][\\w$]*(?:(?:\\?\\.|\\.)[a-zA-Z_$][\\w$]*)*)`;
     const sampleComparison = new RegExp(
-      `\\bif\\s*(?:\\(\\s*)?(?:${issueVariable}|[a-zA-Z_$][\\w$]*(?:(?:\\?\\.|\\.)[a-zA-Z_$][\\w$]*)*)\\s*(?:===|==)\\s*(${stringToken})\\s*\\)?`,
+      `\\bif\\s*(?:\\(\\s*)?(?:(${comparisonVariable})\\s*(?:===|==)\\s*(${stringToken})|(${stringToken})\\s*(?:===|==)\\s*(${comparisonVariable}))\\s*\\)?`,
       'gi',
     );
     for (const match of source.code.matchAll(sampleComparison)) {
       const conditionEnd = (match.index ?? 0) + match[0].length;
-      if (!source.hasAddedCode(match.index ?? 0, conditionEnd) || !branchContainsReturn(source.code, conditionEnd)) continue;
-      const sampleValue = stringValues.get(match[1]);
-      const condition = source.firstAddedRecord(match.index ?? 0, conditionEnd);
+      const returnIndex = branchReturnIndex(source.code, conditionEnd);
+      if (
+        returnIndex === undefined ||
+        !source.hasAddedCode(returnIndex, returnIndex + 'return'.length)
+      ) {
+        continue;
+      }
+      const sampleValue = stringValues.get(match[2] || match[3]);
+      const condition =
+        source.firstAddedRecord(match.index ?? 0, conditionEnd) ||
+        source.firstAddedRecord(returnIndex, returnIndex + 'return'.length);
       if (!sampleValue || !sampleValuePattern.test(sampleValue) || !condition) continue;
       addViolation(
         violations,
@@ -570,7 +673,20 @@ export function lintAntiHardcode(
     stringValue: '',
     stringAddedFlags: [],
     stringSourceLines: [],
+    stringIsFString: false,
     nextToken: 1,
+  };
+
+  const resetLexerState = () => {
+    const nextToken = lexerState.nextToken;
+    lexerState = {
+      inBlockComment: false,
+      stringValue: '',
+      stringAddedFlags: [],
+      stringSourceLines: [],
+      stringIsFString: false,
+      nextToken,
+    };
   };
 
   const finishFile = () => {
@@ -589,6 +705,7 @@ export function lintAntiHardcode(
       stringValue: '',
       stringAddedFlags: [],
       stringSourceLines: [],
+      stringIsFString: false,
       nextToken: 1,
     };
     inHunk = false;
@@ -613,10 +730,19 @@ export function lintAntiHardcode(
 
     if (rawLine.startsWith('@@')) {
       const range = parseHunkOldRange(rawLine);
+      if (!range || !baseLines) {
+        if (isSourceCodeFile(currentFile) && !isTestOrDocFile(currentFile)) {
+          resetLexerState();
+        }
+      }
       if (range && baseLines && isSourceCodeFile(currentFile) && !isTestOrDocFile(currentFile)) {
         const unchangedUntil = Math.max(baseLineCursor, range.start - 1);
         for (let lineIndex = baseLineCursor; lineIndex < unchangedUntil; lineIndex++) {
           const content = baseLines[lineIndex];
+          if (content === undefined) {
+            resetLexerState();
+            break;
+          }
           scanDiffSourceLine(
             content,
             currentFile,
