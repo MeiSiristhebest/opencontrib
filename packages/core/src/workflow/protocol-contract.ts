@@ -119,12 +119,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "Context Assembled",
     description:
       "Minimal deterministic context bundle assembled without repository-wide token dump.",
-    allowedFromPhases: [
-      "INITIALIZED",
-      "OPPORTUNITY_SCOUTED",
-      "PROBE_COMPLETED",
-      "WORKSPACE_PREPARED",
-    ],
+    allowedFromPhases: ["WORKSPACE_PREPARED"],
     requiredArtifacts: ["context"],
     cli: {
       command: "discovery",
@@ -152,7 +147,6 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "INITIALIZED",
       "OPPORTUNITY_SCOUTED",
       "PROBE_COMPLETED",
-      "CONTEXT_ASSEMBLED",
     ],
     requiredArtifacts: ["workspace"],
     cli: {

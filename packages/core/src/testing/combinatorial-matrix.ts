@@ -64,19 +64,6 @@ function detectDomain(input: CombinatorialMatrixInput): {
     };
   }
 
-  // Concurrency / Stream / Async detection
-  if (
-    /\b(?:mutex|locks?|semaphores?|channels?|goroutines?|async|await|asynchronous|deadlocks?|races?|concurrency|concurrent|worker[\s-]*pool|stream(?:s|ing)?|ebusy)\b/i.test(
-      fullText,
-    )
-  ) {
-    return {
-      domain: 'concurrency_stream',
-      rationale:
-        'Detected concurrency, streaming, or asynchronous resource access. Race collisions, locked file descriptors, and asymmetric cleanup are frequent defect sources.',
-    };
-  }
-
   // Text Chunking / NLP / Tokenization detection
   if (
     /\b(?:chunk(?:s|er|ing)?|split_lines|tokenizer|tokenization|nlp|max_tokens|token_count|delimiter|paragraph|all_resolved|text_chunker)\b/i.test(
@@ -87,6 +74,19 @@ function detectDomain(input: CombinatorialMatrixInput): {
       domain: 'text_chunking',
       rationale:
         'Detected text chunking or tokenization logic. Premature loop termination, delimiter starvation, and oversized unbroken text blocks are frequent defect sources.',
+    };
+  }
+
+  // Concurrency / Stream / Async detection
+  if (
+    /\b(?:mutex|locks?|semaphores?|channels?|goroutines?|async|await|asynchronous|deadlocks?|races?|concurrency|concurrent|worker[\s-]*pool|stream(?:s|ing)?|ebusy)\b/i.test(
+      fullText,
+    )
+  ) {
+    return {
+      domain: 'concurrency_stream',
+      rationale:
+        'Detected concurrency, streaming, or asynchronous resource access. Race collisions, locked file descriptors, and asymmetric cleanup are frequent defect sources.',
     };
   }
 
@@ -301,37 +301,37 @@ export function generateCombinatorialMatrix(
           `${rationale} Use the repository's native table and row key APIs for these cases.`,
         dimensions: [
           {
-            name: 'FeatureFrameIndex',
-            description: 'Row-key structure of the input feature table (X)',
+            name: 'FeatureRowKeys',
+            description: 'Row-key structure of the input feature table',
             variants: [
               {
-                id: 'RangeIndex_with_ds_col',
+                id: 'SequentialRows_with_timestamp_column',
                 description: 'Sequential feature rows with a timestamp column',
               },
               {
-                id: 'DatetimeIndex_direct',
+                id: 'Timestamp_keyed_rows',
                 description: 'Feature rows keyed directly by timestamps',
               },
               {
-                id: 'PeriodIndex',
+                id: 'Calendar_period_keys',
                 description: 'Feature rows keyed by calendar periods',
               },
             ],
           },
           {
-            name: 'TargetSeriesIndex',
-            description: 'Row-key structure of the target values (y)',
+            name: 'TargetRowKeys',
+            description: 'Row-key structure of the target values',
             variants: [
               {
-                id: 'DatetimeIndex_matching',
+                id: 'Matching_timestamp_keys',
                 description: 'Target values use matching timestamp keys',
               },
               {
-                id: 'RangeIndex_positional',
+                id: 'Positional_rows',
                 description: 'Target values are aligned by row position',
               },
               {
-                id: 'Misaligned_DatetimeIndex',
+                id: 'Misaligned_timestamp_keys',
                 description: 'Target timestamp keys are reversed or shifted',
               },
             ],
@@ -343,8 +343,8 @@ export function generateCombinatorialMatrix(
             description:
               'Features use sequential rows and a timestamp column while targets use timestamp keys.',
             variantCombination: {
-              FeatureFrameIndex: 'RangeIndex_with_ds_col',
-              TargetSeriesIndex: 'DatetimeIndex_matching',
+              FeatureRowKeys: 'SequentialRows_with_timestamp_column',
+              TargetRowKeys: 'Matching_timestamp_keys',
             },
             testTemplateSnippet:
               "Build feature and target data with the repository's native APIs. Verify the timestamp column maps to the intended target rows.",
@@ -356,8 +356,8 @@ export function generateCombinatorialMatrix(
             description:
               'Features and targets already use the same timestamp keys.',
             variantCombination: {
-              FeatureFrameIndex: 'DatetimeIndex_direct',
-              TargetSeriesIndex: 'DatetimeIndex_matching',
+              FeatureRowKeys: 'Timestamp_keyed_rows',
+              TargetRowKeys: 'Matching_timestamp_keys',
             },
             testTemplateSnippet:
               'Construct matching timestamp keys for both inputs. Verify alignment preserves every row and its order.',
@@ -369,8 +369,8 @@ export function generateCombinatorialMatrix(
             description:
               'Target values use reversed or shifted timestamp keys.',
             variantCombination: {
-              FeatureFrameIndex: 'DatetimeIndex_direct',
-              TargetSeriesIndex: 'Misaligned_DatetimeIndex',
+              FeatureRowKeys: 'Timestamp_keyed_rows',
+              TargetRowKeys: 'Misaligned_timestamp_keys',
             },
             testTemplateSnippet:
               'Reverse or shift the target timestamp keys. Verify the result reports or handles the mismatch explicitly.',
@@ -382,8 +382,8 @@ export function generateCombinatorialMatrix(
             description:
               'Features use calendar-period keys while targets are aligned by position.',
             variantCombination: {
-              FeatureFrameIndex: 'PeriodIndex',
-              TargetSeriesIndex: 'RangeIndex_positional',
+              FeatureRowKeys: 'Calendar_period_keys',
+              TargetRowKeys: 'Positional_rows',
             },
             testTemplateSnippet:
               'Combine period-keyed features with positionally keyed targets. Verify the chosen alignment rule preserves the intended row order.',

@@ -54,14 +54,20 @@ const testApprovalAuthority = () =>
 function initializeFixtureGitBase(workspacePath: string): string {
   const gitPath = join(workspacePath, ".git");
   if (!existsSync(gitPath)) {
+    const hooksPath = join(workspacePath, ".opencontrib-test-hooks");
+    mkdirSync(hooksPath, { recursive: true });
     const fixtureFile = join(workspacePath, "src", "fix.ts");
     mkdirSync(join(workspacePath, "src"), { recursive: true });
     if (!existsSync(fixtureFile)) {
       writeFileSync(fixtureFile, "before\n", "utf8");
     }
 
-    execFileSync("git", ["-C", workspacePath, "init", "--quiet"]);
-    execFileSync("git", ["-C", workspacePath, "add", "--all"]);
+    execFileSync("git", ["-C", workspacePath, "init", "--quiet"], {
+      timeout: 10_000,
+    });
+    execFileSync("git", ["-C", workspacePath, "add", "--all"], {
+      timeout: 10_000,
+    });
     execFileSync("git", [
       "-C",
       workspacePath,
@@ -69,16 +75,25 @@ function initializeFixtureGitBase(workspacePath: string): string {
       "user.name=OpenContrib Test",
       "-c",
       "user.email=opencontrib-test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "commit.template=",
+      "-c",
+      `core.hooksPath=${hooksPath}`,
       "commit",
       "--quiet",
       "--allow-empty",
+      "--no-verify",
+      "--no-gpg-sign",
       "-m",
       "fixture base",
-    ]);
+    ], { timeout: 10_000 });
   }
 
   return execFileSync("git", ["-C", workspacePath, "rev-parse", "HEAD"], {
     encoding: "utf8",
+    timeout: 10_000,
   }).trim();
 }
 

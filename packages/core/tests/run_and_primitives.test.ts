@@ -11,7 +11,6 @@ import {
 } from "../src/index.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import { runBranchName } from "../src/run/run-branch.js";
-import { InMemoryRunRepository } from "../src/testkit/index.js";
 
 describe("Contribution Run & Artifact Bundle Primitives", () => {
   const tempDirs: string[] = [];
@@ -99,10 +98,26 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     );
   });
 
-  it("allows optional PoC after context assembly in the in-memory repository", () => {
-    const repository = new InMemoryRunRepository();
+  it("allows optional PoC after context assembly with a canonical workspace", () => {
+    const customBase = makeTempDir();
+    const repository = new ContributionRunManager({ baseDir: customBase });
     const manifest = repository.createRun({ repoFullName: "example/parser" });
 
+    saveCanonicalArtifact(
+      repository,
+      manifest.runId,
+      "workspace",
+      {
+        workspacePath: "/tmp/workspaces/parser",
+        branchName: "fixture-branch",
+        isWorktree: false,
+        baseRepoPath: "/tmp/workspaces/parser",
+        baseCommitSha: "a".repeat(40),
+        repoFullName: "example/parser",
+        createdAt: "2026-10-01T00:00:00.000Z",
+      },
+      "WORKSPACE_PREPARED",
+    );
     repository.saveArtifact(manifest.runId, "context", { assembled: true });
     repository.saveArtifact(manifest.runId, "poc", { testFile: "repro.test.ts" });
 
@@ -127,13 +142,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       signals: { skillMatch: 0.95 },
     });
 
-    // 2. Save context
-    manager.saveArtifact(manifest.runId, "context", {
-      repo: "cloudwego/kitex",
-      primary: "go",
-    });
-
-    // 2.5 Save workspace sandbox
+    // 2. Save workspace sandbox
     saveCanonicalArtifact(
       manager,
       manifest.runId,
@@ -150,7 +159,13 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       "WORKSPACE_PREPARED",
     );
 
-    // 2.6 Save RED baseline
+    // 3. Save context
+    manager.saveArtifact(manifest.runId, "context", {
+      repo: "cloudwego/kitex",
+      primary: "go",
+    });
+
+    // 4. Save RED baseline
     saveCanonicalArtifact(
       manager,
       manifest.runId,
@@ -167,7 +182,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
       "RED_CAPTURED",
     );
 
-    // 3. Save a concrete patch artifact and its later immutable validation.
+    // 5. Save a concrete patch artifact and its later immutable validation.
     const patchContent = JSON.stringify({
       files: [
         {
@@ -181,7 +196,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     const patchSha256 = createHash("sha256").update(patchContent).digest("hex");
     manager.saveArtifact(manifest.runId, "patch", patchContent);
 
-    // 4. Save evidence (a verified RED→GREEN cycle is required to advance)
+    // 6. Save evidence (a verified RED→GREEN cycle is required to advance)
     const testIdentity = {
       normalizedCommand: "bun test",
       testFiles: [{ path: "pool_test.go", sha256: "hash-test" }],

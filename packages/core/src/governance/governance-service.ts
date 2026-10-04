@@ -7,6 +7,7 @@ const MAX_BASE_SOURCE_CONTENT_BYTES = 64 * 1024 * 1024;
 import {
   CommunityGateSnapshotSchema,
   GovernanceDecisionArtifactSchema,
+  IssueBindingArtifactSchema,
   ValidatedPatchArtifactSchema,
   type GovernanceDecisionArtifact,
 } from "../contracts/schemas.js";
@@ -263,6 +264,18 @@ export class GovernanceService {
       );
     }
     const communityGate = communityGateResult.data;
+    const issueBinding = IssueBindingArtifactSchema.safeParse(
+      run.artifacts.issueBinding,
+    );
+    const providerVerifiedIssueNumber =
+      communityGate.policy.privateVulnerabilityDisclosure !== true &&
+      issueBinding.success &&
+      issueBinding.data.runId === runId &&
+      issueBinding.data.repoFullName.toLowerCase() ===
+        run.manifest.repoFullName.toLowerCase() &&
+      issueBinding.data.state === "open"
+        ? issueBinding.data.providerIssueId
+        : undefined;
 
     const requestedCoverageMinimum =
       options.coveragePolicy?.minimumChangedLineCoverage;
@@ -370,7 +383,7 @@ export class GovernanceService {
       prTitle,
       prBody: prDraftRaw,
       targetRepo: run.manifest.repoFullName,
-      issueNumber: run.manifest.issueNumber,
+      issueNumber: providerVerifiedIssueNumber,
       evidence: evidenceArtifact as any,
       lineCount: validatedPatch.changedLines,
       coreDiffLines,

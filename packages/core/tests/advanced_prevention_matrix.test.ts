@@ -341,9 +341,39 @@ diff --git a/src/core.ts b/src/core.ts
         ].join('\n');
 
         expect(matrix.domain).toBe('tabular_time_series');
-        expect(guidance).not.toMatch(/pd\.|np\.|assert(?:\s+all|\()/);
+        expect(guidance).not.toMatch(
+          /pd\.|np\.|assert(?:\s+all|\()/i,
+        );
+        expect(guidance).not.toMatch(
+          /RangeIndex|DatetimeIndex|PeriodIndex|DataFrame|Series/i,
+        );
         expect(guidance).toContain('timestamp');
       }
+
+      const pythonMatrix = generateCombinatorialMatrix({
+        primaryLanguage: 'Python',
+        issueTitle: 'Fix DataFrame reindex alignment for timestamp rows',
+      });
+      const pythonGuidance = [
+        ...pythonMatrix.dimensions.flatMap((dimension) =>
+          dimension.variants.map((variant) => variant.sampleCodeSnippet || ''),
+        ),
+        ...pythonMatrix.scenarios.map((scenario) => scenario.testTemplateSnippet),
+      ].join('\n');
+
+      expect(pythonMatrix.domain).toBe('tabular_time_series');
+      expect(pythonGuidance).toMatch(/pd\.|np\./);
+    });
+
+    it('prefers chunking scenarios when an issue also mentions async execution', () => {
+      const matrix = generateCombinatorialMatrix({
+        issueTitle: 'Async text chunker loses tokens at the max_tokens boundary',
+      });
+
+      expect(matrix.domain).toBe('text_chunking');
+      expect(matrix.scenarios.some((scenario) =>
+        scenario.scenarioId.includes('UNRESOLVED'),
+      )).toBe(true);
     });
 
     it('generates Semantic Kernel token-scale and delimiter matrix for text chunking', () => {
@@ -392,7 +422,7 @@ diff --git a/src/core.ts b/src/core.ts
       );
       expect(
         generateCombinatorialMatrix({
-          issueTitle: 'Process log chunks concurrently using a worker pool',
+          issueTitle: 'Process log batches concurrently using a worker pool',
         }).domain,
       ).toBe('concurrency_stream');
       expect(generateCombinatorialMatrix({ issueTitle: 'Streaming parser updates' }).domain).toBe(
@@ -645,6 +675,7 @@ diff --git a/src/core.ts b/src/core.ts
           filePattern: 'unknown',
           frameworkName: 'unknown',
           sampleTestPath: undefined,
+          searchLimited: false,
         });
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -768,6 +799,11 @@ diff --git a/src/core.ts b/src/core.ts
         expect(gitArgs).toEqual([[
           '-C',
           tempDir,
+          'rev-parse',
+          '--is-shallow-repository',
+        ], [
+          '-C',
+          tempDir,
           'log',
           '-n',
           '20',
@@ -778,6 +814,7 @@ diff --git a/src/core.ts b/src/core.ts
           'feat(core): parse empty input\n\nSigned-off-by: Dev <dev@example.com>',
         ]);
         expect(fingerprint.commitStyle.requiresSignedOffBy).toBe(true);
+        expect(fingerprint.commitStyle.historyShallow).toBe(false);
         expect(fingerprint.testConventions).toMatchObject({
           filePattern: '*.test.ts',
           frameworkName: 'vitest',
@@ -788,6 +825,28 @@ diff --git a/src/core.ts b/src/core.ts
           hasStrictLint: true,
           linterCommands: ['bun run lint'],
         });
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not infer commit style or DCO policy from shallow history', () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'oc-fp-shallow-'));
+      try {
+        const fingerprint = analyzeRepoEngineeringFingerprint({
+          repoPath: tempDir,
+          runGit: (args) => ({
+            success: true,
+            stdout: args.includes('--is-shallow-repository')
+              ? 'true'
+              : 'feat(core): add parser\n\nSigned-off-by: Dev <dev@example.com>\n---COMMIT_SEP---\n',
+          }),
+        });
+
+        expect(fingerprint.commitStyle.primaryConvention).toBe('unknown');
+        expect(fingerprint.commitStyle.requiresSignedOffBy).toBeUndefined();
+        expect(fingerprint.commitStyle.historyShallow).toBe(true);
+        expect(fingerprint.contributorPersonaAdvice).toContain('history is shallow');
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
@@ -922,7 +981,13 @@ diff --git a/src/core.ts b/src/core.ts
         expect(context.repoContext.engineeringFingerprint?.commitStyle.primaryConvention).toBe(
           'bracketed_component',
         );
-        expect(gitArgs[0]).toContain('--no-merges');
+        expect(gitArgs[0]).toEqual([
+          '-C',
+          tempDir,
+          'rev-parse',
+          '--is-shallow-repository',
+        ]);
+        expect(gitArgs[1]).toContain('--no-merges');
         expect(context.combinatorialMatrix?.domain).toBe('general_data_structure');
         expect(context.combinatorialMatrix?.scenarios[0].testTemplateSnippet).toContain(
           'handleInput([]Item{})',

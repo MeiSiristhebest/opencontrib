@@ -113,7 +113,7 @@ describe("Audit Fixes: Lifecycle State Machine with PROBE and POC phases", () =>
       availableArtifactFiles: [],
     };
 
-    expect(() => validatePhaseGate(summary, "POC_GENERATED")).not.toThrow();
+    expect(validatePhaseGate(summary, "POC_GENERATED").ok).toBe(true);
 
     const contextAssembledSummary: ContributionRunSummary = {
       ...summary,
@@ -126,9 +126,21 @@ describe("Audit Fixes: Lifecycle State Machine with PROBE and POC phases", () =>
         context: { assembled: true },
       },
     };
-    expect(() =>
-      validatePhaseGate(contextAssembledSummary, "POC_GENERATED"),
-    ).not.toThrow();
+    const beforeWorkspaceSummary: ContributionRunSummary = {
+      ...summary,
+      manifest: {
+        ...summary.manifest,
+        currentPhase: "INITIALIZED",
+      },
+      artifacts: {},
+    };
+
+    expect(
+      validatePhaseGate(beforeWorkspaceSummary, "CONTEXT_ASSEMBLED").ok,
+    ).toBe(false);
+    expect(validatePhaseGate(contextAssembledSummary, "POC_GENERATED").ok).toBe(
+      true,
+    );
   });
 });
 

@@ -792,7 +792,7 @@ export function auditGovernance(
   if (patch) {
     const impactResult = analyzePatchImpactAndConsistency({
       modifiedFiles: input.modifiedFiles || [],
-      patchContent: patch,
+      patchContent: input.patchContent ?? patch,
       repoContextFiles: input.repoContextFiles || [],
     });
     impactAnalysisPassed = impactResult.isCompliant;

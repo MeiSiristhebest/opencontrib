@@ -54,6 +54,35 @@ describe("anti-hardcode review regressions", () => {
     ).toBe(true);
   });
 
+  it("ignores SQL and Lua line-comment examples", () => {
+    for (const filePath of ["src/example.sql", "src/example.lua"]) {
+      const result = lintAntiHardcode(
+        diff(filePath, '+-- if repository == "owner/repo" this is an example'),
+        { targetRepo: "owner/repo" },
+      );
+
+      expect(result.isClean).toBe(true);
+    }
+  });
+
+  it("recognizes Python, Rust, and C++ prefixed repository strings", () => {
+    const examples = [
+      ["src/feature.py", '+if repo == r"owner/repo": return fallback()'],
+      ["src/feature.rs", '+if repo == r#"owner/repo"# { return fallback(); }'],
+      ["src/feature.cpp", '+if (repo == R"(owner/repo)") return fallback();'],
+    ] as const;
+
+    for (const [filePath, addedLine] of examples) {
+      const result = lintAntiHardcode(diff(filePath, addedLine), {
+        targetRepo: "owner/repo",
+      });
+
+      expect(result.violations.some(
+        (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+      )).toBe(true);
+    }
+  });
+
   it("scans leading plus source lines and comparisons split across added lines", () => {
     const leadingPlusComparison = diff(
       "src/feature.ts",
@@ -105,6 +134,34 @@ describe("anti-hardcode review regressions", () => {
     ].join("\n");
     expect(
       lintAntiHardcode(returnAddedToExistingGuard).violations.some(
+        (entry) => entry.rule === "TEST_SAMPLE_SHORT_CIRCUIT",
+      ),
+    ).toBe(true);
+  });
+
+  it("detects Python elif sample guards with unchanged returns", () => {
+    const pythonElif = diff(
+      "src/feature.py",
+      '+elif input == "test-sample": return canned_result',
+    );
+    const addedGuard = [
+      "diff --git a/src/feature.ts b/src/feature.ts",
+      "--- a/src/feature.ts",
+      "+++ b/src/feature.ts",
+      "@@ -1,3 +1,4 @@",
+      "+if (input === \"test-sample\") {",
+      " return cannedResult;",
+      " }",
+      " return computeResult(input);",
+    ].join("\n");
+
+    expect(
+      lintAntiHardcode(pythonElif).violations.some(
+        (entry) => entry.rule === "TEST_SAMPLE_SHORT_CIRCUIT",
+      ),
+    ).toBe(true);
+    expect(
+      lintAntiHardcode(addedGuard).violations.some(
         (entry) => entry.rule === "TEST_SAMPLE_SHORT_CIRCUIT",
       ),
     ).toBe(true);

@@ -126,6 +126,8 @@ function gitOutput(cwd: string, args: string[], operation: string): string {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      timeout: 10_000,
+      maxBuffer: 64 * 1024 * 1024,
     });
   } catch (err: any) {
     const detail = typeof err?.stderr === "string" ? err.stderr.trim() : "";
@@ -759,7 +761,7 @@ export function getValidatedPatchUnifiedDiffAtGreenTree(
             "--unified=3",
             baseCommitSha,
             "--",
-            file.path,
+            `:(literal)${file.path}`,
           ],
           `read the base-to-GREEN diff for '${file.path}'`,
         ),
