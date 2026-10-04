@@ -90,7 +90,7 @@ export function deriveTargetedReproductionTestCommand(
       !normalized ||
       normalized.startsWith("/") ||
       /^[a-z]:/i.test(normalized) ||
-      normalized.split("/").some((part) => part === "..") ||
+      normalized.split("/").some((part) => part === ".." || part === "...") ||
       !/^[a-zA-Z0-9._/-]+$/.test(normalized) ||
       !/\.go$/i.test(normalized)
     ) {

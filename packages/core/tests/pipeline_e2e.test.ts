@@ -36,6 +36,11 @@ describe("Pipeline RED command selection", () => {
     expect(
       deriveTargetedReproductionTestCommand("go test ./...", ["../outside_test.go"]),
     ).toBeUndefined();
+    expect(
+      deriveTargetedReproductionTestCommand("go test ./...", [
+        "internal/.../worker_test.go",
+      ]),
+    ).toBeUndefined();
   });
 
   it("does not schedule RED execution for documentation-only opportunities", async () => {
