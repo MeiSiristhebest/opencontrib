@@ -32,6 +32,7 @@ interface DiffPathToken {
 interface DiffLexerState {
   inBlockComment: boolean;
   inHtmlComment?: boolean;
+  inSfcNonTemplateBlock?: "script" | "style";
   stringDelimiter?: string;
   stringTokenId?: string;
   stringValue: string;
@@ -381,6 +382,7 @@ function scanDiffSourceLine(
   const supportsTripleQuotes = /\.(?:py|kt|kts)$/i.test(filePath);
   const supportsTemplateInterpolation =
     /\.(?:[cm]?[jt]sx?|vue|svelte)$/i.test(filePath);
+  const supportsSfcBlocks = /\.(?:vue|svelte)$/i.test(filePath);
 
   const appendStringContent = (value: string) => {
     state.stringValue += value;
@@ -478,7 +480,23 @@ function scanDiffSourceLine(
       index = end + 3;
       continue;
     }
-    if (/\.(?:vue|svelte)$/i.test(filePath) && line.startsWith('<!--', index)) {
+    if (supportsSfcBlocks && line[index] === "<") {
+      const blockTag = /^<(\/)?(script|style)\b[^>]*>/i.exec(
+        line.slice(index),
+      );
+      if (blockTag) {
+        state.inSfcNonTemplateBlock = blockTag[1]
+          ? undefined
+          : (blockTag[2].toLowerCase() as "script" | "style");
+        index += blockTag[0].length;
+        continue;
+      }
+    }
+    if (
+      supportsSfcBlocks &&
+      !state.inSfcNonTemplateBlock &&
+      line.startsWith("<!--", index)
+    ) {
       state.inHtmlComment = true;
       index += 4;
       continue;
