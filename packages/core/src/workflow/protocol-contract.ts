@@ -210,7 +210,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "Reproduction PoC Generated",
     description:
       "Standalone reproducible test or script demonstrating the bug before fix.",
-    allowedFromPhases: ["WORKSPACE_PREPARED"],
+    allowedFromPhases: ["WORKSPACE_PREPARED", "CONTEXT_ASSEMBLED"],
     requiredArtifacts: ["workspace", "poc"],
     cli: {
       command: "verify",

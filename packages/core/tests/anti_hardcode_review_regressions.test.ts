@@ -55,6 +55,18 @@ describe("anti-hardcode review regressions", () => {
   });
 
   it("scans leading plus source lines and comparisons split across added lines", () => {
+    const leadingPlusComparison = diff(
+      "src/feature.ts",
+      '++attempts; if (repo === "org/project") return fallback();',
+    );
+    const leadingPlusResult = lintAntiHardcode(leadingPlusComparison, {
+      targetRepo: "org/project",
+    });
+    expect(leadingPlusResult.violations).toHaveLength(1);
+    expect(leadingPlusResult.violations[0]?.rule).toBe(
+      "REPO_LITERAL_DISCRIMINATION",
+    );
+
     const patch = [
       "diff --git a/src/feature.ts b/src/feature.ts",
       "--- a/src/feature.ts",

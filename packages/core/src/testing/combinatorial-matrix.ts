@@ -60,7 +60,7 @@ function detectDomain(input: CombinatorialMatrixInput): {
     return {
       domain: 'tabular_time_series',
       rationale:
-        'Detected tabular or time-series operations with Pandas/DataFrame. Index type mismatches (RangeIndex vs DatetimeIndex) and column name collisions are frequent defect sources.',
+        'Detected tabular or time-series operations. Key mismatches (sequential rows vs timestamp keys) and column name collisions are frequent defect sources.',
     };
   }
 
@@ -294,6 +294,111 @@ export function generateCombinatorialMatrix(
   const language = templateLanguage(input.primaryLanguage);
 
   if (domain === 'tabular_time_series') {
+    if (input.primaryLanguage && language !== 'python') {
+      return {
+        domain,
+        domainRationale:
+          `${rationale} Use the repository's native table and row key APIs for these cases.`,
+        dimensions: [
+          {
+            name: 'FeatureFrameIndex',
+            description: 'Row-key structure of the input feature table (X)',
+            variants: [
+              {
+                id: 'RangeIndex_with_ds_col',
+                description: 'Sequential feature rows with a timestamp column',
+              },
+              {
+                id: 'DatetimeIndex_direct',
+                description: 'Feature rows keyed directly by timestamps',
+              },
+              {
+                id: 'PeriodIndex',
+                description: 'Feature rows keyed by calendar periods',
+              },
+            ],
+          },
+          {
+            name: 'TargetSeriesIndex',
+            description: 'Row-key structure of the target values (y)',
+            variants: [
+              {
+                id: 'DatetimeIndex_matching',
+                description: 'Target values use matching timestamp keys',
+              },
+              {
+                id: 'RangeIndex_positional',
+                description: 'Target values are aligned by row position',
+              },
+              {
+                id: 'Misaligned_DatetimeIndex',
+                description: 'Target timestamp keys are reversed or shifted',
+              },
+            ],
+          },
+        ],
+        scenarios: [
+          {
+            scenarioId: 'TABULAR_RANGE_X_DATETIME_Y',
+            description:
+              'Features use sequential rows and a timestamp column while targets use timestamp keys.',
+            variantCombination: {
+              FeatureFrameIndex: 'RangeIndex_with_ds_col',
+              TargetSeriesIndex: 'DatetimeIndex_matching',
+            },
+            testTemplateSnippet:
+              "Build feature and target data with the repository's native APIs. Verify the timestamp column maps to the intended target rows.",
+            riskSurface:
+              'Positional and label-based alignment can silently pair different samples.',
+          },
+          {
+            scenarioId: 'TABULAR_MATCHING_TIME_KEYS',
+            description:
+              'Features and targets already use the same timestamp keys.',
+            variantCombination: {
+              FeatureFrameIndex: 'DatetimeIndex_direct',
+              TargetSeriesIndex: 'DatetimeIndex_matching',
+            },
+            testTemplateSnippet:
+              'Construct matching timestamp keys for both inputs. Verify alignment preserves every row and its order.',
+            riskSurface:
+              'Alignment can duplicate, drop, or reorder rows even when keys match.',
+          },
+          {
+            scenarioId: 'TABULAR_MISALIGNED_TIME_KEYS',
+            description:
+              'Target values use reversed or shifted timestamp keys.',
+            variantCombination: {
+              FeatureFrameIndex: 'DatetimeIndex_direct',
+              TargetSeriesIndex: 'Misaligned_DatetimeIndex',
+            },
+            testTemplateSnippet:
+              'Reverse or shift the target timestamp keys. Verify the result reports or handles the mismatch explicitly.',
+            riskSurface:
+              'Implicit forward-fill or positional fallback can hide a temporal mismatch.',
+          },
+          {
+            scenarioId: 'TABULAR_PERIOD_POSITIONAL',
+            description:
+              'Features use calendar-period keys while targets are aligned by position.',
+            variantCombination: {
+              FeatureFrameIndex: 'PeriodIndex',
+              TargetSeriesIndex: 'RangeIndex_positional',
+            },
+            testTemplateSnippet:
+              'Combine period-keyed features with positionally keyed targets. Verify the chosen alignment rule preserves the intended row order.',
+            riskSurface:
+              'Mixed key types can drop rows or pair feature and target values incorrectly.',
+          },
+        ],
+        recommendedAssertions: [
+          'Verify aligned features and targets have the same row count.',
+          'Verify every aligned row uses the intended feature and target keys.',
+          'Verify missing, duplicate, and reordered keys are handled explicitly.',
+        ],
+      };
+    }
+
     const dimensions: MatrixDimension[] = [
       {
         name: 'FeatureFrameIndex',

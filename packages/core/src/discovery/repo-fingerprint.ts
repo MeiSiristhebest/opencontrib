@@ -235,39 +235,50 @@ export function analyzeRepoEngineeringFingerprint(
         'target',
       ]);
       const javascriptFramework = detectJavaScriptTestFramework(repoPath);
-      const walkAndFindTest = (dir: string, depth = 0): string | undefined => {
-        if (depth > 3) return undefined;
-        const entries = readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (skippedDirectories.has(entry.name.toLowerCase())) continue;
-          const full = join(dir, entry.name);
-          if (entry.isFile()) {
-            const javascriptTestMatch = entry.name.match(
-              /^.+\.(test|spec)\.([cm]?[jt]sx?)$/i,
-            );
-            if (javascriptTestMatch) {
-              filePattern = `*.${javascriptTestMatch[1].toLowerCase()}.${javascriptTestMatch[2].toLowerCase()}`;
-              frameworkName = javascriptFramework;
-              return full;
+      const walkAndFindTest = (root: string): string | undefined => {
+        const maxScannedEntries = 50_000;
+        const directories = [root];
+        let nextDirectory = 0;
+        let scannedEntries = 0;
+
+        while (
+          nextDirectory < directories.length &&
+          scannedEntries < maxScannedEntries
+        ) {
+          const dir = directories[nextDirectory++];
+          const entries = readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (scannedEntries >= maxScannedEntries) return undefined;
+            scannedEntries += 1;
+            if (skippedDirectories.has(entry.name.toLowerCase())) continue;
+            const full = join(dir, entry.name);
+            if (entry.isFile()) {
+              const javascriptTestMatch = entry.name.match(
+                /^.+\.(test|spec)\.([cm]?[jt]sx?)$/i,
+              );
+              if (javascriptTestMatch) {
+                filePattern = `*.${javascriptTestMatch[1].toLowerCase()}.${javascriptTestMatch[2].toLowerCase()}`;
+                frameworkName = javascriptFramework;
+                return full;
+              }
+              if (/^test_[a-zA-Z0-9_]+\.py$/i.test(entry.name)) {
+                filePattern = 'test_*.py';
+                frameworkName = 'pytest';
+                return full;
+              }
+              if (/_test\.py$/i.test(entry.name)) {
+                filePattern = '*_test.py';
+                frameworkName = 'pytest/unittest';
+                return full;
+              }
+              if (/_test\.go$/i.test(entry.name)) {
+                filePattern = '*_test.go';
+                frameworkName = 'go test';
+                return full;
+              }
+            } else if (entry.isDirectory()) {
+              directories.push(full);
             }
-            if (/^test_[a-zA-Z0-9_]+\.py$/i.test(entry.name)) {
-              filePattern = 'test_*.py';
-              frameworkName = 'pytest';
-              return full;
-            }
-            if (/_test\.py$/i.test(entry.name)) {
-              filePattern = '*_test.py';
-              frameworkName = 'pytest/unittest';
-              return full;
-            }
-            if (/_test\.go$/i.test(entry.name)) {
-              filePattern = '*_test.go';
-              frameworkName = 'go test';
-              return full;
-            }
-          } else if (entry.isDirectory()) {
-            const found = walkAndFindTest(full, depth + 1);
-            if (found) return found;
           }
         }
         return undefined;
