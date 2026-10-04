@@ -108,6 +108,7 @@ export interface PipelineContext {
   workspace?: { workspacePath: string; branchName: string };
   assembledContext?: any;
   prompt?: string;
+  repositoryTestCmd?: string;
   testCmd?: string;
   preFixReproductionCaptured?: boolean;
   preFixOutput?: string;

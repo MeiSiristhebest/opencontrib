@@ -384,6 +384,7 @@ export class ContextAssemblyStep implements PipelineStep {
 
     ctx.assembledContext = assembledContext;
     ctx.prompt = prompt;
+    ctx.repositoryTestCmd = testCmd;
     ctx.testCmd = testCmd;
     const runManager = deps.runManager ?? defaultRunManager;
     if (!ctx.runId || !runManager.getRun(ctx.runId)) {
@@ -641,7 +642,7 @@ export class ImplementValidateLoopStep implements PipelineStep {
     const workspacePath = ctx.workspace!.workspacePath;
     const runManager = deps.runManager ?? defaultRunManager;
     const prompt = ctx.prompt!;
-    const testCmd = ctx.testCmd;
+    const testCmd = ctx.repositoryTestCmd ?? ctx.testCmd;
     const activePatchRef = { patch: ctx.activePatch! };
 
     deps.stateMachine.transition(
@@ -1326,6 +1327,7 @@ export class PrSubmissionStep implements PipelineStep {
           keyChanges: derivedKeyChanges,
           verificationCommand: ctx.evidenceReport
             ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
+              ctx.repositoryTestCmd ||
               ctx.testCmd ||
               ""
             : "",
