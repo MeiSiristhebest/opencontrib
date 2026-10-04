@@ -62,6 +62,37 @@ function readTrackedFilesAtCommit(
   }
 }
 
+function readSourceFileContentsAtCommit(
+  repositoryPath: string,
+  baseCommitSha: string,
+  paths: readonly string[],
+): Map<string, string> {
+  const contents = new Map<string, string>();
+  const sourceExtension =
+    /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|kts|swift|cs|c|h|cc|cpp|hpp|php|rb|sh|bash|zsh|ps1|scala|sc|dart|ex|exs|lua|sql|sol)$/i;
+  if (!/^[a-f0-9]{40,64}$/i.test(baseCommitSha)) return contents;
+
+  for (const filePath of paths) {
+    if (!sourceExtension.test(filePath)) continue;
+    try {
+      const source = execFileSync(
+        "git",
+        ["-C", repositoryPath, "show", `${baseCommitSha}:${filePath}`],
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 10_000,
+          maxBuffer: 4 * 1024 * 1024,
+        },
+      );
+      contents.set(filePath.replace(/\\/g, "/"), source);
+    } catch {
+      // New files have no base content to use for lexical-state seeding.
+    }
+  }
+  return contents;
+}
+
 export class GovernanceService {
   constructor(private readonly runManager: ContributionRunManager) {}
 
@@ -234,6 +265,7 @@ export class GovernanceService {
 
     let coreDiffLines: number | undefined;
     let repoContextFiles: string[] = [];
+    let baseFileContents = new Map<string, string>();
     try {
       if (
         typeof workspaceArtifact.workspacePath !== "string" ||
@@ -248,6 +280,11 @@ export class GovernanceService {
       repoContextFiles = readTrackedFilesAtCommit(
         workspacePath,
         validatedPatch.baseCommitSha,
+      );
+      baseFileContents = readSourceFileContentsAtCommit(
+        workspacePath,
+        validatedPatch.baseCommitSha,
+        validatedPatch.files.map((file) => file.path),
       );
       const coreFiles = validatedPatch.files.filter(
         (file) => !isSupportingFile(file.path),
@@ -285,6 +322,7 @@ export class GovernanceService {
       resourceLeakPolicy: effectiveResourceLeakPolicy,
       modifiedFiles: validatedPatch.files.map((file) => file.path),
       repoContextFiles,
+      baseFileContents,
       maxDiffLines:
         communityGate.policy.maxDiffCeiling === undefined
           ? undefined

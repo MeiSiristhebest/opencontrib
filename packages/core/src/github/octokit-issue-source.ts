@@ -421,6 +421,9 @@ export class OctokitIssueSource {
       isFork: res.data.data.fork ?? false,
       isArchived: res.data.data.archived ?? false,
       description: res.data.data.description ?? '',
+      ...(typeof res.data.data.language === 'string'
+        ? { primaryLanguage: res.data.data.language }
+        : {}),
     };
 
     this.cache.set(cacheKey, details);

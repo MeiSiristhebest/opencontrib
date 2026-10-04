@@ -134,8 +134,16 @@ export function classifyCommitConvention(messages: string[]): {
   }
 
   const requiresSignedOffBy =
-    signedOffByCount >= Math.max(1, Math.floor(authoredMessages.length * 0.3));
+    signedOffByCount >= Math.ceil(authoredMessages.length * 0.3);
+  const strongestStyleCount = Math.max(
+    conventionalCount,
+    bracketedCount,
+    capitalizedCount,
+  );
 
+  if (strongestStyleCount / authoredMessages.length < 0.5) {
+    return { convention: 'unstructured', requiresSignedOffBy };
+  }
   if (conventionalCount >= bracketedCount && conventionalCount >= capitalizedCount && conventionalCount > 0) {
     return { convention: 'conventional', requiresSignedOffBy };
   }
@@ -197,8 +205,8 @@ export function analyzeRepoEngineeringFingerprint(
   }
 
   // Detect test conventions from filesystem
-  let filePattern = 'test_*.py';
-  let frameworkName = 'pytest';
+  let filePattern = 'unknown';
+  let frameworkName = 'unknown';
   let sampleTestPath: string | undefined;
 
   if (existsSync(repoPath)) {

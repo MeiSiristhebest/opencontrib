@@ -482,6 +482,7 @@ export interface AuditGovernanceInput {
   impactAnalysisConducted?: boolean;
   modifiedFiles?: string[];
   repoContextFiles?: string[];
+  baseFileContents?: ReadonlyMap<string, string>;
   coreDiffLines?: number;
   preflightLintResult?: {
     executed: boolean;
@@ -823,6 +824,7 @@ export function auditGovernance(
     const hardcodeResult = lintAntiHardcode(patch, {
       targetRepo: input.targetRepo,
       issueNumber: input.issueNumber,
+      baseFileContents: input.baseFileContents,
     });
     antiHardcodePassed = hardcodeResult.isClean;
     if (!antiHardcodePassed) {

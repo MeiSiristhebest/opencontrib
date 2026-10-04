@@ -107,6 +107,7 @@ export type MaintainerApprovalSignal = z.infer<typeof MaintainerApprovalSignalSc
 
 export const OpportunitySchema = z.object({
   repoFullName: z.string(),
+  primaryLanguage: z.string().optional(),
   repoStars: z.number(),
   issueNumber: z.number(),
   title: z.string(),
