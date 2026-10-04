@@ -619,6 +619,23 @@ diff --git a/src/core.ts b/src/core.ts
         expect(punctuationSnippet).toContain('漢字。句子！次の文？');
       }
 
+      const goBoundary = generateCombinatorialMatrix({
+        primaryLanguage: 'Go',
+        issueTitle: 'NLP tokenization boundary regression',
+      }).scenarios.find((scenario) => scenario.scenarioId === 'EXACT_TOKEN_BOUNDARY');
+      const rustBoundary = generateCombinatorialMatrix({
+        primaryLanguage: 'Rust',
+        issueTitle: 'NLP tokenization boundary regression',
+      }).scenarios.find((scenario) => scenario.scenarioId === 'EXACT_TOKEN_BOUNDARY');
+      expect(goBoundary?.testTemplateSnippet.indexOf('if len(tokens) < maxTokens')).toBeLessThan(
+        goBoundary?.testTemplateSnippet.indexOf('tokens[:maxTokens]') ?? -1,
+      );
+      expect(
+        rustBoundary?.testTemplateSnippet.indexOf('assert!(tokens.len() >= max_tokens'),
+      ).toBeLessThan(
+        rustBoundary?.testTemplateSnippet.indexOf('tokens[..max_tokens]') ?? -1,
+      );
+
       const rustGeneral = generateCombinatorialMatrix({
         primaryLanguage: 'Rust',
         issueTitle: 'Validate parser input boundaries',
