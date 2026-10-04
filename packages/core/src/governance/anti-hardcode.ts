@@ -37,6 +37,7 @@ interface DiffLexerState {
   stringAddedFlags: boolean[];
   stringSourceLines: string[];
   stringIsFString: boolean;
+  stringIsCppRaw?: boolean;
   nextToken: number;
 }
 
@@ -380,7 +381,11 @@ function scanDiffSourceLine(
     }
 
     if (state.stringDelimiter) {
-      if (line[index] === '\\' && index + 1 < line.length) {
+      if (
+        !state.stringIsCppRaw &&
+        line[index] === '\\' &&
+        index + 1 < line.length
+      ) {
         appendStringContent(line.slice(index, index + 2));
         index += 2;
       } else if (line.startsWith(state.stringDelimiter, index)) {
@@ -434,6 +439,7 @@ function scanDiffSourceLine(
         state.stringAddedFlags = [];
         state.stringSourceLines = [];
         state.stringIsFString = false;
+        state.stringIsCppRaw = false;
       } else {
         appendStringContent(line[index]);
         index++;
@@ -462,6 +468,7 @@ function scanDiffSourceLine(
         state.stringAddedFlags = [];
         state.stringSourceLines = [];
         state.stringIsFString = false;
+        state.stringIsCppRaw = true;
         stringValues.set(`__STR_${tokenId}__`, '');
         code += `__STR_${tokenId}__`;
         index = cppRawString.contentStart;
@@ -481,6 +488,7 @@ function scanDiffSourceLine(
       state.stringAddedFlags = [];
       state.stringSourceLines = [];
       state.stringIsFString = supportsTripleQuotes && isPythonFStringPrefix(line, index);
+      state.stringIsCppRaw = false;
       stringValues.set(`__STR_${tokenId}__`, '');
       code += `__STR_${tokenId}__`;
       index += delimiter.length;

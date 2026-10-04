@@ -167,6 +167,18 @@ describe("anti-hardcode review regressions", () => {
     ).toBe(true);
   });
 
+  it("scans code after C++ raw delimiters preceded by backslashes", () => {
+    const patch = diff(
+      "src/feature.cpp",
+      '+auto example = R"tag(payload \\)tag"; if (repo == "owner/repo") return fallback();',
+    );
+    const result = lintAntiHardcode(patch, { targetRepo: "owner/repo" });
+
+    expect(
+      result.violations.some((entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION"),
+    ).toBe(true);
+  });
+
   it("scans executable Python f-string expressions", () => {
     const patch = diff(
       "src/feature.py",
