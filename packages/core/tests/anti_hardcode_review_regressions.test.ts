@@ -270,6 +270,11 @@ describe("anti-hardcode review regressions", () => {
     );
 
     expect(result.isClean).toBe(true);
+
+    const routeObject = lintAntiHardcode(
+      diff("src/routes.ts", '+const route = { path: "/home" };'),
+    );
+    expect(routeObject.isClean).toBe(true);
   });
 
   it("scans Vue, Svelte, and GitHub Action source files", () => {
