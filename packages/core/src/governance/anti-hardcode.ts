@@ -31,6 +31,7 @@ interface DiffPathToken {
 
 interface DiffLexerState {
   inBlockComment: boolean;
+  inHtmlComment?: boolean;
   stringDelimiter?: string;
   stringTokenId?: string;
   stringValue: string;
@@ -49,7 +50,7 @@ interface DiffLineRecord {
 }
 
 const SOURCE_FILE_EXTENSION =
-  /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|kts|swift|cs|c|h|cc|cpp|hpp|php|rb|sh|bash|zsh|ps1|scala|sc|dart|ex|exs|lua|sql|sol)$/i;
+  /\.(?:[cm]?[jt]sx?|vue|svelte|py|go|rs|java|kt|kts|swift|cs|c|h|cc|cpp|hpp|php|rb|sh|bash|zsh|ps1|scala|sc|dart|ex|exs|lua|sql|sol)$/i;
 
 function isSourceCodeFile(filePath: string): boolean {
   const basename = filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase() || '';
@@ -67,8 +68,26 @@ function isTestOrDocFile(filePath: string): boolean {
     /\.(?:test|spec)\.[a-z0-9]+$/i.test(norm) ||
     /_test\.[a-z0-9]+$/i.test(norm) ||
     /(?:^|\/)test_[a-z0-9_]+\.[a-z0-9]+$/i.test(norm) ||
-    /\.(?:md|mdx|rst|txt)$/i.test(norm) ||
-    norm.startsWith('.github/')
+    /\.(?:md|mdx|rst|txt)$/i.test(norm)
+  );
+}
+
+function isRustLifetimeToken(line: string, quoteIndex: number, filePath: string): boolean {
+  if (!/\.rs$/i.test(filePath)) return false;
+  const lifetime = line.slice(quoteIndex).match(/^'[A-Za-z_][A-Za-z0-9_]*/)?.[0];
+  return Boolean(
+    lifetime && line[quoteIndex + lifetime.length] !== "'",
+  );
+}
+
+function isWebRoutePathReference(code: string, pathToken: string): boolean {
+  const tokenIndex = code.indexOf(pathToken);
+  if (tokenIndex < 0) return false;
+  const prefix = code.slice(Math.max(0, tokenIndex - 120), tokenIndex);
+  return (
+    /<Route\b[^>]*\bpath\s*=\s*\{?\s*$/i.test(prefix) ||
+    /\b(?:route|routePath|pathname|href|url)\s*[:=]\s*\{?\s*$/i.test(prefix) ||
+    /\b(?:routes|router)\b[^;\n]*\bpath\s*:\s*\{?\s*$/i.test(prefix)
   );
 }
 
@@ -359,11 +378,16 @@ function scanDiffSourceLine(
   let code = '';
   const hashComments = isHashCommentLanguage(filePath);
   const dashComments = isDashCommentLanguage(filePath);
-  const supportsTripleQuotes = /\.py$/i.test(filePath);
+  const supportsTripleQuotes = /\.(?:py|kt|kts)$/i.test(filePath);
+  const supportsTemplateInterpolation =
+    /\.(?:[cm]?[jt]sx?|vue|svelte)$/i.test(filePath);
 
   const appendStringContent = (value: string) => {
     state.stringValue += value;
-    if (state.stringDelimiter === '`' || state.stringIsFString) {
+    if (
+      (state.stringDelimiter === '`' && supportsTemplateInterpolation) ||
+      state.stringIsFString
+    ) {
       for (let offset = 0; offset < value.length; offset++) {
         state.stringAddedFlags.push(lineAdded);
         state.stringSourceLines.push(sourceLine);
@@ -392,7 +416,7 @@ function scanDiffSourceLine(
         if (state.stringTokenId) {
           stringValues.set(`__STR_${state.stringTokenId}__`, state.stringValue);
           const expressions =
-            state.stringDelimiter === '`'
+            state.stringDelimiter === '`' && supportsTemplateInterpolation
               ? extractTemplateExpressions(state.stringValue)
               : state.stringIsFString
                 ? extractPythonFStringExpressions(state.stringValue)
@@ -447,6 +471,19 @@ function scanDiffSourceLine(
       continue;
     }
 
+    if (state.inHtmlComment) {
+      const end = line.indexOf('-->', index);
+      if (end < 0) break;
+      state.inHtmlComment = false;
+      index = end + 3;
+      continue;
+    }
+    if (/\.(?:vue|svelte)$/i.test(filePath) && line.startsWith('<!--', index)) {
+      state.inHtmlComment = true;
+      index += 4;
+      continue;
+    }
+
     if (line.startsWith('/*', index)) {
       state.inBlockComment = true;
       index += 2;
@@ -457,6 +494,11 @@ function scanDiffSourceLine(
     if (dashComments && line.startsWith('--', index)) break;
 
     const quote = line[index];
+    if (quote === "'" && isRustLifetimeToken(line, index, filePath)) {
+      code += quote;
+      index++;
+      continue;
+    }
     if (quote === '"' || quote === "'" || quote === '`') {
       const cppRawString = cppRawStringBeforeQuote(line, index, filePath);
       if (cppRawString) {
@@ -624,7 +666,11 @@ function analyzeFileChanges(
 
     for (const pathToken of new Set(code.match(/__STR_\d+__/g) || [])) {
       const value = stringValues.get(pathToken)?.replace(/\\\\/g, '\\').trim();
-      if (value && absolutePathPatterns.some((pattern) => pattern.test(value))) {
+      if (
+        value &&
+        absolutePathPatterns.some((pattern) => pattern.test(value)) &&
+        !isWebRoutePathReference(record.code, pathToken)
+      ) {
         addViolation(
           violations,
           filePath,

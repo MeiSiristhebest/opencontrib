@@ -685,9 +685,16 @@ export class ContextAssembler {
     // Tier 2b: Upstream Engineering Fingerprint & Combinatorial Matrix
     if (ctx.repoContext.engineeringFingerprint) {
       const fp = ctx.repoContext.engineeringFingerprint;
+      const dcoPolicy = fp.commitStyle.requiresSignedOffBy;
+      const dcoDescription =
+        dcoPolicy === undefined
+          ? 'Unknown (shallow history)'
+          : dcoPolicy
+            ? 'MANDATORY (Signed-off-by trailer required)'
+            : 'Optional';
       sections.push(`\n[UPSTREAM_ENGINEERING_FINGERPRINT - CLONED COMMUNITY CONVENTIONS]`);
       sections.push(`- **Commit Convention**: ${fp.commitStyle.primaryConvention} (Recommended: "${fp.commitStyle.recommendedCommitExample}")`);
-      sections.push(`- **DCO Signed-off-by**: ${fp.commitStyle.requiresSignedOffBy ? 'MANDATORY (Signed-off-by trailer required)' : 'Optional'}`);
+      sections.push(`- **DCO Signed-off-by**: ${dcoDescription}`);
       sections.push(`- **Test File Pattern**: ${fp.testConventions.filePattern} (${fp.testConventions.frameworkName})`);
       sections.push(`- **Strictness**: ${fp.strictnessGateways.hasPreCommit ? 'Pre-commit enabled (strictly enforce formatting)' : 'Standard'}`);
       sections.push(`- **Persona Guidance**: ${fp.contributorPersonaAdvice}`);

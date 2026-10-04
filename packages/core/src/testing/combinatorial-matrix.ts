@@ -240,28 +240,28 @@ function textChunkingTemplate(language: MatrixTemplateLanguage): {
 } {
   if (language === 'python') {
     return {
-      exactBoundary: 'text = "Word " * max_tokens\nchunks = chunker.split_lines(text, max_tokens=max_tokens)\nassert all(token_len(chunk) <= max_tokens for chunk in chunks)',
+      exactBoundary: 'tokens = tokenizer.encode("Word " * (max_tokens * 2))\ntext = tokenizer.decode(tokens[:max_tokens])\nassert token_len(text) == max_tokens\nchunks = chunker.split_lines(text, max_tokens=max_tokens)\nassert all(token_len(chunk) <= max_tokens for chunk in chunks)',
       assertions: [
         'assert all(token_len(chunk) <= max_tokens for chunk in chunks), "Chunk exceeded max token bound"',
-        'assert "".join(chunks).replace(" ", "") == original.replace(" ", ""), "Data loss detected during chunking"',
+        'assert "".join(chunks) == text, "Data loss detected during chunking"',
       ],
     };
   }
   if (language === 'go') {
     return {
-      exactBoundary: 'text := strings.Repeat("word ", maxTokens)\nchunks := chunker.SplitLines(text, maxTokens)\nfor _, chunk := range chunks { if tokenLen(chunk) > maxTokens { t.Fatal("chunk exceeded token bound") } }',
+      exactBoundary: 'tokens := tokenizer.Encode(strings.Repeat("word ", maxTokens*2))\ntext := tokenizer.Decode(tokens[:maxTokens])\nif tokenLen(text) != maxTokens { t.Fatal("fixture did not reach token boundary") }\nchunks := chunker.SplitLines(text, maxTokens)\nfor _, chunk := range chunks { if tokenLen(chunk) > maxTokens { t.Fatal("chunk exceeded token bound") } }',
       assertions: [
         'for _, chunk := range chunks { if tokenLen(chunk) > maxTokens { t.Fatal("chunk exceeded token bound") } }',
-        'if strings.Join(chunks, "") != original { t.Fatal("chunking lost text") }',
+        'if strings.Join(chunks, "") != text { t.Fatal("chunking lost text") }',
       ],
     };
   }
   if (language === 'rust') {
     return {
-      exactBoundary: 'let text = "word ".repeat(max_tokens);\nlet chunks = chunker.split_lines(&text, max_tokens);\nassert!(chunks.iter().all(|chunk| token_len(chunk) <= max_tokens));',
+      exactBoundary: 'let tokens = tokenizer.encode(&"word ".repeat(max_tokens * 2));\nlet text = tokenizer.decode(&tokens[..max_tokens]);\nassert_eq!(token_len(&text), max_tokens);\nlet chunks = chunker.split_lines(&text, max_tokens);\nassert!(chunks.iter().all(|chunk| token_len(chunk) <= max_tokens));',
       assertions: [
         'assert!(chunks.iter().all(|chunk| token_len(chunk) <= max_tokens));',
-        'assert_eq!(chunks.concat(), original);',
+        'assert_eq!(chunks.concat(), text);',
       ],
     };
   }
@@ -275,10 +275,10 @@ function textChunkingTemplate(language: MatrixTemplateLanguage): {
     };
   }
   return {
-    exactBoundary: 'const text = "word ".repeat(maxTokens);\nconst chunks = chunker.splitLines(text, maxTokens);\nexpect(chunks.every((chunk) => tokenLen(chunk) <= maxTokens)).toBe(true);',
+    exactBoundary: 'const tokens = tokenizer.encode("word ".repeat(maxTokens * 2));\nconst text = tokenizer.decode(tokens.slice(0, maxTokens));\nexpect(tokenLen(text)).toBe(maxTokens);\nconst chunks = chunker.splitLines(text, maxTokens);\nexpect(chunks.every((chunk) => tokenLen(chunk) <= maxTokens)).toBe(true);',
     assertions: [
       'expect(chunks.every((chunk) => tokenLen(chunk) <= maxTokens)).toBe(true)',
-      'expect(chunks.join("").replaceAll(" ", "")).toBe(original.replaceAll(" ", ""))',
+      'expect(chunks.join("")).toBe(text)',
     ],
   };
 }

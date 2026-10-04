@@ -261,6 +261,83 @@ describe("anti-hardcode review regressions", () => {
     expect(result.violations.some((entry) => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toBe(true);
   });
 
+  it("does not classify web route literals as filesystem paths", () => {
+    const result = lintAntiHardcode(
+      diff(
+        "src/routes.tsx",
+        '+<Route path="/home" element={<Home />} />',
+      ),
+    );
+
+    expect(result.isClean).toBe(true);
+  });
+
+  it("scans Vue, Svelte, and GitHub Action source files", () => {
+    const fixtures = [
+      ["src/App.vue", '+<script>if (repo === "owner/repo") return fallback();</script>'],
+      ["src/App.svelte", '+<script>if (repo === "owner/repo") return fallback();</script>'],
+      [".github/actions/check/index.js", '+if (repo === "owner/repo") return fallback();'],
+    ] as const;
+
+    for (const [filePath, addedLine] of fixtures) {
+      const result = lintAntiHardcode(
+        diff(filePath, addedLine),
+      );
+
+      expect(result.violations.some(
+        (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+      )).toBe(true);
+    }
+
+    expect(
+      lintAntiHardcode(
+        diff(
+          "src/App.vue",
+          '+<!-- if (repo === "owner/repo") return fallback(); -->',
+        ),
+        { targetRepo: "owner/repo" },
+      ).isClean,
+    ).toBe(true);
+  });
+
+  it("keeps Rust lifetimes and Kotlin raw strings from hiding later code", () => {
+    const rust = [
+      "diff --git a/src/feature.rs b/src/feature.rs",
+      "--- a/src/feature.rs",
+      "+++ b/src/feature.rs",
+      "@@ -1,0 +1,3 @@",
+      "+fn route(repo: &'static str) {",
+      '+  if repo == "owner/repo" { return; }',
+      "+}",
+    ].join("\n");
+    const kotlin = [
+      "diff --git a/src/Feature.kt b/src/Feature.kt",
+      "--- a/src/Feature.kt",
+      "+++ b/src/Feature.kt",
+      "@@ -1,0 +1,3 @@",
+      '+val example = """unmatched " quote"""',
+      '+if (repo == "owner/repo") return fallback()',
+      "+println(example)",
+    ].join("\n");
+
+    for (const patch of [rust, kotlin]) {
+      const result = lintAntiHardcode(patch, { targetRepo: "owner/repo" });
+
+      expect(result.violations.some(
+        (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+      )).toBe(true);
+    }
+  });
+
+  it("does not parse Go raw strings as interpolated templates", () => {
+    const result = lintAntiHardcode(
+      diff("src/example.go", '+message := `example ${repo == "owner/repo"}`'),
+      { targetRepo: "owner/repo" },
+    );
+
+    expect(result.isClean).toBe(true);
+  });
+
   it("detects block-bodied sample returns in Python and Go", () => {
     const python = [
       "diff --git a/src/feature.py b/src/feature.py",

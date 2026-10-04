@@ -17,6 +17,62 @@ import { LLMService } from "../src/llm/llm-service.js";
 import { ContributionStateMachine } from "../src/orchestration/state-machine.js";
 import { ContextAssembler } from "../src/discovery/context-assembler.js";
 import type { PipelineDeps } from "../src/orchestration/pipeline/types.js";
+import {
+  ContextAssemblyStep,
+  deriveTargetedReproductionTestCommand,
+} from "../src/orchestration/pipeline/steps.js";
+
+describe("Pipeline RED command selection", () => {
+  it("scopes a recursive Go test command to generated test-file packages", () => {
+    expect(
+      deriveTargetedReproductionTestCommand("go test ./...", [
+        "internal/worker/worker_test.go",
+        "pkg/parser/parser_test.go",
+      ]),
+    ).toBe("go test ./internal/worker ./pkg/parser");
+    expect(
+      deriveTargetedReproductionTestCommand("go test ./...", ["worker_test.go"]),
+    ).toBe("go test .");
+    expect(
+      deriveTargetedReproductionTestCommand("go test ./...", ["../outside_test.go"]),
+    ).toBeUndefined();
+  });
+
+  it("does not schedule RED execution for documentation-only opportunities", async () => {
+    const ctx: any = {
+      selectedOpp: {
+        repoFullName: "owner/repo",
+        issueNumber: 1,
+        title: "Fix README typo",
+        body: "",
+        primaryLanguage: "Go",
+        feasibility: { scope: "docs_only" },
+      },
+      workspace: { workspacePath: "/tmp/workspace" },
+      runId: "run_docs_only",
+    };
+    const deps: any = {
+      stateMachine: { transition: () => {} },
+      contextAssembler: {
+        assemble: async () => ({
+          repoContext: {
+            runnableCommands: { testCommand: "go test ./..." },
+            testCommandHint: "go test ./...",
+          },
+        }),
+        formatContextPrompt: () => "prompt",
+      },
+      runManager: {
+        getRun: () => ({ runId: "run_docs_only" }),
+        saveArtifact: () => {},
+      },
+    };
+
+    await new ContextAssemblyStep().execute(ctx, deps);
+
+    expect(ctx.testCmd).toBeUndefined();
+  });
+});
 
 function buildDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
   const workspacePath = mkdtempSync(join(tmpdir(), "oc-e2e-"));

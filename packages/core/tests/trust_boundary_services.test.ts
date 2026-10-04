@@ -545,7 +545,7 @@ describe("Governance audit impact context", () => {
         "--- a/internal/tool/code_search.go",
         "+++ b/internal/tool/code_search.go",
         "@@ -1 +1 @@",
-        "-normalized := filepath.ToSlash(input)",
+        '-if (repository === "org/repo") return special;',
         "+normalized := filepath.FromSlash(input)",
       ].join("\n"),
       patchContent: JSON.stringify({
@@ -553,6 +553,33 @@ describe("Governance audit impact context", () => {
           {
             path: "internal/tool/code_search.go",
             content: "normalized := filepath.FromSlash(input)",
+          },
+        ],
+      }),
+      modifiedFiles: ["internal/tool/code_search.go"],
+      lineCount: 1,
+      coreDiffLines: 1,
+    });
+
+    expect(audit.antiHardcodePassed).toBe(true);
+    expect(audit.impactAnalysisPassed).toBe(true);
+  });
+
+  it("analyzes the validated diff instead of unchanged PatchDraft content", () => {
+    const audit = auditGovernance({
+      diffText: [
+        "diff --git a/internal/tool/code_search.go b/internal/tool/code_search.go",
+        "--- a/internal/tool/code_search.go",
+        "+++ b/internal/tool/code_search.go",
+        "@@ -4,0 +4,1 @@",
+        "+normalized := filepath.FromSlash(input)",
+      ].join("\n"),
+      patchContent: JSON.stringify({
+        files: [
+          {
+            path: "internal/tool/code_search.go",
+            content:
+              "legacy := filepath.ToSlash(input)\nnormalized := filepath.FromSlash(input)",
           },
         ],
       }),
