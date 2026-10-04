@@ -140,6 +140,32 @@ diff --git a/src/launcher.ts b/src/launcher.ts
       ).toHaveLength(2);
     });
 
+    it('scans executable template interpolations but ignores template text', () => {
+      const templateExpression = "${({ repo: repo === 'owner/repo' }).repo}";
+      const escapedExpression = "\\${repo === 'owner/repo'}";
+      const issueExpression = '${issue?.number === 1614}';
+      const patch = [
+        'diff --git a/src/repository.ts b/src/repository.ts',
+        '--- a/src/repository.ts',
+        '+++ b/src/repository.ts',
+        '@@ -0,0 +1,4 @@',
+        '+const note = `owner/repo`;',
+        '+const escaped = `' + escapedExpression + '`;',
+        '+const result = `' + templateExpression + '`;',
+        '+const issue = `' + issueExpression + '`;',
+      ].join('\n');
+      const result = lintAntiHardcode(patch, {
+        targetRepo: 'owner/repo',
+        issueNumber: 1614,
+      });
+
+      expect(result.isClean).toBe(false);
+      expect(result.violations.map((violation) => violation.rule)).toEqual([
+        'REPO_LITERAL_DISCRIMINATION',
+        'ISSUE_NUMBER_HARDCODING',
+      ]);
+    });
+
     it('allows repository names and sample paths inside test files without false positives', () => {
       const cleanTestPatch = `
 diff --git a/test/test_repo_service.py b/test/test_repo_service.py
