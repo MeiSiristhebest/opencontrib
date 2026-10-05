@@ -76,6 +76,18 @@ export function deriveTargetedReproductionTestCommand(
   testFiles: readonly string[],
 ): string | undefined {
   const command = repositoryCommand.trim();
+  const nodeRunner = /^(npm|pnpm|yarn|bun) test$/.exec(command)?.[1];
+  if (nodeRunner) {
+    const paths = testFiles.map(file => file.replace(/\\/g, "/").replace(/^\.\//, ""));
+    if (paths.length === 0 || paths.some(file =>
+      !/^[a-zA-Z0-9._/-]+$/.test(file) || file.startsWith("/") || file.startsWith("-") ||
+      file.split("/").some(part => part === ".." || part === "...") ||
+      !/\.[cm]?[jt]sx?$/i.test(file)
+    )) return undefined;
+    const args = [...new Set(paths)].sort().map(file => nodeRunner === "bun" ? `./${file}` : file);
+    const separator = nodeRunner === "npm" || nodeRunner === "pnpm" ? " --" : "";
+    return `${command}${separator} ${args.join(" ")}`;
+  }
   if (command !== "go test ./...") {
     if (/^go test\b/.test(command) && /(?:^|\s)\.\/\.\.\.(?:\s|$)/.test(command)) {
       return undefined;
@@ -104,6 +116,13 @@ export function deriveTargetedReproductionTestCommand(
     .sort()
     .map((directory) => (directory === "." ? "." : `./${directory}`));
   return `go test ${packages.join(" ")}`;
+}
+
+export function resolveGreenVerificationTestCommand(
+  scopedRedCommand: string | undefined,
+  repositoryCommand: string | undefined,
+): string | undefined {
+  return scopedRedCommand ?? repositoryCommand;
 }
 
 function getCoreDiffMetrics(
@@ -642,7 +661,7 @@ export class ImplementValidateLoopStep implements PipelineStep {
     const workspacePath = ctx.workspace!.workspacePath;
     const runManager = deps.runManager ?? defaultRunManager;
     const prompt = ctx.prompt!;
-    const testCmd = ctx.repositoryTestCmd ?? ctx.testCmd;
+    const testCmd = resolveGreenVerificationTestCommand(ctx.testCmd, ctx.repositoryTestCmd);
     const activePatchRef = { patch: ctx.activePatch! };
 
     deps.stateMachine.transition(

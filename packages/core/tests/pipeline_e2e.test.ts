@@ -1,3 +1,4 @@
+import { EvidenceService } from "../src/evidence/evidence-service.js";
 /**
  * End-to-end pipeline test for the refactored `AgentOrchestrator`.
  *
@@ -7,7 +8,7 @@
  * doubles — something the old design made impossible. This lock the
  * step-by-step behavior so future refactors can't silently drift.
  */
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -19,7 +20,9 @@ import { ContextAssembler } from "../src/discovery/context-assembler.js";
 import type { PipelineDeps } from "../src/orchestration/pipeline/types.js";
 import {
   ContextAssemblyStep,
+  ImplementValidateLoopStep,
   deriveTargetedReproductionTestCommand,
+  resolveGreenVerificationTestCommand,
 } from "../src/orchestration/pipeline/steps.js";
 
 describe("Pipeline RED command selection", () => {
@@ -115,6 +118,9 @@ describe("Pipeline RED command selection", () => {
 
     expect(ctx.testCmd).toBe("go test ./pkg/parser");
     expect(ctx.repositoryTestCmd).toBe("go test ./...");
+    expect(
+      resolveGreenVerificationTestCommand(ctx.testCmd, ctx.repositoryTestCmd),
+    ).toBe(ctx.testCmd);
   });
 });
 
@@ -350,4 +356,46 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
     expect(result.stage).toBe("PATCH_DESIGN");
     expect(result.reportSummary).toContain("Pipeline halted");
   });
+});
+
+describe("Pipeline command review regressions", () => {
+  it.each([
+    ["npm test", "npm test -- tests/parser.test.ts"],
+    ["pnpm test", "pnpm test -- tests/parser.test.ts"],
+    ["yarn test", "yarn test tests/parser.test.ts"],
+    ["bun test", "bun test ./tests/parser.test.ts"],
+  ])("scopes root command %s", (command, expected) => {
+    expect(deriveTargetedReproductionTestCommand(command, ["tests/parser.test.ts"])).toBe(expected);
+    expect(deriveTargetedReproductionTestCommand(command, [])).toBeUndefined();
+    expect(deriveTargetedReproductionTestCommand(command, ["../parser.test.ts"])).toBeUndefined();
+    expect(deriveTargetedReproductionTestCommand(command, ["tests/parser.test.ts; echo bad"])).toBeUndefined();
+    expect(deriveTargetedReproductionTestCommand(command, ["-parser.test.ts"])).toBeUndefined();
+  });
+
+  it("preserves a command already scoped to a test file", () => {
+    expect(deriveTargetedReproductionTestCommand("bun test ./tests/parser.test.ts", ["tests/parser.test.ts"]))
+      .toBe("bun test ./tests/parser.test.ts");
+  });
+
+  it("sends the scoped RED command to canonical GREEN verification", async () => {
+    const verify = spyOn(EvidenceService.prototype, "verifyGreen").mockResolvedValue({
+      stressLoopPassed: true, passedUnitTestsCount: 1, failedUnitTestsCount: 0, exitCode: 0,
+    } as any);
+    try {
+      const context: any = {
+        workspace: { workspacePath: "fixture" }, prompt: "prompt", runId: "run_fixture",
+        activePatch: { files: [] }, testCmd: "go test ./pkg/parser",
+        repositoryTestCmd: "go test ./...", preFixReproductionCaptured: true,
+      };
+      await new ImplementValidateLoopStep().execute(context, {
+        runManager: {}, stateMachine: { transition: () => {}, setReproductionCaptured: () => {} },
+        worktreeManager: { applySurgicalFilesSafely: () => ({ appliedFiles: [], errors: [] }) },
+      } as any);
+      expect(verify).toHaveBeenCalledWith(expect.objectContaining({ testCommand: "go test ./pkg/parser" }));
+      expect(context.validationStatus).toBe("VALIDATED");
+    } finally {
+      verify.mockRestore();
+    }
+  });
+
 });
