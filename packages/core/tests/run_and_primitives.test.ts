@@ -328,7 +328,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     expect(resumeInfo.availableArtifacts).toContain("opportunity");
     expect(resumeInfo.latestArtifactSummary.hasOpportunity).toBe(true);
     expect(resumeInfo.latestArtifactSummary.hasPatch).toBe(false);
-    expect(resumeInfo.suggestedNextAction).toBe("assemble_context");
+    expect(resumeInfo.suggestedNextAction).toBe("prepare_workspace");
   });
 });
 

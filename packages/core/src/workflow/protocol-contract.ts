@@ -89,7 +89,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Target issues must meet feasibility scoring threshold before workspace isolation.",
     ],
-    suggestedNextAction: "assemble_context",
+    suggestedNextAction: "prepare_workspace",
   },
   PROBE_COMPLETED: {
     phase: "PROBE_COMPLETED",
@@ -112,7 +112,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Pinpoint symbols and defect context strictly via Smart Pointer slices (ptr://...).",
     ],
-    suggestedNextAction: "assemble_context",
+    suggestedNextAction: "prepare_workspace",
   },
   CONTEXT_ASSEMBLED: {
     phase: "CONTEXT_ASSEMBLED",
@@ -166,7 +166,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "All development must take place inside isolated worktree sandbox.",
     ],
-    suggestedNextAction: "capture_red",
+    suggestedNextAction: "assemble_context",
   },
   RED_CAPTURED: {
     phase: "RED_CAPTURED",
