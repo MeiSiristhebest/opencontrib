@@ -79,7 +79,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Restore Turborepo Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .turbo/cache
           key: ${{ runner.os }}-turbo-${{ hashFiles('bun.lock', 'package.json', 'turbo.json', 'packages/**/package.json') }}-${{ github.sha }}
@@ -111,7 +111,7 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Setup Bun Runtime
