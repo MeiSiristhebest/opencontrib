@@ -749,6 +749,31 @@ diff --git a/src/fix.ts b/src/fix.ts
     }
   });
 
+  it.each(["vue", "svelte"])("seeds %s component comments from the canonical base", extension => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-component-base-"));
+    try {
+      const workspace = join(baseDir, "repo");
+      const manager = isolatedRunManager(join(baseDir, "runs"));
+      const run = manager.createRun({ repoFullName: "org/repo" });
+      const path = `src/App.${extension}`;
+      const baseContent = ["<template>", "<!--", ...Array.from({ length: 30 }, (_, i) => `Documentation line ${i}`), "-->", "</template>", ""].join("\n");
+      const greenSource = baseContent.replace("Documentation line 15", 'Documentation line 15\nif (repo === "owner/repo") return example();');
+      const patchDraft: PatchDraft = {
+        title: "docs: explain component behavior", summary: "Add an inert comment example.",
+        rationale: "Document the existing component.", targetFiles: [{ path, reason: "Document behavior." }],
+        files: [{ path, operation: "MODIFY", mode: "100644", content: greenSource, explanation: "Extend the existing HTML comment." }],
+        implementationSteps: ["Extend the comment."], regressionTestPlan: ["Verify base comment state."], estimatedDiffLines: 1,
+      };
+      const decision = seedGovernanceReadyRun(manager, run.runId, workspace, "pr body", {}, {
+        patchPath: path, patchDraft, baseContent, changedLines: 1,
+      });
+      expect(decision.auditResult.antiHardcodePassed).toBe(true);
+      expect(decision.auditResult.flaggedHardcodeIssues).toEqual([]);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it("passes validated patch paths and the base tree into sibling-file analysis", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-impact-"));
     const repoPath = join(baseDir, "repo");

@@ -40,6 +40,13 @@ interface DiffLexerState {
   stringSourceLines: string[];
   stringIsFString: boolean;
   stringIsCppRaw?: boolean;
+  stringIsRaw?: boolean;
+  stringIsTemplate?: boolean;
+  stringIsVueExpression?: boolean;
+  templateDepth?: number;
+  templateQuote?: string;
+  templateBlockComment?: boolean;
+  templateLineComment?: boolean;
   nextToken: number;
 }
 
@@ -181,11 +188,12 @@ function isDashCommentLanguage(filePath: string): boolean {
 
 function extractTemplateExpressions(
   templateBody: string,
+  skipEscapes = true,
 ): Array<{ expression: string; start: number; end: number }> {
   const expressions: Array<{ expression: string; start: number; end: number }> = [];
 
   for (let index = 0; index < templateBody.length; index++) {
-    if (templateBody[index] === '\\') {
+    if (skipEscapes && templateBody[index] === '\\') {
       index++;
       continue;
     }
@@ -365,6 +373,19 @@ function cppRawStringBeforeQuote(
   };
 }
 
+function decodeStringLiteral(value: string, raw: boolean, filePath: string): string {
+  if (raw || !/\.(?:[cm]?[jt]sx?|vue|svelte|py|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp)$/i.test(filePath)) return value;
+  return value.replace(/\\(?:u\{([\da-f]+)\}|u([\da-f]{4})|x([\da-f]{2})|(["'\\/]))/gi,
+    (escape, codePoint, unicode, hex, character) => {
+      if (character) {
+        if (character === '/' && !/\.(?:[cm]?[jt]sx?|vue|svelte)$/i.test(filePath)) return escape;
+        return character;
+      }
+      const number = Number.parseInt(codePoint || unicode || hex, 16);
+      return number <= 0x10ffff ? String.fromCodePoint(number) : escape;
+    });
+}
+
 function scanDiffSourceLine(
   line: string,
   filePath: string,
@@ -387,8 +408,7 @@ function scanDiffSourceLine(
   const appendStringContent = (value: string) => {
     state.stringValue += value;
     if (
-      (state.stringDelimiter === '`' && supportsTemplateInterpolation) ||
-      state.stringIsFString
+      state.stringIsTemplate || state.stringIsFString || state.stringIsVueExpression
     ) {
       for (let offset = 0; offset < value.length; offset++) {
         state.stringAddedFlags.push(lineAdded);
@@ -407,8 +427,48 @@ function scanDiffSourceLine(
     }
 
     if (state.stringDelimiter) {
+      if (state.stringIsTemplate && state.templateDepth) {
+        const char = line[index];
+        const next = line[index + 1];
+        if (state.templateLineComment) {
+          // The line comment ends below, when the newline is appended.
+        } else if (state.templateBlockComment) {
+          if (char === '*' && next === '/') {
+            appendStringContent('*/');
+            index += 2;
+            state.templateBlockComment = false;
+            continue;
+          }
+        } else if (state.templateQuote) {
+          if (char === '\\' && next) {
+            appendStringContent(line.slice(index, index + 2));
+            index += 2;
+            continue;
+          }
+          if (char === state.templateQuote) state.templateQuote = undefined;
+        } else if (char === '/' && next === '/') {
+          state.templateLineComment = true;
+        } else if (char === '/' && next === '*') {
+          state.templateBlockComment = true;
+        } else if (char === '"' || char === "'" || char === '`') {
+          state.templateQuote = char;
+        } else if (char === '{') {
+          state.templateDepth++;
+        } else if (char === '}') {
+          state.templateDepth--;
+        }
+        appendStringContent(char);
+        index++;
+        continue;
+      }
+      if (state.stringIsTemplate && line.startsWith('${', index)) {
+        state.templateDepth = 1;
+        appendStringContent('${');
+        index += 2;
+        continue;
+      }
       if (
-        !state.stringIsCppRaw &&
+        !state.stringIsRaw &&
         line[index] === '\\' &&
         index + 1 < line.length
       ) {
@@ -416,10 +476,12 @@ function scanDiffSourceLine(
         index += 2;
       } else if (line.startsWith(state.stringDelimiter, index)) {
         if (state.stringTokenId) {
-          stringValues.set(`__STR_${state.stringTokenId}__`, state.stringValue);
+          stringValues.set(`__STR_${state.stringTokenId}__`, decodeStringLiteral(state.stringValue, Boolean(state.stringIsRaw), filePath));
           const expressions =
-            state.stringDelimiter === '`' && supportsTemplateInterpolation
-              ? extractTemplateExpressions(state.stringValue)
+            state.stringIsVueExpression
+              ? [{ expression: state.stringValue.replace(/&(?:quot|apos|lt|gt|amp);/g, entity => ({'&quot;': '"', '&apos;': "'", '&lt;': '<', '&gt;': '>', '&amp;': '&'})[entity]!), start: 0, end: state.stringValue.length }]
+              : state.stringIsTemplate
+              ? extractTemplateExpressions(state.stringValue, !state.stringIsRaw)
               : state.stringIsFString
                 ? extractPythonFStringExpressions(state.stringValue)
                 : [];
@@ -466,6 +528,13 @@ function scanDiffSourceLine(
         state.stringSourceLines = [];
         state.stringIsFString = false;
         state.stringIsCppRaw = false;
+        state.stringIsRaw = false;
+        state.stringIsTemplate = false;
+        state.stringIsVueExpression = false;
+        state.templateDepth = 0;
+        state.templateQuote = undefined;
+        state.templateBlockComment = false;
+        state.templateLineComment = false;
       } else {
         appendStringContent(line[index]);
         index++;
@@ -529,6 +598,7 @@ function scanDiffSourceLine(
         state.stringSourceLines = [];
         state.stringIsFString = false;
         state.stringIsCppRaw = true;
+        state.stringIsRaw = true;
         stringValues.set(`__STR_${tokenId}__`, '');
         code += `__STR_${tokenId}__`;
         index = cppRawString.contentStart;
@@ -549,6 +619,14 @@ function scanDiffSourceLine(
       state.stringSourceLines = [];
       state.stringIsFString = supportsTripleQuotes && isPythonFStringPrefix(line, index);
       state.stringIsCppRaw = false;
+      state.stringIsRaw = (/\.go$/i.test(filePath) && quote === '`') ||
+        (/\.py$/i.test(filePath) && /r/i.test(stringPrefix)) ||
+        (/\.rs$/i.test(filePath) && /r/.test(stringPrefix)) ||
+        (/\.kts?$/i.test(filePath) && delimiter === '"""');
+      state.stringIsTemplate = (quote === '`' && supportsTemplateInterpolation) ||
+        (/\.kts?$/i.test(filePath) && quote === '"');
+      state.stringIsVueExpression = /\.vue$/i.test(filePath) && !state.inSfcNonTemplateBlock &&
+        /(?:^|\s)(?:v-[\w:.-]+|[:@#][\w:.-]+)\s*=\s*$/.test(line.slice(0, index));
       stringValues.set(`__STR_${tokenId}__`, '');
       code += `__STR_${tokenId}__`;
       index += delimiter.length;
@@ -561,12 +639,14 @@ function scanDiffSourceLine(
 
   if (
     state.stringDelimiter === '`' ||
+    state.stringDelimiter?.length === 3 ||
     (state.stringIsFString && state.stringDelimiter?.length === 3)
   ) {
     appendStringContent('\n');
   }
+  state.templateLineComment = false;
   if (state.stringTokenId) {
-    stringValues.set(`__STR_${state.stringTokenId}__`, state.stringValue);
+    stringValues.set(`__STR_${state.stringTokenId}__`, decodeStringLiteral(state.stringValue, Boolean(state.stringIsRaw), filePath));
   }
   return code;
 }
@@ -655,7 +735,7 @@ function analyzeFileChanges(
   if (!isSourceCodeFile(filePath) || isTestOrDocFile(filePath)) return;
 
   const repoVariable =
-    String.raw`\b(?:target)?(?:repo|repository|origin|upstream)(?:Name|FullName)?\b`;
+    String.raw`\b(?:target)?(?:repo|repository|origin|upstream)(?:Name|FullName)?\b(?:\s*(?:\?\.|\.)\s*(?:fullName|name))?(?:\s*(?:\?\.|\.)\s*(?:toLowerCase|toUpperCase|trim|lower|upper)\s*\(\s*\))*`;
   const stringToken = String.raw`__STR_\d+__`;
   const repoReference = new RegExp(
     `(?:${repoVariable}\\s*(?:=+|!==?)\\s*(${stringToken})|(${stringToken})\\s*(?:===|==)\\s*${repoVariable}|${repoVariable}\\s*\\.includes\\s*\\(\\s*(${stringToken}))`,
@@ -683,7 +763,7 @@ function analyzeFileChanges(
     if (!code) continue;
 
     for (const pathToken of new Set(code.match(/__STR_\d+__/g) || [])) {
-      const value = stringValues.get(pathToken)?.replace(/\\\\/g, '\\').trim();
+      const value = stringValues.get(pathToken)?.trim();
       if (
         value &&
         absolutePathPatterns.some((pattern) => pattern.test(value)) &&
@@ -729,6 +809,32 @@ function analyzeFileChanges(
             ? `Production logic hardcodes target repository name '${options.targetRepo}'. Solutions must be generalized and decoupled from repository-specific string literals.`
             : 'Detected repository-name literal comparison in production code. Use capability/manifest feature detection rather than repo-name discrimination.',
         );
+      }
+    }
+
+    const repositoryDispatch = new RegExp(
+      `\\b(?:(switch|when)\\s*\\(\\s*${repoVariable}\\s*\\)|(match)\\s+${repoVariable})\\s*\\{`, 'gi',
+    );
+    for (const dispatch of source.code.matchAll(repositoryDispatch)) {
+      const bodyStart = dispatch.index + dispatch[0].length;
+      let depth = 1;
+      for (let index = bodyStart; index < source.code.length && depth > 0; index++) {
+        const char = source.code[index];
+        if (char === '{') { depth++; continue; }
+        if (char === '}') { depth--; continue; }
+        if (depth !== 1) continue;
+        const arm = dispatch[1]?.toLowerCase() === 'switch'
+          ? /^\bcase\s+(__STR_\d+__)\s*:/.exec(source.code.slice(index))
+          : /^(__STR_\d+__)\s*(?:=>|->)/.exec(source.code.slice(index));
+        if (!arm) continue;
+        const literal = stringValues.get(arm[1]);
+        const record = source.firstAddedRecord(dispatch.index, bodyStart) ||
+          source.firstAddedRecord(index, index + arm[0].length);
+        if (record && literal && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(literal)) {
+          addViolation(violations, filePath, record.content.trim(), 'REPO_LITERAL_DISCRIMINATION',
+            'Detected repository-name literal dispatch in production code. Use capability/manifest feature detection rather than repo-name discrimination.');
+        }
+        index += arm[0].length - 1;
       }
     }
 

@@ -102,7 +102,7 @@ function readSourceFileContentsAtCommit(
 ): Map<string, string> {
   const contents = new Map<string, string>();
   const sourceExtension =
-    /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|kts|swift|cs|c|h|cc|cpp|hpp|php|rb|sh|bash|zsh|ps1|scala|sc|dart|ex|exs|lua|sql|sol)$/i;
+    /\.(?:[cm]?[jt]sx?|vue|svelte|py|go|rs|java|kt|kts|swift|cs|c|h|cc|cpp|hpp|php|rb|sh|bash|zsh|ps1|scala|sc|dart|ex|exs|lua|sql|sol)$/i;
   if (!/^[a-f0-9]{40,64}$/i.test(baseCommitSha)) return contents;
 
   for (const filePath of paths) {
