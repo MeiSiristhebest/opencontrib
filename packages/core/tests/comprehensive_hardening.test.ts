@@ -189,6 +189,12 @@ describe('Comprehensive Industrial Hardening Suite', () => {
           join(nodeProject, 'package.json'),
           JSON.stringify({ scripts: { test: 'node test.js' } }),
         );
+        expect(detectRunnableCommandsFromDir(nodeProject).testCommand).toBeUndefined();
+        writeFileSync(
+          join(nodeProject, 'package.json'),
+          JSON.stringify({ scripts: { test: 'vitest run' } }),
+        );
+        expect(detectRunnableCommandsFromDir(nodeProject).testCommand).toBe('npm test');
         writeFileSync(join(nodeProject, 'GNUmakefile'), 'lint:\n\techo lint\n');
         expect(detectRunnableCommandsFromDir(nodeProject).lintCommand).toBe(
           'make lint',

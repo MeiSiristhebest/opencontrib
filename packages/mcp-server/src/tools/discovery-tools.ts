@@ -10,6 +10,12 @@ import {
   scoutOpportunities,
 } from "@opencontrib/core";
 
+function normalizeRepoFullName(value: unknown): string | undefined {
+  return typeof value === "string"
+    ? value.trim().replace(/\.git$/i, "").toLowerCase()
+    : undefined;
+}
+
 function wrapHandler(fn: (args: any) => Promise<any>) {
   return async (args: any) => {
     try {
@@ -349,13 +355,31 @@ export function registerDiscoveryTools(server: McpServer): void {
         ),
     },
     wrapHandler(async (args) => {
-      const { ContextAssembler, buildContributionRunManager } = await import(
-        "@opencontrib/core"
-      );
+      const { ContextAssembler, buildContributionRunManager, runRepositoryGit } =
+        await import("@opencontrib/core");
       const assembler = new ContextAssembler();
       const runManager = buildContributionRunManager();
       const runId = runManager.resolveRunId(args.runId);
-      const workspace = runId ? runManager.getRun(runId)?.artifacts.workspace : undefined;
+      const requestedRepoFullName = `${args.repoDetails.owner}/${args.repoDetails.repo}`;
+      const run = runId ? runManager.getRun(runId) : undefined;
+      if (runId && !run) {
+        throw new Error(`Contribution run ${runId} was not found.`);
+      }
+      const runRepo = normalizeRepoFullName(run?.manifest.repoFullName);
+      const requestedRepo = normalizeRepoFullName(requestedRepoFullName);
+      const workspaceRepo = normalizeRepoFullName(
+        run?.artifacts.workspace?.repoFullName,
+      );
+      if (
+        runId &&
+        (!runRepo || runRepo !== requestedRepo ||
+          (workspaceRepo && workspaceRepo !== requestedRepo))
+      ) {
+        throw new Error(
+          `Contribution run ${runId} is bound to ${run?.manifest.repoFullName || "an unknown repository"}, but the request names ${requestedRepoFullName}.`,
+        );
+      }
+      const workspace = run?.artifacts.workspace;
 
       const context = await assembler.assembleContext({
         issue: {
@@ -384,6 +408,7 @@ export function registerDiscoveryTools(server: McpServer): void {
           ...(item.sha ? { sha: item.sha } : {}),
         })),
         workspacePath: workspace?.workspacePath,
+        runGit: workspace?.workspacePath ? runRepositoryGit : undefined,
       });
 
       if (runId) {

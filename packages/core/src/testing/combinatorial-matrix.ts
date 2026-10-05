@@ -127,14 +127,14 @@ function concurrencyTemplate(
     return `let tasks = make_tasks(${workerCount});\nlet workers: Vec<_> = tasks.into_iter().map(|task| std::thread::spawn(move || process(task))).collect();\nfor worker in workers { worker.join().expect("worker failed"); }\nassert!(!leak_checker.has_dangling_handles());`;
   }
   if (language === 'python') {
-    return `with ThreadPoolExecutor(max_workers=${workerCount}) as pool:\n    results = list(pool.map(process, tasks))\nassert not leak_checker.has_dangling_handles()`;
+    return `worker_count = ${workerCount}\nwork_items = [tasks[index % len(tasks)] if tasks else {"id": index} for index in range(worker_count)]\nwith ThreadPoolExecutor(max_workers=worker_count) as pool:\n    results = list(pool.map(process, work_items))\nassert not leak_checker.has_dangling_handles()`;
   }
   if (language === 'generic') {
     return highContention
       ? 'Run the work with multiple workers, wait for every worker to finish, then verify that no handles remain open.'
       : 'Run the work with one worker, wait for it to finish, then verify that no handles remain open.';
   }
-  return `// Run ${workerCount} worker(s), await every exit, and verify cleanup\nconst workers = tasks.slice(0, ${workerCount}).map((task) => spawnWorker(task));\nawait Promise.all(workers.map((worker) => worker.exit));\nexpect(leakChecker.hasDanglingHandles()).toBe(false);`;
+  return `// Run ${workerCount} worker(s), await every exit, and verify cleanup\nconst workerTasks = Array.from({ length: ${workerCount} }, (_, index) =>\n  tasks.length ? tasks[index % tasks.length] : { id: index },\n);\nconst workers = workerTasks.map((task) => spawnWorker(task));\nawait Promise.all(workers.map((worker) => worker.exit));\nexpect(leakChecker.hasDanglingHandles()).toBe(false);`;
 }
 
 function interruptedCleanupTemplate(language: MatrixTemplateLanguage): string {
@@ -648,8 +648,7 @@ export function generateCombinatorialMatrix(
             WorkerConcurrency: 'HighContention',
             LifecycleInterruption: 'MidStreamAbort',
           },
-          testTemplateSnippet:
-            interruptedCleanupTemplate(language),
+          testTemplateSnippet: `${concurrencyTemplate(language)}\n${interruptedCleanupTemplate(language)}`,
           riskSurface:
             'Windows holding process handle open causing EBUSY unlink errors during test teardown.',
         },

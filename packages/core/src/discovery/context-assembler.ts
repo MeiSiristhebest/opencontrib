@@ -96,6 +96,11 @@ function detectNodePackageManager(files: string[], pkg: any): 'npm' | 'pnpm' | '
   return 'npm';
 }
 
+function hasKnownNodeTestFileArgumentContract(script: unknown): boolean {
+  if (typeof script !== 'string') return false;
+  return /^(?:vitest(?:\s+run)?|jest|mocha|bun\s+test|node\s+--test)(?:\s+(?:--[a-z][\w-]*(?:=[A-Za-z0-9._/-]+)?|\d+))*$/i.test(script.trim());
+}
+
 function detectNodeCommands(files: string[], dirPath: string, commands: RunnableCommands): void {
   if (!files.includes('package.json')) return;
   try {
@@ -104,7 +109,9 @@ function detectNodeCommands(files: string[], dirPath: string, commands: Runnable
     const pm = detectNodePackageManager(files, pkg);
     commands.packageManager = pm;
 
-    if (scripts.test) commands.testCommand = pm === 'npm' ? 'npm test' : `${pm} test`;
+    if (hasKnownNodeTestFileArgumentContract(scripts.test)) {
+      commands.testCommand = pm === 'npm' ? 'npm test' : `${pm} test`;
+    }
     if (scripts.build) commands.buildCommand = pm === 'npm' ? 'npm run build' : `${pm} run build`;
     if (scripts.lint) commands.lintCommand = pm === 'npm' ? 'npm run lint' : `${pm} run lint`;
   } catch {}
@@ -539,8 +546,19 @@ export class ContextAssembler {
 
     let testCommandHint = runnableCommands.testCommand;
     if (!testCommandHint && packageManifest) {
-      if (packageManifest.includes('"test":')) {
-        testCommandHint = packageManifest.includes('pnpm') ? 'pnpm test' : 'npm test';
+      let packageJson: any;
+      try {
+        packageJson = JSON.parse(packageManifest);
+      } catch {
+        packageJson = undefined;
+      }
+      if (
+        packageJson &&
+        hasKnownNodeTestFileArgumentContract(packageJson.scripts?.test)
+      ) {
+        const packageManager = detectNodePackageManager([], packageJson);
+        testCommandHint =
+          packageManager === 'npm' ? 'npm test' : `${packageManager} test`;
       } else if (packageManifest.includes('Cargo.toml')) {
         testCommandHint = 'cargo test';
       } else if (packageManifest.includes('go.mod')) {

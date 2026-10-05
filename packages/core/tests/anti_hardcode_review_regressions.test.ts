@@ -83,6 +83,65 @@ describe("anti-hardcode review regressions", () => {
     }
   });
 
+  it("keeps escaped delimiters in Python raw strings and scans following code", () => {
+    const source = String.raw`note = r"escaped \" quote"; if repo == "owner/repo": return fallback()`;
+    const result = lintAntiHardcode(diff("src/feature.py", `+${source}`), {
+      targetRepo: "owner/repo",
+    });
+
+    expect(result.violations.some(
+      (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+    )).toBe(true);
+  });
+
+  it("decodes Python eight-digit Unicode escapes in repository literals", () => {
+    for (const source of [
+      String.raw`if repo == "owner\U0000002frepo": return fallback()`,
+      String.raw`if repo == "owner\U0000002Frepo": return fallback()`,
+    ]) {
+      const result = lintAntiHardcode(diff("src/feature.py", `+${source}`), {
+        targetRepo: "owner/repo",
+      });
+
+      expect(result.violations.some(
+        (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+      )).toBe(true);
+    }
+  });
+
+  it("treats assignment as distinct from equality except in SQL", () => {
+    const assignment = lintAntiHardcode(
+      diff("src/config.ts", '+const repo = "owner/repo";'),
+      { targetRepo: "owner/repo" },
+    );
+    expect(assignment.violations.some(
+      (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+    )).toBe(false);
+
+    const sqlComparison = lintAntiHardcode(
+      diff("db/check.sql", "+IF repo = 'owner/repo' THEN SELECT 1; END IF;"),
+      { targetRepo: "owner/repo" },
+    );
+    expect(sqlComparison.violations.some(
+      (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+    )).toBe(true);
+  });
+
+  it("recognizes unparenthesized Go and Swift repository switches", () => {
+    for (const [filePath, source] of [
+      ["src/feature.go", '+switch repo { case "owner/repo": return fallback() }'],
+      ["src/Feature.swift", '+switch repo { case "owner/repo": return fallback() }'],
+    ] as const) {
+      const result = lintAntiHardcode(diff(filePath, source), {
+        targetRepo: "owner/repo",
+      });
+
+      expect(result.violations.some(
+        (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+      )).toBe(true);
+    }
+  });
+
   it("scans leading plus source lines and comparisons split across added lines", () => {
     const leadingPlusComparison = diff(
       "src/feature.ts",

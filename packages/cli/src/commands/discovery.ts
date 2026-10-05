@@ -11,6 +11,12 @@ import {
 import { printJSON, parseJSON, readStdin } from "../utils/output.js";
 import { CliExitError } from "../utils/exit.js";
 
+function normalizeRepoFullName(value: unknown): string | undefined {
+  return typeof value === "string"
+    ? value.trim().replace(/\.git$/i, "").toLowerCase()
+    : undefined;
+}
+
 // ─── Sub-commands (defined before discoveryCommand to avoid TDZ) ───────────────
 
 const rankCommand = new Command("rank")
@@ -142,12 +148,33 @@ const contextCommand = new Command("context")
           );
           throw new CliExitError(1);
         }
-        const { ContextAssembler, buildContributionRunManager } =
+        const { ContextAssembler, buildContributionRunManager, runRepositoryGit } =
           await import("@opencontrib/core");
         const assembler = new ContextAssembler();
         const runManager = buildContributionRunManager();
         const runId = runManager.resolveRunId(opts.runId);
-        const workspace = runId ? runManager.getRun(runId)?.artifacts.workspace : undefined;
+        const requestedRepoFullName =
+          parsed.repoDetails.fullName ||
+          `${parsed.repoDetails.owner}/${parsed.repoDetails.repo}`;
+        const run = runId ? runManager.getRun(runId) : undefined;
+        if (runId && !run) {
+          throw new Error(`Contribution run ${runId} was not found.`);
+        }
+        const runRepo = normalizeRepoFullName(run?.manifest.repoFullName);
+        const requestedRepo = normalizeRepoFullName(requestedRepoFullName);
+        const workspaceRepo = normalizeRepoFullName(
+          run?.artifacts.workspace?.repoFullName,
+        );
+        if (
+          runId &&
+          (!runRepo || runRepo !== requestedRepo ||
+            (workspaceRepo && workspaceRepo !== requestedRepo))
+        ) {
+          throw new Error(
+            `Contribution run ${runId} is bound to ${run?.manifest.repoFullName || "an unknown repository"}, but the request names ${requestedRepoFullName}.`,
+          );
+        }
+        const workspace = run?.artifacts.workspace;
         const repoTree = (parsed.repoTree || []).map((item: any) => ({
           path: item.path,
           mode: "100644",
@@ -167,12 +194,11 @@ const contextCommand = new Command("context")
           },
           repoDetails: {
             ...parsed.repoDetails,
-            fullName:
-              parsed.repoDetails.fullName ||
-              `${parsed.repoDetails.owner}/${parsed.repoDetails.repo}`,
+            fullName: requestedRepoFullName,
           },
           repoTree,
           workspacePath: workspace?.workspacePath,
+          runGit: workspace?.workspacePath ? runRepositoryGit : undefined,
         });
 
         if (runId) {

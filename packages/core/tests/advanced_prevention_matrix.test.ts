@@ -547,6 +547,13 @@ diff --git a/src/core.ts b/src/core.ts
           LifecycleInterruption: 'MidStreamAbort',
         });
         expect(snippet).toContain(fixture.workerMarker);
+        if (fixture.language === 'Python') {
+          expect(snippet).toContain('work_items = [tasks[index % len(tasks)] if tasks else {"id": index}');
+        }
+        if (fixture.language === 'TypeScript') {
+          expect(snippet).toContain('Array.from({ length: 20 }');
+          expect(snippet).toContain('tasks.length ? tasks[index % tasks.length] : { id: index }');
+        }
         if (fixture.setupCleanupMarker) {
           expect(snippet).toContain(fixture.setupCleanupMarker);
         }
@@ -565,7 +572,10 @@ diff --git a/src/core.ts b/src/core.ts
         primaryLanguage: 'Kotlin',
         issueTitle: 'Concurrent worker pool cleanup can fail with EBUSY',
       }).scenarios.find((scenario) => scenario.scenarioId === 'WINDOWS_EBUSY_HANDLE_RACE');
-      expect(kotlinFallback?.testTemplateSnippet).toBe(
+      expect(kotlinFallback?.testTemplateSnippet).toContain(
+        'Run the work with multiple workers, wait for every worker to finish, then verify that no handles remain open.',
+      );
+      expect(kotlinFallback?.testTemplateSnippet).toContain(
         'Start 20 child processes, cancel them, wait for every exit, remove their shared temporary directory, and verify cleanup succeeds on Windows.',
       );
     });

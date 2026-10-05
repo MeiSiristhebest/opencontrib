@@ -71,29 +71,47 @@ import { createHash } from "node:crypto";
 import { posix as posixPath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
+function normalizeSafeNodeTestFiles(files: readonly string[]): string[] | undefined {
+  const paths = files.map(file => file.replace(/\\/g, "/").replace(/^\.\//, ""));
+  if (paths.some(file =>
+    !/^[a-zA-Z0-9._/-]+$/.test(file) || file.startsWith("/") || file.startsWith("-") ||
+    file.split("/").some(part => part === ".." || part === "...") ||
+    !/\.[cm]?[jt]sx?$/i.test(file)
+  )) return undefined;
+  return [...new Set(paths)].sort();
+}
+
 export function deriveTargetedReproductionTestCommand(
   repositoryCommand: string,
   testFiles: readonly string[],
 ): string | undefined {
   const command = repositoryCommand.trim();
+  const alreadyScopedNodeCommand =
+    /^(?:npm|pnpm) test -- (.+)$/.exec(command) ??
+    /^(?:yarn|bun) test (.+)$/.exec(command);
+  if (alreadyScopedNodeCommand) {
+    const scopedPaths = normalizeSafeNodeTestFiles(alreadyScopedNodeCommand[1].split(/\s+/));
+    return scopedPaths?.length ? command : undefined;
+  }
+
   const nodeRunner = /^(npm|pnpm|yarn|bun) test$/.exec(command)?.[1];
   if (nodeRunner) {
-    const paths = testFiles.map(file => file.replace(/\\/g, "/").replace(/^\.\//, ""));
-    if (paths.length === 0 || paths.some(file =>
-      !/^[a-zA-Z0-9._/-]+$/.test(file) || file.startsWith("/") || file.startsWith("-") ||
-      file.split("/").some(part => part === ".." || part === "...") ||
-      !/\.[cm]?[jt]sx?$/i.test(file)
-    )) return undefined;
-    const args = [...new Set(paths)].sort().map(file => nodeRunner === "bun" ? `./${file}` : file);
+    const paths = normalizeSafeNodeTestFiles(testFiles);
+    if (!paths?.length) return undefined;
+    const args = paths.map(file => nodeRunner === "bun" ? `./${file}` : file);
     const separator = nodeRunner === "npm" || nodeRunner === "pnpm" ? " --" : "";
     return `${command}${separator} ${args.join(" ")}`;
   }
-  if (command !== "go test ./...") {
-    if (/^go test\b/.test(command) && /(?:^|\s)\.\/\.\.\.(?:\s|$)/.test(command)) {
-      return undefined;
-    }
-    return command;
+  const pythonRunner = /^(?:pytest|python -m pytest|python3 -m pytest|uv run pytest|poetry run pytest|pipenv run pytest|conda run pytest)$/.test(command);
+  if (pythonRunner) {
+    const paths = testFiles.map(file => file.replace(/\\/g, "/").replace(/^\.\//, ""));
+    if (paths.length === 0 || paths.some(file =>
+      !/^[a-zA-Z0-9._/-]+$/.test(file) || file.startsWith("/") || file.startsWith("-") ||
+      file.split("/").some(part => part === ".." || part === "...") || !/\.py$/i.test(file)
+    )) return undefined;
+    return `${command} ${[...new Set(paths)].sort().join(" ")}`;
   }
+  if (command !== "go test ./...") return undefined;
 
   const packageDirectories = new Set<string>();
   for (const testFile of testFiles) {
@@ -116,6 +134,19 @@ export function deriveTargetedReproductionTestCommand(
     .sort()
     .map((directory) => (directory === "." ? "." : `./${directory}`));
   return `go test ${packages.join(" ")}`;
+}
+
+export function buildReproductionDesignPrompt(
+  basePrompt: string | undefined,
+  repositoryTestCommand: string | undefined,
+): string {
+  const nodeRunner = repositoryTestCommand
+    ? /^(npm|pnpm|yarn|bun) test$/.exec(repositoryTestCommand.trim())?.[1]
+    : undefined;
+  const nodeGuidance = nodeRunner
+    ? ` For Node test scripts, return only relative file paths in testFiles and return the exact scoped testCommand: npm and pnpm use " -- <files>", yarn uses " <files>", and bun uses " ./<files>". For example, "npm test" with "src/parser.test.ts" becomes "npm test -- src/parser.test.ts"; "bun test" becomes "bun test ./src/parser.test.ts".`
+    : "";
+  return `${basePrompt ?? ""}\n\nDesign the target RED reproduction only. Return JSON conforming to ReproductionDesignSchema with the exact test command, a non-empty expected failure assertion, at least one concrete test file, and a short rationale. Do not describe the patch. When the repository command is 'go test ./...', choose test files in the target package and use 'go test .' for root-package files or 'go test ./<package>' for subpackages; never use 'go test ./...' for RED.${nodeGuidance}`;
 }
 
 export function resolveGreenVerificationTestCommand(
@@ -451,7 +482,7 @@ export class ReproductionDesignStep implements PipelineStep {
     let design: ReproductionDesign;
     try {
       const result = await deps.llmService.generateStructured({
-        prompt: `${ctx.prompt}\n\nDesign the target RED reproduction only. Return JSON conforming to ReproductionDesignSchema with the exact test command, a non-empty expected failure assertion, at least one concrete test file, and a short rationale. Do not describe the patch. When the repository command is 'go test ./...', choose test files in the target package and use 'go test .' for root-package files or 'go test ./<package>' for subpackages; never use 'go test ./...' for RED.`,
+        prompt: buildReproductionDesignPrompt(ctx.prompt, repositoryTestCommand),
         schema: ReproductionDesignSchema,
       });
       design = result.data as ReproductionDesign;

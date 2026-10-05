@@ -1,4 +1,3 @@
-import { EvidenceService } from "../src/evidence/evidence-service.js";
 /**
  * End-to-end pipeline test for the refactored `AgentOrchestrator`.
  *
@@ -8,6 +7,7 @@ import { EvidenceService } from "../src/evidence/evidence-service.js";
  * doubles — something the old design made impossible. This lock the
  * step-by-step behavior so future refactors can't silently drift.
  */
+import { EvidenceService } from "../src/evidence/evidence-service.js";
 import { describe, expect, it, spyOn } from "bun:test";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
@@ -21,6 +21,7 @@ import type { PipelineDeps } from "../src/orchestration/pipeline/types.js";
 import {
   ContextAssemblyStep,
   ImplementValidateLoopStep,
+  buildReproductionDesignPrompt,
   deriveTargetedReproductionTestCommand,
   resolveGreenVerificationTestCommand,
 } from "../src/orchestration/pipeline/steps.js";
@@ -44,6 +45,13 @@ describe("Pipeline RED command selection", () => {
         "internal/.../worker_test.go",
       ]),
     ).toBeUndefined();
+  });
+
+  it("tells Node RED designs how to return a scoped test command", () => {
+    const prompt = buildReproductionDesignPrompt("base prompt", "npm test");
+
+    expect(prompt).toContain('npm and pnpm use " -- <files>"');
+    expect(prompt).toContain('"npm test" with "src/parser.test.ts" becomes "npm test -- src/parser.test.ts"');
   });
 
   it("does not schedule RED execution for documentation-only opportunities", async () => {

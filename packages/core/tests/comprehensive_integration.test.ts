@@ -23,10 +23,10 @@ function record(module: string, test: string, pass: boolean, ms: number, detail:
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Module 1: ContextAssembler 6-Layer Prompt Assembly
+// Module 1: ContextAssembler 7-Layer Prompt Assembly
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('ContextAssembler — 6-layer prompt assembly', () => {
+describe('ContextAssembler — 7-layer prompt assembly', () => {
   let tempRepo: string;
 
   beforeEach(() => {
@@ -39,7 +39,7 @@ describe('ContextAssembler — 6-layer prompt assembly', () => {
     }
   });
 
-  it('assembles exactly 6 layers (problemContext, repoContext, memoryContext, environmentContext, guidance, assembledAt) with independent content', () => {
+  it('assembles exactly 7 layers (problemContext, repoContext, combinatorialMatrix, memoryContext, environmentContext, guidance, assembledAt) with independent content', () => {
     const t0 = Date.now();
     const assembler = new ContextAssembler();
     const ctx = assembler.assemble({
@@ -57,6 +57,7 @@ describe('ContextAssembler — 6-layer prompt assembly', () => {
     const expectedKeys = [
       'problemContext',
       'repoContext',
+      'combinatorialMatrix',
       'memoryContext',
       'environmentContext',
       'guidance',
@@ -65,9 +66,9 @@ describe('ContextAssembler — 6-layer prompt assembly', () => {
 
     let pass = true;
     const details: string[] = [];
-    if (keys.length !== 6) {
+    if (keys.length !== 7) {
       pass = false;
-      details.push(`expected 6 keys, got ${keys.length}: ${keys.join(',')}`);
+      details.push(`expected 7 keys, got ${keys.length}: ${keys.join(',')}`);
     }
     for (const k of expectedKeys) {
       if (!(k in ctx)) {
@@ -79,6 +80,7 @@ describe('ContextAssembler — 6-layer prompt assembly', () => {
     const layerValues = [
       JSON.stringify(ctx.problemContext),
       JSON.stringify(ctx.repoContext),
+      JSON.stringify(ctx.combinatorialMatrix),
       JSON.stringify(ctx.memoryContext),
       JSON.stringify(ctx.environmentContext),
       JSON.stringify(ctx.guidance),
@@ -99,10 +101,10 @@ describe('ContextAssembler — 6-layer prompt assembly', () => {
 
     record(
       'ContextAssembler',
-      '6 layers with independent content',
+      '7 layers with independent content',
       pass,
       ms,
-      details.length ? details.join('; ') : `6 layers verified, ${keys.length} keys`,
+      details.length ? details.join('; ') : `7 layers verified, ${keys.length} keys`,
     );
   }, 30000);
 

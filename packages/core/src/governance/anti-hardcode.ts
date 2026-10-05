@@ -375,13 +375,19 @@ function cppRawStringBeforeQuote(
 
 function decodeStringLiteral(value: string, raw: boolean, filePath: string): string {
   if (raw || !/\.(?:[cm]?[jt]sx?|vue|svelte|py|go|rs|java|kt|kts|swift|c|h|cc|cpp|hpp)$/i.test(filePath)) return value;
-  return value.replace(/\\(?:u\{([\da-f]+)\}|u([\da-f]{4})|x([\da-f]{2})|(["'\\/]))/gi,
-    (escape, codePoint, unicode, hex, character) => {
+  const python = /\.py$/i.test(filePath);
+  const escapePattern = new RegExp(
+    `\\\\(?:U([\\da-fA-F]{8})|u\\{([\\da-fA-F]+)\\}|u([\\da-fA-F]{4})|x([\\da-fA-F]{2})|(["'\\\\/]))`,
+    python ? 'g' : 'gi',
+  );
+  return value.replace(escapePattern,
+    (escape, longUnicode, codePoint, unicode, hex, character) => {
+      if (longUnicode && !python) return escape;
       if (character) {
         if (character === '/' && !/\.(?:[cm]?[jt]sx?|vue|svelte)$/i.test(filePath)) return escape;
         return character;
       }
-      const number = Number.parseInt(codePoint || unicode || hex, 16);
+      const number = Number.parseInt(longUnicode || codePoint || unicode || hex, 16);
       return number <= 0x10ffff ? String.fromCodePoint(number) : escape;
     });
 }
@@ -467,8 +473,9 @@ function scanDiffSourceLine(
         index += 2;
         continue;
       }
+      const pythonRawString = state.stringIsRaw && /\.py$/i.test(filePath);
       if (
-        !state.stringIsRaw &&
+        (!state.stringIsRaw || pythonRawString) &&
         line[index] === '\\' &&
         index + 1 < line.length
       ) {
@@ -737,8 +744,11 @@ function analyzeFileChanges(
   const repoVariable =
     String.raw`\b(?:target)?(?:repo|repository|origin|upstream)(?:Name|FullName)?\b(?:\s*(?:\?\.|\.)\s*(?:fullName|name))?(?:\s*(?:\?\.|\.)\s*(?:toLowerCase|toUpperCase|trim|lower|upper)\s*\(\s*\))*`;
   const stringToken = String.raw`__STR_\d+__`;
+  const equalityOperator = /\.sql$/i.test(filePath)
+    ? String.raw`(?:===|==|=)`
+    : String.raw`(?:===|==)`;
   const repoReference = new RegExp(
-    `(?:${repoVariable}\\s*(?:=+|!==?)\\s*(${stringToken})|(${stringToken})\\s*(?:===|==)\\s*${repoVariable}|${repoVariable}\\s*\\.includes\\s*\\(\\s*(${stringToken}))`,
+    `(?:${repoVariable}\\s*(?:${equalityOperator}|!==?)\\s*(${stringToken})|(${stringToken})\\s*${equalityOperator}\\s*${repoVariable}|${repoVariable}\\s*\\.includes\\s*\\(\\s*(${stringToken}))`,
     'gi',
   );
   const issueVariable =
@@ -813,7 +823,7 @@ function analyzeFileChanges(
     }
 
     const repositoryDispatch = new RegExp(
-      `\\b(?:(switch|when)\\s*\\(\\s*${repoVariable}\\s*\\)|(match)\\s+${repoVariable})\\s*\\{`, 'gi',
+      `\\b(?:(switch|when)\\s*(?:\\(\\s*${repoVariable}\\s*\\)|${repoVariable})|(match)\\s+${repoVariable})\\s*\\{`, 'gi',
     );
     for (const dispatch of source.code.matchAll(repositoryDispatch)) {
       const bodyStart = dispatch.index + dispatch[0].length;

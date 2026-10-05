@@ -1,6 +1,47 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { detectRunnableCommandsFromDir } from './context-assembler.js';
+
+const MAX_TEST_SOURCE_PREFIX_BYTES = 64 * 1024;
+
+export function runRepositoryGit(args: string[]): { success: boolean; stdout: string } {
+  const result = spawnSync('git', args, {
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 25_000,
+    env: {
+      ...process.env,
+      GIT_ASKPASS: 'echo',
+      GIT_TERMINAL_PROMPT: '0',
+    },
+  });
+  return { success: result.status === 0, stdout: result.stdout || '' };
+}
+
+function readSourcePrefix(filePath: string): string {
+  const descriptor = openSync(filePath, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(MAX_TEST_SOURCE_PREFIX_BYTES);
+    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function hasCargoManifestNear(repoPath: string, directory: string): boolean {
+  const root = resolve(repoPath);
+  const rootPrefix = root.endsWith(sep) ? root : `${root}${sep}`;
+  let current = resolve(directory);
+  while (current === root || current.startsWith(rootPrefix)) {
+    if (existsSync(join(current, 'Cargo.toml'))) return true;
+    if (current === root) return false;
+    current = dirname(current);
+  }
+  return false;
+}
 
 export type CommitConventionType =
   | 'unknown'
@@ -300,16 +341,25 @@ export function analyzeRepoEngineeringFingerprint(
                 return full;
               }
               const relativePath = relative(root, full).replace(/\\/g, '/');
-              if (/\.rs$/i.test(entry.name) && /(?:^|\/)tests\//.test(relativePath)) {
+              if (
+                /\.rs$/i.test(entry.name) &&
+                /^tests\/[^/]+\.rs$/i.test(relativePath) &&
+                hasCargoManifestNear(repoPath, dir)
+              ) {
                 filePattern = 'tests/*.rs';
                 frameworkName = 'cargo test';
                 return full;
               }
-              const jvmTest = entry.name.match(/(?:Test|Tests|Spec)\.(java|kt)$/);
-              const dotnetTest = /(?:Test|Tests)\.cs$/.test(entry.name);
+              const jvmPrefixTest = /^Test.*\.(java|kt)$/i.exec(entry.name);
+              const jvmSuffixTest = /^.*(Test|Tests|Spec)\.(java|kt)$/i.exec(entry.name);
+              const jvmTest = jvmPrefixTest || jvmSuffixTest;
+              const dotnetTest = /(?:Test|Tests)\.cs$/i.test(entry.name);
               if (jvmTest || dotnetTest) {
-                const contents = readFileSync(full, 'utf8');
-                filePattern = jvmTest ? `*${entry.name.match(/(Test|Tests|Spec)\./)![1]}.${jvmTest[1]}`
+                const contents = readSourcePrefix(full);
+                filePattern = jvmTest
+                  ? jvmPrefixTest
+                    ? `Test*.${jvmTest[1].toLowerCase()}`
+                    : `*${jvmTest[1]}.${jvmTest[2].toLowerCase()}`
                   : `*${entry.name.endsWith('Tests.cs') ? 'Tests' : 'Test'}.cs`;
                 frameworkName = /\borg\.junit\b/.test(contents) ? 'JUnit'
                   : /\borg\.testng\b/.test(contents) ? 'TestNG'
