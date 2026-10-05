@@ -14,13 +14,30 @@ import {
   classifyCommitConvention,
   analyzeRepoEngineeringFingerprint,
 } from '../src/discovery/repo-fingerprint.js';
-import { ContextAssembler } from '../src/discovery/context-assembler.js';
+import { ContextAssembler, detectRunnableCommandsFromDir } from '../src/discovery/context-assembler.js';
 import { auditGovernance } from '../src/domain/governance.js';
 import { GovernanceAuditResultSchema } from '../src/contracts/schemas.js';
 import { RepoMemoryLedger } from '../src/memory/repo-memory.js';
 import { InMemoryRunRepository } from '../src/testkit/index.js';
 
 describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
+  it.each([
+    ['bun@1.3.0', 'vitest --config vitest.config.ts', 'bun run test'],
+    ['npm@10.0.0', 'jest --config jest.config.js', 'npm test'],
+  ])('recognizes Node test scripts with separate option values', (packageManager, script, expected) => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-test-script-'));
+    try {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
+        packageManager,
+        scripts: { test: script },
+      }));
+
+      expect(detectRunnableCommandsFromDir(tempDir).testCommand).toBe(expected);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   // ─── 1. Anti-Hardcode & Generalization Gate Tests ───
   describe('Pillar A: Anti-Hardcode & Generalization Gate', () => {
     it('treats an empty diff as clean', () => {

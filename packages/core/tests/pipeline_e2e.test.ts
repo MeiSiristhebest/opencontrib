@@ -52,6 +52,9 @@ describe("Pipeline RED command selection", () => {
 
     expect(prompt).toContain('npm and pnpm use " -- <files>"');
     expect(prompt).toContain('"npm test" with "src/parser.test.ts" becomes "npm test -- src/parser.test.ts"');
+    expect(buildReproductionDesignPrompt("base prompt", "cargo test")).toContain(
+      "select integration test targets under tests/",
+    );
   });
 
   it("does not schedule RED execution for documentation-only opportunities", async () => {
@@ -383,6 +386,29 @@ describe("Pipeline command review regressions", () => {
   it("preserves a command already scoped to a test file", () => {
     expect(deriveTargetedReproductionTestCommand("bun test ./tests/parser.test.ts", ["tests/parser.test.ts"]))
       .toBe("bun test ./tests/parser.test.ts");
+    expect(deriveTargetedReproductionTestCommand("bun test ./tests/a.test.ts", ["tests/b.test.ts"]))
+      .toBeUndefined();
+    expect(deriveTargetedReproductionTestCommand("bun run test", ["tests/parser.test.ts"]))
+      .toBe("bun run test ./tests/parser.test.ts");
+    expect(deriveTargetedReproductionTestCommand("bun run test ./tests/parser.test.ts", ["tests/parser.test.ts"]))
+      .toBe("bun run test ./tests/parser.test.ts");
+  });
+
+  it("scopes supported compiled-language commands to selected test targets", () => {
+    expect(deriveTargetedReproductionTestCommand("cargo test", ["tests/parser.rs"]))
+      .toBe("cargo test --test parser");
+    expect(deriveTargetedReproductionTestCommand("cargo test", ["crates/cli/tests/parser.rs"]))
+      .toBe("cargo test --manifest-path crates/cli/Cargo.toml --test parser");
+    expect(deriveTargetedReproductionTestCommand("cargo test", ["src/parser.rs"]))
+      .toBeUndefined();
+    expect(deriveTargetedReproductionTestCommand("./gradlew test", ["src/test/kotlin/com/example/ParserTest.kt"]))
+      .toBe("./gradlew test --tests com.example.ParserTest");
+    expect(deriveTargetedReproductionTestCommand("mvn test", ["src/test/java/com/example/ParserTest.java"]))
+      .toBe("mvn test -Dtest=com.example.ParserTest");
+    expect(deriveTargetedReproductionTestCommand("dotnet test", ["tests/ParserTests.cs"]))
+      .toBe("dotnet test --filter FullyQualifiedName~ParserTests");
+    expect(deriveTargetedReproductionTestCommand("swift test", ["Tests/ParserTests.swift"]))
+      .toBe("swift test --filter ParserTests");
   });
 
   it("sends the scoped RED command to canonical GREEN verification", async () => {

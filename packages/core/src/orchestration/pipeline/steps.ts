@@ -81,6 +81,74 @@ function normalizeSafeNodeTestFiles(files: readonly string[]): string[] | undefi
   return [...new Set(paths)].sort();
 }
 
+function normalizeSafeSourceTestFiles(
+  files: readonly string[],
+  extension: RegExp,
+): string[] | undefined {
+  const paths = files.map(file => file.replace(/\\/g, "/").replace(/^\.\//, ""));
+  if (paths.length === 0 || paths.some(file =>
+    !/^[a-zA-Z0-9._/-]+$/.test(file) || file.startsWith("/") || file.startsWith("-") ||
+    file.split("/").some(part => part === ".." || part === "...") ||
+    !extension.test(file)
+  )) return undefined;
+  return [...new Set(paths)].sort();
+}
+
+function getJvmTestClassNames(testFiles: readonly string[]): string[] | undefined {
+  const paths = normalizeSafeSourceTestFiles(testFiles, /\.(?:java|kt)$/i);
+  if (!paths?.length) return undefined;
+
+  const classNames: string[] = [];
+  for (const path of paths) {
+    const parts = path.split("/");
+    const sourceRoot = parts.findIndex((part, index) =>
+      part === "src" && parts[index + 1] === "test" &&
+      (parts[index + 2] === "java" || parts[index + 2] === "kotlin")
+    );
+    if (sourceRoot < 0) return undefined;
+    const classParts = parts.slice(sourceRoot + 3);
+    const last = classParts.length - 1;
+    classParts[last] = classParts[last].replace(/\.(?:java|kt)$/i, "");
+    if (classParts.some(part => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(part))) {
+      return undefined;
+    }
+    classNames.push(classParts.join("."));
+  }
+  return [...new Set(classNames)].sort();
+}
+
+function getCargoIntegrationTestTargets(
+  testFiles: readonly string[],
+): { manifestPath?: string; targets: string[] } | undefined {
+  const paths = normalizeSafeSourceTestFiles(testFiles, /\.rs$/i);
+  if (!paths?.length) return undefined;
+
+  const packageRoots = new Set<string>();
+  const targets = new Set<string>();
+  for (const path of paths) {
+    const parts = path.split("/");
+    const testsRoot = parts.lastIndexOf("tests");
+    if (testsRoot < 0) return undefined;
+    const targetParts = parts.slice(testsRoot + 1);
+    const fileName = targetParts[targetParts.length - 1];
+    let targetName: string | undefined;
+    if (targetParts.length === 1 && fileName.endsWith(".rs")) {
+      targetName = fileName.slice(0, -3);
+    } else if (targetParts.length === 2 && fileName === "main.rs") {
+      targetName = targetParts[0];
+    }
+    if (!targetName || !/^[A-Za-z0-9_-]+$/.test(targetName)) return undefined;
+    packageRoots.add(parts.slice(0, testsRoot).join("/"));
+    targets.add(targetName);
+  }
+  if (packageRoots.size !== 1) return undefined;
+  const packageRoot = [...packageRoots][0];
+  return {
+    manifestPath: packageRoot ? `${packageRoot}/Cargo.toml` : undefined,
+    targets: [...targets].sort(),
+  };
+}
+
 export function deriveTargetedReproductionTestCommand(
   repositoryCommand: string,
   testFiles: readonly string[],
@@ -88,19 +156,28 @@ export function deriveTargetedReproductionTestCommand(
   const command = repositoryCommand.trim();
   const alreadyScopedNodeCommand =
     /^(?:npm|pnpm) test -- (.+)$/.exec(command) ??
-    /^(?:yarn|bun) test (.+)$/.exec(command);
+    /^(?:yarn|bun) test (.+)$/.exec(command) ??
+    /^bun run test (.+)$/.exec(command);
   if (alreadyScopedNodeCommand) {
     const scopedPaths = normalizeSafeNodeTestFiles(alreadyScopedNodeCommand[1].split(/\s+/));
-    return scopedPaths?.length ? command : undefined;
+    const expectedPaths = normalizeSafeNodeTestFiles(testFiles);
+    if (!scopedPaths?.length || !expectedPaths?.length ||
+      scopedPaths.length !== expectedPaths.length ||
+      scopedPaths.some((path, index) => path !== expectedPaths[index])) {
+      return undefined;
+    }
+    return command;
   }
 
-  const nodeRunner = /^(npm|pnpm|yarn|bun) test$/.exec(command)?.[1];
+  const nodeRunner = /^(npm|pnpm|yarn) test$/.exec(command)?.[1] ??
+    (command === "bun test" || command === "bun run test" ? "bun" : undefined);
   if (nodeRunner) {
     const paths = normalizeSafeNodeTestFiles(testFiles);
     if (!paths?.length) return undefined;
     const args = paths.map(file => nodeRunner === "bun" ? `./${file}` : file);
+    const baseCommand = command === "bun run test" ? "bun run test" : command;
     const separator = nodeRunner === "npm" || nodeRunner === "pnpm" ? " --" : "";
-    return `${command}${separator} ${args.join(" ")}`;
+    return `${baseCommand}${separator} ${args.join(" ")}`;
   }
   const pythonRunner = /^(?:pytest|python -m pytest|python3 -m pytest|uv run pytest|poetry run pytest|pipenv run pytest|conda run pytest)$/.test(command);
   if (pythonRunner) {
@@ -110,6 +187,41 @@ export function deriveTargetedReproductionTestCommand(
       file.split("/").some(part => part === ".." || part === "...") || !/\.py$/i.test(file)
     )) return undefined;
     return `${command} ${[...new Set(paths)].sort().join(" ")}`;
+  }
+  if (command === "cargo test") {
+    const selection = getCargoIntegrationTestTargets(testFiles);
+    if (!selection) return undefined;
+    const manifest = selection.manifestPath
+      ? ` --manifest-path ${selection.manifestPath}`
+      : "";
+    return `cargo test${manifest}${selection.targets.map(target => ` --test ${target}`).join("")}`;
+  }
+  const gradlePrefix = /^(?:gradle|(?:\.\/|\.\\)?gradlew(?:\.bat)?) test$/.exec(command)?.[0]
+    .replace(/ test$/, "");
+  const mavenPrefix = /^(?:mvn|(?:\.\/|\.\\)?mvnw(?:\.cmd)?) test$/.exec(command)?.[0]
+    .replace(/ test$/, "");
+  if (gradlePrefix || mavenPrefix) {
+    const classNames = getJvmTestClassNames(testFiles);
+    if (!classNames?.length) return undefined;
+    return gradlePrefix
+      ? `${gradlePrefix} test${classNames.map(name => ` --tests ${name}`).join("")}`
+      : `${mavenPrefix} test -Dtest=${classNames.join(",")}`;
+  }
+  if (command === "dotnet test") {
+    const paths = normalizeSafeSourceTestFiles(testFiles, /\.cs$/i);
+    if (paths?.length !== 1) return undefined;
+    const fileName = paths[0].split("/").pop()!;
+    const className = fileName.slice(0, -3);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(className)) return undefined;
+    return `${command} --filter FullyQualifiedName~${className}`;
+  }
+  if (command === "swift test") {
+    const paths = normalizeSafeSourceTestFiles(testFiles, /\.swift$/i);
+    if (paths?.length !== 1) return undefined;
+    const fileName = paths[0].split("/").pop()!;
+    const suiteName = fileName.slice(0, -6);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(suiteName)) return undefined;
+    return `${command} --filter ${suiteName}`;
   }
   if (command !== "go test ./...") return undefined;
 
@@ -141,12 +253,13 @@ export function buildReproductionDesignPrompt(
   repositoryTestCommand: string | undefined,
 ): string {
   const nodeRunner = repositoryTestCommand
-    ? /^(npm|pnpm|yarn|bun) test$/.exec(repositoryTestCommand.trim())?.[1]
+    ? /^(npm|pnpm|yarn) test$/.exec(repositoryTestCommand.trim())?.[1] ??
+      (/^(?:bun test|bun run test)$/.test(repositoryTestCommand.trim()) ? "bun" : undefined)
     : undefined;
   const nodeGuidance = nodeRunner
-    ? ` For Node test scripts, return only relative file paths in testFiles and return the exact scoped testCommand: npm and pnpm use " -- <files>", yarn uses " <files>", and bun uses " ./<files>". For example, "npm test" with "src/parser.test.ts" becomes "npm test -- src/parser.test.ts"; "bun test" becomes "bun test ./src/parser.test.ts".`
+    ? ` For Node test scripts, return only relative file paths in testFiles and return the exact scoped testCommand: npm and pnpm use " -- <files>", yarn and "bun run test" use " <files>", and direct "bun test" uses " ./<files>". For example, "npm test" with "src/parser.test.ts" becomes "npm test -- src/parser.test.ts"; "bun test" becomes "bun test ./src/parser.test.ts".`
     : "";
-  return `${basePrompt ?? ""}\n\nDesign the target RED reproduction only. Return JSON conforming to ReproductionDesignSchema with the exact test command, a non-empty expected failure assertion, at least one concrete test file, and a short rationale. Do not describe the patch. When the repository command is 'go test ./...', choose test files in the target package and use 'go test .' for root-package files or 'go test ./<package>' for subpackages; never use 'go test ./...' for RED.${nodeGuidance}`;
+  return `${basePrompt ?? ""}\n\nDesign the target RED reproduction only. Return JSON conforming to ReproductionDesignSchema with the exact test command, a non-empty expected failure assertion, at least one concrete test file, and a short rationale. Do not describe the patch. When the repository command is 'go test ./...', choose test files in the target package and use 'go test .' for root-package files or 'go test ./<package>' for subpackages; never use 'go test ./...' for RED. For 'cargo test', select integration test targets under tests/ and use '--test <target>' (with '--manifest-path <package>/Cargo.toml' for a nested package). For Gradle or Maven, select files under src/test/java or src/test/kotlin and filter by their qualified class names using '--tests' or '-Dtest='. For 'dotnet test', select one .cs test file and use '--filter FullyQualifiedName~<ClassName>'. For 'swift test', select one .swift test file and use '--filter <SuiteName>'.${nodeGuidance}`;
 }
 
 export function resolveGreenVerificationTestCommand(
@@ -505,7 +618,7 @@ export class ReproductionDesignStep implements PipelineStep {
     if (!expectedTestCommand) {
       deps.stateMachine.transition(
         "BLOCKED",
-        "Repository-wide Go tests could not be scoped to the RED test files",
+        `Repository test command could not be safely scoped to the RED test files: ${repositoryTestCommand}`,
       );
       return halt({
         status: "BLOCKED",

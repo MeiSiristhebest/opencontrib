@@ -98,7 +98,13 @@ function detectNodePackageManager(files: string[], pkg: any): 'npm' | 'pnpm' | '
 
 function hasKnownNodeTestFileArgumentContract(script: unknown): boolean {
   if (typeof script !== 'string') return false;
-  return /^(?:vitest(?:\s+run)?|jest|mocha|bun\s+test|node\s+--test)(?:\s+(?:--[a-z][\w-]*(?:=[A-Za-z0-9._/-]+)?|\d+))*$/i.test(script.trim());
+  return /^(?:vitest(?:\s+run)?|jest|mocha|bun\s+test|node\s+--test)(?:\s+(?:--[a-z][\w-]*(?:=(?:[A-Za-z0-9._/,:@+-]+)|\s+[A-Za-z0-9._/,:@+-]+)?|\d+))*$/i.test(script.trim());
+}
+
+function getNodeTestCommand(packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun'): string {
+  if (packageManager === 'npm') return 'npm test';
+  if (packageManager === 'bun') return 'bun run test';
+  return `${packageManager} test`;
 }
 
 function detectNodeCommands(files: string[], dirPath: string, commands: RunnableCommands): void {
@@ -110,7 +116,7 @@ function detectNodeCommands(files: string[], dirPath: string, commands: Runnable
     commands.packageManager = pm;
 
     if (hasKnownNodeTestFileArgumentContract(scripts.test)) {
-      commands.testCommand = pm === 'npm' ? 'npm test' : `${pm} test`;
+      commands.testCommand = getNodeTestCommand(pm);
     }
     if (scripts.build) commands.buildCommand = pm === 'npm' ? 'npm run build' : `${pm} run build`;
     if (scripts.lint) commands.lintCommand = pm === 'npm' ? 'npm run lint' : `${pm} run lint`;
@@ -557,8 +563,7 @@ export class ContextAssembler {
         hasKnownNodeTestFileArgumentContract(packageJson.scripts?.test)
       ) {
         const packageManager = detectNodePackageManager([], packageJson);
-        testCommandHint =
-          packageManager === 'npm' ? 'npm test' : `${packageManager} test`;
+        testCommandHint = getNodeTestCommand(packageManager);
       } else if (packageManifest.includes('Cargo.toml')) {
         testCommandHint = 'cargo test';
       } else if (packageManifest.includes('go.mod')) {
