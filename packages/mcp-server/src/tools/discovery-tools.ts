@@ -329,6 +329,7 @@ export function registerDiscoveryTools(server: McpServer): void {
         defaultBranch: z.string(),
         description: z.string().optional(),
         stars: z.number().optional(),
+        primaryLanguage: z.string().optional().describe("Primary language from repository metadata"),
       }),
       repoTree: z
         .array(
@@ -352,6 +353,9 @@ export function registerDiscoveryTools(server: McpServer): void {
         "@opencontrib/core"
       );
       const assembler = new ContextAssembler();
+      const runManager = buildContributionRunManager();
+      const runId = runManager.resolveRunId(args.runId);
+      const workspace = runId ? runManager.getRun(runId)?.artifacts.workspace : undefined;
 
       const context = await assembler.assembleContext({
         issue: {
@@ -371,6 +375,7 @@ export function registerDiscoveryTools(server: McpServer): void {
           defaultBranch: args.repoDetails.defaultBranch,
           description: args.repoDetails.description || "",
           stars: args.repoDetails.stars || 0,
+          primaryLanguage: args.repoDetails.primaryLanguage,
         },
         repoTree: args.repoTree.map((item: any) => ({
           path: item.path,
@@ -378,12 +383,12 @@ export function registerDiscoveryTools(server: McpServer): void {
           type: item.type as any,
           ...(item.sha ? { sha: item.sha } : {}),
         })),
+        workspacePath: workspace?.workspacePath,
       });
 
-      if (args.runId) {
+      if (runId) {
         try {
-          const runManager = buildContributionRunManager();
-          runManager.saveArtifact(args.runId, "context", context as any);
+          runManager.saveArtifact(runId, "context", context as any);
         } catch (err: any) {
           console.warn(
             `[discovery-tools] Failed to auto-save context artifact: ${err.message}`,

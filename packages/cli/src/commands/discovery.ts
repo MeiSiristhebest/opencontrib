@@ -145,6 +145,9 @@ const contextCommand = new Command("context")
         const { ContextAssembler, buildContributionRunManager } =
           await import("@opencontrib/core");
         const assembler = new ContextAssembler();
+        const runManager = buildContributionRunManager();
+        const runId = runManager.resolveRunId(opts.runId);
+        const workspace = runId ? runManager.getRun(runId)?.artifacts.workspace : undefined;
         const repoTree = (parsed.repoTree || []).map((item: any) => ({
           path: item.path,
           mode: "100644",
@@ -169,10 +172,9 @@ const contextCommand = new Command("context")
               `${parsed.repoDetails.owner}/${parsed.repoDetails.repo}`,
           },
           repoTree,
+          workspacePath: workspace?.workspacePath,
         });
 
-        const runManager = buildContributionRunManager();
-        const runId = runManager.resolveRunId(opts.runId);
         if (runId) {
           try {
             runManager.saveArtifact(runId, "context", context as any);

@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { detectRunnableCommandsFromDir } from './context-assembler.js';
 
 export type CommitConventionType =
@@ -297,6 +297,27 @@ export function analyzeRepoEngineeringFingerprint(
               if (/_test\.go$/i.test(entry.name)) {
                 filePattern = '*_test.go';
                 frameworkName = 'go test';
+                return full;
+              }
+              const relativePath = relative(root, full).replace(/\\/g, '/');
+              if (/\.rs$/i.test(entry.name) && /(?:^|\/)tests\//.test(relativePath)) {
+                filePattern = 'tests/*.rs';
+                frameworkName = 'cargo test';
+                return full;
+              }
+              const jvmTest = entry.name.match(/(?:Test|Tests|Spec)\.(java|kt)$/);
+              const dotnetTest = /(?:Test|Tests)\.cs$/.test(entry.name);
+              if (jvmTest || dotnetTest) {
+                const contents = readFileSync(full, 'utf8');
+                filePattern = jvmTest ? `*${entry.name.match(/(Test|Tests|Spec)\./)![1]}.${jvmTest[1]}`
+                  : `*${entry.name.endsWith('Tests.cs') ? 'Tests' : 'Test'}.cs`;
+                frameworkName = /\borg\.junit\b/.test(contents) ? 'JUnit'
+                  : /\borg\.testng\b/.test(contents) ? 'TestNG'
+                  : /\bkotlin\.test\b/.test(contents) ? 'kotlin.test'
+                  : /\busing\s+Xunit\b/.test(contents) ? 'xUnit'
+                  : /\bNUnit\.Framework\b/.test(contents) ? 'NUnit'
+                  : /\bMicrosoft\.VisualStudio\.TestTools\.UnitTesting\b/.test(contents) ? 'MSTest'
+                  : 'unknown';
                 return full;
               }
             } else if (entry.isDirectory()) {
