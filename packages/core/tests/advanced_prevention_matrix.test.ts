@@ -25,8 +25,6 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
     ['bun@1.3.0', 'vitest --config vitest.config.ts', 'bun run test'],
     ['npm@10.0.0', 'jest --config jest.config.js', 'npm test'],
     ['npm@10.0.0', 'NODE_ENV=test bun test', 'npm test'],
-    ['npm@10.0.0', 'mocha "test/**/*.js"', 'npm test'],
-    ['npm@10.0.0', 'node --test test/*.js', 'npm test'],
   ])('recognizes Node test scripts with separate option values', (packageManager, script, expected) => {
     const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-test-script-'));
     try {
@@ -36,6 +34,24 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
       }));
 
       expect(detectRunnableCommandsFromDir(tempDir).testCommand).toBe(expected);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'mocha "test/**/*.js"',
+    'node --test test/*.js',
+    'jest --testPathPattern=test/**/*.js',
+  ])('does not advertise an unscoped Node test script: %s', (script) => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-unscoped-test-'));
+    try {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
+        packageManager: 'npm@10.0.0',
+        scripts: { test: script },
+      }));
+
+      expect(detectRunnableCommandsFromDir(tempDir).testCommand).toBeUndefined();
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

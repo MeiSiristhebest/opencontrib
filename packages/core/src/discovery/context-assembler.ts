@@ -104,14 +104,30 @@ function hasKnownNodeTestFileArgumentContract(script: unknown): boolean {
   const argumentsText = command[1] || '';
   const argumentsList = argumentsText.match(/"[^"]*"|'[^']*'|[^\s]+/g) || [];
   if (argumentsText.replace(/"[^"]*"|'[^']*'|[^\s]+/g, '').trim()) return false;
-  return argumentsList.every(argument => {
+  let expectsConfigPath = false;
+  for (const argument of argumentsList) {
     const unquoted =
       (argument.startsWith('"') && argument.endsWith('"')) ||
       (argument.startsWith("'") && argument.endsWith("'"))
         ? argument.slice(1, -1)
         : argument;
-    return /^[A-Za-z0-9._/*?{}\[\]:@+=,-]+$/.test(unquoted);
-  });
+    if (!/^[A-Za-z0-9._/*?{}\[\]:@+=,-]+$/.test(unquoted)) return false;
+
+    if (expectsConfigPath) {
+      if (unquoted.startsWith('-')) return false;
+      expectsConfigPath = false;
+      continue;
+    }
+    if (unquoted === '--config' || unquoted === '-c') {
+      expectsConfigPath = true;
+      continue;
+    }
+    if (/^--config=[A-Za-z0-9._/-]+$/.test(unquoted)) continue;
+    // Other flags may select test files or patterns. Passing an additional
+    // generated test path could then run those selections as well.
+    return false;
+  }
+  return !expectsConfigPath;
 }
 
 function getNodeTestCommand(packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun'): string {
