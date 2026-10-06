@@ -371,27 +371,41 @@ export function registerDiscoveryTools(server: McpServer): void {
       }
       const runRepo = normalizeRepoFullName(run?.manifest.repoFullName);
       const requestedRepo = normalizeRepoFullName(requestedRepoFullName);
+      const workspace = run?.artifacts.workspace;
       const workspaceRepo = normalizeRepoFullName(
-        run?.artifacts.workspace?.repoFullName,
+        workspace?.repoFullName,
       );
       if (
         runId &&
         (!runRepo || runRepo !== requestedRepo ||
-          (workspaceRepo && workspaceRepo !== requestedRepo))
-      ) {
+          (workspace && (!workspaceRepo || workspaceRepo !== requestedRepo))
+      )) {
         throw new Error(
           `Contribution run ${runId} is bound to ${run?.manifest.repoFullName || "an unknown repository"}, but the request names ${requestedRepoFullName}.`,
         );
       }
-      const workspace = run?.artifacts.workspace;
+      if (
+        runId &&
+        run?.manifest.issueNumber !== undefined &&
+        args.issue.number !== run.manifest.issueNumber
+      ) {
+        throw new Error(
+          `Contribution run ${runId} is bound to issue #${run.manifest.issueNumber}, but the request names issue #${args.issue.number}.`,
+        );
+      }
       const workspacePath = workspace?.workspacePath;
       if (
         runId &&
         (typeof workspacePath !== "string" ||
-          !isPreparedRepositoryWorkspace(workspacePath))
+          typeof workspace?.repoFullName !== "string" ||
+          typeof workspace.baseCommitSha !== "string" ||
+          !isPreparedRepositoryWorkspace(workspacePath, {
+            repoFullName: workspace.repoFullName,
+            baseCommitSha: workspace.baseCommitSha,
+          }))
       ) {
         throw new Error(
-          `Contribution run ${runId} has no prepared workspace, or its recorded path is not an existing usable repository; prepare the workspace before assembling context.`,
+          `Contribution run ${runId} has no prepared workspace matching its recorded repository and base commit; prepare the workspace before assembling context.`,
         );
       }
 

@@ -25,6 +25,8 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
     ['bun@1.3.0', 'vitest --config vitest.config.ts', 'bun run test'],
     ['npm@10.0.0', 'jest --config jest.config.js', 'npm test'],
     ['npm@10.0.0', 'NODE_ENV=test bun test', 'npm test'],
+    ['npm@10.0.0', 'mocha "test/**/*.js"', 'npm test'],
+    ['npm@10.0.0', 'node --test test/*.js', 'npm test'],
   ])('recognizes Node test scripts with separate option values', (packageManager, script, expected) => {
     const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-test-script-'));
     try {
@@ -51,6 +53,42 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
 
       expect(commands.testCommand).toBeUndefined();
       expect(commands.packageManager).toBe('npm');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["composer.json", '{"scripts":{"test":"composer test"}}', "composer"],
+    ["Gemfile", "source 'https://rubygems.org'\n", "bundle"],
+    ["CMakeLists.txt", "project(fixture)\n", "cmake"],
+    ["meson.build", "project('fixture')\n", "meson"],
+    ["Makefile", "test:\n\t@echo test\n", "make"],
+  ] as const)("does not advertise an unscoped %s test command", (manifest, contents, packageManager) => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-unscoped-test-command-'));
+    try {
+      writeFileSync(join(tempDir, manifest), contents);
+
+      const commands = detectRunnableCommandsFromDir(tempDir);
+
+      expect(commands.packageManager).toBe(packageManager);
+      expect(commands.testCommand).toBeUndefined();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("advertises an explicitly scoped PHP test runner when PHPUnit is installed", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-phpunit-command-'));
+    try {
+      writeFileSync(join(tempDir, 'composer.json'), '{"require-dev":{"phpunit/phpunit":"^10"}}');
+      const phpunit = join(tempDir, 'vendor', 'bin', 'phpunit');
+      mkdirSync(join(tempDir, 'vendor', 'bin'), { recursive: true });
+      writeFileSync(phpunit, '');
+
+      expect(detectRunnableCommandsFromDir(tempDir).testCommand).toMatch(
+        /vendor[\\/]bin[\\/]phpunit/i,
+      );
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

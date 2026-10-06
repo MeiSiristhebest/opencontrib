@@ -17,6 +17,19 @@ function detectsIssueNumber(file: string, code: string): boolean {
     .some(entry => entry.rule === "ISSUE_NUMBER_HARDCODING");
 }
 
+function changesMiddleLinePatch(file: string, firstLine: string, oldLine: string, newLine: string, lastLine: string): string {
+  return [
+    `diff --git a/${file} b/${file}`,
+    `--- a/${file}`,
+    `+++ b/${file}`,
+    "@@ -1,3 +1,3 @@",
+    ` ${firstLine}`,
+    `-${oldLine}`,
+    `+${newLine}`,
+    ` ${lastLine}`,
+  ].join("\n");
+}
+
 describe("Repository literal review regressions", () => {
   it.each([
     'if (repository.fullName === "owner/repo") return special();',
@@ -54,6 +67,21 @@ describe("Repository literal review regressions", () => {
   });
 
   it.each([
+    ["src/main.cs", String.raw`var text = $"value: {repo == "owner/repo"}";`],
+    ["src/main.cs", String.raw`var text = $@"quoted ""label"" {repo == "owner/repo"}";`],
+    ["src/main.swift", String.raw`let text = "value: \(repo == "owner/repo")"`],
+  ])("scans C# and Swift interpolation expressions in %s", (file, code) => {
+    expect(detectsRepo(file, code)).toBe(true);
+  });
+
+  it.each([
+    ["src/main.cs", String.raw`var text = $"literal {{repo == \"owner/repo\"}}";`],
+    ["src/main.swift", String.raw`let text = "literal \\(repo == \"owner/repo\")"`],
+  ])("does not scan escaped interpolation markers as code in %s", (file, code) => {
+    expect(detectsRepo(file, code)).toBe(false);
+  });
+
+  it.each([
     ['src/main.go', 'help := `${repo == "owner/repo"}`'],
     ['src/main.kt', String.raw`val text = "\${repo == \"owner/repo\"}"`],
     ['src/main.py', String.raw`if repo == r"owner\u002frepo": pass`],
@@ -87,6 +115,14 @@ describe("Repository literal review regressions", () => {
     ).toBe(false);
   });
 
+  it.each([
+    ["src/main.ts", "switch (issueNumber) { case 123: return workaround(); }"],
+    ["src/main.kt", "when (issueNumber) { 123 -> workaround() }"],
+    ["src/main.rs", "match issue_number { 123 => workaround(), _ => normal() }"],
+  ])("detects provider-bound issue-number dispatch in %s", (file, code) => {
+    expect(detectsIssueNumber(file, code)).toBe(true);
+  });
+
   it.each(["Dockerfile", "Makefile", "Containerfile", "GNUmakefile"])(
     "ignores hash comments in %s",
     file => {
@@ -94,11 +130,37 @@ describe("Repository literal review regressions", () => {
     },
   );
 
+  it("ignores Dockerfile comments after shell whitespace", () => {
+    expect(
+      detectsRepo("Dockerfile", 'RUN echo ready # if repo == "owner/repo"'),
+    ).toBe(false);
+  });
+
   it("preserves hash tokens inside Dockerfile RUN commands", () => {
     expect(
       detectsRepo(
         "Dockerfile",
         'RUN printf foo#bar && if (repo === "owner/repo") return special();',
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["src/routes.ts", `router.get("/system", handler);`],
+    ["src/Controller.java", `@GetMapping("/system")\nvoid status() {}`],
+    ["src/Controller.java", `@RequestMapping(path = "/system")\nvoid status() {}`],
+  ])("allows positional web route paths in %s", (file, code) => {
+    expect(
+      lintAntiHardcode(patch(file, code)).violations.some(
+        entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH",
+      ),
+    ).toBe(false);
+  });
+
+  it("continues to flag absolute environment paths outside route declarations", () => {
+    expect(
+      lintAntiHardcode(patch("src/config.ts", `const backup = "/system/secrets";`)).violations.some(
+        entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH",
       ),
     ).toBe(true);
   });
@@ -112,6 +174,36 @@ describe("Repository literal review regressions", () => {
     ).toBe(true);
     expect(
       detectsRepo("src/main.ts", String.raw`const example = /repo === "owner\/repo"/;`),
+    ).toBe(false);
+  });
+
+  it("honors Rust raw-string closing delimiters", () => {
+    expect(
+      detectsRepo(
+        "src/main.rs",
+        String.raw`let note = r#"embedded "quote" text"#; if repo == "owner/repo" { special(); }`,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["src/template.ts", "const value = `first", "old value", "last`;"],
+    ["src/settings.py", "value = '''first", "old value", "last'''"],
+  ])("checks added paths inside existing multiline strings in %s", (file, first, oldValue, last) => {
+    const base = `${first}\n${oldValue}\n${last}\n`;
+    const result = lintAntiHardcode(
+      changesMiddleLinePatch(file, first, oldValue, "/tmp/secret", last),
+      { baseFileContents: new Map([[file, base]]) },
+    );
+    expect(result.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toBe(true);
+  });
+
+  it("recognizes shell equality predicates without treating assignments as comparisons", () => {
+    expect(
+      detectsRepo("scripts/check.sh", 'if [ $repo = "owner/repo" ]; then exit 0; fi'),
+    ).toBe(true);
+    expect(
+      detectsRepo("scripts/check.sh", 'repo="owner/repo"; printf "%s" "$repo"'),
     ).toBe(false);
   });
 

@@ -24,6 +24,7 @@ import {
   buildReproductionDesignPrompt,
   deriveTargetedReproductionTestCommand,
   resolveGreenVerificationTestCommand,
+  selectVerificationCommand,
 } from "../src/orchestration/pipeline/steps.js";
 
 describe("Pipeline RED command selection", () => {
@@ -55,6 +56,34 @@ describe("Pipeline RED command selection", () => {
     expect(buildReproductionDesignPrompt("base prompt", "cargo test")).toContain(
       "select integration test targets under tests/",
     );
+  });
+
+  it("matches Bun guidance to the derived scoped command", () => {
+    const prompt = buildReproductionDesignPrompt("base prompt", "bun run test");
+
+    expect(prompt).toContain(
+      '"bun run test" becomes "bun run test ./src/parser.test.ts"',
+    );
+    expect(
+      deriveTargetedReproductionTestCommand("bun run test", ["src/parser.test.ts"]),
+    ).toBe("bun run test ./src/parser.test.ts");
+  });
+
+  it("reports the scoped command that was verified", () => {
+    expect(
+      selectVerificationCommand({
+        evidenceReport: { status: "passed" } as any,
+        repositoryTestCmd: "go test ./...",
+        testCmd: "go test ./pkg/parser",
+      }),
+    ).toBe("go test ./pkg/parser");
+    expect(
+      selectVerificationCommand({
+        evidenceReport: undefined,
+        repositoryTestCmd: "go test ./...",
+        testCmd: "go test ./pkg/parser",
+      }),
+    ).toBe("");
   });
 
   it("does not schedule RED execution for documentation-only opportunities", async () => {
@@ -435,6 +464,15 @@ describe("Pipeline command review regressions", () => {
       .toBe("dotnet test --filter FullyQualifiedName~ParserTests");
     expect(deriveTargetedReproductionTestCommand("swift test", ["Tests/ParserTests.swift"]))
       .toBe("swift test --filter ParserTests");
+    expect(
+      deriveTargetedReproductionTestCommand("./vendor/bin/phpunit", ["tests/ParserTest.php"]),
+    ).toBe("./vendor/bin/phpunit tests/ParserTest.php");
+    expect(
+      deriveTargetedReproductionTestCommand(".\\vendor\\bin\\phpunit", ["tests/ParserTest.php"]),
+    ).toBe(".\\vendor\\bin\\phpunit tests/ParserTest.php");
+    expect(
+      deriveTargetedReproductionTestCommand("./vendor/bin/phpunit", ["../ParserTest.php"]),
+    ).toBeUndefined();
   });
 
   it("sends the scoped RED command to canonical GREEN verification", async () => {

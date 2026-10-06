@@ -98,7 +98,20 @@ function detectNodePackageManager(files: string[], pkg: any): 'npm' | 'pnpm' | '
 
 function hasKnownNodeTestFileArgumentContract(script: unknown): boolean {
   if (typeof script !== 'string') return false;
-  return /^(?:[A-Za-z_][\w]*=(?:'[^']*'|"[^"]*"|[^\s]+)\s+)*(?:vitest(?:\s+run)?|jest|mocha|bun\s+test|node\s+--test)(?:\s+(?:--[a-z][\w-]*(?:=(?:[A-Za-z0-9._/,:@+-]+)|\s+[A-Za-z0-9._/,:@+-]+)?|\d+))*$/i.test(script.trim());
+  const command = /^(?:[A-Za-z_][\w]*=(?:'[^']*'|"[^"]*"|[^\s]+)\s+)*(?:vitest(?:\s+run)?|jest|mocha|bun\s+test|node\s+--test)(?:\s+(.*))?$/i.exec(script.trim());
+  if (!command) return false;
+
+  const argumentsText = command[1] || '';
+  const argumentsList = argumentsText.match(/"[^"]*"|'[^']*'|[^\s]+/g) || [];
+  if (argumentsText.replace(/"[^"]*"|'[^']*'|[^\s]+/g, '').trim()) return false;
+  return argumentsList.every(argument => {
+    const unquoted =
+      (argument.startsWith('"') && argument.endsWith('"')) ||
+      (argument.startsWith("'") && argument.endsWith("'"))
+        ? argument.slice(1, -1)
+        : argument;
+    return /^[A-Za-z0-9._/*?{}\[\]:@+=,-]+$/.test(unquoted);
+  });
 }
 
 function getNodeTestCommand(packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun'): string {
@@ -248,9 +261,11 @@ function detectCompiledEcosystemCommands(files: string[], dirPath: string, comma
   if (files.includes('composer.json') || files.includes('composer.lock')) {
     commands.packageManager = 'composer';
     commands.buildCommand = 'composer install';
-    commands.testCommand = existsSync(join(dirPath, 'vendor/bin/phpunit'))
-      ? (process.platform === 'win32' ? '.\\vendor\\bin\\phpunit' : './vendor/bin/phpunit')
-      : 'composer test';
+    if (existsSync(join(dirPath, 'vendor/bin/phpunit'))) {
+      commands.testCommand = process.platform === 'win32'
+        ? '.\\vendor\\bin\\phpunit'
+        : './vendor/bin/phpunit';
+    }
     commands.lintCommand = existsSync(join(dirPath, 'vendor/bin/phpcs'))
       ? (process.platform === 'win32' ? '.\\vendor\\bin\\phpcs' : './vendor/bin/phpcs')
       : 'composer check';
@@ -261,7 +276,6 @@ function detectCompiledEcosystemCommands(files: string[], dirPath: string, comma
   if (files.includes('Gemfile') || files.includes('Gemfile.lock')) {
     commands.packageManager = 'bundle';
     commands.buildCommand = 'bundle install';
-    commands.testCommand = 'bundle exec rake test';
     commands.lintCommand = 'bundle exec rubocop';
     return;
   }
@@ -270,19 +284,16 @@ function detectCompiledEcosystemCommands(files: string[], dirPath: string, comma
   if (files.includes('CMakeLists.txt')) {
     commands.packageManager = 'cmake';
     commands.buildCommand = 'cmake -B build && cmake --build build';
-    commands.testCommand = 'ctest --test-dir build';
     return;
   }
   if (files.includes('meson.build')) {
     commands.packageManager = 'meson';
     commands.buildCommand = 'meson setup build && meson compile -C build';
-    commands.testCommand = 'meson test -C build';
     return;
   }
   if (files.includes('Makefile') || files.includes('makefile') || files.includes('GNUmakefile')) {
     commands.packageManager = 'make';
     commands.buildCommand = 'make';
-    commands.testCommand = 'make test';
     commands.lintCommand = 'make check';
     return;
   }

@@ -20,7 +20,22 @@ export function runRepositoryGit(args: string[]): { success: boolean; stdout: st
   return { success: result.status === 0, stdout: result.stdout || '' };
 }
 
-export function isPreparedRepositoryWorkspace(workspacePath: string): boolean {
+export interface PreparedRepositoryWorkspaceBinding {
+  repoFullName: string;
+  baseCommitSha: string;
+}
+
+function repositoryNameFromRemote(remoteUrl: string): string | undefined {
+  const match = remoteUrl.trim().match(
+    /(?:^|[@/])github\.com[:/]([^/:]+)\/([^/?#]+?)(?:\.git)?(?:[?#].*)?$/i,
+  );
+  return match ? `${match[1]}/${match[2]}`.toLowerCase() : undefined;
+}
+
+export function isPreparedRepositoryWorkspace(
+  workspacePath: string,
+  binding: PreparedRepositoryWorkspaceBinding,
+): boolean {
   if (!workspacePath.trim() || !existsSync(workspacePath)) return false;
   try {
     const workspaceRoot = realpathSync(workspacePath);
@@ -33,10 +48,43 @@ export function isPreparedRepositoryWorkspace(workspacePath: string): boolean {
     if (!result.success || !result.stdout.trim()) return false;
 
     const repositoryRoot = realpathSync(result.stdout.trim());
-    const normalizeForComparison = (path: string) =>
-      process.platform === 'win32' ? path.toLowerCase() : path;
-    return normalizeForComparison(workspaceRoot) ===
-      normalizeForComparison(repositoryRoot);
+    const normalizeForComparison = (path: string) => {
+      const normalized = resolve(path).replace(/[\\/]+/g, '/').replace(/\/$/, '');
+      return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+    };
+    if (
+      normalizeForComparison(workspaceRoot) !==
+      normalizeForComparison(repositoryRoot)
+    ) {
+      return false;
+    }
+
+    const expectedRepo = binding.repoFullName.trim().toLowerCase();
+    if (!expectedRepo || !/^[0-9a-f]{40}$/i.test(binding.baseCommitSha)) {
+      return false;
+    }
+    const remote = runRepositoryGit([
+      '-C',
+      repositoryRoot,
+      'remote',
+      'get-url',
+      'origin',
+    ]);
+    if (
+      !remote.success ||
+      repositoryNameFromRemote(remote.stdout) !== expectedRepo
+    ) {
+      return false;
+    }
+
+    return runRepositoryGit([
+      '-C',
+      repositoryRoot,
+      'merge-base',
+      '--is-ancestor',
+      binding.baseCommitSha,
+      'HEAD',
+    ]).success;
   } catch {
     return false;
   }

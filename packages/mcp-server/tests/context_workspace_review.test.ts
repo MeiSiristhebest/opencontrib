@@ -10,6 +10,27 @@ import { createOpenContribMcpServer } from "../src/server.js";
 const gitAvailable = spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0;
 const contextTest = gitAvailable ? it : it.skip;
 
+function saveWorkspaceArtifact(
+  manager: ReturnType<typeof buildContributionRunManager>,
+  runId: string,
+  workspacePath: string,
+): void {
+  const baseCommitSha = execFileSync(
+    "git",
+    ["-C", workspacePath, "rev-parse", "HEAD"],
+    { encoding: "utf8" },
+  ).trim();
+  saveCanonicalArtifact(manager, runId, "workspace", {
+    workspacePath,
+    branchName: "fixture",
+    isWorktree: false,
+    baseRepoPath: workspacePath,
+    baseCommitSha,
+    repoFullName: "example/parser",
+    createdAt: new Date().toISOString(),
+  }, "WORKSPACE_PREPARED");
+}
+
 contextTest("MCP context uses the prepared workspace and repository language", async () => {
   const root = mkdtempSync(join(tmpdir(), "oc-mcp-context-review-"));
   const originalHome = process.env.OPENCONTRIB_HOME;
@@ -31,13 +52,13 @@ contextTest("MCP context uses the prepared workspace and repository language", a
       "commit", "--allow-empty", "-m", "Update parser",
       "-m", "Signed-off-by: OpenContrib Test <test@example.invalid>",
     ], { stdio: "ignore" });
+    execFileSync("git", [
+      "-C", workspace,
+      "remote", "add", "origin", "https://github.com/example/parser.git",
+    ], { stdio: "ignore" });
     const manager = buildContributionRunManager();
-    const run = manager.createRun({ repoFullName: "example/parser" });
-    saveCanonicalArtifact(manager, run.runId, "workspace", {
-      workspacePath: workspace, branchName: "fixture", isWorktree: false,
-      baseRepoPath: workspace, baseCommitSha: "a".repeat(40),
-      repoFullName: "example/parser", createdAt: new Date().toISOString(),
-    }, "WORKSPACE_PREPARED");
+    const run = manager.createRun({ repoFullName: "example/parser", issueNumber: 1 });
+    saveWorkspaceArtifact(manager, run.runId, workspace);
     const server = createOpenContribMcpServer();
     const tool = (server as any)._registeredTools.contrib_assemble_context;
     const result = await tool.handler({ runId: run.runId,
@@ -53,7 +74,7 @@ contextTest("MCP context uses the prepared workspace and repository language", a
     expect(response.context.repoContext.engineeringFingerprint.testConventions.filePattern).toBe("*_test.go");
     expect(response.context.repoContext.engineeringFingerprint.commitStyle.requiresSignedOffBy).toBe(true);
 
-    const unpreparedRun = manager.createRun({ repoFullName: "example/parser" });
+    const unpreparedRun = manager.createRun({ repoFullName: "example/parser", issueNumber: 2 });
     const unpreparedResult = await tool.handler({
       runId: unpreparedRun.runId,
       issue: { number: 2, title: "Fix parser", body: "", labels: [] },
@@ -81,7 +102,29 @@ contextTest("MCP context uses the prepared workspace and repository language", a
     expect(mismatch.status).toBe("error");
     expect(mismatch.message).toContain("example/parser");
 
-    const unusableRun = manager.createRun({ repoFullName: "example/parser" });
+    const issueMismatchRun = manager.createRun({
+      repoFullName: "example/parser",
+      issueNumber: 1,
+    });
+    saveWorkspaceArtifact(manager, issueMismatchRun.runId, workspace);
+    const issueMismatchResult = await tool.handler({
+      runId: issueMismatchRun.runId,
+      issue: { number: 2, title: "Fix another parser issue", body: "", labels: [] },
+      repoDetails: {
+        owner: "example",
+        repo: "parser",
+        defaultBranch: "main",
+        primaryLanguage: "Go",
+      },
+      repoTree: [],
+    });
+    expect(issueMismatchResult.isError).toBe(true);
+    const issueMismatch = JSON.parse(issueMismatchResult.content[0].text);
+    expect(issueMismatch.status).toBe("error");
+    expect(issueMismatch.message).toContain("bound to issue #1");
+    expect(manager.getRun(issueMismatchRun.runId)?.artifacts.context).toBeUndefined();
+
+    const unusableRun = manager.createRun({ repoFullName: "example/parser", issueNumber: 3 });
     const nonRepository = join(root, "non-repository");
     mkdirSync(nonRepository);
     saveCanonicalArtifact(manager, unusableRun.runId, "workspace", {
@@ -100,7 +143,7 @@ contextTest("MCP context uses the prepared workspace and repository language", a
     expect(unusableResult.isError).toBe(true);
     const unusable = JSON.parse(unusableResult.content[0].text);
     expect(unusable.status).toBe("error");
-    expect(unusable.message).toContain("existing usable repository");
+    expect(unusable.message).toContain("recorded repository and base commit");
     expect(manager.getRun(unusableRun.runId)?.artifacts.context).toBeUndefined();
   } finally {
     if (originalHome === undefined) delete process.env.OPENCONTRIB_HOME;

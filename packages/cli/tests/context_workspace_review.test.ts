@@ -10,7 +10,10 @@ import { saveCanonicalArtifact } from "../../core/src/run/canonical-writer.js";
 const cliEntry = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
-function initializeWorkspace(workspace: string): void {
+function initializeWorkspace(
+  workspace: string,
+  repoFullName = "example/parser",
+): void {
   mkdirSync(workspace, { recursive: true });
   writeFileSync(join(workspace, "go.mod"), "module example/parser\ngo 1.22\n");
   writeFileSync(join(workspace, "parser_test.go"), "package parser\n");
@@ -24,6 +27,32 @@ function initializeWorkspace(workspace: string): void {
     "-m", "Update parser",
     "-m", "Signed-off-by: OpenContrib Test <test@example.invalid>",
   ], { stdio: "ignore" });
+  execFileSync("git", [
+    "-C", workspace,
+    "remote", "add", "origin",
+    `https://github.com/${repoFullName}.git`,
+  ], { stdio: "ignore" });
+}
+
+function saveWorkspaceArtifact(
+  manager: ReturnType<typeof buildContributionRunManager>,
+  runId: string,
+  workspacePath: string,
+  baseCommitSha = execFileSync(
+    "git",
+    ["-C", workspacePath, "rev-parse", "HEAD"],
+    { encoding: "utf8" },
+  ).trim(),
+): void {
+  saveCanonicalArtifact(manager, runId, "workspace", {
+    workspacePath,
+    branchName: "fixture",
+    isWorktree: false,
+    baseRepoPath: workspacePath,
+    baseCommitSha,
+    repoFullName: "example/parser",
+    createdAt: new Date().toISOString(),
+  }, "WORKSPACE_PREPARED");
 }
 
 function createPreparedRun(testHome: string, workspace: string) {
@@ -31,16 +60,8 @@ function createPreparedRun(testHome: string, workspace: string) {
   process.env.OPENCONTRIB_HOME = testHome;
   try {
     const manager = buildContributionRunManager();
-    const run = manager.createRun({ repoFullName: "example/parser" });
-    saveCanonicalArtifact(manager, run.runId, "workspace", {
-      workspacePath: workspace,
-      branchName: "fixture",
-      isWorktree: false,
-      baseRepoPath: workspace,
-      baseCommitSha: "a".repeat(40),
-      repoFullName: "example/parser",
-      createdAt: new Date().toISOString(),
-    }, "WORKSPACE_PREPARED");
+    const run = manager.createRun({ repoFullName: "example/parser", issueNumber: 1 });
+    saveWorkspaceArtifact(manager, run.runId, workspace);
     return { manager, run };
   } finally {
     if (originalHome === undefined) delete process.env.OPENCONTRIB_HOME;
@@ -48,10 +69,15 @@ function createPreparedRun(testHome: string, workspace: string) {
   }
 }
 
-function runContextCli(testHome: string, runId: string, repo: string) {
+function runContextCli(
+  testHome: string,
+  runId: string,
+  repo: string,
+  issueNumber = 1,
+) {
   const [owner, name] = repo.split("/");
   const input = JSON.stringify({
-    issue: { number: 1, title: "Fix parser", body: "", labels: [] },
+    issue: { number: issueNumber, title: "Fix parser", body: "", labels: [] },
     repoDetails: { owner, repo: name, defaultBranch: "main", primaryLanguage: "Go" },
     repoTree: [],
   });
@@ -114,7 +140,7 @@ it("CLI context uses a repository-bound run and preserves useful diagnostics", (
     expect(success.context.repoContext.engineeringFingerprint.testConventions.filePattern).toBe("*_test.go");
     expect(success.context.repoContext.engineeringFingerprint.commitStyle.requiresSignedOffBy).toBe(true);
 
-    const unpreparedRun = manager.createRun({ repoFullName: "example/parser" });
+    const unpreparedRun = manager.createRun({ repoFullName: "example/parser", issueNumber: 1 });
     const unprepared = runContextCli(
       testHome,
       unpreparedRun.runId,
@@ -126,16 +152,8 @@ it("CLI context uses a repository-bound run and preserves useful diagnostics", (
     expect(unpreparedFailure.message).toContain("no prepared workspace");
     expect(manager.getRun(unpreparedRun.runId)?.artifacts.context).toBeUndefined();
 
-    const mismatchRun = manager.createRun({ repoFullName: "example/parser" });
-    saveCanonicalArtifact(manager, mismatchRun.runId, "workspace", {
-      workspacePath: workspace,
-      branchName: "fixture",
-      isWorktree: false,
-      baseRepoPath: workspace,
-      baseCommitSha: "a".repeat(40),
-      repoFullName: "example/parser",
-      createdAt: new Date().toISOString(),
-    }, "WORKSPACE_PREPARED");
+    const mismatchRun = manager.createRun({ repoFullName: "example/parser", issueNumber: 1 });
+    saveWorkspaceArtifact(manager, mismatchRun.runId, workspace);
     expect(manager.getRun(mismatchRun.runId)?.artifacts.context).toBeUndefined();
 
     const mismatched = runContextCli(testHome, mismatchRun.runId, "other/parser");
@@ -145,23 +163,54 @@ it("CLI context uses a repository-bound run and preserves useful diagnostics", (
     expect(failure.message).toContain("bound to example/parser");
     expect(manager.getRun(mismatchRun.runId)?.artifacts.context).toBeUndefined();
 
-    const staleRun = manager.createRun({ repoFullName: "example/parser" });
-    const deletedWorkspace = join(root, "deleted-workspace");
-    saveCanonicalArtifact(manager, staleRun.runId, "workspace", {
-      workspacePath: deletedWorkspace,
-      branchName: "fixture",
-      isWorktree: false,
-      baseRepoPath: deletedWorkspace,
-      baseCommitSha: "a".repeat(40),
+    const issueMismatchRun = manager.createRun({
       repoFullName: "example/parser",
-      createdAt: new Date().toISOString(),
-    }, "WORKSPACE_PREPARED");
+      issueNumber: 1,
+    });
+    saveWorkspaceArtifact(manager, issueMismatchRun.runId, workspace);
+    const issueMismatch = runContextCli(
+      testHome,
+      issueMismatchRun.runId,
+      "example/parser",
+      2,
+    );
+    expect(issueMismatch.status).not.toBe(0);
+    const issueFailure = parseCliResponse(issueMismatch);
+    expect(issueFailure.status).toBe("error");
+    expect(issueFailure.message).toContain("bound to issue #1");
+    expect(manager.getRun(issueMismatchRun.runId)?.artifacts.context).toBeUndefined();
+
+    const staleRun = manager.createRun({ repoFullName: "example/parser", issueNumber: 1 });
+    const deletedWorkspace = join(root, "deleted-workspace");
+    initializeWorkspace(deletedWorkspace);
+    saveWorkspaceArtifact(manager, staleRun.runId, deletedWorkspace);
+    rmSync(deletedWorkspace, { recursive: true, force: true });
     const stale = runContextCli(testHome, staleRun.runId, "example/parser");
     expect(stale.status).not.toBe(0);
     const staleFailure = parseCliResponse(stale);
     expect(staleFailure.status).toBe("error");
-    expect(staleFailure.message).toContain("existing usable repository");
+    expect(staleFailure.message).toContain("recorded repository and base commit");
     expect(manager.getRun(staleRun.runId)?.artifacts.context).toBeUndefined();
+
+    const wrongOriginWorkspace = join(root, "wrong-origin-workspace");
+    initializeWorkspace(wrongOriginWorkspace, "other/parser");
+    const wrongOriginRun = manager.createRun({ repoFullName: "example/parser", issueNumber: 1 });
+    saveWorkspaceArtifact(manager, wrongOriginRun.runId, wrongOriginWorkspace);
+    const wrongOrigin = runContextCli(testHome, wrongOriginRun.runId, "example/parser");
+    expect(wrongOrigin.status).not.toBe(0);
+    const wrongOriginFailure = parseCliResponse(wrongOrigin);
+    expect(wrongOriginFailure.status).toBe("error");
+    expect(wrongOriginFailure.message).toContain("recorded repository and base commit");
+    expect(manager.getRun(wrongOriginRun.runId)?.artifacts.context).toBeUndefined();
+
+    const wrongBaseRun = manager.createRun({ repoFullName: "example/parser", issueNumber: 1 });
+    saveWorkspaceArtifact(manager, wrongBaseRun.runId, workspace, "a".repeat(40));
+    const wrongBase = runContextCli(testHome, wrongBaseRun.runId, "example/parser");
+    expect(wrongBase.status).not.toBe(0);
+    const wrongBaseFailure = parseCliResponse(wrongBase);
+    expect(wrongBaseFailure.status).toBe("error");
+    expect(wrongBaseFailure.message).toContain("recorded repository and base commit");
+    expect(manager.getRun(wrongBaseRun.runId)?.artifacts.context).toBeUndefined();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

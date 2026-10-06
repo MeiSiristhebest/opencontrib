@@ -198,6 +198,11 @@ export function deriveTargetedReproductionTestCommand(
     const separator = nodeRunner === "npm" || nodeRunner === "pnpm" ? " --" : "";
     return `${baseCommand}${separator} ${args.join(" ")}`;
   }
+  if (/^(?:\.\/|\.\\)?vendor[\\/]bin[\\/]phpunit(?:\.bat)?$/i.test(command)) {
+    const paths = normalizeSafeSourceTestFiles(testFiles, /\.php$/i);
+    if (!paths?.length) return undefined;
+    return `${command} ${paths.join(" ")}`;
+  }
   const pythonRunner = /^(?:pytest|python -m pytest|python3 -m pytest|uv run pytest|poetry run pytest|pipenv run pytest|conda run pytest)$/.test(command);
   if (pythonRunner) {
     const paths = testFiles.map(file => file.replace(/\\/g, "/").replace(/^\.\//, ""));
@@ -285,9 +290,16 @@ export function buildReproductionDesignPrompt(
       (/^(?:bun test|bun run test)$/.test(repositoryTestCommand.trim()) ? "bun" : undefined)
     : undefined;
   const nodeGuidance = nodeRunner
-    ? ` For Node test scripts, return only relative file paths in testFiles and return the exact scoped testCommand: npm and pnpm use " -- <files>", yarn and "bun run test" use " <files>", and direct "bun test" uses " ./<files>". For example, "npm test" with "src/parser.test.ts" becomes "npm test -- src/parser.test.ts"; "bun test" becomes "bun test ./src/parser.test.ts".`
+    ? ` For Node test scripts, return only relative file paths in testFiles and return the exact scoped testCommand: npm and pnpm use " -- <files>", yarn uses " <files>", and both "bun run test" and direct "bun test" use " ./<files>". For example, "npm test" with "src/parser.test.ts" becomes "npm test -- src/parser.test.ts"; "bun run test" becomes "bun run test ./src/parser.test.ts"; "bun test" becomes "bun test ./src/parser.test.ts".`
     : "";
   return `${basePrompt ?? ""}\n\nDesign the target RED reproduction only. Return JSON conforming to ReproductionDesignSchema with the exact test command, a non-empty expected failure assertion, at least one concrete test file, and a short rationale. Do not describe the patch. When the repository command is 'go test ./...', choose test files in the target package and use 'go test .' for root-package files or 'go test ./<package>' for subpackages; never use 'go test ./...' for RED. For 'cargo test', select integration test targets under tests/ and use '--test <target>' (with '--manifest-path <package>/Cargo.toml' for a nested package). For Gradle or Maven, select files under src/test/java or src/test/kotlin and filter by their qualified class names using '--tests' or '-Dtest='. For 'dotnet test', select one .cs test file and use '--filter FullyQualifiedName~<ClassName>'. For 'swift test', select one .swift test file and use '--filter <SuiteName>'.${nodeGuidance}`;
+}
+
+export function selectVerificationCommand(
+  ctx: Pick<PipelineContext, "evidenceReport" | "testCmd" | "repositoryTestCmd">,
+): string {
+  if (!ctx.evidenceReport) return "";
+  return ctx.testCmd || ctx.repositoryTestCmd || "";
 }
 
 export function resolveGreenVerificationTestCommand(
@@ -1516,12 +1528,7 @@ export class PrSubmissionStep implements PipelineStep {
           rootCause:
             activePatch?.rationale || "Unavailable (root cause not recorded)",
           keyChanges: derivedKeyChanges,
-          verificationCommand: ctx.evidenceReport
-            ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
-              ctx.repositoryTestCmd ||
-              ctx.testCmd ||
-              ""
-            : "",
+          verificationCommand: selectVerificationCommand(ctx),
           evidence: ctx.evidenceReport,
         },
         nativeTemplateContent,
