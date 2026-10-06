@@ -343,10 +343,12 @@ export function analyzeRepoEngineeringFingerprint(
               const relativePath = relative(root, full).replace(/\\/g, '/');
               if (
                 /\.rs$/i.test(entry.name) &&
-                /^tests\/[^/]+\.rs$/i.test(relativePath) &&
+                /^(?:[^/]+\/)*tests\/[^/]+\.rs$/i.test(relativePath) &&
                 hasCargoManifestNear(repoPath, dir)
               ) {
-                filePattern = 'tests/*.rs';
+                filePattern = relativePath.startsWith('tests/')
+                  ? 'tests/*.rs'
+                  : '**/tests/*.rs';
                 frameworkName = 'cargo test';
                 return full;
               }

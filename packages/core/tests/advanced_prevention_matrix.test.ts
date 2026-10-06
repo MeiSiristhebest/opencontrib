@@ -24,6 +24,7 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
   it.each([
     ['bun@1.3.0', 'vitest --config vitest.config.ts', 'bun run test'],
     ['npm@10.0.0', 'jest --config jest.config.js', 'npm test'],
+    ['npm@10.0.0', 'NODE_ENV=test bun test', 'npm test'],
   ])('recognizes Node test scripts with separate option values', (packageManager, script, expected) => {
     const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-test-script-'));
     try {
@@ -33,6 +34,23 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
       }));
 
       expect(detectRunnableCommandsFromDir(tempDir).testCommand).toBe(expected);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not treat an unsupported Node test script as a Cargo test command', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-cargo-test-'));
+    try {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
+        scripts: { test: 'node test.js' },
+      }));
+      writeFileSync(join(tempDir, 'Cargo.toml'), '[package]\nname = "fixture"\nversion = "0.1.0"\n');
+
+      const commands = detectRunnableCommandsFromDir(tempDir);
+
+      expect(commands.testCommand).toBeUndefined();
+      expect(commands.packageManager).toBe('npm');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

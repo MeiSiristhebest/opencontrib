@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildContributionRunManager } from "@opencontrib/core";
+import { buildContributionRunManager } from "../../core/src/index.js";
 import { saveCanonicalArtifact } from "../../core/src/run/canonical-writer.js";
 
 const cliEntry = fileURLToPath(new URL("../src/index.ts", import.meta.url));
@@ -19,6 +19,7 @@ function initializeWorkspace(workspace: string): void {
     "-C", workspace,
     "-c", "user.name=OpenContrib Test",
     "-c", "user.email=test@example.invalid",
+    "-c", "commit.gpgsign=false",
     "commit", "--allow-empty",
     "-m", "Update parser",
     "-m", "Signed-off-by: OpenContrib Test <test@example.invalid>",
@@ -113,12 +114,36 @@ it("CLI context uses a repository-bound run and preserves useful diagnostics", (
     expect(success.context.repoContext.engineeringFingerprint.testConventions.filePattern).toBe("*_test.go");
     expect(success.context.repoContext.engineeringFingerprint.commitStyle.requiresSignedOffBy).toBe(true);
 
-    const mismatched = runContextCli(testHome, run.runId, "other/parser");
+    const unpreparedRun = manager.createRun({ repoFullName: "example/parser" });
+    const unprepared = runContextCli(
+      testHome,
+      unpreparedRun.runId,
+      "example/parser",
+    );
+    expect(unprepared.status).not.toBe(0);
+    const unpreparedFailure = parseCliResponse(unprepared);
+    expect(unpreparedFailure.status).toBe("error");
+    expect(unpreparedFailure.message).toContain("no prepared workspace");
+    expect(manager.getRun(unpreparedRun.runId)?.artifacts.context).toBeUndefined();
+
+    const mismatchRun = manager.createRun({ repoFullName: "example/parser" });
+    saveCanonicalArtifact(manager, mismatchRun.runId, "workspace", {
+      workspacePath: workspace,
+      branchName: "fixture",
+      isWorktree: false,
+      baseRepoPath: workspace,
+      baseCommitSha: "a".repeat(40),
+      repoFullName: "example/parser",
+      createdAt: new Date().toISOString(),
+    }, "WORKSPACE_PREPARED");
+    expect(manager.getRun(mismatchRun.runId)?.artifacts.context).toBeUndefined();
+
+    const mismatched = runContextCli(testHome, mismatchRun.runId, "other/parser");
     expect(mismatched.status).not.toBe(0);
     const failure = parseCliResponse(mismatched);
     expect(failure.status).toBe("error");
     expect(failure.message).toContain("bound to example/parser");
-    expect(manager.getRun(run.runId)?.artifacts.context).toBeDefined();
+    expect(manager.getRun(mismatchRun.runId)?.artifacts.context).toBeUndefined();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

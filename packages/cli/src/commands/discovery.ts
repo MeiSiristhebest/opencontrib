@@ -175,6 +175,11 @@ const contextCommand = new Command("context")
           );
         }
         const workspace = run?.artifacts.workspace;
+        if (runId && !workspace?.workspacePath) {
+          throw new Error(
+            `Contribution run ${runId} has no prepared workspace; prepare the workspace before assembling context.`,
+          );
+        }
         const repoTree = (parsed.repoTree || []).map((item: any) => ({
           path: item.path,
           mode: "100644",
@@ -202,13 +207,7 @@ const contextCommand = new Command("context")
         });
 
         if (runId) {
-          try {
-            runManager.saveArtifact(runId, "context", context as any);
-          } catch (err: any) {
-            console.warn(
-              `[Discovery] Failed to auto-save context artifact: ${err.message}`,
-            );
-          }
+          runManager.saveArtifact(runId, "context", context as any);
         }
 
         printJSON({ status: "success", context }, opts.pretty);

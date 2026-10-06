@@ -380,6 +380,11 @@ export function registerDiscoveryTools(server: McpServer): void {
         );
       }
       const workspace = run?.artifacts.workspace;
+      if (runId && !workspace?.workspacePath) {
+        throw new Error(
+          `Contribution run ${runId} has no prepared workspace; prepare the workspace before assembling context.`,
+        );
+      }
 
       const context = await assembler.assembleContext({
         issue: {
@@ -412,13 +417,7 @@ export function registerDiscoveryTools(server: McpServer): void {
       });
 
       if (runId) {
-        try {
-          runManager.saveArtifact(runId, "context", context as any);
-        } catch (err: any) {
-          console.warn(
-            `[discovery-tools] Failed to auto-save context artifact: ${err.message}`,
-          );
-        }
+        runManager.saveArtifact(runId, "context", context as any);
       }
 
       return {

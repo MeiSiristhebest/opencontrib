@@ -117,6 +117,25 @@ function getJvmTestClassNames(testFiles: readonly string[]): string[] | undefine
   return [...new Set(classNames)].sort();
 }
 
+function getMavenModulePaths(testFiles: readonly string[]): string[] | undefined {
+  const paths = normalizeSafeSourceTestFiles(testFiles, /\.(?:java|kt)$/i);
+  if (!paths?.length) return undefined;
+
+  const modules = new Set<string>();
+  for (const path of paths) {
+    const parts = path.split("/");
+    const sourceRoot = parts.findIndex((part, index) =>
+      part === "src" && parts[index + 1] === "test" &&
+      (parts[index + 2] === "java" || parts[index + 2] === "kotlin")
+    );
+    if (sourceRoot < 0) return undefined;
+    modules.add(parts.slice(0, sourceRoot).join("/") || ".");
+  }
+
+  if (modules.size > 1 && modules.has(".")) return undefined;
+  return [...modules].sort();
+}
+
 function getCargoIntegrationTestTargets(
   testFiles: readonly string[],
 ): { manifestPath?: string; targets: string[] } | undefined {
@@ -203,9 +222,15 @@ export function deriveTargetedReproductionTestCommand(
   if (gradlePrefix || mavenPrefix) {
     const classNames = getJvmTestClassNames(testFiles);
     if (!classNames?.length) return undefined;
+    if (mavenPrefix) {
+      const modules = getMavenModulePaths(testFiles);
+      if (!modules?.length) return undefined;
+      const selector = modules[0] === "." ? "" : ` -pl ${modules.join(",")} -am`;
+      return `${mavenPrefix}${selector} test -Dtest=${classNames.join(",")}`;
+    }
     return gradlePrefix
       ? `${gradlePrefix} test${classNames.map(name => ` --tests ${name}`).join("")}`
-      : `${mavenPrefix} test -Dtest=${classNames.join(",")}`;
+      : undefined;
   }
   if (command === "dotnet test") {
     const paths = normalizeSafeSourceTestFiles(testFiles, /\.cs$/i);
@@ -626,7 +651,7 @@ export class ReproductionDesignStep implements PipelineStep {
         selectedOpportunity: ctx.selectedOpp,
         workspacePath: ctx.workspace?.workspacePath,
         reportSummary:
-          "Pipeline halted: the generated Go test files did not identify a safe target package for RED.",
+          "Pipeline halted: the generated test files did not identify a safe target for RED.",
       });
     }
 

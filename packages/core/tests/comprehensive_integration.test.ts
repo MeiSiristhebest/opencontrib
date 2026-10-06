@@ -76,6 +76,7 @@ describe('ContextAssembler — 7-layer prompt assembly', () => {
         details.push(`missing key: ${k}`);
       }
     }
+    expect(ctx.combinatorialMatrix).toBeDefined();
     // Verify layers have independent content (not all the same string)
     const layerValues = [
       JSON.stringify(ctx.problemContext),
@@ -98,6 +99,7 @@ describe('ContextAssembler — 7-layer prompt assembly', () => {
     expect(ctx.environmentContext.os).toBeDefined();
     expect(ctx.guidance.riskSurface.level).toBeDefined();
     expect(ctx.assembledAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(pass).toBe(true);
 
     record(
       'ContextAssembler',

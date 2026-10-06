@@ -12,6 +12,11 @@ function detectsRepo(file: string, code: string): boolean {
     .violations.some(entry => entry.rule === "REPO_LITERAL_DISCRIMINATION");
 }
 
+function detectsIssueNumber(file: string, code: string): boolean {
+  return lintAntiHardcode(patch(file, code), { issueNumber: 123 }).violations
+    .length > 0;
+}
+
 describe("Repository literal review regressions", () => {
   it.each([
     'if (repository.fullName === "owner/repo") return special();',
@@ -62,6 +67,43 @@ describe("Repository literal review regressions", () => {
     ['src/main.ts', 'if (config.fullName === "owner/repo") return special();'],
   ])("keeps inert or unrelated source clean in %s", (file, code) => {
     expect(detectsRepo(file, code)).toBe(false);
+  });
+
+  it("distinguishes SQL assignments from repository comparisons and recognizes <>", () => {
+    expect(
+      detectsRepo("db/migration.sql", "UPDATE repositories SET repo = 'owner/repo';"),
+    ).toBe(false);
+    expect(
+      detectsRepo("db/check.sql", "SELECT * FROM repositories WHERE repo <> 'owner/repo';"),
+    ).toBe(true);
+  });
+
+  it.each(["Dockerfile", "Makefile", "Containerfile", "GNUmakefile"])(
+    "ignores hash comments in %s",
+    file => {
+      expect(detectsRepo(file, '# Example: if repo == "owner/repo"')).toBe(false);
+    },
+  );
+
+  it("skips quotes inside JavaScript regular-expression literals", () => {
+    expect(
+      detectsRepo(
+        "src/main.ts",
+        'const quote = /"/;\nif (repo === "owner/repo") return fallback();',
+      ),
+    ).toBe(true);
+    expect(
+      detectsRepo("src/main.ts", String.raw`const example = /repo === "owner\/repo"/;`),
+    ).toBe(false);
+  });
+
+  it.each([
+    ["src/main.py", "if issue_number == 123: return workaround()"],
+    ["src/main.py", "if issue_id == 123: return workaround()"],
+    ["src/main.py", "if pr_number == 123: return workaround()"],
+    ["src/main.py", "if bug_id == 123: return workaround()"],
+  ])("detects provider-bound snake-case issue identifiers in %s", (file, code) => {
+    expect(detectsIssueNumber(file, code)).toBe(true);
   });
 
 });

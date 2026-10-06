@@ -33,8 +33,8 @@ function canonicalMcpPath(): string {
   return [
     toolFor("INITIALIZED"),
     `${toolFor("OPPORTUNITY_SCOUTED")} or ${toolFor("PROBE_COMPLETED")}`,
-    toolFor("CONTEXT_ASSEMBLED"),
     toolFor("WORKSPACE_PREPARED"),
+    toolFor("CONTEXT_ASSEMBLED"),
     `(optional ${toolFor("POC_GENERATED")})`,
     toolFor("RED_CAPTURED"),
     toolFor("PATCH_DRAFTED"),

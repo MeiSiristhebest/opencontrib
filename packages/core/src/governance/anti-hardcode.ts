@@ -179,11 +179,69 @@ function parseHunkOldRange(header: string): { start: number; count: number } | u
 }
 
 function isHashCommentLanguage(filePath: string): boolean {
-  return /\.(?:py|sh|bash|zsh|ps1|rb)$/i.test(filePath);
+  const basename = filePath.replace(/\\/g, "/").split("/").pop()?.toLowerCase() || "";
+  return (
+    /\.(?:py|sh|bash|zsh|ps1|rb)$/i.test(filePath) ||
+    /^(?:dockerfile|containerfile|makefile|gnumakefile)$/.test(basename)
+  );
 }
 
 function isDashCommentLanguage(filePath: string): boolean {
   return /\.(?:lua|sql)$/i.test(filePath);
+}
+
+function isJavaScriptLikeFile(filePath: string): boolean {
+  return /\.(?:[cm]?[jt]sx?|vue|svelte)$/i.test(filePath);
+}
+
+function isJavaScriptRegexStart(line: string, index: number): boolean {
+  let previousIndex = index - 1;
+  while (previousIndex >= 0 && /\s/.test(line[previousIndex]!)) previousIndex--;
+  if (previousIndex < 0) return true;
+
+  const previous = line[previousIndex]!;
+  if ("({[,:;=!&|+-*%^~<>?".includes(previous)) return true;
+  return /(?:^|\W)(?:return|throw|case|delete|void|typeof|instanceof|in|of|yield|await)\s*$/.test(
+    line.slice(0, previousIndex + 1),
+  );
+}
+
+function findJavaScriptRegexEnd(line: string, start: number): number {
+  let inCharacterClass = false;
+  for (let index = start + 1; index < line.length; index++) {
+    const character = line[index]!;
+    if (character === "\\") {
+      index++;
+      continue;
+    }
+    if (character === "[" && !inCharacterClass) {
+      inCharacterClass = true;
+    } else if (character === "]" && inCharacterClass) {
+      inCharacterClass = false;
+    } else if (character === "/" && !inCharacterClass) {
+      index++;
+      while (index < line.length && /[a-z]/i.test(line[index]!)) index++;
+      return index;
+    }
+  }
+  return -1;
+}
+
+function isSqlPredicateComparison(code: string, index: number): boolean {
+  const statement = code
+    .slice(code.lastIndexOf(';', index - 1) + 1, index)
+    .toLowerCase();
+  let assignmentStart = -1;
+  for (const match of statement.matchAll(/\bset\b/g)) {
+    assignmentStart = match.index ?? -1;
+  }
+  let predicateStart = -1;
+  for (const match of statement.matchAll(
+    /\b(?:where|having|on|when|if|elsif|elseif|check)\b/g,
+  )) {
+    predicateStart = match.index ?? -1;
+  }
+  return predicateStart > assignmentStart;
 }
 
 function extractTemplateExpressions(
@@ -578,6 +636,19 @@ function scanDiffSourceLine(
       continue;
     }
 
+    if (
+      isJavaScriptLikeFile(filePath) &&
+      line[index] === "/" &&
+      isJavaScriptRegexStart(line, index)
+    ) {
+      const end = findJavaScriptRegexEnd(line, index);
+      if (end >= 0) {
+        code += "__REGEX_LITERAL__";
+        index = end;
+        continue;
+      }
+    }
+
     if (line.startsWith('/*', index)) {
       state.inBlockComment = true;
       index += 2;
@@ -744,15 +815,16 @@ function analyzeFileChanges(
   const repoVariable =
     String.raw`\b(?:target)?(?:repo|repository|origin|upstream)(?:Name|FullName)?\b(?:\s*(?:\?\.|\.)\s*(?:fullName|name))?(?:\s*(?:\?\.|\.)\s*(?:toLowerCase|toUpperCase|trim|lower|upper)\s*\(\s*\))*`;
   const stringToken = String.raw`__STR_\d+__`;
-  const equalityOperator = /\.sql$/i.test(filePath)
-    ? String.raw`(?:===|==|=)`
-    : String.raw`(?:===|==)`;
+  const isSqlFile = /\.sql$/i.test(filePath);
+  const repositoryComparisonOperator = isSqlFile
+    ? String.raw`(?:===|==|<>|!=|=)`
+    : String.raw`(?:===|==|!==?)`;
   const repoReference = new RegExp(
-    `(?:${repoVariable}\\s*(?:${equalityOperator}|!==?)\\s*(${stringToken})|(${stringToken})\\s*${equalityOperator}\\s*${repoVariable}|${repoVariable}\\s*\\.includes\\s*\\(\\s*(${stringToken}))`,
+    `(?:${repoVariable}\\s*${repositoryComparisonOperator}\\s*(${stringToken})|(${stringToken})\\s*${repositoryComparisonOperator}\\s*${repoVariable}|${repoVariable}\\s*\\.includes\\s*\\(\\s*(${stringToken}))`,
     'gi',
   );
   const issueVariable =
-    String.raw`\b(?:issue(?:Number|Id)?|prNumber|ticket|bugId)(?:\s*(?:\?\.|\.)\s*(?:number|id))?\b`;
+    String.raw`\b(?:issue(?:Number|Id|_number|_id)?|pr(?:Number|_number)|ticket|bug(?:Id|_id)?)(?:\s*(?:\?\.|\.)\s*(?:number|id))?\b`;
   const issueNumberPattern = options.issueNumber
     ? new RegExp(
         `(?:${issueVariable}\\s*(?:===|==)\\s*${options.issueNumber}\\b|\\b${options.issueNumber}\\s*(?:===|==)\\s*${issueVariable})`,
@@ -804,6 +876,9 @@ function analyzeFileChanges(
   for (const hunkRecords of hunks.values()) {
     const source = buildHunkSource(hunkRecords);
     for (const match of source.code.matchAll(repoReference)) {
+      if (isSqlFile && !isSqlPredicateComparison(source.code, match.index ?? 0)) {
+        continue;
+      }
       const tokenId = match[1] || match[2] || match[3];
       const sampleValue = stringValues.get(tokenId);
       const matchedRecord = source.firstAddedRecord(match.index, match.index + match[0].length);

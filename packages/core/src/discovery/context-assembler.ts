@@ -98,7 +98,7 @@ function detectNodePackageManager(files: string[], pkg: any): 'npm' | 'pnpm' | '
 
 function hasKnownNodeTestFileArgumentContract(script: unknown): boolean {
   if (typeof script !== 'string') return false;
-  return /^(?:vitest(?:\s+run)?|jest|mocha|bun\s+test|node\s+--test)(?:\s+(?:--[a-z][\w-]*(?:=(?:[A-Za-z0-9._/,:@+-]+)|\s+[A-Za-z0-9._/,:@+-]+)?|\d+))*$/i.test(script.trim());
+  return /^(?:[A-Za-z_][\w]*=(?:'[^']*'|"[^"]*"|[^\s]+)\s+)*(?:vitest(?:\s+run)?|jest|mocha|bun\s+test|node\s+--test)(?:\s+(?:--[a-z][\w-]*(?:=(?:[A-Za-z0-9._/,:@+-]+)|\s+[A-Za-z0-9._/,:@+-]+)?|\d+))*$/i.test(script.trim());
 }
 
 function getNodeTestCommand(packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun'): string {
@@ -107,8 +107,8 @@ function getNodeTestCommand(packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun'): st
   return `${packageManager} test`;
 }
 
-function detectNodeCommands(files: string[], dirPath: string, commands: RunnableCommands): void {
-  if (!files.includes('package.json')) return;
+function detectNodeCommands(files: string[], dirPath: string, commands: RunnableCommands): boolean {
+  if (!files.includes('package.json')) return false;
   try {
     const pkg = JSON.parse(readFileSync(join(dirPath, 'package.json'), 'utf-8'));
     const scripts = pkg.scripts || {};
@@ -120,7 +120,10 @@ function detectNodeCommands(files: string[], dirPath: string, commands: Runnable
     }
     if (scripts.build) commands.buildCommand = pm === 'npm' ? 'npm run build' : `${pm} run build`;
     if (scripts.lint) commands.lintCommand = pm === 'npm' ? 'npm run lint' : `${pm} run lint`;
-  } catch {}
+    return typeof scripts.test === 'string' && scripts.test.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function detectCompiledEcosystemCommands(files: string[], dirPath: string, commands: RunnableCommands): void {
@@ -294,8 +297,8 @@ export function detectRunnableCommandsFromDir(dirPath: string): RunnableCommands
 
   try {
     const files = readdirSync(dirPath);
-    detectNodeCommands(files, dirPath, commands);
-    if (!commands.testCommand) {
+    const hasNodeTestScript = detectNodeCommands(files, dirPath, commands);
+    if (!commands.testCommand && !hasNodeTestScript) {
       detectCompiledEcosystemCommands(files, dirPath, commands);
     }
 

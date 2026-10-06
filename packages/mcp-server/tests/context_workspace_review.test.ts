@@ -1,13 +1,16 @@
 import { expect, it } from "bun:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildContributionRunManager } from "@opencontrib/core";
+import { buildContributionRunManager } from "../../core/src/index.js";
 import { saveCanonicalArtifact } from "../../core/src/run/canonical-writer.js";
 import { createOpenContribMcpServer } from "../src/server.js";
 
-it("MCP context uses the prepared workspace and repository language", async () => {
+const gitAvailable = spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0;
+const contextTest = gitAvailable ? it : it.skip;
+
+contextTest("MCP context uses the prepared workspace and repository language", async () => {
   const root = mkdtempSync(join(tmpdir(), "oc-mcp-context-review-"));
   const originalHome = process.env.OPENCONTRIB_HOME;
   try {
@@ -49,6 +52,24 @@ it("MCP context uses the prepared workspace and repository language", async () =
     expect(response.context.repoContext.runnableCommands.testCommand).toBe("go test ./...");
     expect(response.context.repoContext.engineeringFingerprint.testConventions.filePattern).toBe("*_test.go");
     expect(response.context.repoContext.engineeringFingerprint.commitStyle.requiresSignedOffBy).toBe(true);
+
+    const unpreparedRun = manager.createRun({ repoFullName: "example/parser" });
+    const unpreparedResult = await tool.handler({
+      runId: unpreparedRun.runId,
+      issue: { number: 2, title: "Fix parser", body: "", labels: [] },
+      repoDetails: {
+        owner: "example",
+        repo: "parser",
+        defaultBranch: "main",
+        primaryLanguage: "Go",
+      },
+      repoTree: [],
+    });
+    expect(unpreparedResult.isError).toBe(true);
+    const unprepared = JSON.parse(unpreparedResult.content[0].text);
+    expect(unprepared.status).toBe("error");
+    expect(unprepared.message).toContain("no prepared workspace");
+    expect(manager.getRun(unpreparedRun.runId)?.artifacts.context).toBeUndefined();
 
     const mismatchResult = await tool.handler({ runId: run.runId,
       issue: { number: 1, title: "Fix chunking token loss", body: "", labels: [] },

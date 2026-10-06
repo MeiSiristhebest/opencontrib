@@ -124,7 +124,10 @@ function readSourceFileContentsAtCommit(
         error && typeof error === "object" && "code" in error
           ? error.code
           : undefined;
-      if (errorCode === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+      if (
+        errorCode === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" ||
+        errorCode === "ENOBUFS"
+      ) {
         throw new Error(
           `GovernanceBaseContentUnavailableError: base source '${filePath}' exceeds the safe read limit.`,
         );

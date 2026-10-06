@@ -403,8 +403,32 @@ describe("Pipeline command review regressions", () => {
       .toBeUndefined();
     expect(deriveTargetedReproductionTestCommand("./gradlew test", ["src/test/kotlin/com/example/ParserTest.kt"]))
       .toBe("./gradlew test --tests com.example.ParserTest");
-    expect(deriveTargetedReproductionTestCommand("mvn test", ["src/test/java/com/example/ParserTest.java"]))
+    expect(
+      deriveTargetedReproductionTestCommand("mvn test", [
+        "src/test/java/com/example/ParserTest.java",
+      ]),
+    )
       .toBe("mvn test -Dtest=com.example.ParserTest");
+    expect(
+      deriveTargetedReproductionTestCommand("mvn test", [
+        "module-a/src/test/java/com/example/ParserTest.java",
+      ]),
+    )
+      .toBe("mvn -pl module-a -am test -Dtest=com.example.ParserTest");
+    expect(
+      deriveTargetedReproductionTestCommand("mvn test", [
+        "module-a/src/test/java/com/example/ParserTest.java",
+        "module-b/src/test/java/com/example/OtherTest.java",
+      ]),
+    ).toBe(
+      "mvn -pl module-a,module-b -am test -Dtest=com.example.OtherTest,com.example.ParserTest",
+    );
+    expect(
+      deriveTargetedReproductionTestCommand("mvn test", [
+        "src/test/java/com/example/ParserTest.java",
+        "module-a/src/test/java/com/example/OtherTest.java",
+      ]),
+    ).toBeUndefined();
     expect(deriveTargetedReproductionTestCommand("dotnet test", ["tests/ParserTests.cs"]))
       .toBe("dotnet test --filter FullyQualifiedName~ParserTests");
     expect(deriveTargetedReproductionTestCommand("swift test", ["Tests/ParserTests.swift"]))

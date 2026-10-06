@@ -45,6 +45,25 @@ describe("Native repository test conventions", () => {
     }
   });
 
+  it("recognizes Rust integration tests in nested Cargo crates", () => {
+    const root = mkdtempSync(join(tmpdir(), "oc-review-nested-cargo-"));
+    try {
+      const crate = join(root, "crates", "parser");
+      const testPath = join(crate, "tests", "parser.rs");
+      mkdirSync(dirname(testPath), { recursive: true });
+      writeFileSync(testPath, "#[test]\nfn parses() {}\n");
+      writeFileSync(join(crate, "Cargo.toml"), "[package]\nname = \"parser\"\nversion = \"0.1.0\"\n");
+
+      const result = analyzeRepoEngineeringFingerprint({ repoPath: root });
+
+      expect(result.testConventions.sampleTestPath).toBe(testPath);
+      expect(result.testConventions.filePattern).toBe("**/tests/*.rs");
+      expect(result.testConventions.frameworkName).toBe("cargo test");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("bounds framework detection reads to a test source prefix", () => {
     const root = mkdtempSync(join(tmpdir(), "oc-review-large-test-"));
     try {
