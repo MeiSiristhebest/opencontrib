@@ -144,6 +144,24 @@ it("CLI context uses a repository-bound run and preserves useful diagnostics", (
     expect(failure.status).toBe("error");
     expect(failure.message).toContain("bound to example/parser");
     expect(manager.getRun(mismatchRun.runId)?.artifacts.context).toBeUndefined();
+
+    const staleRun = manager.createRun({ repoFullName: "example/parser" });
+    const deletedWorkspace = join(root, "deleted-workspace");
+    saveCanonicalArtifact(manager, staleRun.runId, "workspace", {
+      workspacePath: deletedWorkspace,
+      branchName: "fixture",
+      isWorktree: false,
+      baseRepoPath: deletedWorkspace,
+      baseCommitSha: "a".repeat(40),
+      repoFullName: "example/parser",
+      createdAt: new Date().toISOString(),
+    }, "WORKSPACE_PREPARED");
+    const stale = runContextCli(testHome, staleRun.runId, "example/parser");
+    expect(stale.status).not.toBe(0);
+    const staleFailure = parseCliResponse(stale);
+    expect(staleFailure.status).toBe("error");
+    expect(staleFailure.message).toContain("existing usable repository");
+    expect(manager.getRun(staleRun.runId)?.artifacts.context).toBeUndefined();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

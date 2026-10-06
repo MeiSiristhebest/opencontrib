@@ -226,7 +226,10 @@ export function deriveTargetedReproductionTestCommand(
       const modules = getMavenModulePaths(testFiles);
       if (!modules?.length) return undefined;
       const selector = modules[0] === "." ? "" : ` -pl ${modules.join(",")} -am`;
-      return `${mavenPrefix}${selector} test -Dtest=${classNames.join(",")}`;
+      const ignoreUnmatchedModules = selector
+        ? " -Dsurefire.failIfNoSpecifiedTests=false"
+        : "";
+      return `${mavenPrefix}${selector} test -Dtest=${classNames.join(",")}${ignoreUnmatchedModules}`;
     }
     return gradlePrefix
       ? `${gradlePrefix} test${classNames.map(name => ` --tests ${name}`).join("")}`

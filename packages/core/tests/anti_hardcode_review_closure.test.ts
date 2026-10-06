@@ -14,7 +14,7 @@ function detectsRepo(file: string, code: string): boolean {
 
 function detectsIssueNumber(file: string, code: string): boolean {
   return lintAntiHardcode(patch(file, code), { issueNumber: 123 }).violations
-    .length > 0;
+    .some(entry => entry.rule === "ISSUE_NUMBER_HARDCODING");
 }
 
 describe("Repository literal review regressions", () => {
@@ -78,12 +78,30 @@ describe("Repository literal review regressions", () => {
     ).toBe(true);
   });
 
+  it("does not count unrelated hardcode rules as issue-number findings", () => {
+    expect(
+      detectsIssueNumber(
+        "src/main.ts",
+        String.raw`const binary = "C:\Users\Mei\Downloads\tool.exe";`,
+      ),
+    ).toBe(false);
+  });
+
   it.each(["Dockerfile", "Makefile", "Containerfile", "GNUmakefile"])(
     "ignores hash comments in %s",
     file => {
       expect(detectsRepo(file, '# Example: if repo == "owner/repo"')).toBe(false);
     },
   );
+
+  it("preserves hash tokens inside Dockerfile RUN commands", () => {
+    expect(
+      detectsRepo(
+        "Dockerfile",
+        'RUN printf foo#bar && if (repo === "owner/repo") return special();',
+      ),
+    ).toBe(true);
+  });
 
   it("skips quotes inside JavaScript regular-expression literals", () => {
     expect(

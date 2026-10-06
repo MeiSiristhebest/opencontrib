@@ -186,6 +186,11 @@ function isHashCommentLanguage(filePath: string): boolean {
   );
 }
 
+function isDockerfile(filePath: string): boolean {
+  const basename = filePath.replace(/\\/g, "/").split("/").pop()?.toLowerCase() || "";
+  return /^(?:dockerfile|containerfile)$/.test(basename);
+}
+
 function isDashCommentLanguage(filePath: string): boolean {
   return /\.(?:lua|sql)$/i.test(filePath);
 }
@@ -655,7 +660,11 @@ function scanDiffSourceLine(
       continue;
     }
     if (!hashComments && line.startsWith('//', index)) break;
-    if (hashComments && line[index] === '#') break;
+    if (
+      hashComments &&
+      line[index] === '#' &&
+      (!isDockerfile(filePath) || line.slice(0, index).trim() === '')
+    ) break;
     if (dashComments && line.startsWith('--', index)) break;
 
     const quote = line[index];

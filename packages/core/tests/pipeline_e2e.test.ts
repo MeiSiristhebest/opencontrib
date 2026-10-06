@@ -414,14 +414,16 @@ describe("Pipeline command review regressions", () => {
         "module-a/src/test/java/com/example/ParserTest.java",
       ]),
     )
-      .toBe("mvn -pl module-a -am test -Dtest=com.example.ParserTest");
+      .toBe(
+        "mvn -pl module-a -am test -Dtest=com.example.ParserTest -Dsurefire.failIfNoSpecifiedTests=false",
+      );
     expect(
       deriveTargetedReproductionTestCommand("mvn test", [
         "module-a/src/test/java/com/example/ParserTest.java",
         "module-b/src/test/java/com/example/OtherTest.java",
       ]),
     ).toBe(
-      "mvn -pl module-a,module-b -am test -Dtest=com.example.OtherTest,com.example.ParserTest",
+      "mvn -pl module-a,module-b -am test -Dtest=com.example.OtherTest,com.example.ParserTest -Dsurefire.failIfNoSpecifiedTests=false",
     );
     expect(
       deriveTargetedReproductionTestCommand("mvn test", [

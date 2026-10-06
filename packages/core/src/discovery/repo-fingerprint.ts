@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { detectRunnableCommandsFromDir } from './context-assembler.js';
@@ -18,6 +18,28 @@ export function runRepositoryGit(args: string[]): { success: boolean; stdout: st
     },
   });
   return { success: result.status === 0, stdout: result.stdout || '' };
+}
+
+export function isPreparedRepositoryWorkspace(workspacePath: string): boolean {
+  if (!workspacePath.trim() || !existsSync(workspacePath)) return false;
+  try {
+    const workspaceRoot = realpathSync(workspacePath);
+    const result = runRepositoryGit([
+      '-C',
+      workspaceRoot,
+      'rev-parse',
+      '--show-toplevel',
+    ]);
+    if (!result.success || !result.stdout.trim()) return false;
+
+    const repositoryRoot = realpathSync(result.stdout.trim());
+    const normalizeForComparison = (path: string) =>
+      process.platform === 'win32' ? path.toLowerCase() : path;
+    return normalizeForComparison(workspaceRoot) ===
+      normalizeForComparison(repositoryRoot);
+  } catch {
+    return false;
+  }
 }
 
 function readSourcePrefix(filePath: string): string {

@@ -355,8 +355,12 @@ export function registerDiscoveryTools(server: McpServer): void {
         ),
     },
     wrapHandler(async (args) => {
-      const { ContextAssembler, buildContributionRunManager, runRepositoryGit } =
-        await import("@opencontrib/core");
+      const {
+        ContextAssembler,
+        buildContributionRunManager,
+        isPreparedRepositoryWorkspace,
+        runRepositoryGit,
+      } = await import("@opencontrib/core");
       const assembler = new ContextAssembler();
       const runManager = buildContributionRunManager();
       const runId = runManager.resolveRunId(args.runId);
@@ -380,9 +384,14 @@ export function registerDiscoveryTools(server: McpServer): void {
         );
       }
       const workspace = run?.artifacts.workspace;
-      if (runId && !workspace?.workspacePath) {
+      const workspacePath = workspace?.workspacePath;
+      if (
+        runId &&
+        (typeof workspacePath !== "string" ||
+          !isPreparedRepositoryWorkspace(workspacePath))
+      ) {
         throw new Error(
-          `Contribution run ${runId} has no prepared workspace; prepare the workspace before assembling context.`,
+          `Contribution run ${runId} has no prepared workspace, or its recorded path is not an existing usable repository; prepare the workspace before assembling context.`,
         );
       }
 
@@ -412,8 +421,8 @@ export function registerDiscoveryTools(server: McpServer): void {
           type: item.type as any,
           ...(item.sha ? { sha: item.sha } : {}),
         })),
-        workspacePath: workspace?.workspacePath,
-        runGit: workspace?.workspacePath ? runRepositoryGit : undefined,
+        workspacePath: typeof workspacePath === "string" ? workspacePath : undefined,
+        runGit: typeof workspacePath === "string" ? runRepositoryGit : undefined,
       });
 
       if (runId) {

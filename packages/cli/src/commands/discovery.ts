@@ -148,8 +148,12 @@ const contextCommand = new Command("context")
           );
           throw new CliExitError(1);
         }
-        const { ContextAssembler, buildContributionRunManager, runRepositoryGit } =
-          await import("@opencontrib/core");
+        const {
+          ContextAssembler,
+          buildContributionRunManager,
+          isPreparedRepositoryWorkspace,
+          runRepositoryGit,
+        } = await import("@opencontrib/core");
         const assembler = new ContextAssembler();
         const runManager = buildContributionRunManager();
         const runId = runManager.resolveRunId(opts.runId);
@@ -175,9 +179,14 @@ const contextCommand = new Command("context")
           );
         }
         const workspace = run?.artifacts.workspace;
-        if (runId && !workspace?.workspacePath) {
+        const workspacePath = workspace?.workspacePath;
+        if (
+          runId &&
+          (typeof workspacePath !== "string" ||
+            !isPreparedRepositoryWorkspace(workspacePath))
+        ) {
           throw new Error(
-            `Contribution run ${runId} has no prepared workspace; prepare the workspace before assembling context.`,
+            `Contribution run ${runId} has no prepared workspace, or its recorded path is not an existing usable repository; prepare the workspace before assembling context.`,
           );
         }
         const repoTree = (parsed.repoTree || []).map((item: any) => ({
@@ -202,8 +211,8 @@ const contextCommand = new Command("context")
             fullName: requestedRepoFullName,
           },
           repoTree,
-          workspacePath: workspace?.workspacePath,
-          runGit: workspace?.workspacePath ? runRepositoryGit : undefined,
+          workspacePath: typeof workspacePath === "string" ? workspacePath : undefined,
+          runGit: typeof workspacePath === "string" ? runRepositoryGit : undefined,
         });
 
         if (runId) {

@@ -80,6 +80,28 @@ contextTest("MCP context uses the prepared workspace and repository language", a
     const mismatch = JSON.parse(mismatchResult.content[0].text);
     expect(mismatch.status).toBe("error");
     expect(mismatch.message).toContain("example/parser");
+
+    const unusableRun = manager.createRun({ repoFullName: "example/parser" });
+    const nonRepository = join(root, "non-repository");
+    mkdirSync(nonRepository);
+    saveCanonicalArtifact(manager, unusableRun.runId, "workspace", {
+      workspacePath: nonRepository, branchName: "fixture", isWorktree: false,
+      baseRepoPath: nonRepository, baseCommitSha: "a".repeat(40),
+      repoFullName: "example/parser", createdAt: new Date().toISOString(),
+    }, "WORKSPACE_PREPARED");
+    const unusableResult = await tool.handler({
+      runId: unusableRun.runId,
+      issue: { number: 3, title: "Fix parser", body: "", labels: [] },
+      repoDetails: {
+        owner: "example", repo: "parser", defaultBranch: "main", primaryLanguage: "Go",
+      },
+      repoTree: [],
+    });
+    expect(unusableResult.isError).toBe(true);
+    const unusable = JSON.parse(unusableResult.content[0].text);
+    expect(unusable.status).toBe("error");
+    expect(unusable.message).toContain("existing usable repository");
+    expect(manager.getRun(unusableRun.runId)?.artifacts.context).toBeUndefined();
   } finally {
     if (originalHome === undefined) delete process.env.OPENCONTRIB_HOME;
     else process.env.OPENCONTRIB_HOME = originalHome;
