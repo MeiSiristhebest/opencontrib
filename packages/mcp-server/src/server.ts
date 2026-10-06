@@ -35,7 +35,7 @@ export function createOpenContribMcpServer(
   const runManager = options.runManager ?? buildContributionRunManager();
 
   // Register modular tools across domains
-  registerDiscoveryTools(server);
+  registerDiscoveryTools(server, runManager);
   registerWorkspaceTools(server, worktreeManager, runManager);
   registerEvidenceTools(server, runManager);
   registerGovernanceTools(server, memory, flywheel, runManager);

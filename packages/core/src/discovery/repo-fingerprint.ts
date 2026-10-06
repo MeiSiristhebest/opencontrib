@@ -4,6 +4,67 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { detectRunnableCommandsFromDir } from './context-assembler.js';
 
 const MAX_TEST_SOURCE_PREFIX_BYTES = 64 * 1024;
+const SKIPPED_SOURCE_SCAN_DIRECTORIES = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  '.opencontrib',
+  '.venv',
+  'venv',
+  'vendor',
+  '.yarn',
+  '.pnpm-store',
+  '.pytest_cache',
+  '.mypy_cache',
+  '.ruff_cache',
+  '.tox',
+  '__pycache__',
+  '.cache',
+  'coverage',
+  '.next',
+  '.nuxt',
+  '.turbo',
+  'target',
+]);
+
+function hasUntrustedIgnoredPaths(repositoryRoot: string): boolean {
+  const ignored = runRepositoryGit([
+    '-C',
+    repositoryRoot,
+    'ls-files',
+    '--others',
+    '--ignored',
+    '--exclude-standard',
+    '--directory',
+    '--no-empty-directory',
+    '-z',
+  ]);
+  if (!ignored.success) return true;
+
+  return ignored.stdout.split('\0').some((path) => {
+    if (!path) return false;
+    const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+    const components = normalized.split('/');
+    const lastComponent = components.at(-1)?.toLowerCase();
+    return !path.endsWith('/') || !lastComponent ||
+      !SKIPPED_SOURCE_SCAN_DIRECTORIES.has(lastComponent);
+  });
+}
+
+// These index flags let Git status omit worktree changes for tracked files.
+function hasNonDefaultTrackedIndexEntries(repositoryRoot: string): boolean {
+  const tracked = runRepositoryGit([
+    '-C',
+    repositoryRoot,
+    'ls-files',
+    '-v',
+    '-z',
+  ]);
+  if (!tracked.success) return true;
+
+  return tracked.stdout.split('\0').some((entry) => entry && entry[0] !== 'H');
+}
 
 export function runRepositoryGit(args: string[]): { success: boolean; stdout: string } {
   const result = spawnSync('git', args, {
@@ -77,14 +138,29 @@ export function isPreparedRepositoryWorkspace(
       return false;
     }
 
-    return runRepositoryGit([
+    const head = runRepositoryGit([
       '-C',
       repositoryRoot,
-      'merge-base',
-      '--is-ancestor',
-      binding.baseCommitSha,
+      'rev-parse',
       'HEAD',
-    ]).success;
+    ]);
+    if (
+      !head.success ||
+      head.stdout.trim().toLowerCase() !== binding.baseCommitSha.toLowerCase()
+    ) {
+      return false;
+    }
+
+    const status = runRepositoryGit([
+      '-C',
+      repositoryRoot,
+      'status',
+      '--porcelain',
+      '--untracked-files=all',
+    ]);
+    return status.success && status.stdout.trim().length === 0 &&
+      !hasNonDefaultTrackedIndexEntries(repositoryRoot) &&
+      !hasUntrustedIgnoredPaths(repositoryRoot);
   } catch {
     return false;
   }
@@ -342,29 +418,6 @@ export function analyzeRepoEngineeringFingerprint(
 
   if (existsSync(repoPath)) {
     try {
-      const skippedDirectories = new Set([
-        'node_modules',
-        '.git',
-        'dist',
-        'build',
-        '.opencontrib',
-        '.venv',
-        'venv',
-        'vendor',
-        '.yarn',
-        '.pnpm-store',
-        '.pytest_cache',
-        '.mypy_cache',
-        '.ruff_cache',
-        '.tox',
-        '__pycache__',
-        '.cache',
-        'coverage',
-        '.next',
-        '.nuxt',
-        '.turbo',
-        'target',
-      ]);
       const javascriptFramework = detectJavaScriptTestFramework(repoPath);
       const walkAndFindTest = (root: string): string | undefined => {
         const maxScannedEntries = 50_000;
@@ -384,7 +437,7 @@ export function analyzeRepoEngineeringFingerprint(
               return undefined;
             }
             scannedEntries += 1;
-            if (skippedDirectories.has(entry.name.toLowerCase())) continue;
+            if (SKIPPED_SOURCE_SCAN_DIRECTORIES.has(entry.name.toLowerCase())) continue;
             const full = join(dir, entry.name);
             if (entry.isFile()) {
               const javascriptTestMatch = entry.name.match(

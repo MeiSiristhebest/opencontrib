@@ -42,7 +42,8 @@ interface DiffLexerState {
   stringIsCppRaw?: boolean;
   stringIsRaw?: boolean;
   stringIsTemplate?: boolean;
-  templateInterpolationMode?: "dollar_brace" | "brace" | "swift_paren";
+  templateInterpolationMode?: "dollar_brace" | "brace" | "raw_brace" | "swift_paren";
+  templateInterpolationBraceCount?: number;
   stringIsVueExpression?: boolean;
   templateDepth?: number;
   templateClosingStack?: string[];
@@ -73,11 +74,18 @@ function isSourceCodeFile(filePath: string): boolean {
 
 function isTestOrDocFile(filePath: string): boolean {
   const norm = filePath.replace(/\\/g, '/').toLowerCase();
+  const basename = filePath.replace(/\\/g, '/').split('/').pop() || '';
+  const extension = /\.(?:java|cs|kt|kts)$/i.exec(basename)?.[0];
+  const hasEcosystemTestSuffix = Boolean(
+    extension && /(?:Test|Tests|Spec|Specs)$/.test(basename.slice(0, -extension.length)),
+  );
   return (
     /(?:^|\/)(?:tests?|__tests__|fixtures?|mocks?)(?:\/|$)/.test(norm) ||
+    /(?:^|\/)[^/]+\.(?:tests?|specs?)(?:\/|$)/.test(norm) ||
     /\.(?:test|spec)\.[a-z0-9]+$/i.test(norm) ||
     /_test\.[a-z0-9]+$/i.test(norm) ||
     /(?:^|\/)test_[a-z0-9_]+\.[a-z0-9]+$/i.test(norm) ||
+    hasEcosystemTestSuffix ||
     /\.(?:md|mdx|rst|txt)$/i.test(norm)
   );
 }
@@ -99,8 +107,17 @@ function isWebRoutePathReference(code: string, pathToken: string): boolean {
     /\b(?:route|routePath|pathname|href|url)\s*[:=]\s*\{?\s*$/i.test(prefix) ||
     /\b(?:route|routes|router)\b[^;\n]*\bpath\s*:\s*\{?\s*$/i.test(prefix) ||
     /\b(?:app|router|server|fastify|api)\s*\.\s*(?:get|post|put|patch|delete|head|options|all|route)\s*\(\s*$/i.test(prefix) ||
-    /@\s*(?:Get|Post|Put|Patch|Delete|Request)Mapping\s*\(\s*(?:(?:path|value)\s*=\s*)?$/i.test(prefix)
+    /@\s*(?:Get|Post|Put|Patch|Delete|Request)Mapping\s*\(\s*(?:(?:path|value)\s*=\s*)?(?:\{\s*(?:__STR_\d+__\s*,\s*)*)?$/i.test(prefix)
   );
+}
+
+function isDockerfileCopyFromPathReference(
+  filePath: string,
+  code: string,
+): boolean {
+  if (!isDockerfile(filePath)) return false;
+  const copyInstruction = /^\s*COPY\b[^\n]*/i.exec(code)?.[0];
+  return Boolean(copyInstruction && /\s--from(?:=|\s+)/i.test(copyInstruction));
 }
 
 function readDiffPathToken(input: string, start = 0): DiffPathToken | undefined {
@@ -346,17 +363,31 @@ function extractTemplateExpressions(
 function extractBraceInterpolationExpressions(
   stringBody: string,
   commentSyntax: "hash" | "c" = "hash",
+  delimiterLength = 1,
+  rawBraceDelimiters = false,
 ): Array<{ expression: string; start: number; end: number }> {
   const expressions: Array<{ expression: string; start: number; end: number }> = [];
 
   for (let index = 0; index < stringBody.length; index++) {
     if (stringBody[index] !== '{') continue;
-    if (stringBody[index + 1] === '{') {
-      index++;
+    if (
+      !rawBraceDelimiters &&
+      delimiterLength === 1 &&
+      stringBody[index + 1] === '{'
+    ) {
+      index += 1;
+      continue;
+    }
+    let openingBraceCount = 1;
+    while (stringBody[index + openingBraceCount] === '{') openingBraceCount++;
+    if (openingBraceCount < delimiterLength) {
+      index += openingBraceCount - 1;
       continue;
     }
 
-    const expressionStart = index + 1;
+    const expressionStart = rawBraceDelimiters
+      ? index + openingBraceCount
+      : index + delimiterLength;
     let braceDepth = 1;
     let quote: string | undefined;
     let inLineComment = false;
@@ -407,9 +438,18 @@ function extractBraceInterpolationExpressions(
       }
       if (current === '{') {
         braceDepth++;
-      } else if (current === '}' && --braceDepth === 0) {
-        expressionEnd = cursor;
-        break;
+      } else if (current === '}') {
+        if (
+          braceDepth === 1 &&
+          stringBody.startsWith('}'.repeat(delimiterLength), cursor)
+        ) {
+          expressionEnd = cursor;
+          break;
+        }
+        if (--braceDepth === 0) {
+          expressionEnd = cursor;
+          break;
+        }
       }
     }
 
@@ -419,7 +459,7 @@ function extractBraceInterpolationExpressions(
       start: expressionStart,
       end: expressionEnd,
     });
-    index = expressionEnd;
+    index = expressionEnd + delimiterLength - 1;
   }
 
   return expressions;
@@ -527,6 +567,23 @@ function stringPrefixBeforeQuote(line: string, quoteIndex: number, filePath: str
   return match?.[1] || '';
 }
 
+function csharpRawStringBeforeQuote(
+  line: string,
+  quoteIndex: number,
+  filePath: string,
+): { prefix: string; delimiter: string; interpolationBraceCount: number } | undefined {
+  if (!/\.cs$/i.test(filePath)) return undefined;
+  const delimiter = /^"{3,}/.exec(line.slice(quoteIndex))?.[0];
+  if (!delimiter) return undefined;
+  const prefix = line.slice(0, quoteIndex).match(/(?:^|[^a-zA-Z0-9_])(\$*)$/);
+  if (!prefix) return undefined;
+  return {
+    prefix: prefix[1],
+    delimiter,
+    interpolationBraceCount: prefix[1].length,
+  };
+}
+
 function cppRawStringBeforeQuote(
   line: string,
   quoteIndex: number,
@@ -628,6 +685,7 @@ function scanDiffSourceLine(
       if (state.stringIsTemplate && state.templateDepth) {
         const char = line[index];
         const next = line[index + 1];
+        const templateCloser = state.templateClosingStack?.at(-1);
         if (state.templateLineComment) {
           // The line comment ends below, when the newline is appended.
         } else if (state.templateBlockComment) {
@@ -650,12 +708,23 @@ function scanDiffSourceLine(
           state.templateBlockComment = true;
         } else if (char === '"' || char === "'" || char === '`') {
           state.templateQuote = char;
+        } else if (
+          state.templateInterpolationMode === 'raw_brace' &&
+          state.templateClosingStack?.length === 1 &&
+          templateCloser &&
+          line.startsWith(templateCloser, index)
+        ) {
+          state.templateClosingStack.pop();
+          state.templateDepth = 0;
+          appendStringContent(templateCloser, false);
+          index += templateCloser.length;
+          continue;
         } else if (char === '{' || char === '(' || char === '[') {
           state.templateClosingStack?.push(
             char === '{' ? '}' : char === '(' ? ')' : ']',
           );
           state.templateDepth = state.templateClosingStack?.length ?? 0;
-        } else if (char === state.templateClosingStack?.at(-1)) {
+        } else if (char === templateCloser) {
           state.templateClosingStack?.pop();
           state.templateDepth = state.templateClosingStack?.length ?? 0;
         }
@@ -664,9 +733,12 @@ function scanDiffSourceLine(
         continue;
       }
       const interpolationMode = state.templateInterpolationMode;
+      const interpolationBraceCount = state.templateInterpolationBraceCount ?? 1;
       const interpolationOpener = interpolationMode === 'dollar_brace'
         ? '${'
-        : interpolationMode === 'brace'
+        : interpolationMode === 'raw_brace'
+          ? '{'.repeat(interpolationBraceCount)
+          : interpolationMode === 'brace'
           ? '{'
           : interpolationMode === 'swift_paren'
             ? '\\('
@@ -684,7 +756,13 @@ function scanDiffSourceLine(
         continue;
       }
       if (state.stringIsTemplate && startsInterpolation && interpolationOpener) {
-        state.templateClosingStack = [interpolationMode === 'swift_paren' ? ')' : '}'];
+        state.templateClosingStack = [
+          interpolationMode === 'swift_paren'
+            ? ')'
+            : interpolationMode === 'raw_brace'
+              ? '}'.repeat(interpolationBraceCount)
+              : '}',
+        ];
         state.templateDepth = 1;
         appendStringContent(interpolationOpener, false);
         index += interpolationOpener.length;
@@ -715,8 +793,16 @@ function scanDiffSourceLine(
           stringValues.set(`__STR_${state.stringTokenId}__`, decodeStringLiteral(state.stringValue, Boolean(state.stringIsRaw), filePath));
           const expressions = state.stringIsVueExpression
             ? [{ expression: state.stringValue.replace(/&(?:quot|apos|lt|gt|amp);/g, entity => ({'&quot;': '"', '&apos;': "'", '&lt;': '<', '&gt;': '>', '&amp;': '&'})[entity]!), start: 0, end: state.stringValue.length }]
-            : state.templateInterpolationMode === 'brace'
-              ? extractBraceInterpolationExpressions(state.stringValue, 'c')
+            : state.templateInterpolationMode === 'brace' ||
+                state.templateInterpolationMode === 'raw_brace'
+              ? extractBraceInterpolationExpressions(
+                  state.stringValue,
+                  'c',
+                  state.templateInterpolationMode === 'raw_brace'
+                    ? state.templateInterpolationBraceCount ?? 1
+                    : 1,
+                  state.templateInterpolationMode === 'raw_brace',
+                )
               : state.templateInterpolationMode === 'swift_paren'
                 ? extractSwiftInterpolations(state.stringValue)
                 : state.stringIsTemplate
@@ -770,6 +856,7 @@ function scanDiffSourceLine(
         state.stringIsRaw = false;
         state.stringIsTemplate = false;
         state.templateInterpolationMode = undefined;
+        state.templateInterpolationBraceCount = undefined;
         state.stringIsVueExpression = false;
         state.templateDepth = 0;
         state.templateClosingStack = undefined;
@@ -865,6 +952,33 @@ function scanDiffSourceLine(
         continue;
       }
 
+      const csharpRawString = csharpRawStringBeforeQuote(line, index, filePath);
+      if (csharpRawString) {
+        if (csharpRawString.prefix) {
+          code = code.slice(0, -csharpRawString.prefix.length);
+        }
+        const tokenId = String(state.nextToken++);
+        state.stringDelimiter = csharpRawString.delimiter;
+        state.stringTokenId = tokenId;
+        state.stringValue = '';
+        state.stringAddedFlags = [];
+        state.stringSourceLines = [];
+        state.stringIsFString = false;
+        state.stringIsCppRaw = false;
+        state.stringIsRaw = true;
+        state.templateInterpolationMode = csharpRawString.interpolationBraceCount
+          ? 'raw_brace'
+          : undefined;
+        state.templateInterpolationBraceCount = csharpRawString.interpolationBraceCount || undefined;
+        state.stringIsTemplate = state.templateInterpolationMode !== undefined;
+        state.templateClosingStack = undefined;
+        state.stringIsVueExpression = false;
+        stringValues.set(`__STR_${tokenId}__`, '');
+        code += `__STR_${tokenId}__`;
+        index += csharpRawString.delimiter.length;
+        continue;
+      }
+
       const stringPrefix = stringPrefixBeforeQuote(line, index, filePath);
       if (stringPrefix) code = code.slice(0, -stringPrefix.length);
       const rustRawString =
@@ -890,6 +1004,7 @@ function scanDiffSourceLine(
         (/\.rs$/i.test(filePath) && /r/.test(stringPrefix)) ||
         (/\.kts?$/i.test(filePath) && delimiter === '"""') ||
         (/\.cs$/i.test(filePath) && stringPrefix.includes('@'));
+      state.templateInterpolationBraceCount = undefined;
       state.templateInterpolationMode =
         /\.cs$/i.test(filePath) && stringPrefix.includes('$') && quote === '"'
           ? 'brace'
@@ -926,7 +1041,7 @@ function scanDiffSourceLine(
 
   if (
     state.stringDelimiter === '`' ||
-    state.stringDelimiter?.length === 3 ||
+    (state.stringDelimiter?.length ?? 0) >= 3 ||
     (state.stringIsFString && state.stringDelimiter?.length === 3) ||
     (state.stringIsRaw && /\.cs$/i.test(filePath))
   ) {
@@ -1062,7 +1177,8 @@ function analyzeFileChanges(
       if (
         value &&
         absolutePathPatterns.some((pattern) => pattern.test(value)) &&
-        !isWebRoutePathReference(record.code, pathToken)
+        !isWebRoutePathReference(record.code, pathToken) &&
+        !isDockerfileCopyFromPathReference(filePath, record.code)
       ) {
         addViolation(
           violations,

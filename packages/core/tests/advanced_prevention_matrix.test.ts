@@ -40,15 +40,49 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
   });
 
   it.each([
-    'mocha "test/**/*.js"',
-    'node --test test/*.js',
-    'jest --testPathPattern=test/**/*.js',
-  ])('does not advertise an unscoped Node test script: %s', (script) => {
+    ['mocha "test/**/*.js"', 'npm exec --no -- mocha'],
+    ['node --test test/*.js', 'node --test'],
+  ])('separates the repository test command from its scoped runner: %s', (script, redTestCommand) => {
     const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-unscoped-test-'));
     try {
       writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
         packageManager: 'npm@10.0.0',
         scripts: { test: script },
+      }));
+
+      const commands = detectRunnableCommandsFromDir(tempDir);
+      expect(commands.testCommand).toBe('npm test');
+      expect(commands.redTestCommand).toBe(redTestCommand);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'VITEST_POOL_ID=1 vitest tests/**/*.spec.ts',
+    'MOCHA_REPORTER=dot mocha "test/**/*.js"',
+  ])('does not drop an environment prefix when scoping %s', script => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-env-prefix-'));
+    try {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
+        packageManager: 'npm@10.0.0',
+        scripts: { test: script },
+      }));
+
+      const commands = detectRunnableCommandsFromDir(tempDir);
+      expect(commands.testCommand).toBe('npm test');
+      expect(commands.redTestCommand).toBeNull();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not scope runner scripts with unsupported selection flags', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-unsupported-selection-'));
+    try {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
+        packageManager: 'npm@10.0.0',
+        scripts: { test: 'jest --testPathPattern=test/**/*.js' },
       }));
 
       expect(detectRunnableCommandsFromDir(tempDir).testCommand).toBeUndefined();
@@ -89,6 +123,15 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
 
       expect(commands.packageManager).toBe(packageManager);
       expect(commands.testCommand).toBeUndefined();
+      const context = new ContextAssembler().assemble({
+        repoFullName: "example/fixture",
+        issueNumber: 1,
+        issueTitle: "Fixture test command",
+        issueBody: "",
+        workspacePath: tempDir,
+        packageManifest: `${manifest}\n${contents}`,
+      });
+      expect(context.repoContext.testCommandHint).toBeUndefined();
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

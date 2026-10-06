@@ -3,7 +3,10 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildContributionRunManager } from "../../core/src/index.js";
+import {
+  ActiveSessionManager,
+  ContributionRunManager,
+} from "../../core/src/index.js";
 import { saveCanonicalArtifact } from "../../core/src/run/canonical-writer.js";
 import { createOpenContribMcpServer } from "../src/server.js";
 
@@ -11,7 +14,7 @@ const gitAvailable = spawnSync("git", ["--version"], { stdio: "ignore" }).status
 const contextTest = gitAvailable ? it : it.skip;
 
 function saveWorkspaceArtifact(
-  manager: ReturnType<typeof buildContributionRunManager>,
+  manager: ContributionRunManager,
   runId: string,
   workspacePath: string,
 ): void {
@@ -33,9 +36,13 @@ function saveWorkspaceArtifact(
 
 contextTest("MCP context uses the prepared workspace and repository language", async () => {
   const root = mkdtempSync(join(tmpdir(), "oc-mcp-context-review-"));
-  const originalHome = process.env.OPENCONTRIB_HOME;
   try {
-    process.env.OPENCONTRIB_HOME = join(root, "home");
+    const home = join(root, "home");
+    const dataDir = join(home, ".opencontrib");
+    const manager = new ContributionRunManager({
+      baseDir: join(dataDir, "runs"),
+      activeSession: new ActiveSessionManager(join(dataDir, "active_session.json")),
+    });
     const workspace = join(root, "workspace");
     mkdirSync(workspace);
     writeFileSync(join(workspace, "go.mod"), "module example/parser\ngo 1.22\n");
@@ -43,6 +50,10 @@ contextTest("MCP context uses the prepared workspace and repository language", a
     const hooks = join(root, "hooks");
     mkdirSync(hooks);
     execFileSync("git", ["-C", workspace, "init", "--quiet"], { stdio: "ignore" });
+    execFileSync("git", [
+      "-C", workspace,
+      "add", "--", "go.mod", "parser_test.go",
+    ], { stdio: "ignore" });
     execFileSync("git", [
       "-C", workspace,
       "-c", "user.name=OpenContrib Test",
@@ -56,17 +67,18 @@ contextTest("MCP context uses the prepared workspace and repository language", a
       "-C", workspace,
       "remote", "add", "origin", "https://github.com/example/parser.git",
     ], { stdio: "ignore" });
-    const manager = buildContributionRunManager();
     const run = manager.createRun({ repoFullName: "example/parser", issueNumber: 1 });
     saveWorkspaceArtifact(manager, run.runId, workspace);
-    const server = createOpenContribMcpServer();
+    const server = createOpenContribMcpServer({ runManager: manager });
     const tool = (server as any)._registeredTools.contrib_assemble_context;
     const result = await tool.handler({ runId: run.runId,
       issue: { number: 1, title: "Fix chunking token loss", body: "", labels: [] },
       repoDetails: { owner: "example", repo: "parser", defaultBranch: "main", primaryLanguage: "Go" },
       repoTree: [],
     });
-    expect(result.isError).not.toBe(true);
+    if (result.isError) {
+      throw new Error(`MCP context failed: ${result.content.map((item: any) => item.text ?? "").join("\n")}`);
+    }
     const response = JSON.parse(result.content[0].text);
     expect(response.status).toBe("success");
     expect(response.context.repoContext.primaryLanguage).toBe("Go");
@@ -146,8 +158,6 @@ contextTest("MCP context uses the prepared workspace and repository language", a
     expect(unusable.message).toContain("recorded repository and base commit");
     expect(manager.getRun(unusableRun.runId)?.artifacts.context).toBeUndefined();
   } finally {
-    if (originalHome === undefined) delete process.env.OPENCONTRIB_HOME;
-    else process.env.OPENCONTRIB_HOME = originalHome;
     rmSync(root, { recursive: true, force: true });
   }
 });

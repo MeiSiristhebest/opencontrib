@@ -13,6 +13,7 @@ import {
 
 export interface RunnableCommands {
   testCommand?: string;
+  redTestCommand?: string | null;
   buildCommand?: string;
   lintCommand?: string;
   packageManager?:
@@ -96,38 +97,98 @@ function detectNodePackageManager(files: string[], pkg: any): 'npm' | 'pnpm' | '
   return 'npm';
 }
 
-function hasKnownNodeTestFileArgumentContract(script: unknown): boolean {
-  if (typeof script !== 'string') return false;
-  const command = /^(?:[A-Za-z_][\w]*=(?:'[^']*'|"[^"]*"|[^\s]+)\s+)*(?:vitest(?:\s+run)?|jest|mocha|bun\s+test|node\s+--test)(?:\s+(.*))?$/i.exec(script.trim());
-  if (!command) return false;
+interface ParsedNodeTestScript {
+  runner: string;
+  configArguments: string[];
+  testOperands: string[];
+  hasEnvironmentPrefix: boolean;
+}
 
-  const argumentsText = command[1] || '';
+function parseNodeTestScript(script: unknown): ParsedNodeTestScript | undefined {
+  if (typeof script !== 'string') return undefined;
+  const trimmed = script.trim();
+  const match = /^(?<environmentPrefix>(?:[A-Za-z_][\w]*=(?:'[^']*'|"[^"]*"|[^\s]+)\s+)+)?(?<runner>vitest(?:\s+run)?|jest|mocha|bun\s+test|node\s+--test)(?:\s+(?<arguments>.*))?$/i.exec(trimmed);
+  if (!match?.groups?.runner) return undefined;
+
+  const argumentsText = match.groups.arguments || '';
   const argumentsList = argumentsText.match(/"[^"]*"|'[^']*'|[^\s]+/g) || [];
-  if (argumentsText.replace(/"[^"]*"|'[^']*'|[^\s]+/g, '').trim()) return false;
-  let expectsConfigPath = false;
-  for (const argument of argumentsList) {
+  if (argumentsText.replace(/"[^"]*"|'[^']*'|[^\s]+/g, '').trim()) return undefined;
+
+  const configArguments: string[] = [];
+  const testOperands: string[] = [];
+  for (let index = 0; index < argumentsList.length; index++) {
+    const argument = argumentsList[index];
     const unquoted =
       (argument.startsWith('"') && argument.endsWith('"')) ||
       (argument.startsWith("'") && argument.endsWith("'"))
         ? argument.slice(1, -1)
         : argument;
-    if (!/^[A-Za-z0-9._/*?{}\[\]:@+=,-]+$/.test(unquoted)) return false;
+    if (!/^[A-Za-z0-9._/*?{}\[\]:@+=,-]+$/.test(unquoted)) return undefined;
 
-    if (expectsConfigPath) {
-      if (unquoted.startsWith('-')) return false;
-      expectsConfigPath = false;
-      continue;
-    }
     if (unquoted === '--config' || unquoted === '-c') {
-      expectsConfigPath = true;
+      const config = argumentsList[++index];
+      if (!config) return undefined;
+      const configPath =
+        (config.startsWith('"') && config.endsWith('"')) ||
+        (config.startsWith("'") && config.endsWith("'"))
+          ? config.slice(1, -1)
+          : config;
+      if (
+        !/^[A-Za-z0-9._/-]+$/.test(configPath) ||
+        configPath.startsWith('-') ||
+        configPath.split('/').some((part) => part === '..' || part === '...')
+      ) return undefined;
+      configArguments.push(`${unquoted} ${configPath}`);
       continue;
     }
-    if (/^--config=[A-Za-z0-9._/-]+$/.test(unquoted)) continue;
-    // Other flags may select test files or patterns. Passing an additional
-    // generated test path could then run those selections as well.
-    return false;
+    if (/^--config=[A-Za-z0-9._/-]+$/.test(unquoted)) {
+      const configPath = unquoted.slice('--config='.length);
+      if (configPath.split('/').some((part) => part === '..' || part === '...')) {
+        return undefined;
+      }
+      configArguments.push(unquoted);
+      continue;
+    }
+    if (
+      unquoted.startsWith('-') ||
+      unquoted.startsWith('/') ||
+      /^[a-z]:/i.test(unquoted) ||
+      unquoted.split(/[\\/]/).some((part) => part === '..' || part === '...')
+    ) return undefined;
+    testOperands.push(unquoted);
   }
-  return !expectsConfigPath;
+
+  const runner = match.groups.runner.replace(/\s+/g, ' ').toLowerCase();
+  return {
+    runner,
+    configArguments,
+    testOperands,
+    hasEnvironmentPrefix: Boolean(match.groups.environmentPrefix),
+  };
+}
+
+function getScopedNodeTestCommand(
+  parsed: ParsedNodeTestScript,
+  packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun',
+): string | undefined {
+  if (parsed.testOperands.length === 0 || parsed.hasEnvironmentPrefix) return undefined;
+
+  let baseCommand: string;
+  if (parsed.runner === 'node --test' || parsed.runner === 'bun test') {
+    baseCommand = parsed.runner;
+  } else if (packageManager === 'npm') {
+    baseCommand = `npm exec --no -- ${parsed.runner}`;
+  } else if (packageManager === 'pnpm') {
+    baseCommand = `pnpm exec ${parsed.runner}`;
+  } else {
+    return undefined;
+  }
+  return [baseCommand, ...parsed.configArguments].join(' ');
+}
+
+function hasKnownNodeTestFileArgumentContract(script: unknown): boolean {
+  const parsed = parseNodeTestScript(script);
+  return Boolean(parsed && parsed.testOperands.length === 0);
 }
 
 function getNodeTestCommand(packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun'): string {
@@ -144,8 +205,12 @@ function detectNodeCommands(files: string[], dirPath: string, commands: Runnable
     const pm = detectNodePackageManager(files, pkg);
     commands.packageManager = pm;
 
-    if (hasKnownNodeTestFileArgumentContract(scripts.test)) {
+    const parsedTestScript = parseNodeTestScript(scripts.test);
+    if (parsedTestScript) {
       commands.testCommand = getNodeTestCommand(pm);
+      commands.redTestCommand = parsedTestScript.testOperands.length === 0
+        ? commands.testCommand
+        : getScopedNodeTestCommand(parsedTestScript, pm) ?? null;
     }
     if (scripts.build) commands.buildCommand = pm === 'npm' ? 'npm run build' : `${pm} run build`;
     if (scripts.lint) commands.lintCommand = pm === 'npm' ? 'npm run lint' : `${pm} run lint`;
@@ -612,12 +677,6 @@ export class ContextAssembler {
         testCommandHint = 'dotnet test';
       } else if (packageManifest.includes('Package.swift')) {
         testCommandHint = 'swift test';
-      } else if (packageManifest.includes('composer.json')) {
-        testCommandHint = 'composer test';
-      } else if (packageManifest.includes('Gemfile')) {
-        testCommandHint = 'bundle exec rake test';
-      } else if (packageManifest.includes('CMakeLists.txt')) {
-        testCommandHint = 'ctest --test-dir build';
       }
     }
 
@@ -780,6 +839,14 @@ export class ContextAssembler {
     }
     if (ctx.repoContext.runnableCommands.testCommand) {
       sections.push(`- **Test Command**: \`${ctx.repoContext.runnableCommands.testCommand}\``);
+    }
+    if (ctx.repoContext.runnableCommands.redTestCommand === null) {
+      sections.push('- **Scoped RED Command**: unavailable; do not use the repository-wide command as RED.');
+    } else if (
+      ctx.repoContext.runnableCommands.redTestCommand &&
+      ctx.repoContext.runnableCommands.redTestCommand !== ctx.repoContext.runnableCommands.testCommand
+    ) {
+      sections.push(`- **Scoped RED Runner**: \`${ctx.repoContext.runnableCommands.redTestCommand}\``);
     }
     if (ctx.repoContext.detectedSkeletonFiles.length > 0) {
       sections.push(`- **Top-level Structure**: ${ctx.repoContext.detectedSkeletonFiles.join(', ')}`);

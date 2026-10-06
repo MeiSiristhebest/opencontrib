@@ -30,6 +30,21 @@ function changesMiddleLinePatch(file: string, firstLine: string, oldLine: string
   ].join("\n");
 }
 
+function changesSeededMultilineMiddleLinePatch(
+  file: string,
+  oldLine: string,
+  newLine: string,
+): string {
+  return [
+    `diff --git a/${file} b/${file}`,
+    `--- a/${file}`,
+    `+++ b/${file}`,
+    "@@ -2,1 +2,1 @@",
+    `-${oldLine}`,
+    `+${newLine}`,
+  ].join("\n");
+}
+
 describe("Repository literal review regressions", () => {
   it.each([
     'if (repository.fullName === "owner/repo") return special();',
@@ -95,6 +110,12 @@ describe("Repository literal review regressions", () => {
     ['src/main.ts', 'if (config.fullName === "owner/repo") return special();'],
   ])("keeps inert or unrelated source clean in %s", (file, code) => {
     expect(detectsRepo(file, code)).toBe(false);
+  });
+
+  it("does not treat assignments as repository comparisons", () => {
+    expect(detectsRepo("src/main.ts", 'const repo = "owner/repo";')).toBe(false);
+    expect(detectsRepo("src/main.py", 'repo = "owner/repo"')).toBe(false);
+    expect(detectsRepo("src/main.ts", 'if (repo === "owner/repo") return special();')).toBe(true);
   });
 
   it("distinguishes SQL assignments from repository comparisons and recognizes <>", () => {
@@ -174,6 +195,85 @@ describe("Repository literal review regressions", () => {
     ).toBe(true);
     expect(
       detectsRepo("src/main.ts", String.raw`const example = /repo === "owner\/repo"/;`),
+    ).toBe(false);
+  });
+
+  it("scans C# raw interpolated strings with repeated dollar delimiters", () => {
+    expect(
+      detectsRepo("src/main.cs", 'var text = $"""{{repo == "owner/repo"}}""";'),
+    ).toBe(true);
+    expect(
+      detectsRepo("src/main.cs", 'var text = $$"""{{repo == "owner/repo"}}""";'),
+    ).toBe(true);
+    expect(
+      detectsRepo("src/main.cs", 'var text = $$$"""{{{repo == "owner/repo"}}}""";'),
+    ).toBe(true);
+    expect(
+      detectsRepo("src/main.cs", 'var text = $$$"""{{repo == "owner/repo"}}""";'),
+    ).toBe(false);
+  });
+
+  it("allows Spring mapping arrays but still flags non-route absolute paths", () => {
+    for (const code of [
+      '@GetMapping({"/system"})\nvoid status() {}',
+      '@RequestMapping(path = {"/system", "/status"})\nvoid status() {}',
+      '@PostMapping(value={"/system"})\nvoid status() {}',
+    ]) {
+      expect(
+        lintAntiHardcode(patch("src/Controller.java", code)).violations.some(
+          entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH",
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("exempts container paths in Dockerfile COPY --from operands", () => {
+    const containerCopy = lintAntiHardcode(
+      patch(
+        "Dockerfile",
+        'COPY --from=builder "/usr/local/bin/tool" "/usr/local/bin/tool"',
+      ),
+    );
+    expect(
+      containerCopy.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH"),
+    ).toBe(false);
+
+    const hostCopy = lintAntiHardcode(
+      patch("Dockerfile", 'COPY "/home/me/private-key" /root/.ssh'),
+    );
+    expect(
+      hostCopy.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH"),
+    ).toBe(true);
+  });
+
+  it.each([
+    "src/ParserTest.java",
+    "src/ParserTests.cs",
+    "src/ParserSpec.kt",
+    "src/Parser.Tests/ParserTests.cs",
+  ])("exempts supported ecosystem test suffixes in %s", file => {
+    expect(detectsRepo(file, 'if (repo === "owner/repo") return special();')).toBe(false);
+  });
+
+  it("still scans production files without a supported test suffix", () => {
+    expect(detectsRepo("src/Parser.java", 'if (repo === "owner/repo") return special();')).toBe(true);
+  });
+
+  it.each([
+    ["src/template.ts", "const value = `first", "old value", "last`;"],
+    ["src/settings.py", "value = '''first", "old value", "last'''"],
+  ])("uses base lexical state to inspect added paths inside multiline strings in %s", (file, first, oldValue, last) => {
+    const base = `${first}\n${oldValue}\n${last}\n`;
+    const diff = changesSeededMultilineMiddleLinePatch(file, oldValue, "/tmp/secret");
+    expect(
+      lintAntiHardcode(diff, { baseFileContents: new Map([[file, base]]) }).violations.some(
+        entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH",
+      ),
+    ).toBe(true);
+    expect(
+      lintAntiHardcode(diff).violations.some(
+        entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH",
+      ),
     ).toBe(false);
   });
 

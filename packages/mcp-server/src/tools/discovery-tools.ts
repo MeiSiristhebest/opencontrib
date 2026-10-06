@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type { ContributionRunManager } from "@opencontrib/core";
 import {
   assessFeasibility,
   detectSystemCapabilities,
@@ -38,7 +39,10 @@ function wrapHandler(fn: (args: any) => Promise<any>) {
   };
 }
 
-export function registerDiscoveryTools(server: McpServer): void {
+export function registerDiscoveryTools(
+  server: McpServer,
+  suppliedRunManager?: ContributionRunManager,
+): void {
   // -------------------------------------------------------------
   // Tool 1: contrib_assess_feasibility (纯算法：环境可行性矩阵)
   // -------------------------------------------------------------
@@ -362,7 +366,7 @@ export function registerDiscoveryTools(server: McpServer): void {
         runRepositoryGit,
       } = await import("@opencontrib/core");
       const assembler = new ContextAssembler();
-      const runManager = buildContributionRunManager();
+      const runManager = suppliedRunManager ?? buildContributionRunManager();
       const runId = runManager.resolveRunId(args.runId);
       const requestedRepoFullName = `${args.repoDetails.owner}/${args.repoDetails.repo}`;
       const run = runId ? runManager.getRun(runId) : undefined;
@@ -513,7 +517,7 @@ export function registerDiscoveryTools(server: McpServer): void {
           const { buildContributionRunManager } = await import(
             "@opencontrib/core"
           );
-          const runManager = buildContributionRunManager();
+          const runManager = suppliedRunManager ?? buildContributionRunManager();
           runManager.saveArtifact(args.runId, "opportunity", {
             target: args.target,
             opportunities,

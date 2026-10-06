@@ -39,6 +39,12 @@ describe("Pipeline RED command selection", () => {
       deriveTargetedReproductionTestCommand("go test ./...", ["worker_test.go"]),
     ).toBe("go test .");
     expect(
+      deriveTargetedReproductionTestCommand("go test ./...", ["worker_TEST.GO"]),
+    ).toBeUndefined();
+    expect(
+      deriveTargetedReproductionTestCommand("go test ./...", ["pkg/parser.go"]),
+    ).toBeUndefined();
+    expect(
       deriveTargetedReproductionTestCommand("go test ./...", ["../outside_test.go"]),
     ).toBeUndefined();
     expect(
@@ -423,6 +429,21 @@ describe("Pipeline command review regressions", () => {
       .toBe("bun run test ./tests/parser.test.ts");
   });
 
+  it("replaces existing Node runner operands with the selected RED test files", () => {
+    expect(
+      deriveTargetedReproductionTestCommand("npm exec --no -- mocha", ["test/parser.test.js"]),
+    ).toBe("npm exec --no -- mocha test/parser.test.js");
+    expect(
+      deriveTargetedReproductionTestCommand("node --test", ["test/parser.test.js"]),
+    ).toBe("node --test test/parser.test.js");
+    expect(
+      deriveTargetedReproductionTestCommand("npm exec --no -- mocha --config .mocharc.json", ["test/parser.test.js"]),
+    ).toBe("npm exec --no -- mocha --config .mocharc.json test/parser.test.js");
+    expect(
+      deriveTargetedReproductionTestCommand("npm exec --no -- mocha --config ../outside.json", ["test/parser.test.js"]),
+    ).toBeUndefined();
+  });
+
   it("scopes supported compiled-language commands to selected test targets", () => {
     expect(deriveTargetedReproductionTestCommand("cargo test", ["tests/parser.rs"]))
       .toBe("cargo test --test parser");
@@ -469,7 +490,7 @@ describe("Pipeline command review regressions", () => {
     ).toBe("./vendor/bin/phpunit tests/ParserTest.php");
     expect(
       deriveTargetedReproductionTestCommand(".\\vendor\\bin\\phpunit", ["tests/ParserTest.php"]),
-    ).toBe(".\\vendor\\bin\\phpunit tests/ParserTest.php");
+    ).toBe("./vendor/bin/phpunit tests/ParserTest.php");
     expect(
       deriveTargetedReproductionTestCommand("./vendor/bin/phpunit", ["../ParserTest.php"]),
     ).toBeUndefined();
