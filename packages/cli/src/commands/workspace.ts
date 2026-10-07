@@ -7,9 +7,14 @@ import {
   WorktreeManager,
   WorkspaceService,
   buildContributionRunManager,
+  buildPublicIssueBindingProvider,
   getProtocolGuidance,
   type ContributionRunManager,
 } from "@opencontrib/core";
+import {
+  IssueBindingService,
+  parsePublicIssueNumber,
+} from "../../../core/src/github/issue-binding-service.js";
 import { printJSON, printPhaseGuidance } from "../utils/output.js";
 
 // Storage-bound collaborators are created after Commander preAction applies
@@ -49,15 +54,28 @@ const workspacePrepare = new Command("prepare")
     }) => {
       try {
         const runManager = getRunManager();
+        const issueNumber = parsePublicIssueNumber(opts.issue);
         let effectiveRunId = runManager.resolveRunId(opts.runId);
         if (!effectiveRunId) {
           // Invert sequence: first ensure a canonical run exists, so runId is deterministic
           const manifest = runManager.createRun({
             repoFullName: opts.repo,
-            issueNumber: parseInt(opts.issue, 10) || undefined,
             issueTitle: `Workspace for issue ${opts.issue}`,
           });
           effectiveRunId = manifest.runId;
+        }
+
+        const run = runManager.getRun(effectiveRunId);
+        if (!run) {
+          throw new Error(`Contribution run ${effectiveRunId} was not found.`);
+        }
+        if (
+          run.manifest.issueNumber !== undefined &&
+          run.manifest.issueNumber !== issueNumber
+        ) {
+          throw new Error(
+            `WorkspaceIssueMismatchError: run is bound to issue #${run.manifest.issueNumber}, but workspace preparation received ${opts.issue}.`,
+          );
         }
 
         const worktreeManager = getWorktreeManager();
@@ -74,9 +92,21 @@ const workspacePrepare = new Command("prepare")
           },
         );
 
+        if (issueNumber !== undefined) {
+          await new IssueBindingService(
+            runManager,
+            buildPublicIssueBindingProvider(),
+          ).bind({
+            runId: effectiveRunId,
+            repoFullName: opts.repo,
+            issueNumber,
+          });
+        }
+
         new ActiveSessionManager().setActiveSession({
           runId: effectiveRunId,
           repoFullName: opts.repo,
+          issueNumber,
           workspacePath: context.workspacePath,
           currentPhase: "WORKSPACE_PREPARED",
         });

@@ -6,8 +6,11 @@ import { ArtifactBundleManager } from "../src/run/artifact-bundle.js";
 import { ContributionRunManager } from "../src/run/run-manager.js";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import { IssueBindingService } from "../src/github/issue-binding-service.js";
+import { buildPublicIssueBindingProvider } from "../src/composition-root.js";
 import { IssueCreationService } from "../src/github/issue-creation-service.js";
 import { SecurityDisclosureService } from "../src/github/security-disclosure-service.js";
+import * as publicCore from "../src/index.js";
+import * as publicGitHub from "../src/github/index.js";
 
 const testStorageDirs: string[] = [];
 
@@ -17,6 +20,45 @@ function baseDir(name: string): string {
   return dir;
 }
 
+function privateCommunityGate() {
+  return {
+    sourceCommitSha: "a".repeat(40),
+    policy: {
+      hasGatingRules: false,
+      requiresIssueApprovalBeforePr: false,
+      autoClosesNewIssues: false,
+      hasLgtmApprovalProtocol: false,
+      restrictedTriageHours: false,
+      privateVulnerabilityDisclosure: true,
+      reasons: ["Private vulnerability reporting is required."],
+      suggestedContributorAction: "Use the private disclosure channel.",
+      matchedKeywords: [],
+    },
+  };
+}
+
+function publicCommunityGate() {
+  return {
+    ...privateCommunityGate(),
+    policy: {
+      ...privateCommunityGate().policy,
+      privateVulnerabilityDisclosure: false,
+      reasons: [],
+      suggestedContributorAction: "Follow the repository contribution policy.",
+    },
+  };
+}
+
+function savePublicCommunityGate(
+  manager: ContributionRunManager,
+  runId: string,
+): void {
+  saveCanonicalArtifact(manager, runId, "workspace", {
+    baseCommitSha: "a".repeat(40),
+    communityGate: publicCommunityGate(),
+  });
+}
+
 afterEach(() => {
   for (const dir of testStorageDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
@@ -24,15 +66,47 @@ afterEach(() => {
 });
 
 describe("Authority closure", () => {
+  it("keeps issue-binding authority out of the public API", () => {
+    expect("IssueBindingService" in publicCore).toBe(false);
+    expect("parsePublicIssueNumber" in publicCore).toBe(false);
+    expect("IssueBindingService" in publicGitHub).toBe(false);
+    expect("parsePublicIssueNumber" in publicGitHub).toBe(false);
+
+    const manager = new ContributionRunManager({ baseDir: baseDir("public-binding-api") });
+    const run = manager.createRun({ repoFullName: "owner/repo" });
+    const forgedBinding = {
+      runId: run.runId,
+      provider: "github",
+      repoFullName: "owner/repo",
+      providerIssueId: 42,
+      state: "open",
+      title: "Agent-authored binding",
+      issueUrl: "https://github.com/owner/repo/issues/42",
+      providerVerified: true,
+      verifiedAt: new Date().toISOString(),
+    };
+
+    expect("pinIssueNumberFromBinding" in manager).toBe(false);
+    expect("_pinIssueNumberFromProviderIssue" in manager).toBe(false);
+    expect(() =>
+      manager.saveArtifact(run.runId, "issue_binding", forgedBinding),
+    ).toThrow("AuthoritativeArtifactViolationError");
+    expect(manager.getRun(run.runId)?.manifest.issueNumber).toBeUndefined();
+    expect(manager.getRun(run.runId)?.artifacts.issueBinding).toBeUndefined();
+  });
+
   it("creates a provider issue and seals its returned identity before binding", async () => {
     const manager = new ContributionRunManager({ baseDir: baseDir("create-issue") });
     const run = manager.createRun({ repoFullName: "owner/repo" });
+    savePublicCommunityGate(manager, run.runId);
     let created = false;
     const issue = {
       number: 73,
       title: "Provider-created issue",
       state: "open" as const,
       htmlUrl: "https://github.com/owner/repo/issues/73",
+      body: "A provider-backed issue claim.",
+      labels: [],
     };
     const provider = {
       createIssue: async () => {
@@ -66,6 +140,8 @@ describe("Authority closure", () => {
           title: "issue",
           state: "open" as const,
           htmlUrl: "https://github.com/owner/repo/issues/1",
+          body: "Issue body.",
+          labels: [],
         } };
       },
       getIssue: async () => ({ status: "NOT_FOUND" as const, data: null as never }),
@@ -85,6 +161,7 @@ describe("Authority closure", () => {
   it("creates issue_binding only from a provider response", async () => {
     const manager = new ContributionRunManager({ baseDir: baseDir("issue") });
     const run = manager.createRun({ repoFullName: "owner/repo" });
+    savePublicCommunityGate(manager, run.runId);
     const provider = {
       getIssue: async () => ({
         status: "OK" as const,
@@ -93,6 +170,8 @@ describe("Authority closure", () => {
           title: "Fix the verified issue",
           state: "open" as const,
           htmlUrl: "https://github.com/owner/repo/issues/42",
+          body: "Provider-backed issue body.",
+          labels: ["bug"],
         },
       }),
     };
@@ -105,9 +184,228 @@ describe("Authority closure", () => {
 
     expect(artifact.providerVerified).toBe(true);
     expect(manager.getRun(run.runId)?.artifacts.issueBinding).toEqual(artifact);
+    expect(manager.getRun(run.runId)?.manifest.issueNumber).toBe(42);
     expect(() =>
       manager.saveArtifact(run.runId, "issue_binding", artifact as any),
     ).toThrow("AuthoritativeArtifactViolationError");
+  });
+
+  it("binds enterprise issue URLs using the configured provider host", async () => {
+    const manager = new ContributionRunManager({ baseDir: baseDir("enterprise-issue") });
+    const run = manager.createRun({ repoFullName: "owner/repo" });
+    savePublicCommunityGate(manager, run.runId);
+    const host = "github.enterprise.test";
+    const service = new IssueBindingService(manager, {
+      issueUrlHost: host,
+      getIssue: async (_owner, _repo, issueNumber) => ({
+        status: "OK",
+        data: {
+          number: issueNumber,
+          title: "Enterprise issue",
+          state: "open",
+          htmlUrl: `https://${host}/owner/repo/issues/${issueNumber}`,
+          body: "Provider-backed issue body.",
+          labels: [],
+        },
+      }),
+    });
+
+    const binding = await service.bind({
+      runId: run.runId,
+      repoFullName: "owner/repo",
+      issueNumber: 42,
+    });
+
+    expect(binding.issueUrl).toBe(`https://${host}/owner/repo/issues/42`);
+    expect(manager.getRun(run.runId)?.manifest.issueNumber).toBe(42);
+    await expect(
+      service.verify({
+        runId: run.runId,
+        repoFullName: "owner/repo",
+        issueNumber: 42,
+      }),
+    ).resolves.toEqual(binding);
+  });
+
+  it("exposes an unauthenticated issue-only provider to agent-facing code", () => {
+    const provider = buildPublicIssueBindingProvider({
+      host: "github.enterprise.test",
+    });
+    expect(provider.issueUrlHost).toBe("github.enterprise.test");
+    expect(provider.getIssue).toBeFunction();
+    expect("createIssue" in provider).toBe(false);
+  });
+
+  it("requires a valid canonical policy snapshot before public issue binding", async () => {
+    const manager = new ContributionRunManager({ baseDir: baseDir("missing-policy") });
+    const run = manager.createRun({ repoFullName: "owner/repo" });
+    let lookupCount = 0;
+    const provider = {
+      getIssue: async () => {
+        lookupCount += 1;
+        return {
+          status: "OK" as const,
+          data: {
+            number: 42,
+            title: "Fix the verified issue",
+            state: "open" as const,
+            htmlUrl: "https://github.com/owner/repo/issues/42",
+            body: "Provider issue body.",
+            labels: [],
+          },
+        };
+      },
+    };
+
+    await expect(
+      new IssueBindingService(manager, provider).bind({
+        runId: run.runId,
+        repoFullName: "owner/repo",
+        issueNumber: 42,
+      }),
+    ).rejects.toThrow("requires a valid canonical workspace policy snapshot");
+    expect(lookupCount).toBe(0);
+    expect(manager.getRun(run.runId)?.artifacts.issueBinding).toBeUndefined();
+    expect(manager.getRun(run.runId)?.manifest.issueNumber).toBeUndefined();
+  });
+
+  it("blocks public issue binding for private disclosure runs", async () => {
+    const manager = new ContributionRunManager({ baseDir: baseDir("private-issue") });
+    const run = manager.createRun({ repoFullName: "owner/repo" });
+    saveCanonicalArtifact(manager, run.runId, "workspace", {
+      baseCommitSha: "a".repeat(40),
+      communityGate: privateCommunityGate(),
+    });
+    let lookupCount = 0;
+    const provider = {
+      getIssue: async () => {
+        lookupCount += 1;
+        return {
+          status: "OK" as const,
+          data: {
+            number: 42,
+            title: "Private vulnerability",
+            state: "open" as const,
+            htmlUrl: "https://github.com/owner/repo/issues/42",
+            body: "Private issue body.",
+            labels: [],
+          },
+        };
+      },
+    };
+
+    await expect(
+      new IssueBindingService(manager, provider).bind({
+        runId: run.runId,
+        repoFullName: "owner/repo",
+        issueNumber: 42,
+      }),
+    ).rejects.toThrow("private disclosure runs cannot bind a public issue");
+    expect(lookupCount).toBe(0);
+    expect(manager.getRun(run.runId)?.artifacts.issueBinding).toBeUndefined();
+    expect(manager.getRun(run.runId)?.manifest.issueNumber).toBeUndefined();
+  });
+
+  it("rechecks public issue bindings against the current provider without writing", async () => {
+    const manager = new ContributionRunManager({ baseDir: baseDir("verify-issue") });
+    const run = manager.createRun({ repoFullName: "owner/repo", issueNumber: 42 });
+    savePublicCommunityGate(manager, run.runId);
+    const binding = {
+      runId: run.runId,
+      provider: "github" as const,
+      repoFullName: "owner/repo",
+      providerIssueId: 42,
+      state: "open" as const,
+      title: "Fix the verified issue",
+      issueUrl: "https://github.com/owner/repo/issues/42",
+      providerVerified: true as const,
+      verifiedAt: "2026-10-06T00:00:00.000Z",
+    };
+    saveCanonicalArtifact(manager, run.runId, "issue_binding", binding);
+    let issue: {
+      number: number;
+      title: string;
+      state: "open" | "closed";
+      htmlUrl: string;
+      body: string;
+      labels: string[];
+    } = {
+      number: 42,
+      title: "Fix the verified issue",
+      state: "open" as const,
+      htmlUrl: "https://github.com/owner/repo/issues/42",
+      body: "Provider-backed issue body.",
+      labels: ["bug"],
+    };
+    let lookupCount = 0;
+    const service = new IssueBindingService(manager, {
+      getIssue: async () => {
+        lookupCount += 1;
+        return { status: "OK" as const, data: issue };
+      },
+    });
+
+    const verifiedIssueContext = await service.verifyIssueContext({
+      runId: run.runId,
+      repoFullName: "owner/repo",
+      issueNumber: 42,
+    });
+    expect(verifiedIssueContext.binding).toEqual(binding);
+    expect(verifiedIssueContext.issue.body).toBe("Provider-backed issue body.");
+    expect(verifiedIssueContext.issue.labels).toEqual(["bug"]);
+    expect(lookupCount).toBe(1);
+
+    issue = { ...issue, title: "Changed title" };
+    await expect(service.verify({
+      runId: run.runId,
+      repoFullName: "owner/repo",
+      issueNumber: 42,
+    })).rejects.toThrow("does not match the stored binding");
+
+    issue = { ...issue, state: "closed" };
+    await expect(service.verify({
+      runId: run.runId,
+      repoFullName: "owner/repo",
+      issueNumber: 42,
+    })).rejects.toThrow("mismatched issue identity");
+    expect(manager.getRun(run.runId)?.artifacts.issueBinding).toEqual(binding);
+    expect(manager.getRun(run.runId)?.manifest.issueNumber).toBe(42);
+  });
+
+  it("rejects a provider binding that conflicts with the run issue number", async () => {
+    const manager = new ContributionRunManager({ baseDir: baseDir("issue-conflict") });
+    const run = manager.createRun({
+      repoFullName: "owner/repo",
+      issueNumber: 7,
+    });
+    savePublicCommunityGate(manager, run.runId);
+    let lookupCount = 0;
+    const provider = {
+      getIssue: async () => {
+        lookupCount += 1;
+        return {
+          status: "OK" as const,
+          data: {
+            number: 42,
+            title: "Fix the verified issue",
+            state: "open" as const,
+            htmlUrl: "https://github.com/owner/repo/issues/42",
+            body: "Provider-backed issue body.",
+            labels: [],
+          },
+        };
+      },
+    };
+
+    await expect(
+      new IssueBindingService(manager, provider).bind({
+        runId: run.runId,
+        repoFullName: "owner/repo",
+        issueNumber: 42,
+      }),
+    ).rejects.toThrow("already bound to issue #7");
+    expect(lookupCount).toBe(0);
+    expect(manager.getRun(run.runId)?.artifacts.issueBinding).toBeUndefined();
   });
 
   it("records a provider-verified private channel and blocks public submission", async () => {

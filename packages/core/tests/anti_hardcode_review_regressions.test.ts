@@ -142,6 +142,191 @@ describe("anti-hardcode review regressions", () => {
     }
   });
 
+  it("scans C# interpolated verbatim strings that begin with three quotes", () => {
+    const result = lintAntiHardcode(
+      diff(
+        "src/feature.cs",
+        '+var text = $@"""value {repo == "owner/repo"}""";',
+      ),
+      { targetRepo: "owner/repo" },
+    );
+
+    expect(result.violations.some(
+      (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+    )).toBe(true);
+  });
+
+  it("detects new code inside an unchanged repository-specific guard", () => {
+    const patch = [
+      "diff --git a/src/feature.ts b/src/feature.ts",
+      "--- a/src/feature.ts",
+      "+++ b/src/feature.ts",
+      "@@ -1,2 +1,3 @@",
+      ' if (repo === "owner/repo") {',
+      "+  return specialResult();",
+      " }",
+    ].join("\n");
+
+    expect(
+      lintAntiHardcode(patch, { targetRepo: "owner/repo" }).violations.some(
+        (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+      ),
+    ).toBe(true);
+
+    const codeAfterGuard = [
+      "diff --git a/src/feature.ts b/src/feature.ts",
+      "--- a/src/feature.ts",
+      "+++ b/src/feature.ts",
+      "@@ -1,2 +1,3 @@",
+      ' if (repo === "owner/repo") {',
+      "   return existingResult();",
+      " }",
+      "+return generalResult();",
+    ].join("\n");
+    expect(
+      lintAntiHardcode(codeAfterGuard, { targetRepo: "owner/repo" }).violations.some(
+        (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+      ),
+    ).toBe(false);
+  });
+
+  it("recognizes snake-case repository identifiers", () => {
+    for (const source of [
+      '+if (target_repo == "owner/repo") return fallback();',
+      '+if (repository_full_name == "owner/repo") return fallback();',
+    ]) {
+      expect(
+        lintAntiHardcode(diff("src/feature.py", source), {
+          targetRepo: "owner/repo",
+        }).violations.some(
+          (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("exempts Ruby spec files and still scans nearby production files", () => {
+    const example = '+if repo == "owner/repo" then special end';
+
+    expect(
+      lintAntiHardcode(diff("spec/features/repository_spec.rb", example), {
+        targetRepo: "owner/repo",
+      }).isClean,
+    ).toBe(true);
+    expect(
+      lintAntiHardcode(diff("src/specification.rb", example), {
+        targetRepo: "owner/repo",
+      }).violations.some(
+        (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+      ),
+    ).toBe(true);
+  });
+
+  it("exempts inline Rust cfg(test) modules while scanning production code", () => {
+    const testModule = [
+      "diff --git a/src/feature.rs b/src/feature.rs",
+      "--- a/src/feature.rs",
+      "+++ b/src/feature.rs",
+      "@@ -0,0 +1,6 @@",
+      "+#[cfg(test)]",
+      "+mod tests {",
+      "+    fn only_for_tests() {",
+      '+        if repo == "owner/repo" { special(); }',
+      "+    }",
+      "+}",
+    ].join("\n");
+
+    expect(
+      lintAntiHardcode(testModule, { targetRepo: "owner/repo" }).isClean,
+    ).toBe(true);
+    expect(
+      lintAntiHardcode(
+        diff("src/feature.rs", '+if repo == "owner/repo" { special(); }'),
+        { targetRepo: "owner/repo" },
+      ).violations.some(
+        (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+      ),
+    ).toBe(true);
+  });
+
+  it("exempts changes inside an existing inline Rust cfg(test) module", () => {
+    const filePath = "src/feature.rs";
+    const baseFile = [
+      "#[cfg(test)]",
+      "mod tests {",
+      "    fn only_for_tests() {",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    const patch = [
+      "diff --git a/" + filePath + " b/" + filePath,
+      "--- a/" + filePath,
+      "+++ b/" + filePath,
+      "@@ -3,2 +3,3 @@",
+      "     fn only_for_tests() {",
+      '+        if repo == "owner/repo" { special(); }',
+      "     }",
+    ].join("\n");
+
+    expect(
+      lintAntiHardcode(patch, {
+        targetRepo: "owner/repo",
+        baseFileContents: new Map([[filePath, baseFile]]),
+      }).isClean,
+    ).toBe(true);
+  });
+
+  it("scans a Rust module after its base cfg(test) boundary is removed", () => {
+    const filePath = "src/feature.rs";
+    const baseFile = [
+      "#[cfg(test)]",
+      "mod tests {",
+      "    fn keep() {}",
+      "}",
+      "",
+    ].join("\n");
+    const patch = [
+      "diff --git a/" + filePath + " b/" + filePath,
+      "--- a/" + filePath,
+      "+++ b/" + filePath,
+      "@@ -1,4 +1,6 @@",
+      "-#[cfg(test)]",
+      " mod tests {",
+      "+    pub fn production_issue_path(issue_number: u32) {",
+      '+        if issue_number == 123 { panic!("special"); }',
+      "+    }",
+      "     fn keep() {}",
+      " }",
+    ].join("\n");
+
+    expect(
+      lintAntiHardcode(patch, {
+        issueNumber: 123,
+        baseFileContents: new Map([[filePath, baseFile]]),
+      }).violations.some(
+        (entry) => entry.rule === "ISSUE_NUMBER_HARDCODING",
+      ),
+    ).toBe(true);
+  });
+
+  it("recognizes Java and C# string equality methods", () => {
+    for (const [filePath, source] of [
+      ["src/Feature.java", 'if (repo.equals("owner/repo")) return special();'],
+      ["src/Feature.java", 'if ("owner/repo".equals(repositoryName)) return special();'],
+      ["src/Feature.cs", 'if (string.Equals(repo, "owner/repo")) return Special();'],
+      ["src/Feature.cs", 'if (String.Equals("owner/repo", targetRepository)) return Special();'],
+    ] as const) {
+      expect(
+        lintAntiHardcode(diff(filePath, `+${source}`), {
+          targetRepo: "owner/repo",
+        }).violations.some(
+          (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+        ),
+      ).toBe(true);
+    }
+  });
+
   it("scans leading plus source lines and comparisons split across added lines", () => {
     const leadingPlusComparison = diff(
       "src/feature.ts",
@@ -440,5 +625,54 @@ describe("anti-hardcode review regressions", () => {
     ].join("\n");
     expect(lintAntiHardcode(python).isClean).toBe(false);
     expect(lintAntiHardcode(go).isClean).toBe(false);
+  });
+
+  it("checks new behavior beneath unparenthesized repository guards", () => {
+    const patches = [
+      [
+        "diff --git a/src/feature.py b/src/feature.py",
+        "--- a/src/feature.py",
+        "+++ b/src/feature.py",
+        "@@ -1,2 +1,3 @@",
+        ' if repo == "owner/repo":',
+        "+    return fallback",
+        " pass",
+      ],
+      [
+        "diff --git a/src/feature.go b/src/feature.go",
+        "--- a/src/feature.go",
+        "+++ b/src/feature.go",
+        "@@ -1,2 +1,3 @@",
+        ' if repo == "owner/repo" {',
+        "+    return fallback",
+        " }",
+      ],
+      [
+        "diff --git a/src/feature.rs b/src/feature.rs",
+        "--- a/src/feature.rs",
+        "+++ b/src/feature.rs",
+        "@@ -1,2 +1,3 @@",
+        ' if repo == "owner/repo" {',
+        "+    return fallback",
+        " }",
+      ],
+      [
+        "diff --git a/src/feature.rb b/src/feature.rb",
+        "--- a/src/feature.rb",
+        "+++ b/src/feature.rb",
+        "@@ -1,2 +1,3 @@",
+        ' if repo == "owner/repo"',
+        "+    return fallback",
+        " end",
+      ],
+    ].map((lines) => lines.join("\n"));
+
+    for (const patch of patches) {
+      expect(
+        lintAntiHardcode(patch, { targetRepo: "owner/repo" }).violations.some(
+          (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+        ),
+      ).toBe(true);
+    }
   });
 });

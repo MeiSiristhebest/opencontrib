@@ -8,6 +8,8 @@ import {
   qualifyIssue,
   rankOpportunitySignals,
 } from "@opencontrib/core";
+import type { ContributionRunManager } from "@opencontrib/core";
+import type { IssueBindingProvider } from "../../../core/src/github/issue-binding-service.js";
 import { printJSON, parseJSON, readStdin } from "../utils/output.js";
 import { CliExitError } from "../utils/exit.js";
 
@@ -127,7 +129,13 @@ const feasibilityCommand = new Command("feasibility")
     },
   );
 
-const contextCommand = new Command("context")
+export function createContextCommand(
+  dependencies: {
+    runManager?: ContributionRunManager;
+    issueBindingProvider?: IssueBindingProvider;
+  } = {},
+): Command {
+  return new Command("context")
   .description(
     "Assemble multi-dimensional context for an issue (problem, repo skeleton, test targets)",
   )
@@ -150,12 +158,19 @@ const contextCommand = new Command("context")
         }
         const {
           ContextAssembler,
+          IssueBindingArtifactSchema,
           buildContributionRunManager,
+          buildPublicIssueBindingProvider,
           isPreparedRepositoryWorkspace,
+          requiresPrivateVulnerabilityDisclosure,
           runRepositoryGit,
         } = await import("@opencontrib/core");
+        const { IssueBindingService } = await import(
+          "../../../core/src/github/issue-binding-service.js"
+        );
         const assembler = new ContextAssembler();
-        const runManager = buildContributionRunManager();
+        const runManager =
+          dependencies.runManager ?? buildContributionRunManager();
         const runId = runManager.resolveRunId(opts.runId);
         const requestedRepoFullName =
           parsed.repoDetails.fullName ||
@@ -179,7 +194,11 @@ const contextCommand = new Command("context")
             `Contribution run ${runId} is bound to ${run?.manifest.repoFullName || "an unknown repository"}, but the request names ${requestedRepoFullName}.`,
           );
         }
+        const privateDisclosureRoute = Boolean(
+          run && requiresPrivateVulnerabilityDisclosure(run),
+        );
         if (
+          !privateDisclosureRoute &&
           runId &&
           run?.manifest.issueNumber !== undefined &&
           Number(parsed.issue.number) !== run.manifest.issueNumber
@@ -203,6 +222,53 @@ const contextCommand = new Command("context")
             `Contribution run ${runId} has no prepared workspace matching its recorded repository and base commit; prepare the workspace before assembling context.`,
           );
         }
+        const requestedIssueNumber =
+          parsed.issue.number === undefined
+            ? undefined
+            : Number(parsed.issue.number);
+        const issueBinding = IssueBindingArtifactSchema.safeParse(
+          run?.artifacts.issueBinding,
+        );
+        let verifiedIssueContext:
+          | { number: number; title: string; body: string; labels: string[] }
+          | undefined;
+        if (runId && privateDisclosureRoute) {
+          if (
+            requestedIssueNumber !== undefined ||
+            run?.manifest.issueNumber !== undefined ||
+            run?.artifacts.issueBinding !== undefined
+          ) {
+            throw new Error(
+              `Private disclosure run ${runId} cannot use a public issue number or binding during context assembly.`,
+            );
+          }
+        } else if (runId) {
+          if (
+            !Number.isSafeInteger(requestedIssueNumber) ||
+            requestedIssueNumber! <= 0 ||
+            !issueBinding.success ||
+            issueBinding.data.runId !== runId ||
+            issueBinding.data.repoFullName.toLowerCase() !== requestedRepo ||
+            issueBinding.data.provider !== "github" ||
+            issueBinding.data.providerVerified !== true ||
+            issueBinding.data.providerIssueId !== requestedIssueNumber ||
+            run?.manifest.issueNumber !== requestedIssueNumber ||
+            issueBinding.data.title !== parsed.issue.title
+          ) {
+            throw new Error(
+              `Contribution run ${runId} has no provider-verified issue binding matching issue #${parsed.issue.number}; prepare the workspace for that issue first.`,
+            );
+          }
+          const verified = await new IssueBindingService(
+            runManager,
+            dependencies.issueBindingProvider ?? buildPublicIssueBindingProvider(),
+          ).verifyIssueContext({
+            runId,
+            repoFullName: requestedRepoFullName,
+            issueNumber: requestedIssueNumber!,
+          });
+          verifiedIssueContext = verified.issue;
+        }
         const repoTree = (parsed.repoTree || []).map((item: any) => ({
           path: item.path,
           mode: "100644",
@@ -211,14 +277,16 @@ const contextCommand = new Command("context")
         }));
         const context = await assembler.assembleContext({
           issue: {
-            number: parsed.issue.number,
-            title: parsed.issue.title,
-            body: parsed.issue.body,
-            labels: parsed.issue.labels || [],
+            ...(verifiedIssueContext === undefined && requestedIssueNumber === undefined
+              ? {}
+              : { number: verifiedIssueContext?.number ?? requestedIssueNumber }),
+            title: verifiedIssueContext?.title ?? parsed.issue.title,
+            body: verifiedIssueContext?.body ?? parsed.issue.body,
+            labels: verifiedIssueContext?.labels ?? parsed.issue.labels ?? [],
             isOpen: true,
             assignees: [],
             createdAt: parsed.issue.createdAt || new Date().toISOString(),
-            comments: parsed.issue.comments || [],
+            comments: verifiedIssueContext ? [] : parsed.issue.comments || [],
           },
           repoDetails: {
             ...parsed.repoDetails,
@@ -241,6 +309,7 @@ const contextCommand = new Command("context")
       }
     },
   );
+}
 
 const manifestsCommand = new Command("manifests")
   .description(
@@ -271,5 +340,5 @@ export const discoveryCommand = new Command("discovery")
   .addCommand(rankCommand)
   .addCommand(qualifyCommand)
   .addCommand(feasibilityCommand)
-  .addCommand(contextCommand)
+  .addCommand(createContextCommand())
   .addCommand(manifestsCommand);

@@ -16,6 +16,10 @@ import {
   type IdGenerator,
 } from "../ports/id-generator.port.js";
 import { ActiveSessionManager } from "./active-session.js";
+import { IssueBindingArtifactSchema } from "../contracts/schemas.js";
+import { requiresPrivateVulnerabilityDisclosure } from "../submission/submission-route.js";
+import type { ProviderIssue } from "../github/types.js";
+import { canonicalGitHubIssueUrl } from "../github/issue-url.js";
 
 import {
   getProtocolGuidance,
@@ -116,6 +120,76 @@ export class ContributionRunManager {
     // Register the service-only capability after construction. The capability
     // is held in a private WeakMap and is not exposed through the public core
     // barrel; canonical services use it to persist authoritative artifacts.
+    const pinIssueNumberFromProviderIssue = (
+      runId: string,
+      issue: ProviderIssue,
+      issueUrlHost?: string,
+    ): ContributionRunManifest => {
+      const summary = this.getRun(runId);
+      if (!summary) {
+        throw new Error(`Contribution run ${runId} does not exist`);
+      }
+      if (requiresPrivateVulnerabilityDisclosure(summary)) {
+        throw new Error(
+          `PrivateIssueBindingForbiddenError: private disclosure run ${runId} cannot pin a public issue number.`,
+        );
+      }
+      const binding = IssueBindingArtifactSchema.safeParse(
+        summary.artifacts.issueBinding,
+      );
+      const expectedIssueUrl = canonicalGitHubIssueUrl(
+        issueUrlHost,
+        summary.manifest.repoFullName,
+        issue.number,
+      );
+      if (
+        !binding.success ||
+        binding.data.runId !== runId ||
+        binding.data.repoFullName.toLowerCase() !==
+          summary.manifest.repoFullName.toLowerCase() ||
+        binding.data.provider !== "github" ||
+        binding.data.providerVerified !== true ||
+        binding.data.providerIssueId !== issue.number ||
+        binding.data.state !== issue.state ||
+        binding.data.title !== issue.title ||
+        binding.data.issueUrl.toLowerCase() !== issue.htmlUrl.toLowerCase() ||
+        issue.state !== "open" ||
+        issue.htmlUrl.toLowerCase() !== expectedIssueUrl.toLowerCase()
+      ) {
+        throw new Error(
+          `IssueBindingProviderError: run ${runId} has no canonical issue binding matching the validated provider response.`,
+        );
+      }
+      if (
+        summary.manifest.issueNumber !== undefined &&
+        summary.manifest.issueNumber !== binding.data.providerIssueId
+      ) {
+        throw new Error(
+          `IssueBindingImmutableError: run ${runId} is already bound to issue #${summary.manifest.issueNumber}.`,
+        );
+      }
+      if (summary.manifest.issueNumber === binding.data.providerIssueId) {
+        return summary.manifest;
+      }
+
+      const manifest = this.bundleManager.readManifest(runId);
+      if (!manifest) {
+        throw new Error(`Contribution run ${runId} does not exist`);
+      }
+      manifest.issueNumber = binding.data.providerIssueId;
+      manifest.updatedAt = this.clock.nowIso();
+      this.bundleManager.saveManifest(manifest);
+      this.bundleManager.appendEvent(runId, {
+        phase: manifest.currentPhase,
+        eventType: "ISSUE_NUMBER_BOUND_BY_PROVIDER",
+        payload: {
+          issueNumber: binding.data.providerIssueId,
+          provider: binding.data.provider,
+        },
+      });
+      return manifest;
+    };
+
     registerCanonicalRunWriter(this, {
       saveArtifact: (runId, type, content) =>
         this._saveArtifactInternal(runId, type, content),
@@ -135,6 +209,7 @@ export class ContributionRunManager {
           providerSideEffectPossible,
         ),
       hydrateRun: (manifest) => this._hydrateRunInternal(manifest),
+      pinIssueNumberFromProviderIssue,
     });
   }
 

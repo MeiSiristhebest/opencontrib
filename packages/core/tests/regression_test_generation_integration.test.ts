@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { EvidenceService } from "../src/index.js";
+import { EvidenceService, hashCommunityGateSnapshot } from "../src/index.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -97,6 +97,8 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
             title: "mul always returns 0",
             state: "open" as const,
             htmlUrl: "https://github.com/test-org/math-repo/issues/42",
+            body: "Provider issue body.",
+            labels: [],
           },
         }),
       };
@@ -116,15 +118,26 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
               title: "mul always returns 0",
               state: "open" as const,
               htmlUrl: "https://github.com/test-org/math-repo/issues/42",
+              body: "Provider issue body.",
+              labels: [],
             },
           };
         },
       };
-      await new IssueBindingService(agentRunManager, issueProvider).bind({
-        runId: manifest.runId,
-        repoFullName: "test-org/math-repo",
-        issueNumber: 42,
-      });
+      const communityGate = {
+        sourceCommitSha: baseCommitSha,
+        policy: {
+          hasGatingRules: false,
+          requiresIssueApprovalBeforePr: false,
+          autoClosesNewIssues: false,
+          hasLgtmApprovalProtocol: false,
+          restrictedTriageHours: false,
+          privateVulnerabilityDisclosure: false,
+          reasons: [],
+          suggestedContributorAction: "Follow the repository contribution policy.",
+          matchedKeywords: [],
+        },
+      };
       saveCanonicalArtifact(
         agentRunManager,
         manifest.runId,
@@ -136,10 +149,17 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
           baseRepoPath: agentWorkspace,
           baseBranch: "main",
           repoFullName: "test-org/math-repo",
+          communityGate,
+          communityGateSha256: hashCommunityGateSnapshot(communityGate),
           createdAt: new Date().toISOString(),
         },
         "WORKSPACE_PREPARED",
       );
+      await new IssueBindingService(agentRunManager, issueProvider).bind({
+        runId: manifest.runId,
+        repoFullName: "test-org/math-repo",
+        issueNumber: 42,
+      });
 
       // 2. Agent authoring a brand new regression test
       const reproTestFile = {

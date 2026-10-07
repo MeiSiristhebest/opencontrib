@@ -1,6 +1,7 @@
 import { EnvConfigGhCliCredentialsProvider } from "../github/credentials-provider.js";
 import { FileResponseCache } from "../github/response-cache.js";
 import { OctokitIssueSource } from "../github/octokit-issue-source.js";
+import { normalizeGitHubIssueHost } from "../github/issue-url.js";
 import { CredentialsProvider } from "../ports/credentials-provider.port.js";
 import { ResponseCache } from "../ports/response-cache.port.js";
 import type {
@@ -45,6 +46,7 @@ export interface GitHubClientDependencies {
  * monolith; only the internal wiring changed.
  */
 export class GitHubClient {
+  readonly issueUrlHost: string;
   private credentials: CredentialsProvider;
   private cache: ResponseCache;
   private source: OctokitIssueSource;
@@ -54,6 +56,7 @@ export class GitHubClient {
     deps: GitHubClientDependencies = {},
   ) {
     const host = options.host || "github.com";
+    this.issueUrlHost = normalizeGitHubIssueHost(host);
     const apiVersion = options.apiVersion || "2022-11-28";
 
     this.credentials =

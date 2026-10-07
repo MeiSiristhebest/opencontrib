@@ -4,6 +4,7 @@ import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 
 const MAX_BASE_SOURCE_CONTENT_BYTES = 64 * 1024 * 1024;
+const MAX_BASE_SOURCE_CONTENT_TOTAL_BYTES = 64 * 1024 * 1024;
 import {
   CommunityGateSnapshotSchema,
   GovernanceDecisionArtifactSchema,
@@ -105,10 +106,12 @@ function readSourceFileContentsAtCommit(
     /\.(?:[cm]?[jt]sx?|vue|svelte|py|go|rs|java|kt|kts|swift|cs|c|h|cc|cpp|hpp|php|rb|sh|bash|zsh|ps1|scala|sc|dart|ex|exs|lua|sql|sol)$/i;
   if (!/^[a-f0-9]{40,64}$/i.test(baseCommitSha)) return contents;
 
+  let totalBytes = 0;
   for (const filePath of paths) {
     if (/\.[^/]+$/.test(filePath) && !sourceExtension.test(filePath)) continue;
+    let source: string;
     try {
-      const source = execFileSync(
+      source = execFileSync(
         "git",
         ["-C", repositoryPath, "show", `${baseCommitSha}:${filePath}`],
         {
@@ -118,7 +121,6 @@ function readSourceFileContentsAtCommit(
           maxBuffer: MAX_BASE_SOURCE_CONTENT_BYTES,
         },
       );
-      contents.set(filePath.replace(/\\/g, "/"), source);
     } catch (error) {
       const errorCode =
         error && typeof error === "object" && "code" in error
@@ -133,7 +135,17 @@ function readSourceFileContentsAtCommit(
         );
       }
       // New files have no base content to use for lexical-state seeding.
+      continue;
     }
+
+    const sourceBytes = Buffer.byteLength(source, "utf8");
+    if (sourceBytes > MAX_BASE_SOURCE_CONTENT_TOTAL_BYTES - totalBytes) {
+      throw new Error(
+        `GovernanceBaseContentUnavailableError: selected base sources exceed the aggregate safe read limit at '${filePath}'.`,
+      );
+    }
+    totalBytes += sourceBytes;
+    contents.set(filePath.replace(/\\/g, "/"), source);
   }
   return contents;
 }

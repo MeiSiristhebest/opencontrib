@@ -9,7 +9,7 @@
  */
 import { EvidenceService } from "../src/evidence/evidence-service.js";
 import { describe, expect, it, spyOn } from "bun:test";
-import { mkdtempSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { FixedClock } from "../src/ports/clock.port.js";
@@ -17,10 +17,13 @@ import { MockLLMProvider } from "../src/testkit/mock-llm.js";
 import { LLMService } from "../src/llm/llm-service.js";
 import { ContributionStateMachine } from "../src/orchestration/state-machine.js";
 import { ContextAssembler } from "../src/discovery/context-assembler.js";
+import { ContributionRunManager } from "../src/run/run-manager.js";
+import { ActiveSessionManager } from "../src/run/active-session.js";
 import type { PipelineDeps } from "../src/orchestration/pipeline/types.js";
 import {
   ContextAssemblyStep,
   ImplementValidateLoopStep,
+  WorkspaceAllocationStep,
   buildReproductionDesignPrompt,
   deriveTargetedReproductionTestCommand,
   resolveGreenVerificationTestCommand,
@@ -117,7 +120,7 @@ describe("Pipeline RED command selection", () => {
         formatContextPrompt: () => "prompt",
       },
       runManager: {
-        getRun: () => ({ runId: "run_docs_only" }),
+        getRun: () => ({ runId: "run_docs_only", artifacts: {} }),
         saveArtifact: () => {},
       },
     };
@@ -152,7 +155,7 @@ describe("Pipeline RED command selection", () => {
         formatContextPrompt: () => "prompt",
       },
       runManager: {
-        getRun: () => ({ runId: "run_parser_fix" }),
+        getRun: () => ({ runId: "run_parser_fix", artifacts: {} }),
         saveArtifact: () => {},
       },
     };
@@ -167,6 +170,112 @@ describe("Pipeline RED command selection", () => {
     expect(
       resolveGreenVerificationTestCommand(ctx.testCmd, ctx.repositoryTestCmd),
     ).toBe(ctx.testCmd);
+  });
+
+  it("uses the private run identifier instead of a public issue number for workspace allocation", async () => {
+    const root = mkdtempSync(join(tmpdir(), "oc-private-pipeline-workspace-"));
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = join(root, "home");
+    try {
+      const runManager = new ContributionRunManager({
+        baseDir: join(root, "runs"),
+        activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+      });
+      const runId = runManager.createRun({ repoFullName: "owner/repo" }).runId;
+      let allocatedTarget: string | number | undefined;
+      const ctx: any = {
+        runId,
+        selectedOpp: {
+          repoFullName: "owner/repo",
+          issueNumber: 42,
+          title: "Security report",
+          body: "",
+        },
+      };
+      const deps: any = {
+        runManager,
+        stateMachine: { transition: () => {}, setWorkspace: () => {} },
+        worktreeManager: {
+          createIsolatedWorkspace: (input: { issueOrTaskId: string | number }) => {
+            allocatedTarget = input.issueOrTaskId;
+            return {
+              workspacePath: join(root, "workspace"),
+              branchName: "opencontrib/run-private",
+              isWorktree: true,
+              baseRepoPath: join(root, "repo"),
+              baseCommitSha: "a".repeat(40),
+              baseBranch: "main",
+            };
+          },
+          runGit: () => ({ success: true, stdout: "", stderr: "" }),
+          cleanupWorkspace: () => {},
+        },
+      };
+
+      await new WorkspaceAllocationStep().execute(ctx, deps);
+
+      expect(allocatedTarget).toBe(runId);
+      expect(runManager.getRun(runId)?.manifest.issueNumber).toBeUndefined();
+    } finally {
+      if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+      else process.env.OPENCONTRIB_HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("omits public issue numbers when assembling context for a private disclosure run", async () => {
+    const privateGate = {
+      sourceCommitSha: "a".repeat(40),
+      policy: {
+        hasGatingRules: false,
+        requiresIssueApprovalBeforePr: false,
+        autoClosesNewIssues: false,
+        hasLgtmApprovalProtocol: false,
+        restrictedTriageHours: false,
+        privateVulnerabilityDisclosure: true,
+        reasons: [],
+        suggestedContributorAction: "Use the private security channel.",
+        matchedKeywords: [],
+      },
+    };
+    let assembledInput: Record<string, unknown> | undefined;
+    const ctx: any = {
+      runId: "run_private_context",
+      selectedOpp: {
+        repoFullName: "owner/repo",
+        issueNumber: 42,
+        title: "Security report",
+        body: "Report details",
+        primaryLanguage: "Go",
+      },
+      workspace: { workspacePath: "/private/workspace" },
+    };
+    const deps: any = {
+      stateMachine: { transition: () => {} },
+      contextAssembler: {
+        assemble: async (input: Record<string, unknown>) => {
+          assembledInput = input;
+          return {
+            repoContext: {
+              runnableCommands: { testCommand: "go test ./..." },
+              testCommandHint: "go test ./...",
+            },
+          };
+        },
+        formatContextPrompt: () => "prompt",
+      },
+      worktreeManager: { runGit: () => ({ success: true, stdout: "", stderr: "" }) },
+      runManager: {
+        getRun: () => ({
+          artifacts: { workspace: { communityGate: privateGate } },
+        }),
+        saveArtifact: () => {},
+      },
+    };
+
+    await new ContextAssemblyStep().execute(ctx, deps);
+
+    expect(assembledInput?.issueNumber).toBeUndefined();
   });
 });
 
@@ -437,10 +546,38 @@ describe("Pipeline command review regressions", () => {
       deriveTargetedReproductionTestCommand("node --test", ["test/parser.test.js"]),
     ).toBe("node --test test/parser.test.js");
     expect(
+      deriveTargetedReproductionTestCommand("yarn exec mocha", ["test/parser.test.js"]),
+    ).toBe("yarn exec mocha test/parser.test.js");
+    expect(
       deriveTargetedReproductionTestCommand("npm exec --no -- mocha --config .mocharc.json", ["test/parser.test.js"]),
     ).toBe("npm exec --no -- mocha --config .mocharc.json test/parser.test.js");
     expect(
+      deriveTargetedReproductionTestCommand("yarn exec mocha --config .mocharc.json", ["test/parser.test.js"]),
+    ).toBe("yarn exec mocha --config .mocharc.json test/parser.test.js");
+    expect(
       deriveTargetedReproductionTestCommand("npm exec --no -- mocha --config ../outside.json", ["test/parser.test.js"]),
+    ).toBeUndefined();
+  });
+
+  it("retains safe Bun config options when appending scoped RED test files", () => {
+    expect(
+      deriveTargetedReproductionTestCommand("bun test --config ./bunfig.toml", ["tests/parser.test.ts"]),
+    ).toBe("bun test --config ./bunfig.toml tests/parser.test.ts");
+    expect(
+      deriveTargetedReproductionTestCommand("bun test -c bunfig.toml", ["tests/parser.test.ts"]),
+    ).toBe("bun test -c bunfig.toml tests/parser.test.ts");
+    expect(
+      deriveTargetedReproductionTestCommand("bun test --config=./bunfig.toml", ["tests/parser.test.ts"]),
+    ).toBe("bun test --config=./bunfig.toml tests/parser.test.ts");
+
+    expect(
+      deriveTargetedReproductionTestCommand("bun test --config ../outside.toml", ["tests/parser.test.ts"]),
+    ).toBeUndefined();
+    expect(
+      deriveTargetedReproductionTestCommand("bun test --config /tmp/bunfig.toml", ["tests/parser.test.ts"]),
+    ).toBeUndefined();
+    expect(
+      deriveTargetedReproductionTestCommand("bun test --watch", ["tests/parser.test.ts"]),
     ).toBeUndefined();
   });
 

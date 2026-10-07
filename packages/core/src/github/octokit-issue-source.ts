@@ -9,6 +9,19 @@ import type {
 import type { ResponseCache } from '../ports/response-cache.port.js';
 import { requestWithRetry } from './retry-strategy.js';
 
+function mapIssueLabels(labels: unknown): string[] {
+  if (!Array.isArray(labels)) return [];
+  return labels
+    .map((label) =>
+      typeof label === 'string'
+        ? label
+        : label && typeof label === 'object' && 'name' in label
+          ? String((label as { name?: unknown }).name ?? '')
+          : '',
+    )
+    .filter((label) => label.length > 0);
+}
+
 export interface OctokitIssueSourceOptions {
   token: string;
   host: string;
@@ -242,6 +255,8 @@ export class OctokitIssueSource {
         title: String(issue.title || ''),
         state: issue.state === 'open' ? 'open' : 'closed',
         htmlUrl: String(issue.html_url || ''),
+        body: String(issue.body ?? ''),
+        labels: mapIssueLabels(issue.labels),
       },
     };
   }
@@ -280,6 +295,8 @@ export class OctokitIssueSource {
         title: String(issue.title || ""),
         state: issue.state === "open" ? "open" : "closed",
         htmlUrl: String(issue.html_url || ""),
+        body: String(issue.body ?? ""),
+        labels: mapIssueLabels(issue.labels),
       },
     };
   }

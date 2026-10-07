@@ -364,6 +364,8 @@ export class InMemoryGitHub {
         title: "mul always returns 0",
         state: "open",
         htmlUrl: `https://github.com/${owner}/${repo}/issues/${issueNumber}`,
+        body: "mul returns 0 for all inputs",
+        labels: ["bug"],
       },
     });
   }

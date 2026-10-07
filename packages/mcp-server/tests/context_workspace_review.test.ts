@@ -6,7 +6,9 @@ import { join } from "node:path";
 import {
   ActiveSessionManager,
   ContributionRunManager,
+  hashCommunityGateSnapshot,
 } from "../../core/src/index.js";
+import { IssueBindingService } from "../../core/src/github/issue-binding-service.js";
 import { saveCanonicalArtifact } from "../../core/src/run/canonical-writer.js";
 import { createOpenContribMcpServer } from "../src/server.js";
 
@@ -17,12 +19,27 @@ function saveWorkspaceArtifact(
   manager: ContributionRunManager,
   runId: string,
   workspacePath: string,
+  privateDisclosure = false,
 ): void {
   const baseCommitSha = execFileSync(
     "git",
     ["-C", workspacePath, "rev-parse", "HEAD"],
     { encoding: "utf8" },
   ).trim();
+  const communityGate = {
+    sourceCommitSha: baseCommitSha,
+    policy: {
+      hasGatingRules: false,
+      requiresIssueApprovalBeforePr: false,
+      autoClosesNewIssues: false,
+      hasLgtmApprovalProtocol: false,
+      restrictedTriageHours: false,
+      privateVulnerabilityDisclosure: privateDisclosure,
+      reasons: [],
+      suggestedContributorAction: "Follow the repository contribution policy.",
+      matchedKeywords: [],
+    },
+  };
   saveCanonicalArtifact(manager, runId, "workspace", {
     workspacePath,
     branchName: "fixture",
@@ -30,8 +47,42 @@ function saveWorkspaceArtifact(
     baseRepoPath: workspacePath,
     baseCommitSha,
     repoFullName: "example/parser",
+    communityGate,
+    communityGateSha256: hashCommunityGateSnapshot(communityGate),
     createdAt: new Date().toISOString(),
   }, "WORKSPACE_PREPARED");
+}
+
+function testIssueProvider(onLookup: () => void = () => {}) {
+  return {
+    getIssue: async (owner: string, repo: string, issueNumber: number) => {
+      onLookup();
+      return {
+        status: "OK" as const,
+        data: {
+          number: issueNumber,
+          title: "Fix chunking token loss",
+          state: "open" as const,
+          htmlUrl: `https://github.com/${owner}/${repo}/issues/${issueNumber}`,
+          body: "Provider issue body.",
+          labels: ["provider-label"],
+        },
+      };
+    },
+  };
+}
+
+async function bindIssue(
+  manager: ContributionRunManager,
+  runId: string,
+  issueNumber = 1,
+  provider = testIssueProvider(),
+): Promise<void> {
+  await new IssueBindingService(manager, provider).bind({
+    runId,
+    repoFullName: "example/parser",
+    issueNumber,
+  });
 }
 
 contextTest("MCP context uses the prepared workspace and repository language", async () => {
@@ -50,6 +101,7 @@ contextTest("MCP context uses the prepared workspace and repository language", a
     const hooks = join(root, "hooks");
     mkdirSync(hooks);
     execFileSync("git", ["-C", workspace, "init", "--quiet"], { stdio: "ignore" });
+    execFileSync("git", ["-C", workspace, "config", "--local", "core.ignoreStat", "false"], { stdio: "ignore" });
     execFileSync("git", [
       "-C", workspace,
       "add", "--", "go.mod", "parser_test.go",
@@ -67,9 +119,17 @@ contextTest("MCP context uses the prepared workspace and repository language", a
       "-C", workspace,
       "remote", "add", "origin", "https://github.com/example/parser.git",
     ], { stdio: "ignore" });
-    const run = manager.createRun({ repoFullName: "example/parser", issueNumber: 1 });
+    const run = manager.createRun({ repoFullName: "example/parser" });
     saveWorkspaceArtifact(manager, run.runId, workspace);
-    const server = createOpenContribMcpServer({ runManager: manager });
+    let providerLookups = 0;
+    const issueBindingProvider = testIssueProvider(() => {
+      providerLookups += 1;
+    });
+    await bindIssue(manager, run.runId, 1, issueBindingProvider);
+    const server = createOpenContribMcpServer({
+      runManager: manager,
+      issueBindingProvider,
+    });
     const tool = (server as any)._registeredTools.contrib_assemble_context;
     const result = await tool.handler({ runId: run.runId,
       issue: { number: 1, title: "Fix chunking token loss", body: "", labels: [] },
@@ -81,10 +141,84 @@ contextTest("MCP context uses the prepared workspace and repository language", a
     }
     const response = JSON.parse(result.content[0].text);
     expect(response.status).toBe("success");
+    expect(response.context.problemContext.issueBody).toBe("Provider issue body.");
     expect(response.context.repoContext.primaryLanguage).toBe("Go");
     expect(response.context.repoContext.runnableCommands.testCommand).toBe("go test ./...");
     expect(response.context.repoContext.engineeringFingerprint.testConventions.filePattern).toBe("*_test.go");
     expect(response.context.repoContext.engineeringFingerprint.commitStyle.requiresSignedOffBy).toBe(true);
+    expect(providerLookups).toBe(2);
+
+    const privateRun = manager.createRun({ repoFullName: "example/parser" });
+    saveWorkspaceArtifact(manager, privateRun.runId, workspace, true);
+    const privateContextResult = await tool.handler({
+      runId: privateRun.runId,
+      issue: { title: "Private vulnerability", body: "Report details", labels: [] },
+      repoDetails: {
+        owner: "example",
+        repo: "parser",
+        defaultBranch: "main",
+        primaryLanguage: "Go",
+      },
+      repoTree: [],
+    });
+    expect(privateContextResult.isError).not.toBe(true);
+    const privateContext = JSON.parse(privateContextResult.content[0].text);
+    expect(privateContext.status).toBe("success");
+    expect(privateContext.context.problemContext.issueNumber).toBeUndefined();
+    expect(providerLookups).toBe(2);
+
+    const numberedPrivateRun = manager.createRun({
+      repoFullName: "example/parser",
+      issueNumber: 4,
+    });
+    saveWorkspaceArtifact(manager, numberedPrivateRun.runId, workspace, true);
+    const numberedPrivateResult = await tool.handler({
+      runId: numberedPrivateRun.runId,
+      issue: { title: "Private vulnerability", body: "Report details", labels: [] },
+      repoDetails: {
+        owner: "example",
+        repo: "parser",
+        defaultBranch: "main",
+        primaryLanguage: "Go",
+      },
+      repoTree: [],
+    });
+    expect(numberedPrivateResult.isError).toBe(true);
+    expect(JSON.parse(numberedPrivateResult.content[0].text).message).toContain(
+      "cannot use a public issue number or binding",
+    );
+    expect(manager.getRun(numberedPrivateRun.runId)?.artifacts.context).toBeUndefined();
+
+    const boundPrivateRun = manager.createRun({ repoFullName: "example/parser" });
+    saveWorkspaceArtifact(manager, boundPrivateRun.runId, workspace, true);
+    saveCanonicalArtifact(manager, boundPrivateRun.runId, "issue_binding", {
+      runId: boundPrivateRun.runId,
+      provider: "github",
+      repoFullName: "example/parser",
+      providerIssueId: 4,
+      state: "open",
+      title: "Private vulnerability",
+      issueUrl: "https://github.com/example/parser/issues/4",
+      providerVerified: true,
+      verifiedAt: new Date().toISOString(),
+    });
+    const boundPrivateResult = await tool.handler({
+      runId: boundPrivateRun.runId,
+      issue: { title: "Private vulnerability", body: "Report details", labels: [] },
+      repoDetails: {
+        owner: "example",
+        repo: "parser",
+        defaultBranch: "main",
+        primaryLanguage: "Go",
+      },
+      repoTree: [],
+    });
+    expect(boundPrivateResult.isError).toBe(true);
+    expect(JSON.parse(boundPrivateResult.content[0].text).message).toContain(
+      "cannot use a public issue number or binding",
+    );
+    expect(manager.getRun(boundPrivateRun.runId)?.artifacts.context).toBeUndefined();
+    expect(providerLookups).toBe(2);
 
     const unpreparedRun = manager.createRun({ repoFullName: "example/parser", issueNumber: 2 });
     const unpreparedResult = await tool.handler({
@@ -119,6 +253,7 @@ contextTest("MCP context uses the prepared workspace and repository language", a
       issueNumber: 1,
     });
     saveWorkspaceArtifact(manager, issueMismatchRun.runId, workspace);
+    await bindIssue(manager, issueMismatchRun.runId);
     const issueMismatchResult = await tool.handler({
       runId: issueMismatchRun.runId,
       issue: { number: 2, title: "Fix another parser issue", body: "", labels: [] },
@@ -135,6 +270,29 @@ contextTest("MCP context uses the prepared workspace and repository language", a
     expect(issueMismatch.status).toBe("error");
     expect(issueMismatch.message).toContain("bound to issue #1");
     expect(manager.getRun(issueMismatchRun.runId)?.artifacts.context).toBeUndefined();
+
+    const unboundRun = manager.createRun({ repoFullName: "example/parser" });
+    manager.saveArtifact(unboundRun.runId, "opportunity", {
+      issueNumber: 2,
+      title: "Fix chunking token loss",
+    });
+    saveWorkspaceArtifact(manager, unboundRun.runId, workspace);
+    const unboundResult = await tool.handler({
+      runId: unboundRun.runId,
+      issue: { number: 2, title: "Fix chunking token loss", body: "", labels: [] },
+      repoDetails: {
+        owner: "example",
+        repo: "parser",
+        defaultBranch: "main",
+        primaryLanguage: "Go",
+      },
+      repoTree: [],
+    });
+    expect(unboundResult.isError).toBe(true);
+    const unbound = JSON.parse(unboundResult.content[0].text);
+    expect(unbound.status).toBe("error");
+    expect(unbound.message).toContain("provider-verified issue binding");
+    expect(manager.getRun(unboundRun.runId)?.artifacts.context).toBeUndefined();
 
     const unusableRun = manager.createRun({ repoFullName: "example/parser", issueNumber: 3 });
     const nonRepository = join(root, "non-repository");

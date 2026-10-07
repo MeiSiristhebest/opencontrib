@@ -180,6 +180,8 @@ function getScopedNodeTestCommand(
     baseCommand = `npm exec --no -- ${parsed.runner}`;
   } else if (packageManager === 'pnpm') {
     baseCommand = `pnpm exec ${parsed.runner}`;
+  } else if (packageManager === 'yarn') {
+    baseCommand = `yarn exec ${parsed.runner}`;
   } else {
     return undefined;
   }

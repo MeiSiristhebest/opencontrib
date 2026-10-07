@@ -19,7 +19,13 @@ import {
   type CommunityGateFileReader,
   type CommunityGateSnapshot,
 } from "../governance/community-gate.js";
-import { CommunityGateSnapshotSchema } from "../contracts/schemas.js";
+import {
+  CommunityGateSnapshotSchema,
+  IssueBindingArtifactSchema,
+} from "../contracts/schemas.js";
+import { isPreparedRepositoryWorkspace } from "../discovery/repo-fingerprint.js";
+import { parsePublicIssueNumber } from "../github/issue-binding-service.js";
+import { requiresPrivateVulnerabilityDisclosure } from "../submission/submission-route.js";
 import { WorktreeManager, type WorkspaceContext } from "./worktree-manager.js";
 
 export interface PrepareWorkspaceInput {
@@ -36,6 +42,7 @@ export interface WorkspaceArtifactData {
   baseRepoPath: string;
   baseCommitSha: string;
   repoFullName: string;
+  issueOrTaskId: string;
   baseBranch?: string;
   policySnapshot: TrustedPolicySnapshot;
   policySha256: string;
@@ -150,9 +157,33 @@ export class WorkspaceService {
     artifact: WorkspaceArtifactData;
     alreadyPrepared: boolean;
   } {
+    const issueOrTaskId = String(input.issueOrTaskId).trim();
+    if (!issueOrTaskId) {
+      throw new Error(
+        "WorkspaceTargetIdentifierError: issueOrTaskId must not be empty.",
+      );
+    }
+
     const run = this.runManager.getRun(input.runId);
     if (!run) {
       throw new Error(`Contribution run ${input.runId} does not exist`);
+    }
+    const publicIssueNumber = parsePublicIssueNumber(issueOrTaskId);
+    if (
+      publicIssueNumber !== undefined &&
+      requiresPrivateVulnerabilityDisclosure(run)
+    ) {
+      throw new Error(
+        "PrivateIssueBindingForbiddenError: private disclosure workspaces require a nonnumeric task identifier.",
+      );
+    }
+    if (
+      run.manifest.issueNumber !== undefined &&
+      run.manifest.issueNumber !== publicIssueNumber
+    ) {
+      throw new Error(
+        `WorkspaceIssueMismatchError: run is bound to issue #${run.manifest.issueNumber}, but workspace preparation received ${JSON.stringify(issueOrTaskId)}.`,
+      );
     }
 
     const manifestRepo = run.manifest.repoFullName;
@@ -172,6 +203,58 @@ export class WorkspaceService {
     const existingWs = run.artifacts.workspace as unknown as
       WorkspaceArtifactData | undefined;
     if (existingWs) {
+      const recordedIssueOrTaskId = (
+        existingWs as { issueOrTaskId?: unknown }
+      ).issueOrTaskId;
+      if (
+        typeof recordedIssueOrTaskId !== "string" ||
+        recordedIssueOrTaskId.trim() === ""
+      ) {
+        throw new Error(
+          `WorkspaceLegacyArtifactTargetUnknownError: persisted workspace for run ${input.runId} does not record its original issue or task identifier and cannot be safely reused.`,
+        );
+      }
+      if (existingWs.issueOrTaskId !== issueOrTaskId) {
+        const existingIssueNumber = parsePublicIssueNumber(
+          recordedIssueOrTaskId,
+        );
+        const binding = IssueBindingArtifactSchema.safeParse(
+          run.artifacts.issueBinding,
+        );
+        const targetHasProviderBinding =
+          publicIssueNumber !== undefined &&
+          binding.success &&
+          binding.data.runId === input.runId &&
+          binding.data.repoFullName.trim().toLowerCase() ===
+            manifestRepo.trim().toLowerCase() &&
+          binding.data.providerIssueId === publicIssueNumber &&
+          binding.data.providerVerified === true &&
+          run.manifest.issueNumber === publicIssueNumber;
+        const canRetryUnboundIssue =
+          publicIssueNumber !== undefined &&
+          existingIssueNumber !== undefined &&
+          run.manifest.issueNumber === undefined &&
+          run.artifacts.issueBinding === undefined;
+
+        if (!targetHasProviderBinding && !canRetryUnboundIssue) {
+          throw new Error(
+            `WorkspaceIssueOrTaskMismatchError: canonical workspace for run ${input.runId} was prepared for ${JSON.stringify(existingWs.issueOrTaskId ?? "an unrecorded target")}, but preparation received ${JSON.stringify(issueOrTaskId)}.`,
+          );
+        }
+        if (
+          canRetryUnboundIssue &&
+          (!existingWs.workspacePath ||
+            !existingWs.baseCommitSha ||
+            !isPreparedRepositoryWorkspace(existingWs.workspacePath, {
+              repoFullName: manifestRepo,
+              baseCommitSha: existingWs.baseCommitSha,
+            }))
+        ) {
+          throw new Error(
+            `WorkspaceIssueRetargetUnsafeError: unbound issue retry for run ${input.runId} requires the existing workspace to remain at its clean, verified baseline.`,
+          );
+        }
+      }
       if (
         !isTrustedPolicySnapshot(existingWs.policySnapshot) ||
         typeof existingWs.policySha256 !== "string" ||
@@ -207,7 +290,7 @@ export class WorkspaceService {
         // trusted one merely because it was persisted earlier.
         const verified = this.worktreeManager.createIsolatedWorkspace({
           repoFullName: manifestRepo,
-          issueOrTaskId: input.issueOrTaskId,
+          issueOrTaskId,
           localRepoPath: existingWs.baseRepoPath,
           runId: input.runId,
           workspacePath: existingWs.workspacePath,
@@ -284,7 +367,7 @@ export class WorkspaceService {
     try {
       context = this.worktreeManager.createIsolatedWorkspace({
         repoFullName: manifestRepo,
-        issueOrTaskId: input.issueOrTaskId,
+        issueOrTaskId,
         localRepoPath: input.localRepoPath,
         runId: input.runId,
       });
@@ -311,6 +394,14 @@ export class WorkspaceService {
         context.baseRepoPath,
         context.baseCommitSha,
       );
+      if (
+        publicIssueNumber !== undefined &&
+        communityGate.policy.privateVulnerabilityDisclosure === true
+      ) {
+        throw new Error(
+          "PrivateIssueBindingForbiddenError: private disclosure workspaces require a nonnumeric task identifier.",
+        );
+      }
       const artifact: WorkspaceArtifactData = {
         workspacePath: context.workspacePath,
         branchName: context.branchName,
@@ -318,6 +409,7 @@ export class WorkspaceService {
         baseRepoPath: context.baseRepoPath,
         baseCommitSha: context.baseCommitSha,
         repoFullName: manifestRepo,
+        issueOrTaskId,
         baseBranch,
         policySnapshot,
         policySha256: hashTrustedPolicySnapshot(policySnapshot),

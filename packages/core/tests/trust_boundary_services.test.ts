@@ -1,7 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { execFileSync } from "child_process";
 import { createHash, generateKeyPairSync } from "crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
@@ -234,6 +240,7 @@ function seedGovernanceReadyRun(
     changedLines?: number;
     baseContent?: string;
     providerIssueId?: number;
+    additionalBaseSourceFiles?: Array<{ path: string; content: string }>;
   } = {},
 ) {
   mkdirSync(workspacePath, { recursive: true });
@@ -309,6 +316,12 @@ function seedGovernanceReadyRun(
           ? {}
           : { changedLines: options.changedLines }),
       },
+      ...(options.additionalBaseSourceFiles ?? []).map((file) => ({
+        path: file.path,
+        operation: "MODIFY" as const,
+        mode: "100644" as const,
+        contentSha256: createHash("sha256").update(file.content).digest("hex"),
+      })),
     ],
     validatedAt: "2026-01-01T00:01:00.000Z",
   };
@@ -535,6 +548,51 @@ describe("Validated base-to-GREEN governance diffs", () => {
       }
     });
   }
+});
+
+describe("Governance base source context limits", () => {
+  it("fails closed when selected base source contents exceed the cumulative limit", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-governance-source-budget-"));
+    const workspacePath = join(baseDir, "repo");
+    const sourceContent = "x".repeat(33 * 1024 * 1024);
+    const sourceFiles = [
+      { path: "src/large-a.ts", content: sourceContent },
+      { path: "src/large-b.ts", content: sourceContent },
+    ];
+    try {
+      for (const sourceFile of sourceFiles) {
+        const sourcePath = join(workspacePath, sourceFile.path);
+        mkdirSync(dirname(sourcePath), { recursive: true });
+        writeFileSync(sourcePath, sourceFile.content);
+      }
+      const baseCommitSha = writeGreenFileAfterBaseCommit(
+        workspacePath,
+        "const after = true;\n",
+        "src/fix.ts",
+        "const before = true;\n",
+      );
+      const manager = isolatedRunManager(join(baseDir, "runs"));
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+
+      expect(() =>
+        seedGovernanceReadyRun(
+          manager,
+          manifest.runId,
+          workspacePath,
+          "pr body",
+          {},
+          {
+            baseCommitSha,
+            patchPath: "src/fix.ts",
+            patchContent: "non-canonical fixture patch",
+            additionalBaseSourceFiles: sourceFiles,
+          },
+        ),
+      ).toThrow(/GovernanceBaseContentUnavailableError:.*aggregate safe read limit/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("Governance audit impact context", () => {
@@ -888,6 +946,14 @@ describe("Trusted private security materialization", () => {
     try {
       const manager = isolatedRunManager(baseDir);
       const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
+      const publicRun = manager.createRun({ repoFullName: "owner/private-repo" });
+      const publicPolicy = fixtureCommunityGate("a".repeat(40), {
+        privateVulnerabilityDisclosure: false,
+      });
+      saveCanonicalArtifact(manager, publicRun.runId, "workspace", {
+        baseCommitSha: "a".repeat(40),
+        ...publicPolicy,
+      });
       const rateLimitError = Object.assign(new Error("rate limited"), {
         status: 429,
       });
@@ -898,7 +964,7 @@ describe("Trusted private security materialization", () => {
       });
       await expect(
         issueBinding.bind({
-          runId: manifest.runId,
+          runId: publicRun.runId,
           repoFullName: "owner/private-repo",
           issueNumber: 42,
         }),
@@ -1824,6 +1890,14 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         },
         resourceLeakCheck: { required: false },
       });
+      expect(first.artifact.issueOrTaskId).toBe("1");
+
+      expect(() => {
+        service.prepare({
+          runId: manifest.runId,
+          issueOrTaskId: "TASK-17",
+        });
+      }).toThrow(/WorkspaceIssueOrTaskMismatchError/);
 
       // Second preparation returns existing canonical workspace if exists
       const second = service.prepare({
@@ -1831,6 +1905,31 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         issueOrTaskId: 1,
       });
       expect(second.alreadyPrepared).toBe(true);
+
+      const workspaceArtifactPath = join(
+        baseDir,
+        manifest.runId,
+        "workspace.json",
+      );
+      const savedWorkspaceArtifact = JSON.parse(
+        readFileSync(workspaceArtifactPath, "utf8"),
+      ) as Record<string, unknown>;
+      const legacyWorkspaceArtifact = { ...savedWorkspaceArtifact };
+      delete legacyWorkspaceArtifact.issueOrTaskId;
+      writeFileSync(
+        workspaceArtifactPath,
+        JSON.stringify(legacyWorkspaceArtifact),
+      );
+      expect(() =>
+        service.prepare({
+          runId: manifest.runId,
+          issueOrTaskId: 1,
+        }),
+      ).toThrow(/WorkspaceLegacyArtifactTargetUnknownError/);
+      writeFileSync(
+        workspaceArtifactPath,
+        JSON.stringify(savedWorkspaceArtifact),
+      );
 
       // Deleting the physical folder triggers WorkspaceImmutableViolationError (cannot allocate new workspace for same run)
       rmSync(first.context.workspacePath, { recursive: true, force: true });
@@ -1840,6 +1939,223 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           issueOrTaskId: 1,
         });
       }).toThrow(/WorkspaceImmutableViolationError/);
+    } finally {
+      if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+      else process.env.OPENCONTRIB_HOME = previousHome;
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("WorkspaceService allows retrying an unbound issue target only from a clean baseline", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-issue-retry-"));
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = join(baseDir, "isolated-home");
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/repo" });
+      const workspacePath = join(baseDir, "allocated-ws");
+      mkdirSync(workspacePath, { recursive: true });
+      writeFileSync(join(workspacePath, "README.md"), "baseline\n");
+      execFileSync("git", ["init", "-b", "main"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "Tester"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.email", "test@example.com"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "core.ignoreStat", "false"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["add", "README.md"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["commit", "-m", "baseline"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/repo.git"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: workspacePath,
+        encoding: "utf8",
+      }).trim();
+
+      const fakeWorktreeManager = {
+        runGit: (args: string[]) => {
+          if (args.includes("ls-tree")) {
+            return {
+              success: true,
+              stdout: args.includes(".opencontrib.json")
+                ? ".opencontrib.json\n"
+                : "",
+              stderr: "",
+            };
+          }
+          if (args.includes("show")) {
+            return {
+              success: true,
+              stdout: JSON.stringify({
+                policy: {
+                  coverage: {
+                    required: true,
+                    minimumChangedLineCoverage: 90,
+                  },
+                },
+              }),
+              stderr: "",
+            };
+          }
+          return { success: true, stdout: "", stderr: "" };
+        },
+        createIsolatedWorkspace: () => ({
+          workspacePath,
+          branchName: "opencontrib/run-issue-retry",
+          isWorktree: true,
+          baseRepoPath: workspacePath,
+          baseCommitSha,
+          baseBranch: "main",
+        }),
+        detectDefaultBranch: () => "main",
+      } as any;
+      const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+      const service = new WorkspaceService(manager, fakeWorktreeManager);
+      service.prepare({ runId: manifest.runId, issueOrTaskId: 1 });
+
+      const missingIssueBinding = new IssueBindingService(manager, {
+        getIssue: async () => ({ status: "NOT_FOUND", data: undefined as never }),
+      });
+      await expect(
+        missingIssueBinding.bind({
+          runId: manifest.runId,
+          repoFullName: "owner/repo",
+          issueNumber: 1,
+        }),
+      ).rejects.toThrow(/IssueBindingProviderError/);
+      expect(manager.getRun(manifest.runId)?.manifest.issueNumber).toBeUndefined();
+      expect(manager.getRun(manifest.runId)?.artifacts.issueBinding).toBeUndefined();
+
+      const untrackedFile = join(workspacePath, "untracked.txt");
+      writeFileSync(untrackedFile, "unverified work\n");
+      expect(() =>
+        service.prepare({ runId: manifest.runId, issueOrTaskId: 2 }),
+      ).toThrow(/WorkspaceIssueRetargetUnsafeError/);
+      rmSync(untrackedFile);
+
+      const retried = service.prepare({
+        runId: manifest.runId,
+        issueOrTaskId: 2,
+      });
+      expect(retried.alreadyPrepared).toBe(true);
+      expect(retried.artifact.issueOrTaskId).toBe("1");
+
+      const issueBinding = new IssueBindingService(manager, {
+        getIssue: async (_owner, _repo, issueNumber) => ({
+          status: "OK",
+          data: {
+            number: issueNumber,
+            title: `Issue ${issueNumber}`,
+            state: "open",
+            htmlUrl: `https://github.com/owner/repo/issues/${issueNumber}`,
+          },
+        }),
+      });
+      await issueBinding.bind({
+        runId: manifest.runId,
+        repoFullName: "owner/repo",
+        issueNumber: 2,
+      });
+      expect(
+        service.prepare({ runId: manifest.runId, issueOrTaskId: 2 })
+          .alreadyPrepared,
+      ).toBe(true);
+      expect(() =>
+        service.prepare({ runId: manifest.runId, issueOrTaskId: 1 }),
+      ).toThrow(/WorkspaceIssueMismatchError/);
+    } finally {
+      if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+      else process.env.OPENCONTRIB_HOME = previousHome;
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("WorkspaceService rejects numeric targets for private disclosure policy before saving a workspace", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-private-issue-"));
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = join(baseDir, "isolated-home");
+    let cleanupCount = 0;
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/repo" });
+      const workspacePath = join(baseDir, "allocated-ws");
+      mkdirSync(workspacePath, { recursive: true });
+      const baseCommitSha = "a".repeat(40);
+      const fakeWorktreeManager = {
+        runGit: (args: string[]) => {
+          const target = args.at(-1) ?? "";
+          if (args.includes("ls-tree")) {
+            return {
+              success: true,
+              stdout:
+                target === ".opencontrib.json"
+                  ? ".opencontrib.json\n"
+                  : target === "SECURITY.md"
+                    ? "SECURITY.md\n"
+                    : "",
+              stderr: "",
+            };
+          }
+          if (args.includes("show")) {
+            return {
+              success: true,
+              stdout: target.endsWith(":.opencontrib.json")
+                ? JSON.stringify({
+                    policy: {
+                      coverage: {
+                        required: true,
+                        minimumChangedLineCoverage: 90,
+                      },
+                    },
+                  })
+                : target.endsWith(":SECURITY.md")
+                  ? "Report vulnerabilities privately.\n"
+                  : "",
+              stderr: "",
+            };
+          }
+          return { success: true, stdout: "", stderr: "" };
+        },
+        createIsolatedWorkspace: () => ({
+          workspacePath,
+          branchName: "opencontrib/run-private",
+          isWorktree: true,
+          baseRepoPath: workspacePath,
+          baseCommitSha,
+          baseBranch: "main",
+        }),
+        cleanupWorkspace: () => {
+          cleanupCount += 1;
+        },
+        detectDefaultBranch: () => "main",
+      } as any;
+      const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+
+      expect(() =>
+        new WorkspaceService(manager, fakeWorktreeManager).prepare({
+          runId: manifest.runId,
+          issueOrTaskId: 42,
+        }),
+      ).toThrow(/private disclosure workspaces require a nonnumeric task identifier/i);
+      expect(manager.getRun(manifest.runId)?.artifacts.workspace).toBeUndefined();
+      expect(cleanupCount).toBe(1);
     } finally {
       if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
       else process.env.OPENCONTRIB_HOME = previousHome;

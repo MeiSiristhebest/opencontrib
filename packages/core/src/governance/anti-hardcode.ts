@@ -58,6 +58,7 @@ interface DiffLineRecord {
   hunk: number;
   content: string;
   code: string;
+  oldLine?: number;
 }
 
 const SOURCE_FILE_EXTENSION =
@@ -81,9 +82,10 @@ function isTestOrDocFile(filePath: string): boolean {
   );
   return (
     /(?:^|\/)(?:tests?|__tests__|fixtures?|mocks?)(?:\/|$)/.test(norm) ||
+    /(?:^|\/)specs?(?:\/|$)/.test(norm) ||
     /(?:^|\/)[^/]+\.(?:tests?|specs?)(?:\/|$)/.test(norm) ||
     /\.(?:test|spec)\.[a-z0-9]+$/i.test(norm) ||
-    /_test\.[a-z0-9]+$/i.test(norm) ||
+    /_(?:test|spec)\.[a-z0-9]+$/i.test(norm) ||
     /(?:^|\/)test_[a-z0-9_]+\.[a-z0-9]+$/i.test(norm) ||
     hasEcosystemTestSuffix ||
     /\.(?:md|mdx|rst|txt)$/i.test(norm)
@@ -573,6 +575,9 @@ function csharpRawStringBeforeQuote(
   filePath: string,
 ): { prefix: string; delimiter: string; interpolationBraceCount: number } | undefined {
   if (!/\.cs$/i.test(filePath)) return undefined;
+  // @ belongs to an interpolated verbatim prefix, not a raw-string prefix.
+  // In $@""", the extra opening quotes are escaped verbatim content.
+  if (line[quoteIndex - 1] === '@') return undefined;
   const delimiter = /^"{3,}/.exec(line.slice(quoteIndex))?.[0];
   if (!delimiter) return undefined;
   const prefix = line.slice(0, quoteIndex).match(/(?:^|[^a-zA-Z0-9_])(\$*)$/);
@@ -1128,17 +1133,292 @@ function branchReturnIndex(source: string, conditionEnd: number): number | undef
     : undefined;
 }
 
+function findEnclosingIfBody(
+  source: string,
+  matchStart: number,
+  matchEnd: number,
+  filePath: string,
+): { start: number; end: number } | undefined {
+  const supportsUnparenthesizedIf = /\.(?:go|py|rb|rs)$/i.test(filePath);
+  const ifStatements = [...source.matchAll(/\bif\b\s*/gi)];
+  for (const statement of ifStatements.reverse()) {
+    const statementStart = statement.index ?? 0;
+    if (statementStart >= matchStart) continue;
+    const conditionStart = statementStart + statement[0].length;
+    const openParen = source[conditionStart] === '(';
+    if (!openParen && !supportsUnparenthesizedIf) continue;
+
+    let conditionEnd = -1;
+    let bodyStart = -1;
+    if (openParen) {
+      let conditionDepth = 0;
+      for (let index = conditionStart; index < source.length; index++) {
+        if (source[index] === '(') conditionDepth++;
+        else if (source[index] === ')' && --conditionDepth === 0) {
+          conditionEnd = index;
+          bodyStart = index + 1;
+          break;
+        }
+      }
+    } else if (/\.py$/i.test(filePath)) {
+      conditionEnd = findTopLevelIfDelimiter(source, conditionStart, ':') ?? -1;
+      bodyStart = conditionEnd;
+    } else if (/\.(?:go|rs)$/i.test(filePath)) {
+      conditionEnd = findTopLevelIfDelimiter(source, conditionStart, '{') ?? -1;
+      bodyStart = conditionEnd;
+    } else if (/\.rb$/i.test(filePath)) {
+      const lineEnd = source.indexOf('\n', conditionStart);
+      const conditionLineEnd = lineEnd < 0 ? source.length : lineEnd;
+      const thenMatch = /\bthen\b/.exec(source.slice(conditionStart, conditionLineEnd));
+      conditionEnd = thenMatch
+        ? conditionStart + thenMatch.index
+        : conditionLineEnd;
+      bodyStart = thenMatch
+        ? conditionEnd + thenMatch[0].length
+        : lineEnd < 0 ? source.length : lineEnd + 1;
+      if (source.slice(source.lastIndexOf('\n', statementStart) + 1, statementStart).trim()) {
+        continue;
+      }
+    }
+    if (conditionEnd < matchEnd || bodyStart < 0) continue;
+
+    while (/\s/.test(source[bodyStart] ?? '')) bodyStart++;
+    if (bodyStart >= source.length) continue;
+
+    if (source[bodyStart] === '{') {
+      let bodyDepth = 1;
+      for (let index = bodyStart + 1; index < source.length; index++) {
+        if (source[index] === '{') bodyDepth++;
+        else if (source[index] === '}' && --bodyDepth === 0) {
+          return { start: bodyStart + 1, end: index };
+        }
+      }
+      return { start: bodyStart + 1, end: source.length };
+    }
+
+    if (source[bodyStart] === ':') {
+      const lineStart = source.lastIndexOf('\n', statementStart) + 1;
+      const indentation = source.slice(lineStart, statementStart).match(/^\s*/)?.[0].length ?? 0;
+      const contentStart = bodyStart + 1;
+      const firstLineEnd = source.indexOf('\n', contentStart);
+      if (firstLineEnd < 0) return { start: contentStart, end: source.length };
+      let cursor = firstLineEnd + 1;
+      while (cursor < source.length) {
+        const nextLineEnd = source.indexOf('\n', cursor);
+        const end = nextLineEnd < 0 ? source.length : nextLineEnd;
+        const line = source.slice(cursor, end);
+        if (line.trim() && (line.match(/^\s*/)?.[0].length ?? 0) <= indentation) break;
+        cursor = nextLineEnd < 0 ? source.length : nextLineEnd + 1;
+      }
+      return { start: contentStart, end: cursor };
+    }
+
+    if (/\.rb$/i.test(filePath) && !openParen) {
+      return {
+        start: bodyStart,
+        end: findRubyIfBodyEnd(source, bodyStart),
+      };
+    }
+
+    let bodyEnd = source.indexOf(';', bodyStart);
+    const lineEnd = source.indexOf('\n', bodyStart);
+    if (bodyEnd < 0 || (lineEnd >= 0 && lineEnd < bodyEnd)) bodyEnd = lineEnd;
+    return { start: bodyStart, end: bodyEnd < 0 ? source.length : bodyEnd + 1 };
+  }
+  return undefined;
+}
+
+function findTopLevelIfDelimiter(
+  source: string,
+  start: number,
+  delimiter: ':' | '{',
+): number | undefined {
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  for (let index = start; index < source.length; index++) {
+    const character = source[index];
+    if (
+      character === delimiter &&
+      parenDepth === 0 &&
+      bracketDepth === 0 &&
+      braceDepth === 0
+    ) {
+      return index;
+    }
+    if (character === '(') parenDepth++;
+    else if (character === ')' && parenDepth > 0) parenDepth--;
+    else if (character === '[') bracketDepth++;
+    else if (character === ']' && bracketDepth > 0) bracketDepth--;
+    else if (character === '{') braceDepth++;
+    else if (character === '}' && braceDepth > 0) braceDepth--;
+  }
+  return undefined;
+}
+
+function findRubyIfBodyEnd(source: string, bodyStart: number): number {
+  let depth = 1;
+  let offset = bodyStart;
+  for (const line of source.slice(bodyStart).split(/(?<=\n)/)) {
+    const code = line.trimStart();
+    if (/^(?:if|unless|case|begin|class|module|def|while|until|for)\b/i.test(code)) {
+      depth++;
+    }
+    if (/\bdo(?:\s*\|[^|]*\|)?\s*(?:#.*)?$/i.test(code)) depth++;
+    if (/^end\b/i.test(code)) {
+      depth--;
+      if (depth === 0) return offset;
+    }
+    offset += line.length;
+  }
+  return source.length;
+}
+
+function rustCfgTestModuleRecordBoundaries(
+  records: DiffLineRecord[],
+): Map<DiffLineRecord, readonly number[]> {
+  const boundaries = new Map<DiffLineRecord, readonly number[]>();
+  let currentHunk = -1;
+  let braceDepth = 0;
+  let cfgTestPending = false;
+  let cfgTestAttributeLine: number | undefined;
+  let moduleBodyPending = false;
+  let moduleBodySearchFrom = 0;
+  let moduleBodyCfgLine: number | undefined;
+  const testModuleDepths: Array<{ depth: number; cfgLine: number }> = [];
+
+  for (const record of records) {
+    if (record.hunk !== currentHunk) {
+      currentHunk = record.hunk;
+      braceDepth = 0;
+      cfgTestPending = false;
+      cfgTestAttributeLine = undefined;
+      moduleBodyPending = false;
+      moduleBodyCfgLine = undefined;
+      testModuleDepths.length = 0;
+    }
+
+    const code = record.code;
+    if (/#[ \t]*\[[ \t]*cfg[ \t]*\([ \t]*test[ \t]*\)[ \t]*\]/.test(code)) {
+      cfgTestPending = true;
+      cfgTestAttributeLine = record.oldLine;
+    }
+    if (cfgTestPending) {
+      const module = /\bmod\s+[A-Za-z_][A-Za-z0-9_]*/.exec(code);
+      if (module) {
+        cfgTestPending = false;
+        moduleBodySearchFrom = module.index + module[0].length;
+        moduleBodyPending = !/^\s*;/.test(code.slice(moduleBodySearchFrom));
+        moduleBodyCfgLine = cfgTestAttributeLine;
+        cfgTestAttributeLine = undefined;
+      } else if (/;\s*$/.test(code) || /\b(?:fn|struct|enum|const|static|use)\b/.test(code)) {
+        cfgTestPending = false;
+        cfgTestAttributeLine = undefined;
+      }
+    }
+    if (moduleBodyPending && /^\s*;/.test(code)) {
+      moduleBodyPending = false;
+      moduleBodyCfgLine = undefined;
+    }
+
+    const recordBoundaries = new Set(
+      testModuleDepths.map((module) => module.cfgLine),
+    );
+    let insideTestModule = testModuleDepths.length > 0;
+    for (let index = 0; index < code.length; index++) {
+      if (code[index] === '{') {
+        braceDepth++;
+        if (moduleBodyPending && index >= moduleBodySearchFrom) {
+          if (moduleBodyCfgLine !== undefined) {
+            testModuleDepths.push({ depth: braceDepth, cfgLine: moduleBodyCfgLine });
+            recordBoundaries.add(moduleBodyCfgLine);
+          }
+          moduleBodyPending = false;
+          moduleBodyCfgLine = undefined;
+          insideTestModule = true;
+        }
+      } else if (code[index] === '}') {
+        braceDepth--;
+        while (
+          testModuleDepths.length > 0 &&
+          testModuleDepths[testModuleDepths.length - 1]!.depth > braceDepth
+        ) {
+          testModuleDepths.pop();
+        }
+      }
+    }
+    if (insideTestModule && recordBoundaries.size > 0) {
+      boundaries.set(record, [...recordBoundaries]);
+    }
+  }
+
+  return boundaries;
+}
+
+function rustCfgTestBoundariesFromBase(
+  filePath: string,
+  contents: string,
+): Map<number, readonly number[]> {
+  let lexerState: DiffLexerState = {
+    inBlockComment: false,
+    stringValue: '',
+    stringAddedFlags: [],
+    stringSourceLines: [],
+    stringIsFString: false,
+    nextToken: 1,
+  };
+  const stringValues = new Map<string, string>();
+  const records = contents.split(/\r?\n/).map((content, index) => ({
+    added: false,
+    hunk: 0,
+    content,
+    code: scanDiffSourceLine(
+      content,
+      filePath,
+      lexerState,
+      stringValues,
+      false,
+      content,
+      [],
+      0,
+    ),
+    oldLine: index + 1,
+  }));
+  const boundaries = new Map<number, readonly number[]>();
+  for (const [record, cfgLines] of rustCfgTestModuleRecordBoundaries(records)) {
+    if (record.oldLine !== undefined) boundaries.set(record.oldLine, cfgLines);
+  }
+  return boundaries;
+}
+
 function analyzeFileChanges(
   filePath: string,
   records: DiffLineRecord[],
   stringValues: Map<string, string>,
   options: AntiHardcodeOptions,
   violations: AntiHardcodeViolation[],
+  removedOldLines: ReadonlySet<number>,
 ): void {
   if (!isSourceCodeFile(filePath) || isTestOrDocFile(filePath)) return;
+  if (/\.rs$/i.test(filePath)) {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const baseContents = options.baseFileContents?.get(normalizedPath);
+    const baseTestBoundaries = baseContents === undefined
+      ? new Map<number, readonly number[]>()
+      : rustCfgTestBoundariesFromBase(filePath, baseContents);
+    const testRecords = new Set(rustCfgTestModuleRecordBoundaries(records).keys());
+    for (const record of records) {
+      const boundaries =
+        record.oldLine === undefined ? undefined : baseTestBoundaries.get(record.oldLine);
+      if (boundaries?.some((line) => !removedOldLines.has(line))) {
+        testRecords.add(record);
+      }
+    }
+    records = records.filter((record) => !testRecords.has(record));
+  }
 
   const repoVariable =
-    String.raw`\b(?:target)?(?:repo|repository|origin|upstream)(?:Name|FullName)?\b(?:\s*(?:\?\.|\.)\s*(?:fullName|name))?(?:\s*(?:\?\.|\.)\s*(?:toLowerCase|toUpperCase|trim|lower|upper)\s*\(\s*\))*`;
+    String.raw`\b(?:target_?)?(?:repo|repository|origin|upstream)(?:_?(?:name|full_?name))?\b(?:\s*(?:\?\.|\.)\s*(?:fullName|name))?(?:\s*(?:\?\.|\.)\s*(?:toLowerCase|toUpperCase|trim|lower|upper)\s*\(\s*\))*`;
   const stringToken = String.raw`__STR_\d+__`;
   const isSqlFile = /\.sql$/i.test(filePath);
   const isShellSource = isShellFile(filePath);
@@ -1149,6 +1429,15 @@ function analyzeFileChanges(
     : String.raw`(?:===|==|!==?)`;
   const repoReference = new RegExp(
     `(?:${repoVariable}\\s*${repositoryComparisonOperator}\\s*(${stringToken})|(${stringToken})\\s*${repositoryComparisonOperator}\\s*${repoVariable}|${repoVariable}\\s*\\.includes\\s*\\(\\s*(${stringToken}))`,
+    'gi',
+  );
+  const repoMethodReference = new RegExp(
+    '(?:' +
+      repoVariable + '\\s*\\.\\s*equals(?:ignorecase)?\\s*\\(\\s*(' + stringToken + ')' +
+      '|(' + stringToken + ')\\s*\\.\\s*equals(?:ignorecase)?\\s*\\(\\s*' + repoVariable +
+      '|(?:string)\\s*\\.\\s*equals\\s*\\(\\s*' + repoVariable + '\\s*,\\s*(' + stringToken + ')' +
+      '|(?:string)\\s*\\.\\s*equals\\s*\\(\\s*(' + stringToken + ')\\s*,\\s*' + repoVariable +
+    ')',
     'gi',
   );
   const issueVariable =
@@ -1204,7 +1493,10 @@ function analyzeFileChanges(
 
   for (const hunkRecords of hunks.values()) {
     const source = buildHunkSource(hunkRecords);
-    for (const match of source.code.matchAll(repoReference)) {
+    for (const match of [
+      ...source.code.matchAll(repoReference),
+      ...source.code.matchAll(repoMethodReference),
+    ]) {
       const singleEquals = /(?:^|[^=!<>])=(?:[^=]|$)/.test(match[0]);
       if (
         singleEquals &&
@@ -1213,16 +1505,29 @@ function analyzeFileChanges(
       ) {
         continue;
       }
-      const tokenId = match[1] || match[2] || match[3];
+      const tokenId = match.slice(1).find((capture) => capture?.startsWith('__STR_'));
+      if (!tokenId) continue;
       const sampleValue = stringValues.get(tokenId);
       const matchedRecord = source.firstAddedRecord(match.index, match.index + match[0].length);
-      if (!matchedRecord) continue;
       if (sampleValue && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(sampleValue)) {
         const isTarget = options.targetRepo && sampleValue.toLowerCase() === options.targetRepo.toLowerCase();
+        const guardBody = matchedRecord
+          ? undefined
+          : findEnclosingIfBody(
+              source.code,
+              match.index ?? 0,
+              (match.index ?? 0) + match[0].length,
+              filePath,
+            );
+        const addedBehavior = guardBody
+          ? source.firstAddedRecord(guardBody.start, guardBody.end)
+          : undefined;
+        const findingRecord = matchedRecord || addedBehavior;
+        if (!findingRecord) continue;
         addViolation(
           violations,
           filePath,
-          matchedRecord.content.trim(),
+          findingRecord.content.trim(),
           'REPO_LITERAL_DISCRIMINATION',
           isTarget
             ? `Production logic hardcodes target repository name '${options.targetRepo}'. Solutions must be generalized and decoupled from repository-specific string literals.`
@@ -1360,8 +1665,10 @@ export function lintAntiHardcode(
   let currentHunk = 0;
   let records: DiffLineRecord[] = [];
   let stringValues = new Map<string, string>();
+  let removedOldLines = new Set<number>();
   let baseLines: string[] | undefined;
   let baseLineCursor = 0;
+  let currentOldLine = 0;
   let lexerState: DiffLexerState = {
     inBlockComment: false,
     stringValue: '',
@@ -1384,16 +1691,25 @@ export function lintAntiHardcode(
   };
 
   const finishFile = () => {
-    analyzeFileChanges(currentFile, records, stringValues, options, violations);
+    analyzeFileChanges(
+      currentFile,
+      records,
+      stringValues,
+      options,
+      violations,
+      removedOldLines,
+    );
   };
   const resetFile = (filePath: string) => {
     currentFile = filePath;
     records = [];
     stringValues = new Map<string, string>();
+    removedOldLines = new Set<number>();
     const normalizedPath = filePath.replace(/\\/g, '/');
     const baseContents = options.baseFileContents?.get(normalizedPath);
     baseLines = baseContents === undefined ? undefined : baseContents.split(/\r?\n/);
     baseLineCursor = 0;
+    currentOldLine = 0;
     lexerState = {
       inBlockComment: false,
       stringValue: '',
@@ -1424,6 +1740,7 @@ export function lintAntiHardcode(
 
     if (rawLine.startsWith('@@')) {
       const range = parseHunkOldRange(rawLine);
+      currentOldLine = range?.start ?? 0;
       if (!range || !baseLines) {
         if (isSourceCodeFile(currentFile) && !isTestOrDocFile(currentFile)) {
           resetLexerState();
@@ -1461,8 +1778,14 @@ export function lintAntiHardcode(
 
     const added = rawLine.startsWith('+');
     const context = rawLine.startsWith(' ');
+    if (rawLine.startsWith('-')) {
+      removedOldLines.add(currentOldLine);
+      currentOldLine++;
+      continue;
+    }
     if (!added && !context) continue;
 
+    const oldLine = currentOldLine;
     const content = rawLine.slice(1);
     const code = scanDiffSourceLine(
       content,
@@ -1474,7 +1797,8 @@ export function lintAntiHardcode(
       records,
       currentHunk,
     );
-    records.push({ added, hunk: currentHunk, content, code });
+    records.push({ added, hunk: currentHunk, content, code, oldLine });
+    if (context) currentOldLine++;
   }
 
   finishFile();

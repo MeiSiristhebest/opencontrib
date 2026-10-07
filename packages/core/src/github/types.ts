@@ -36,6 +36,8 @@ export interface ProviderIssue {
   title: string;
   state: 'open' | 'closed';
   htmlUrl: string;
+  body?: string;
+  labels?: string[];
 }
 
 export interface RepoDetails {

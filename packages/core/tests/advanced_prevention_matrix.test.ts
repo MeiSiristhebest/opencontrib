@@ -40,18 +40,19 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
   });
 
   it.each([
-    ['mocha "test/**/*.js"', 'npm exec --no -- mocha'],
-    ['node --test test/*.js', 'node --test'],
-  ])('separates the repository test command from its scoped runner: %s', (script, redTestCommand) => {
+    ['npm@10.0.0', 'mocha "test/**/*.js"', 'npm exec --no -- mocha'],
+    ['npm@10.0.0', 'node --test test/*.js', 'node --test'],
+    ['yarn@4.0.0', 'mocha "test/**/*.js"', 'yarn exec mocha'],
+  ])('separates the repository test command from its scoped runner: %s', (packageManager, script, redTestCommand) => {
     const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-unscoped-test-'));
     try {
       writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
-        packageManager: 'npm@10.0.0',
+        packageManager,
         scripts: { test: script },
       }));
 
       const commands = detectRunnableCommandsFromDir(tempDir);
-      expect(commands.testCommand).toBe('npm test');
+      expect(commands.testCommand).toBe(packageManager.startsWith('yarn') ? 'yarn test' : 'npm test');
       expect(commands.redTestCommand).toBe(redTestCommand);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });

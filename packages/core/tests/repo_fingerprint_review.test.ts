@@ -99,6 +99,7 @@ describe("Prepared repository workspace binding", () => {
       writeFileSync(join(root, "parser.ts"), "export const value = 1;\n");
       writeFileSync(join(root, ".gitignore"), "ignored_test.go\nnode_modules/\n");
       execFileSync("git", ["-C", root, "init", "--quiet"], { stdio: "ignore" });
+      execFileSync("git", ["-C", root, "config", "--local", "core.ignoreStat", "false"], { stdio: "ignore" });
       execFileSync("git", ["-C", root, "add", "--", "parser.ts", ".gitignore"], { stdio: "ignore" });
       execFileSync("git", [
         "-C", root,
