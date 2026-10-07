@@ -567,7 +567,7 @@ describe("Governance base source context limits", () => {
   it("fails closed when selected base source contents exceed the cumulative limit", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-governance-source-budget-"));
     const workspacePath = join(baseDir, "repo");
-    const sourceContent = "x".repeat(33 * 1024 * 1024);
+    const sourceContent = "x".repeat(32 * 1024 * 1024 + 1);
     const sourceFiles = [
       { path: "src/large-a.ts", content: sourceContent },
       { path: "src/large-b.ts", content: sourceContent },
