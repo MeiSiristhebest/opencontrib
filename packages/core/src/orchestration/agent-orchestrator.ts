@@ -10,6 +10,7 @@ import { SystemClock } from "../ports/clock.port.js";
 import type { UserProfile, Opportunity } from "../contracts/schemas.js";
 import type { ValidationStatus } from "../risk/risk-engine.js";
 import type { RiskAssessment } from "../risk/risk-engine.js";
+import type { ContributionRunPhase } from "../run/types.js";
 import type {
   PipelineDeps,
   PipelineContext,
@@ -120,6 +121,8 @@ export interface TelemetryRecord {
 }
 
 export interface OrchestratorRunResult {
+  runId?: string;
+  currentPhase?: ContributionRunPhase;
   status:
     "COMPLETED" | "BLOCKED" | "HUMAN_APPROVAL_REQUIRED" | "DRY_RUN_COMPLETED";
   stage: string;
@@ -256,7 +259,11 @@ export class AgentOrchestrator {
     for (const step of PIPELINE_STEPS) {
       const outcome = await step.execute(ctx, this.deps);
       if (outcome.kind === "halt") {
-        return outcome.result;
+        return {
+          ...outcome.result,
+          runId: ctx.runId,
+          currentPhase: ctx.runId ? this.deps.runManager?.getRun(ctx.runId)?.manifest.currentPhase : undefined,
+        };
       }
     }
 

@@ -395,11 +395,16 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
   it("runs the full pipeline to DRY_RUN_COMPLETED", async () => {
     const { AgentOrchestrator } =
       await import("../src/orchestration/agent-orchestrator.js");
-    const orchestrator = new AgentOrchestrator({ deps: buildDeps() });
+    const deps = buildDeps();
+    const orchestrator = new AgentOrchestrator({ deps });
 
     const result = await orchestrator.runPipeline({ profile: profile(), targetRepo: "octocat/hello-world" });
 
     expect(result.status).toBe("DRY_RUN_COMPLETED");
+    expect(result.runId).toBeDefined();
+    expect(result.currentPhase).toBe(deps.stateMachine.getState().currentPhase);
+    expect(result.currentPhase).not.toBe("PR_SUBMITTED");
+    expect(result.currentPhase).not.toBe("COMPLETED");
     expect(result.stage).toBe("COMPLETED");
     expect(result.selectedOpportunity?.repoFullName).toBe(
       "octocat/hello-world",

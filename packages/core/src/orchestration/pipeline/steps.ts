@@ -477,6 +477,7 @@ export class RunCreationStep implements PipelineStep {
     ctx.runId = runManager.createRun({
       repoFullName: ctx.targetRepo,
     }).runId;
+    deps.stateMachine.bindRun(runManager, ctx.runId);
 
     return continuePipeline();
   }

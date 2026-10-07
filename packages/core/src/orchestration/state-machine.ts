@@ -1,3 +1,6 @@
+import type { ContributionRunManager } from "../run/run-manager.js";
+import type { ContributionRunPhase } from "../run/types.js";
+
 export type ExecutionMode =
   | "draft_only"
   | "local_artifacts_only"
@@ -45,6 +48,9 @@ export type PipelineStage =
   | "BLOCKED";
 
 export interface PipelineState {
+  /** Canonical lifecycle phase; pipeline stages never advance it. */
+  currentPhase?: ContributionRunPhase;
+  runId?: string;
   stage: PipelineStage;
   policy: ExecutionPolicy;
   repoFullName?: string;
@@ -60,6 +66,7 @@ export interface PipelineState {
 
 export class ContributionStateMachine {
   private state: PipelineState;
+  private phaseSource?: () => ContributionRunPhase | undefined;
 
   constructor(policy: Partial<ExecutionPolicy> = {}) {
     this.state = {
@@ -71,52 +78,24 @@ export class ContributionStateMachine {
   }
 
   getState(): Readonly<PipelineState> {
-    return this.state;
+    return { ...this.state, currentPhase: this.phaseSource?.() };
+  }
+
+  bindRun(runManager: ContributionRunManager, runId: string): void {
+    if (!runManager.getRun(runId)) throw new Error(`CanonicalRunMissingError: cannot bind pipeline progress to ${runId}.`);
+    this.phaseSource = () => runManager.getRun(runId)?.manifest.currentPhase;
+    this.state = {
+      stage: "IDLE",
+      runId,
+      policy: this.state.policy,
+      reproductionCaptured: false,
+      history: [{ stage: "IDLE", timestamp: new Date().toISOString() }],
+    };
   }
 
   transition(nextStage: PipelineStage, note?: string): void {
-    const currentStage = this.state.stage;
-    // Valid transitions aligned with the agent-orchestrator's actual execution paths:
-    //   Autonomous/dry-run:  DISCOVERY -> ONBOARDING -> PATCH_DESIGN -> SANDBOX_VALIDATION -> SUBAGENT_REVIEW -> COMPLETED
-    //   With PR:            ... -> SUBAGENT_REVIEW -> PR_SUBMISSION -> COMPLETED
-    //   With human gate:    ... -> SUBAGENT_REVIEW -> HUMAN_GATE -> PR_SUBMISSION -> COMPLETED
-    // QUALIFICATION is a logical concept inlined in the orchestrator (ranking) and is not a separate transition.
-    const validTransitions: Record<PipelineStage, PipelineStage[]> = {
-      IDLE: ["DISCOVERY", "BLOCKED"],
-      DISCOVERY: [
-        "ONBOARDING",
-        "QUALIFICATION",
-        "PATCH_DESIGN",
-        "HUMAN_GATE",
-        "BLOCKED",
-      ],
-      QUALIFICATION: ["ONBOARDING", "PATCH_DESIGN", "HUMAN_GATE", "BLOCKED"],
-      ONBOARDING: ["PATCH_DESIGN", "SANDBOX_VALIDATION", "BLOCKED"],
-      PATCH_DESIGN: ["ONBOARDING", "SANDBOX_VALIDATION", "BLOCKED"],
-      SANDBOX_VALIDATION: ["SUBAGENT_REVIEW", "PATCH_DESIGN", "BLOCKED"],
-      SUBAGENT_REVIEW: [
-        "SANDBOX_VALIDATION",
-        "HUMAN_GATE",
-        "PR_SUBMISSION",
-        "COMPLETED",
-        "PATCH_DESIGN",
-        "BLOCKED",
-      ],
-      HUMAN_GATE: ["PR_SUBMISSION", "COMPLETED", "PATCH_DESIGN", "BLOCKED"],
-      // A trusted broker may pause a submission while waiting for an
-      // approval challenge.  This is a forward hand-off, not a rollback.
-      PR_SUBMISSION: ["HUMAN_GATE", "COMPLETED", "BLOCKED"],
-      COMPLETED: [],
-      BLOCKED: ["IDLE", "PATCH_DESIGN"],
-    };
-
-    const allowedTargets = validTransitions[currentStage] || [];
-    if (!allowedTargets.includes(nextStage)) {
-      throw new Error(
-        `Invalid pipeline transition: ${currentStage} -> ${nextStage}. Allowed: ${allowedTargets.join(", ") || "none"}`,
-      );
-    }
-
+    // Execution progress only. RunManager and its canonical contract own all
+    // lifecycle transitions and artifact gates, including completion.
     this.state.stage = nextStage;
     this.state.history.push({
       stage: nextStage,
