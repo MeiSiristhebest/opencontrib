@@ -115,7 +115,6 @@ contextTest("MCP context uses the prepared workspace and repository language", a
       "commit", "--allow-empty", "-m", "Update parser",
       "-m", "Signed-off-by: OpenContrib Test <test@example.invalid>",
     ], { stdio: "ignore" });
-    execFileSync("git", ["-C", workspace, "config", "--local", "core.ignoreStat", "true"], { stdio: "ignore" });
     execFileSync("git", [
       "-C", workspace,
       "remote", "add", "origin", "https://github.com/example/parser.git",

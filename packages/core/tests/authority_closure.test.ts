@@ -10,6 +10,7 @@ import { IssueBindingService } from "../src/github/issue-binding-service.js";
 import { buildPublicIssueBindingProvider } from "../src/composition-root.js";
 import { IssueCreationService } from "../src/github/issue-creation-service.js";
 import { SecurityDisclosureService } from "../src/github/security-disclosure-service.js";
+import { hashCommunityGateSnapshot } from "../src/governance/community-gate.js";
 import * as publicCore from "../src/index.js";
 import * as publicGitHub from "../src/github/index.js";
 
@@ -54,9 +55,11 @@ function savePublicCommunityGate(
   manager: ContributionRunManager,
   runId: string,
 ): void {
+  const communityGate = publicCommunityGate();
   saveCanonicalArtifact(manager, runId, "workspace", {
     baseCommitSha: "a".repeat(40),
-    communityGate: publicCommunityGate(),
+    communityGate,
+    communityGateSha256: hashCommunityGateSnapshot(communityGate),
   });
 }
 
@@ -162,9 +165,11 @@ describe("Authority closure", () => {
   it("checks the public route before creating a provider issue", async () => {
     const manager = new ContributionRunManager({ baseDir: baseDir("issue-route-preflight") });
     const privateRun = manager.createRun({ repoFullName: "owner/repo" });
+    const privateGate = privateCommunityGate();
     saveCanonicalArtifact(manager, privateRun.runId, "workspace", {
       baseCommitSha: "a".repeat(40),
-      communityGate: privateCommunityGate(),
+      communityGate: privateGate,
+      communityGateSha256: hashCommunityGateSnapshot(privateGate),
     });
     const policylessRun = manager.createRun({ repoFullName: "owner/repo" });
     let createCalls = 0;
@@ -187,6 +192,67 @@ describe("Authority closure", () => {
       .rejects.toThrow("private disclosure runs cannot bind a public issue");
     await expect(service.createAndBind(input(policylessRun.runId)))
       .rejects.toThrow("issue binding requires a valid canonical workspace policy snapshot");
+    expect(createCalls).toBe(0);
+  });
+
+  it("rejects a changed community gate before creating a public issue", async () => {
+    const manager = new ContributionRunManager({ baseDir: baseDir("issue-gate-preflight") });
+    const run = manager.createRun({ repoFullName: "owner/repo" });
+    const originalGate = privateCommunityGate();
+    const changedGate = {
+      ...originalGate,
+      policy: {
+        ...originalGate.policy,
+        privateVulnerabilityDisclosure: false,
+      },
+    };
+    saveCanonicalArtifact(manager, run.runId, "workspace", {
+      baseCommitSha: originalGate.sourceCommitSha,
+      communityGate: changedGate,
+      communityGateSha256: hashCommunityGateSnapshot(originalGate),
+    });
+    let createCalls = 0;
+    const provider = {
+      createIssue: async () => {
+        createCalls += 1;
+        return { status: "UNKNOWN_ERROR" as const, data: undefined as never };
+      },
+      getIssue: async () => ({ status: "NOT_FOUND" as const, data: null as never }),
+    };
+
+    await expect(new IssueCreationService(manager, provider).createAndBind({
+      runId: run.runId,
+      repoFullName: "owner/repo",
+      title: "Issue title",
+      body: "Issue body",
+    })).rejects.toThrow(/community gate snapshot/i);
+    expect(createCalls).toBe(0);
+  });
+
+  it("requires the community gate snapshot to match the workspace base commit", async () => {
+    const manager = new ContributionRunManager({ baseDir: baseDir("issue-gate-base-commit") });
+    const run = manager.createRun({ repoFullName: "owner/repo" });
+    const communityGate = publicCommunityGate();
+    saveCanonicalArtifact(manager, run.runId, "workspace", {
+      baseCommitSha: "b".repeat(40),
+      communityGate,
+      communityGateSha256: hashCommunityGateSnapshot(communityGate),
+    });
+    let createCalls = 0;
+    const provider = {
+      createIssue: async () => {
+        createCalls += 1;
+        return { status: "UNKNOWN_ERROR" as const, data: undefined as never };
+      },
+      getIssue: async () => ({ status: "NOT_FOUND" as const, data: null as never }),
+    };
+
+    await expect(new IssueCreationService(manager, provider).createAndBind({
+      runId: run.runId,
+      repoFullName: "owner/repo",
+      title: "Issue title",
+      body: "Issue body",
+    })).rejects.toThrow(/community gate snapshot/i);
     expect(createCalls).toBe(0);
   });
 

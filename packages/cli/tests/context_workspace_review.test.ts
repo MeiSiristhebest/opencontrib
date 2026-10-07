@@ -34,7 +34,6 @@ function initializeWorkspace(
     "-m", "Update parser",
     "-m", "Signed-off-by: OpenContrib Test <test@example.invalid>",
   ], { stdio: "ignore" });
-  execFileSync("git", ["-C", workspace, "config", "--local", "core.ignoreStat", "true"], { stdio: "ignore" });
   execFileSync("git", [
     "-C", workspace,
     "remote", "add", "origin",

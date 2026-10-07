@@ -218,6 +218,8 @@ function getScopedNodeTestCommand(
   } else if (packageManager === 'yarn') {
     if (!yarnBerry) return undefined;
     baseCommand = `yarn exec ${parsed.runner}`;
+  } else if (packageManager === 'bun') {
+    baseCommand = `bunx --no-install ${parsed.runner}`;
   } else {
     return undefined;
   }

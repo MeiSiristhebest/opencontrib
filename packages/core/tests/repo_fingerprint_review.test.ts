@@ -108,7 +108,6 @@ describe("Prepared repository workspace binding", () => {
         "-c", "commit.gpgsign=false",
         "commit", "-m", "Baseline",
       ], { stdio: "ignore" });
-      execFileSync("git", ["-C", root, "config", "--local", "core.ignoreStat", "true"], { stdio: "ignore" });
       execFileSync("git", [
         "-C", root,
         "remote", "add", "origin", "https://github.com/example/parser.git",

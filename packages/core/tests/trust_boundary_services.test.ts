@@ -2002,10 +2002,6 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         cwd: workspacePath,
         stdio: "ignore",
       });
-      execFileSync("git", ["config", "core.ignoreStat", "true"], {
-        cwd: workspacePath,
-        stdio: "ignore",
-      });
       execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/repo.git"], {
         cwd: workspacePath,
         stdio: "ignore",

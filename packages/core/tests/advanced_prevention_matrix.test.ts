@@ -59,6 +59,27 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
     }
   });
 
+  it.each([
+    ['vitest', 'bunx --no-install vitest'],
+    ['vitest run --config vitest.config.ts', 'bunx --no-install vitest run --config vitest.config.ts'],
+    ['jest --runInBand', 'bunx --no-install jest --runInBand'],
+    ['mocha --timeout 5000', 'bunx --no-install mocha --timeout 5000'],
+  ])('scopes Bun-managed %s scripts through an installed test runner', (script, redTestCommand) => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-bun-scoped-node-test-'));
+    try {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
+        packageManager: 'bun@1.3.14',
+        scripts: { test: script },
+      }));
+
+      const commands = detectRunnableCommandsFromDir(tempDir);
+      expect(commands.testCommand).toBe('bun run test');
+      expect(commands.redTestCommand).toBe(redTestCommand);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('preserves supported timeout flags for scoped Bun RED commands', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'oc-bun-test-timeout-'));
     try {

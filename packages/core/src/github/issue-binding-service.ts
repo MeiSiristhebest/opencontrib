@@ -8,6 +8,7 @@ import {
   pinIssueNumberFromProviderIssue,
   saveCanonicalArtifact,
 } from "../run/canonical-writer.js";
+import { hashCommunityGateSnapshot } from "../governance/community-gate.js";
 import { requiresPrivateVulnerabilityDisclosure } from "../submission/submission-route.js";
 import { canonicalGitHubIssueUrl } from "./issue-url.js";
 import { mapErrorToApiStatus } from "./retry-strategy.js";
@@ -229,7 +230,11 @@ export class IssueBindingService {
     repoFullName: string,
   ): void {
     const workspace = run.artifacts.workspace as
-      | { communityGate?: unknown }
+      | {
+          baseCommitSha?: unknown;
+          communityGate?: unknown;
+          communityGateSha256?: unknown;
+        }
       | undefined;
     const communityGate = CommunityGateSnapshotSchema.safeParse(
       workspace?.communityGate,
@@ -242,6 +247,17 @@ export class IssueBindingService {
     if (requiresPrivateVulnerabilityDisclosure(run)) {
       throw new Error(
         "PrivateIssueBindingForbiddenError: private disclosure runs cannot bind a public issue.",
+      );
+    }
+    if (
+      typeof workspace?.baseCommitSha !== "string" ||
+      communityGate.data.sourceCommitSha !== workspace.baseCommitSha ||
+      typeof workspace.communityGateSha256 !== "string" ||
+      hashCommunityGateSnapshot(communityGate.data) !==
+        workspace.communityGateSha256
+    ) {
+      throw new Error(
+        "IssueBindingPolicyUnavailableError: community gate snapshot does not match its recorded hash and workspace base commit.",
       );
     }
     if (run.manifest.repoFullName.toLowerCase() !== repoFullName.toLowerCase()) {
