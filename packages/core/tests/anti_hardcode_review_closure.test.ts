@@ -186,6 +186,21 @@ describe("Repository literal review regressions", () => {
     ).toBe(true);
   });
 
+  it("allows home-root module aliases in import specifiers", () => {
+    const aliases = lintAntiHardcode(
+      patch(
+        "src/aliases.ts",
+        'import { component } from "~/components/component";\nconst helper = require("~/lib/helper");',
+      ),
+    );
+    expect(aliases.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toBe(false);
+
+    const filesystemPath = lintAntiHardcode(
+      patch("src/paths.ts", 'const config = "~/private/config.json";'),
+    );
+    expect(filesystemPath.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toBe(true);
+  });
+
   it("skips quotes inside JavaScript regular-expression literals", () => {
     expect(
       detectsRepo(
@@ -305,6 +320,14 @@ describe("Repository literal review regressions", () => {
     expect(
       detectsRepo("scripts/check.sh", 'repo="owner/repo"; printf "%s" "$repo"'),
     ).toBe(false);
+  });
+
+  it.each([
+    'if [ "$repo" = "owner/repo" ]; then exit 0; fi',
+    'if [ "${repo}" = "owner/repo" ]; then exit 0; fi',
+    'if [ "owner/repo" = "${targetRepo}" ]; then exit 0; fi',
+  ])("detects quoted shell repository comparisons: %s", code => {
+    expect(detectsRepo("scripts/check.sh", code)).toBe(true);
   });
 
   it.each([

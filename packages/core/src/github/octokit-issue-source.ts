@@ -44,8 +44,7 @@ export class OctokitIssueSource {
     const normalizedHost = normalizeGitHubIssueHost(opts.host);
     const isCustomEnterpriseHost =
       normalizedHost &&
-      normalizedHost !== 'github.com' &&
-      normalizedHost !== 'api.github.com';
+      normalizedHost !== 'github.com';
     this.octokit = new Octokit({
       auth: opts.token || undefined,
       baseUrl: isCustomEnterpriseHost

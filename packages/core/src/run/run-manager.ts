@@ -168,7 +168,10 @@ export class ContributionRunManager {
           `IssueBindingImmutableError: run ${runId} is already bound to issue #${summary.manifest.issueNumber}.`,
         );
       }
-      if (summary.manifest.issueNumber === binding.data.providerIssueId) {
+      const issueNumberChanged =
+        summary.manifest.issueNumber !== binding.data.providerIssueId;
+      const issueTitleChanged = summary.manifest.issueTitle !== binding.data.title;
+      if (!issueNumberChanged && !issueTitleChanged) {
         return summary.manifest;
       }
 
@@ -177,6 +180,7 @@ export class ContributionRunManager {
         throw new Error(`Contribution run ${runId} does not exist`);
       }
       manifest.issueNumber = binding.data.providerIssueId;
+      manifest.issueTitle = binding.data.title;
       manifest.updatedAt = this.clock.nowIso();
       this.bundleManager.saveManifest(manifest);
       this.activeSession.patchActiveSession(runId, {
@@ -185,7 +189,9 @@ export class ContributionRunManager {
       });
       this.bundleManager.appendEvent(runId, {
         phase: manifest.currentPhase,
-        eventType: "ISSUE_NUMBER_BOUND_BY_PROVIDER",
+        eventType: issueNumberChanged
+          ? "ISSUE_NUMBER_BOUND_BY_PROVIDER"
+          : "ISSUE_TITLE_UPDATED_BY_PROVIDER",
         payload: {
           issueNumber: binding.data.providerIssueId,
           provider: binding.data.provider,

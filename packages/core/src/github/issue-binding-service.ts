@@ -76,6 +76,16 @@ export class IssueBindingService {
     private readonly provider: IssueBindingProvider,
   ) {}
 
+  /** Validate the public route before a caller creates a provider issue. */
+  assertPublicIssueCreationAllowed(input: {
+    runId: string;
+    repoFullName: string;
+  }): void {
+    const run = this.runManager.getRun(input.runId);
+    if (!run) throw new Error(`Contribution run ${input.runId} does not exist`);
+    this.assertPublicIssueTarget(run, input.repoFullName);
+  }
+
   async bind(input: BindIssueInput): Promise<IssueBindingArtifact> {
     const run = this.getPublicRun(input);
 
@@ -199,6 +209,25 @@ export class IssueBindingService {
   private getPublicRun(input: BindIssueInput) {
     const run = this.runManager.getRun(input.runId);
     if (!run) throw new Error(`Contribution run ${input.runId} does not exist`);
+    this.assertPublicIssueTarget(run, input.repoFullName);
+    if (!Number.isSafeInteger(input.issueNumber) || input.issueNumber <= 0) {
+      throw new Error("IssueBindingInputError: issueNumber must be a positive safe integer.");
+    }
+    if (
+      run.manifest.issueNumber !== undefined &&
+      run.manifest.issueNumber !== input.issueNumber
+    ) {
+      throw new Error(
+        `IssueBindingTargetMismatchError: run is already bound to issue #${run.manifest.issueNumber}.`,
+      );
+    }
+    return run;
+  }
+
+  private assertPublicIssueTarget(
+    run: NonNullable<ReturnType<ContributionRunManager["getRun"]>>,
+    repoFullName: string,
+  ): void {
     const workspace = run.artifacts.workspace as
       | { communityGate?: unknown }
       | undefined;
@@ -215,28 +244,16 @@ export class IssueBindingService {
         "PrivateIssueBindingForbiddenError: private disclosure runs cannot bind a public issue.",
       );
     }
-    if (run.manifest.repoFullName.toLowerCase() !== input.repoFullName.toLowerCase()) {
+    if (run.manifest.repoFullName.toLowerCase() !== repoFullName.toLowerCase()) {
       throw new Error(
         "IssueBindingTargetMismatchError: provider issue target does not match the canonical run repository.",
       );
     }
-    if (!Number.isSafeInteger(input.issueNumber) || input.issueNumber <= 0) {
-      throw new Error("IssueBindingInputError: issueNumber must be a positive safe integer.");
-    }
-    if (
-      run.manifest.issueNumber !== undefined &&
-      run.manifest.issueNumber !== input.issueNumber
-    ) {
-      throw new Error(
-        `IssueBindingTargetMismatchError: run is already bound to issue #${run.manifest.issueNumber}.`,
-      );
-    }
-    if (!/^([^/\s]+)\/([^/\s]+)$/.test(input.repoFullName)) {
+    if (!/^([^/\s]+)\/([^/\s]+)$/.test(repoFullName)) {
       throw new Error(
         "IssueBindingInputError: repoFullName must be exactly owner/repo.",
       );
     }
-    return run;
   }
 
   private async fetchProviderIssue(

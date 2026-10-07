@@ -184,7 +184,7 @@ npx -y @opencontrib/cli doctor
 ### 第 1 步：创建运行锚点
 
 ```bash
-opencontrib run create --repo owner/repo --issue 0 --title "target defect"
+opencontrib run create --repo owner/repo --issue 1 --title "target defect"
 ```
 
 ### 第 2 步：主动探针扫描与 Top-K 收敛（Track A 主动模式）
@@ -202,7 +202,7 @@ opencontrib pointer resolve ptr://findings/<pointer_id> --view slice
 ### 第 4 步：建立 Clean-Room 隔离沙盒
 
 ```bash
-opencontrib workspace prepare --repo owner/repo --issue 0 --run-id "$RUN_ID"
+opencontrib workspace prepare --repo owner/repo --issue 1 --run-id "$RUN_ID"
 # 获取返回的独立隔离 workspacePath
 ```
 

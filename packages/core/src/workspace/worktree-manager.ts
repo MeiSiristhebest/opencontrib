@@ -1,4 +1,5 @@
 import { spawnSync } from "child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -113,6 +114,12 @@ export interface WorkspaceContext {
   baseRepoPath: string;
   baseCommitSha: string;
   baseBranch?: string;
+}
+
+function workspacePathKey(value: string): string {
+  const prefix = sanitizeRunId(value).slice(0, 48) || "task";
+  const digest = createHash("sha256").update(value).digest("hex").slice(0, 16);
+  return `${prefix}-${digest}`;
 }
 
 export class WorktreeManager {
@@ -250,17 +257,16 @@ export class WorktreeManager {
   }): WorkspaceContext {
     const { repoFullName, issueOrTaskId, localRepoPath, runId } = input;
     const sanitizedRepoName = repoFullName.replace("/", "__");
-    const cleanRunId = runId ? sanitizeRunId(runId) : "";
-    const runSuffix = cleanRunId ? `-${cleanRunId}` : "";
+    const runSuffix = runId
+      ? `-${createHash("sha256").update(runId).digest("hex").slice(0, 16)}`
+      : "";
+    const issueOrTaskKey = workspacePathKey(String(issueOrTaskId));
     const branchName = runId
       ? runBranchName(runId)
       : `opencontrib/fix-${issueOrTaskId}${runSuffix}`;
     const workspacePath =
       input.workspacePath ||
-      join(
-        this.workspaceRoot,
-        `${sanitizedRepoName}__${issueOrTaskId}${runSuffix}`,
-      );
+      join(this.workspaceRoot, `${sanitizedRepoName}__${issueOrTaskKey}${runSuffix}`);
 
     let sourceRepoPath = localRepoPath;
     if (!sourceRepoPath || !existsSync(sourceRepoPath)) {

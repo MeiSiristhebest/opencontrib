@@ -75,7 +75,7 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
     }
   });
 
-  it('rejects shell glob values in Node test runner flags', () => {
+  it('rejects shell glob values passed to test runner flags', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-test-unsafe-flag-'));
     try {
       writeFileSync(join(tempDir, 'package.json'), JSON.stringify({

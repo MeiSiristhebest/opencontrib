@@ -113,6 +113,22 @@ function isWebRoutePathReference(code: string, pathToken: string): boolean {
   );
 }
 
+function isModuleAliasSpecifierReference(
+  code: string,
+  pathToken: string,
+  value: string,
+): boolean {
+  if (!/^~[\\/]/.test(value)) return false;
+  const tokenIndex = code.indexOf(pathToken);
+  if (tokenIndex < 0) return false;
+  const prefix = code.slice(Math.max(0, tokenIndex - 120), tokenIndex);
+  return (
+    /\bfrom\s*$/i.test(prefix) ||
+    /\bimport\s*$/i.test(prefix) ||
+    /\b(?:import|require)\s*\(\s*$/i.test(prefix)
+  );
+}
+
 function isDockerfileCopyFromPathReference(
   filePath: string,
   code: string,
@@ -1431,6 +1447,15 @@ function analyzeFileChanges(
     `(?:${repoVariable}\\s*${repositoryComparisonOperator}\\s*(${stringToken})|(${stringToken})\\s*${repositoryComparisonOperator}\\s*${repoVariable}|${repoVariable}\\s*\\.includes\\s*\\(\\s*(${stringToken}))`,
     'gi',
   );
+  const shellRepoVariableValue = isShellSource
+    ? new RegExp(`^\\$(?:\\{${repoVariable}\\}|${repoVariable})$`, 'i')
+    : undefined;
+  const shellRepositoryComparison = isShellSource
+    ? new RegExp(
+        `(${stringToken})\\s*${repositoryComparisonOperator}\\s*(${stringToken})`,
+        'gi',
+      )
+    : undefined;
   const repoMethodReference = new RegExp(
     '(?:' +
       repoVariable + '\\s*\\.\\s*equals(?:ignorecase)?\\s*\\(\\s*(' + stringToken + ')' +
@@ -1467,6 +1492,7 @@ function analyzeFileChanges(
         value &&
         absolutePathPatterns.some((pattern) => pattern.test(value)) &&
         !isWebRoutePathReference(record.code, pathToken) &&
+        !isModuleAliasSpecifierReference(record.code, pathToken, value) &&
         !isDockerfileCopyFromPathReference(filePath, record.code)
       ) {
         addViolation(
@@ -1493,6 +1519,42 @@ function analyzeFileChanges(
 
   for (const hunkRecords of hunks.values()) {
     const source = buildHunkSource(hunkRecords);
+    if (shellRepoVariableValue && shellRepositoryComparison) {
+      for (const match of source.code.matchAll(shellRepositoryComparison)) {
+        const matchIndex = match.index ?? 0;
+        if (!isShellPredicateComparison(source.code, matchIndex)) continue;
+        const leftValue = stringValues.get(match[1]);
+        const rightValue = stringValues.get(match[2]);
+        const repositoryLiteral = leftValue && shellRepoVariableValue.test(leftValue)
+          ? rightValue
+          : rightValue && shellRepoVariableValue.test(rightValue)
+            ? leftValue
+            : undefined;
+        if (
+          !repositoryLiteral ||
+          !/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repositoryLiteral)
+        ) {
+          continue;
+        }
+        const findingRecord = source.firstAddedRecord(
+          matchIndex,
+          matchIndex + match[0].length,
+        );
+        if (!findingRecord) continue;
+        const isTarget =
+          options.targetRepo &&
+          repositoryLiteral.toLowerCase() === options.targetRepo.toLowerCase();
+        addViolation(
+          violations,
+          filePath,
+          findingRecord.content.trim(),
+          'REPO_LITERAL_DISCRIMINATION',
+          isTarget
+            ? `Production logic hardcodes target repository name '${options.targetRepo}'. Solutions must be generalized and decoupled from repository-specific string literals.`
+            : 'Detected repository-name literal comparison in production code. Use capability/manifest feature detection rather than repo-name discrimination.',
+        );
+      }
+    }
     for (const match of [
       ...source.code.matchAll(repoReference),
       ...source.code.matchAll(repoMethodReference),

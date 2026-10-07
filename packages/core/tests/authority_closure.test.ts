@@ -159,11 +159,46 @@ describe("Authority closure", () => {
     expect(createCalls).toBe(0);
   });
 
+  it("checks the public route before creating a provider issue", async () => {
+    const manager = new ContributionRunManager({ baseDir: baseDir("issue-route-preflight") });
+    const privateRun = manager.createRun({ repoFullName: "owner/repo" });
+    saveCanonicalArtifact(manager, privateRun.runId, "workspace", {
+      baseCommitSha: "a".repeat(40),
+      communityGate: privateCommunityGate(),
+    });
+    const policylessRun = manager.createRun({ repoFullName: "owner/repo" });
+    let createCalls = 0;
+    const provider = {
+      createIssue: async () => {
+        createCalls += 1;
+        return { status: "UNKNOWN_ERROR" as const, data: undefined as never };
+      },
+      getIssue: async () => ({ status: "NOT_FOUND" as const, data: null as never }),
+    };
+    const service = new IssueCreationService(manager, provider);
+    const input = (runId: string) => ({
+      runId,
+      repoFullName: "owner/repo",
+      title: "Issue title",
+      body: "Issue body",
+    });
+
+    await expect(service.createAndBind(input(privateRun.runId)))
+      .rejects.toThrow("private disclosure runs cannot bind a public issue");
+    await expect(service.createAndBind(input(policylessRun.runId)))
+      .rejects.toThrow("issue binding requires a valid canonical workspace policy snapshot");
+    expect(createCalls).toBe(0);
+  });
+
   it("creates issue_binding only from a provider response", async () => {
     const storageDir = baseDir("issue");
     const activeSession = new ActiveSessionManager(join(storageDir, "active-session.json"));
     const manager = new ContributionRunManager({ baseDir: storageDir, activeSession });
-    const run = manager.createRun({ repoFullName: "owner/repo" });
+    const run = manager.createRun({
+      repoFullName: "owner/repo",
+      issueNumber: 42,
+      issueTitle: "Stale discovery title",
+    });
     savePublicCommunityGate(manager, run.runId);
     const provider = {
       getIssue: async () => ({
@@ -188,6 +223,7 @@ describe("Authority closure", () => {
     expect(artifact.providerVerified).toBe(true);
     expect(manager.getRun(run.runId)?.artifacts.issueBinding).toEqual(artifact);
     expect(manager.getRun(run.runId)?.manifest.issueNumber).toBe(42);
+    expect(manager.getRun(run.runId)?.manifest.issueTitle).toBe("Fix the verified issue");
     expect(activeSession.getActiveSession()?.issueNumber).toBe(42);
     expect(activeSession.getActiveSession()?.issueTitle).toBe("Fix the verified issue");
     expect(() =>

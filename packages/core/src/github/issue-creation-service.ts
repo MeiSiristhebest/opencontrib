@@ -72,6 +72,10 @@ export class IssueCreationService {
     if (!owner || !repo) {
       throw new Error("IssueCreationInputError: repoFullName must be owner/repo.");
     }
+    this.bindingService.assertPublicIssueCreationAllowed({
+      runId: input.runId,
+      repoFullName: input.repoFullName,
+    });
     const response = await this.provider.createIssue(owner, repo, {
       title: input.title.trim(),
       body: input.body,
