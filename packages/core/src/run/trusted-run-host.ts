@@ -71,13 +71,16 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
       capturedAt: red.capturedAt,
       sourceTreeSha256: red.sourceTreeSha256,
       testIdentity: red.testIdentity,
+      baselineTestedAt: red.baselineTestedAt,
+      baselineFlakyTests: red.baselineFlakyTests,
+      baselineCheckStatus: red.baselineCheckStatus,
     };
   }
 
   async verifyGreen(
     job: import("./trusted-execution.port.js").GreenExecutionJob,
   ): Promise<import("./trusted-execution.port.js").RawGreenExecutionResult> {
-    const { verifyGreenEvidence, getProcessHandleCount } =
+    const { verifyGreenEvidence, getProcessHandleCount, parseTestCountsFromOutput } =
       await import("../evidence/evidence-collector.js");
     const initialHandles = getProcessHandleCount();
     const green = await verifyGreenEvidence({
@@ -88,6 +91,8 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
       concurrencyWorkers: job.concurrencyWorkers ?? 1,
     });
     const finalHandles = getProcessHandleCount();
+    const counts = parseTestCountsFromOutput(green.stressResult.lastOutput);
+    const passed = green.greenEvidence.passed && counts.passed > 0 && counts.failed === 0;
     let handleLeakCheckPassed: "PASS" | "FAIL" | "UNAVAILABLE" = "UNAVAILABLE";
     if (initialHandles !== null && finalHandles !== null) {
       handleLeakCheckPassed =
@@ -98,7 +103,7 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
       command: green.greenEvidence.command,
       exitCode: green.greenEvidence.exitCode,
       outputSnippet: green.greenEvidence.outputSnippet,
-      passed: green.greenEvidence.passed,
+      passed,
       sourceTreeSha256: green.greenEvidence.sourceTreeSha256,
       capturedAt: green.greenEvidence.capturedAt,
       roundsRequested: green.stressResult.roundsRequested,
@@ -108,12 +113,12 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
       executionCount: green.stressResult.executionCount,
       maxConcurrentObserved: green.stressResult.maxConcurrentObserved,
       concurrencyWorkers: green.stressResult.concurrencyWorkers,
-      concurrencyStampedePassed: green.stressResult.concurrencyStampedePassed,
+      concurrencyStampedePassed: passed && green.stressResult.concurrencyStampedePassed,
       raceCollisionsDetected: green.stressResult.raceCollisionsDetected,
       latencyJitterMs: green.stressResult.latencyJitterMs,
       testIdentity: green.greenEvidence.testIdentity,
-      passedUnitTestsCount: green.greenEvidence.passed ? 1 : 0,
-      failedUnitTestsCount: green.greenEvidence.passed ? 0 : 1,
+      passedUnitTestsCount: counts.passed,
+      failedUnitTestsCount: counts.failed,
       handleLeakCheckPassed,
       initialDescriptorCount: initialHandles ?? undefined,
       finalDescriptorCount: finalHandles ?? undefined,
@@ -314,6 +319,7 @@ export class TrustedRunMaterializer {
         );
       }
 
+      const coverageStartedAt = Date.now();
       const rawGreen = await this.executionPort.verifyGreen({
         runId: bundle.manifest.runId,
         workspace: {
@@ -329,6 +335,7 @@ export class TrustedRunMaterializer {
       await evidenceService.recordGreenExecution(
         bundle.manifest.runId,
         rawGreen,
+        coverageStartedAt,
       );
 
       this.runManager.saveArtifact(

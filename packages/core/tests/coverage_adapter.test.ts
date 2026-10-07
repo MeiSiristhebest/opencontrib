@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   IstanbulSummaryCoverageAdapter,
+  LcovChangedLineCoverageAdapter,
   NoopCoverageAdapter,
   type TestCoverageAdapter,
 } from "../src/evidence/coverage-adapter.js";
@@ -24,32 +26,33 @@ function withTmpDir<T>(fn: (dir: string) => Promise<T> | T): Promise<T> {
 }
 
 describe("IstanbulSummaryCoverageAdapter", () => {
-  test("reads total.pct.lines from coverage-summary.json", () =>
+  test("reads total.lines.pct without rounding across the policy threshold", () =>
     withTmpDir(async (dir) => {
       writeFileSync(
         join(dir, "coverage-summary.json"),
         JSON.stringify({
-          total: { pct: { lines: 91.4, branches: 88, functions: 90 } },
+          total: { lines: { pct: 84.9 } },
         }),
       );
       const adapter = new IstanbulSummaryCoverageAdapter();
-      expect(await adapter.resolve(dir)).toBe(91);
+      expect(await adapter.resolve(dir)).toBe(84.9);
+      expect(adapter.scope).toBe("whole-project");
     }));
 
-  test("clamps out-of-range percentages to 0-100", () =>
+  test("rejects out-of-range percentages", () =>
     withTmpDir(async (dir) => {
       writeFileSync(
         join(dir, "coverage-summary.json"),
-        JSON.stringify({ total: { pct: { lines: 140 } } }),
+        JSON.stringify({ total: { lines: { pct: 140 } } }),
       );
       const high = new IstanbulSummaryCoverageAdapter();
-      expect(await high.resolve(dir)).toBe(100);
+      expect(await high.resolve(dir)).toBeUndefined();
 
       writeFileSync(
         join(dir, "coverage-summary.json"),
-        JSON.stringify({ total: { pct: { lines: -12 } } }),
+        JSON.stringify({ total: { lines: { pct: -12 } } }),
       );
-      expect(await high.resolve(dir)).toBe(0);
+      expect(await high.resolve(dir)).toBeUndefined();
     }));
 
   test("returns undefined for a missing file (no invented numbers)", () =>
@@ -65,7 +68,7 @@ describe("IstanbulSummaryCoverageAdapter", () => {
       expect(await adapter.resolve(dir)).toBeUndefined();
     }));
 
-  test("returns undefined when total.pct.lines is absent", () =>
+  test("returns undefined when total.lines.pct is absent", () =>
     withTmpDir(async (dir) => {
       writeFileSync(
         join(dir, "coverage-summary.json"),
@@ -79,11 +82,50 @@ describe("IstanbulSummaryCoverageAdapter", () => {
     withTmpDir(async (dir) => {
       writeFileSync(
         join(dir, "my-coverage.json"),
-        JSON.stringify({ total: { pct: { lines: 85 } } }),
+        JSON.stringify({ total: { lines: { pct: 85 } } }),
       );
       const adapter = new IstanbulSummaryCoverageAdapter("my-coverage.json");
       expect(await adapter.resolve(dir)).toBe(85);
     }));
+});
+
+describe("LCOV changed-line coverage", () => {
+  function prepare(dir: string) {
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    writeFileSync(join(dir, ".gitignore"), "coverage/\n");
+    writeFileSync(join(dir, "value.ts"), "export const value = 1;\nexport const other = 1;\nexport const unchanged = 1;\n");
+    execFileSync("git", ["add", "."], { cwd: dir });
+    execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "baseline"], { cwd: dir });
+    writeFileSync(join(dir, "value.ts"), "export const value = 2;\nexport const other = 2;\nexport const unchanged = 1;\n");
+    mkdirSync(join(dir, "coverage"));
+    return join(dir, "coverage", "lcov.info");
+  }
+
+  test("counts changed executable source lines and includes newly created source files", () => withTmpDir(async dir => {
+    const file = prepare(dir);
+    writeFileSync(join(dir, "added.ts"), "export const added = 1;\n");
+    writeFileSync(join(dir, "value.test.ts"), "test('regression', () => {});\n");
+    writeFileSync(file, "SF:value.ts\nDA:1,1\nDA:2,0\nDA:3,0\nend_of_record\nSF:added.ts\nDA:1,1\nend_of_record\n");
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir)).toBe(200 / 3);
+  }));
+
+  test("rejects missing source records, invalid counts, and incomplete LCOV", () => withTmpDir(async dir => {
+    const file = prepare(dir);
+    for (const report of ["SF:other.ts\nDA:1,1\nend_of_record\n", "SF:value.ts\nDA:1,-1\nend_of_record\n", "SF:value.ts\nDA:1,1\n"]) {
+      writeFileSync(file, report);
+      expect(await new LcovChangedLineCoverageAdapter().resolve(dir)).toBeUndefined();
+    }
+  }));
+
+  test("rejects stale reports and paths outside the workspace", () => withTmpDir(async dir => {
+    const file = prepare(dir);
+    writeFileSync(file, "SF:value.ts\nDA:1,1\nDA:2,1\nend_of_record\n");
+    utimesSync(file, new Date(0), new Date(0));
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir, { startedAt: Date.now() })).toBeUndefined();
+    expect(await new LcovChangedLineCoverageAdapter("../coverage/lcov.info").resolve(dir)).toBeUndefined();
+    writeFileSync(file, "SF:../value.ts\nDA:1,1\nend_of_record\n");
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir)).toBeUndefined();
+  }));
 });
 
 describe("Evidence coverage measurement status", () => {

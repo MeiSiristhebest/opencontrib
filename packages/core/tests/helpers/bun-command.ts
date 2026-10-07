@@ -23,8 +23,9 @@ export function stateAssertionCommand(
     `const state = require("node:fs").readFileSync(${statePath}, "utf8");`,
     `if (state.includes("FAIL")) {`,
     `console.log(${JSON.stringify(assertion)});`,
+    'console.log("0 pass, 1 fail");',
     "process.exitCode = 1;",
-    `} else { console.log("PASS"); }`,
+    `} else { console.log("1 pass, 0 fail"); }`,
   ].join(" ");
   return bunCommand(source);
 }

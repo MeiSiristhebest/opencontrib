@@ -785,6 +785,9 @@ export function auditGovernance(
   const resourceLeakGatePassed =
     input.resourceLeakPolicy?.required !== true ||
     input.evidence?.handleLeakCheckPassed === "PASS";
+  const executedTestsGatePassed =
+    input.evidence?.zeroAssertionWarning !== true &&
+    input.evidence?.passedUnitTestsCount !== 0;
 
   // 3b. Cross-Platform, Collision & Lifecycle Impact Analysis Check
   let impactAnalysisPassed = true;
@@ -845,6 +848,7 @@ export function auditGovernance(
     confidence.isPassed &&
     coverageGatePassed &&
     resourceLeakGatePassed &&
+    executedTestsGatePassed &&
     impactAnalysisPassed &&
     preflightLintPassed &&
     antiHardcodePassed;
@@ -879,6 +883,9 @@ export function auditGovernance(
   };
 
   const remediationSuggestions: string[] = [];
+  if (!executedTestsGatePassed) {
+    remediationSuggestions.push("Evidence contains no verified executed tests. Run a supported test runner with a non-empty test selection before governance audit.");
+  }
   if (!markdownIntegrityPassed) {
     remediationSuggestions.push(
       `Fix Markdown encoding/corruption issues: ${corruptedMarkdownIssues.join("; ")}`,
@@ -1259,6 +1266,7 @@ function updateNativeTemplateIssueReference(
 }
 
 export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
+  const aiDisclosureRequired = data.aiDisclosureRequired === true || data.conditionalAiRequired === true;
   const submissionRoute = data.submissionRoute ?? "PUBLIC_ISSUE";
   if (
     submissionRoute === "PUBLIC_ISSUE" &&
@@ -1403,7 +1411,7 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
 
 
     const complianceNotes = [
-      data.aiDisclosureRequired
+      aiDisclosureRequired
         ? "Automated assistance disclosure: This contribution was prepared using OpenContrib AI-assisted tooling; specific model details were not recorded in this run."
         : "",
       data.dcoRequired
@@ -1419,8 +1427,8 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     regressionLine = `- **Regression Isolation**: ${validatedEvidence.baselineFlakyTests.length} baseline flaky test(s) observed.`;
   }
 
-  const aiDisclosureSection = data.aiDisclosureRequired
-    ? `\n\n### Automated Assistance Disclosure\nIn accordance with repository policies, this contribution was developed with AI-assisted tooling (OpenContrib autonomous engine) with deterministic local reproduction and human verification.`
+  const aiDisclosureSection = aiDisclosureRequired
+    ? `\n\n### Automated Assistance Disclosure\nThis contribution was prepared using OpenContrib AI-assisted tooling; specific model details were not recorded in this run.`
     : "";
 
   return `### Problem Description

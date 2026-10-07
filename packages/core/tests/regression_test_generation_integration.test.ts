@@ -166,7 +166,7 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         path: "math.test.js",
         operation: "CREATE" as const,
         content:
-          "import { mul } from './math.js'; if (mul(3, 4) !== 12) { console.error('ASSERTION_MUL_FAIL'); process.exit(1); }\n",
+          "import { expect, test } from 'bun:test'; import { mul } from './math.js'; test('multiplication regression', () => expect(mul(3, 4), 'ASSERTION_MUL_FAIL').toBe(12));\n",
         explanation: "regression test for multiplication",
       };
       writeFileSync(
@@ -174,7 +174,7 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         reproTestFile.content,
       );
 
-      const testCmd = "bun math.test.js";
+      const testCmd = "bun test math.test.js";
       const agentEvidence = new EvidenceService(agentRunManager);
       const red = agentEvidence.captureRed({
         runId: manifest.runId,
@@ -212,13 +212,15 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         "patch",
         JSON.stringify(fullPatch),
       );
-      await agentEvidence.verifyGreen({
+      const agentGreen = await agentEvidence.verifyGreen({
         runId: manifest.runId,
         cwd: agentWorkspace,
         testCommand: testCmd,
         stressLoopCount: 1,
         concurrencyWorkers: 1,
       });
+      expect(agentGreen.reproductionVerified).toBe(true);
+      expect(agentGreen.passedUnitTestsCount).toBe(1);
       agentRunManager.saveArtifact(
         manifest.runId,
         "pr_draft",
@@ -297,6 +299,8 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
       expect(hostRun.artifacts.issueBinding).toBeDefined();
       expect(hostRun.artifacts.submissionIntent).toBeDefined();
       expect(hostRun.manifest.currentPhase).toBe("GOVERNANCE_AUDITED");
+      expect(hostRun.artifacts.evidenceRed?.baselineCheckStatus).toBe("PASS");
+      expect(hostRun.artifacts.evidence?.baselineTestedAt).toBe(hostRun.artifacts.evidenceRed?.baselineTestedAt);
       const hostValidatedPatch = hostRun.artifacts.validatedPatch as any;
       expect(hostValidatedPatch).toBeDefined();
       expect(hostValidatedPatch.files.map((f: any) => f.path)).toContain(

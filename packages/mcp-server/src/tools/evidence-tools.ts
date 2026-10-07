@@ -352,6 +352,7 @@ export function registerEvidenceTools(
         .describe("Concurrent workers (integer 1..32)"),
       baselineCommitSha: z.string().optional().describe("Baseline commit SHA"),
       workspaceRoot: z.string().optional().describe("Root workspace directory"),
+      coverageReport: z.string().optional().describe("Workspace-relative LCOV report produced by GREEN (default: coverage/lcov.info)"),
     },
     async (args) => {
       try {
@@ -364,6 +365,7 @@ export function registerEvidenceTools(
           baselineCommitSha: args.baselineCommitSha,
           stressLoopCount: args.stressLoopCount ?? 1,
           concurrencyWorkers: args.concurrencyWorkers ?? 1,
+          coverageReport: args.coverageReport,
         });
         const persistence: { saved: boolean; error?: string } = {
           saved: report.reproductionVerified === true,

@@ -20,6 +20,37 @@ const auditGovernance: typeof auditGovernanceRaw = (input) =>
   });
 
 describe("Governance & Anti-AI Audit Engine", () => {
+  it.each([0, undefined])("blocks empty test evidence even with a passing quality score (%s)", passed => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/parser.ts b/parser.ts\n+export const value = 2;",
+      prTitle: "fix(parser): handle empty input",
+      prBody: "Handle empty input.",
+      confidenceBreakdown: {
+        rootCause: 100,
+        implementation: 100,
+        regression: 100,
+        defensiveCoverage: 100,
+        testCoverage: 100,
+        styleMatch: 100,
+        securityAudit: 100,
+      },
+      evidence: { allTestsPassing: true, reproductionVerified: true, passedUnitTestsCount: passed, zeroAssertionWarning: true },
+    });
+    expect(audit.technicalGate?.status).toBe("FAIL");
+    expect(audit.remediationSuggestions.join("\n")).toContain("executed tests");
+  });
+
+  it.each([undefined, "## Description\nFix parser.\n"])("renders conditional AI disclosure without invented verification (%s)", nativeTemplateContent => {
+    const template = renderMasterPrTemplate({
+      issueNumber: 1,
+      summary: "Fix parser.",
+      conditionalAiRequired: true,
+      nativeTemplateContent,
+    });
+    expect(template).toContain("AI-assisted tooling");
+    expect(template).not.toContain("human verification");
+    expect(template).not.toContain("deterministic local reproduction");
+  });
   it("detects forbidden AI phrases in text", () => {
     const textWithAi =
       "I have carefully analyzed the issue. Here is a breakdown of the changes: // helper function";

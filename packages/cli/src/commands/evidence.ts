@@ -343,6 +343,7 @@ export const verifyGreenCommand = evidenceCommand
   )
   .option("--baseline-sha <sha>", "Baseline commit SHA")
   .option("--workspace-root <path>", "Root workspace for security boundary")
+  .option("--coverage-report <path>", "Workspace-relative LCOV report produced by GREEN (default: coverage/lcov.info)")
   .option("--pretty", "Pretty-print", false)
   .action(
     async (opts: {
@@ -353,6 +354,7 @@ export const verifyGreenCommand = evidenceCommand
       concurrency?: number;
       baselineSha?: string;
       workspaceRoot?: string;
+      coverageReport?: string;
       pretty?: boolean;
     }) => {
       try {
@@ -383,6 +385,7 @@ export const verifyGreenCommand = evidenceCommand
             baselineCommitSha: baselineSha,
             stressLoopCount: opts.stressLoop ?? 1,
             concurrencyWorkers: opts.concurrency ?? 1,
+            coverageReport: opts.coverageReport,
           });
           persistence = { saved: report.reproductionVerified === true };
         } else {

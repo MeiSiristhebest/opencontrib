@@ -120,12 +120,9 @@ export interface BenchmarkFixture {
 }
 
 const REGRESSION_TEST_SOURCE = [
+  "import { expect, test } from 'bun:test';",
   "import { mul } from './math.js';",
-  "if (mul(3, 4) !== 12) {",
-  "  console.error('ASSERTION_MUL_FAIL');",
-  "  process.exit(1);",
-  "}",
-  "console.log('TEST_PASS');",
+  "test('multiplication regression', () => expect(mul(3, 4), 'ASSERTION_MUL_FAIL').toBe(12));",
   "",
 ].join("\n");
 
@@ -165,7 +162,7 @@ export function createBenchmarkFixture(rootDir: string): BenchmarkFixture {
     baseSha,
     repoFullName: "fixture/math-repo",
     issueNumber: 42,
-    testCommand: "bun math.test.js",
+    testCommand: "bun test math.test.js",
     expectedAssertion: "ASSERTION_MUL_FAIL",
     testFile: {
       path: "math.test.js",
@@ -781,7 +778,7 @@ export async function seedScriptedAgent(
     implementationSteps: [
       "Add math.test.js regression test",
       "Fix mul in math.js",
-      "Run bun math.test.js",
+      `Run ${fixture.testCommand}`,
     ],
     regressionTestPlan: [fixture.testCommand],
     estimatedDiffLines: 16,
@@ -795,13 +792,14 @@ export async function seedScriptedAgent(
   // A PR draft is a proposal over canonical RED/GREEN evidence. Verify GREEN
   // before writing it so every transfer path exercises the same lifecycle
   // ordering as the real agent-facing workflow.
-  await agentEvidence.verifyGreen({
+  const agentGreen = await agentEvidence.verifyGreen({
     runId: manifest.runId,
     cwd: agentWs,
     testCommand: fixture.testCommand,
     stressLoopCount: 1,
     concurrencyWorkers: 1,
   });
+  if (agentGreen.reproductionVerified !== true || agentGreen.passedUnitTestsCount === 0) throw new Error("BenchmarkFixtureGreenError: fixture must produce verified GREEN with observed executed tests.");
   agentRunManager.saveArtifact(manifest.runId, "pr_draft", fixture.prDraft);
 
   await new IssueBindingService(agentRunManager, host.github).bind({

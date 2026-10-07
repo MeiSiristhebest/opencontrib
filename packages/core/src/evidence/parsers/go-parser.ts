@@ -33,16 +33,13 @@ export class GoTestOutputParser implements TestOutputParser {
 
     // 2. Fallback: package-level summary matching (go test standard)
     if (passed === 0 && failed === 0) {
-      const okMatches = output.match(/ok\s+\S+\s+[\d\.]+s/g);
+      const okMatches = output.split(/\r?\n/).filter(line => !/\[no (?:test files|tests to run)\]/i.test(line)).join("\n").match(/ok\s+\S+\s+[\d\.]+s/g);
       if (okMatches) {
         passed = okMatches.length;
       }
       const failPkgMatches = output.match(/FAIL\s+\S+\s+[\d\.]+s/g);
       if (failPkgMatches) {
         failed = failPkgMatches.length;
-      }
-      if (passed === 0 && (output.includes('PASS') || output.includes('ok\t'))) {
-        passed = 1;
       }
       if (failed === 0 && (output.includes('FAIL\t') || output.includes('FAIL\n'))) {
         failed = 1;

@@ -14,6 +14,8 @@ import type {
 import {
   computeSourceTreeHash,
   computeTestIdentity,
+  parseTestCountsFromOutput,
+  summarizeFlakyBaseline,
 } from "../evidence/evidence-collector.js";
 import { matchExpectedFailure } from "../evidence/expected-failure-matcher.js";
 import { runConcurrentRounds } from "../evidence/stress-runner.js";
@@ -104,6 +106,21 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
   }
 
   async captureRed(job: RedExecutionJob): Promise<RawRedExecutionResult> {
+    const before = computeSourceTreeHash(job.workspace.workspacePath);
+    const first = await this.executeRedOnce(job);
+    if (first.sourceTreeSha256 !== before) throw new Error("RedBaselineMutationError: isolated RED execution changed the source tree.");
+    const baselineTestedAt = new Date().toISOString();
+    const samples = [];
+    for (let index = 0; index < 3; index++) {
+      const sample = await this.executeRedOnce(job);
+      if (sample.sourceTreeSha256 !== first.sourceTreeSha256) throw new Error("RedBaselineMutationError: isolated baseline sampling changed the RED source tree.");
+      samples.push({ passed: sample.exitCode === 0, output: `${sample.stdout}\n${sample.stderr}` });
+    }
+    const baseline = summarizeFlakyBaseline(samples);
+    return { ...first, baselineTestedAt, baselineFlakyTests: baseline.records, baselineCheckStatus: baseline.status };
+  }
+
+  private async executeRedOnce(job: RedExecutionJob): Promise<RawRedExecutionResult> {
     const cwd = job.workspace.workspacePath;
     const testIdentity = computeTestIdentity(
       cwd,
@@ -324,8 +341,13 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
 
     const minLat = latencies.length > 0 ? Math.min(...latencies) : 0;
     const maxLat = latencies.length > 0 ? Math.max(...latencies) : 0;
+    const observedCounts = parseTestCountsFromOutput(lastOutput);
+    const testsPassed = allPassed && scheduled.results.every(result => {
+      const counts = parseTestCountsFromOutput(result.output);
+      return counts.passed > 0 && counts.failed === 0;
+    });
     const concurrencyStampedePassed =
-      allPassed &&
+      testsPassed &&
       raceCollisions === 0 &&
       (scheduled.workersPerRound === 1 ||
         scheduled.maxConcurrentObserved >= scheduled.workersPerRound);
@@ -334,7 +356,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       command: job.testCommand,
       exitCode: allPassed ? 0 : 1,
       outputSnippet: lastOutput.slice(0, 500),
-      passed: allPassed,
+      passed: testsPassed,
       sourceTreeSha256: greenTree,
       capturedAt: new Date().toISOString(),
       roundsRequested: scheduled.roundsRequested,
@@ -348,8 +370,8 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       raceCollisionsDetected: raceCollisions,
       latencyJitterMs: maxLat - minLat,
       testIdentity: job.redEvidence.testIdentity,
-      passedUnitTestsCount: allPassed ? 1 : 0,
-      failedUnitTestsCount: allPassed ? 0 : 1,
+      passedUnitTestsCount: observedCounts.passed,
+      failedUnitTestsCount: observedCounts.failed,
       handleLeakCheckPassed: "UNAVAILABLE",
     };
   }

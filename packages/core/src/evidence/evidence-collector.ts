@@ -25,7 +25,7 @@ import type {
 } from "../contracts/schemas.js";
 import { defaultTestOutputParserRegistry } from "./parsers/registry.js";
 import { defaultVcsDeltaAdapter, type VcsDeltaPort } from "./vcs-delta.port.js";
-import type { TestCoverageAdapter } from "./coverage-adapter.js";
+import { LcovChangedLineCoverageAdapter, type TestCoverageAdapter } from "./coverage-adapter.js";
 import {
   matchExpectedFailure,
   validateExpectedFailurePattern,
@@ -47,14 +47,13 @@ export interface EvidenceCollectionOptions {
   testCommand: string;
   stressLoopCount?: number;
   concurrencyWorkers?: number;
-  runFlakyBaseline?: boolean;
   /** Trusted coverage adapter result; absence is explicitly UNAVAILABLE. */
   changedCodeCoveragePercent?: number;
   /**
    * Generic seam for coverage measurement: the adapter resolves a 0-100
    * percentage from a coverage artifact the runner already produced.
-   * A caller-supplied changedCodeCoveragePercent always wins; without
-   * either, coverage is reported UNAVAILABLE (no invented numbers).
+   * Only changed-line adapters satisfy this measurement. The default reads
+   * fresh coverage/lcov.info; absent or unusable reports are UNAVAILABLE.
    */
   coverageAdapter?: TestCoverageAdapter;
   redEvidence?: RedEvidence;
@@ -128,26 +127,48 @@ export function recordFlakyBaseline(
   runs: number = 3,
   workspaceRoot?: string,
 ): FlakyTestRecord[] {
+  return measureFlakyBaseline(cwd, testCommand, runs, workspaceRoot).records;
+}
+
+function measureFlakyBaseline(
+  cwd: string,
+  testCommand: string,
+  runs: number,
+  workspaceRoot?: string,
+): { records: FlakyTestRecord[]; status: MeasurementStatus; testedAt: string } {
+  const testedAt = new Date().toISOString();
+  const spec = parseCommandSpec(testCommand);
+  const samples = Array.from({ length: runs }, () => defaultSandboxRuntime.executeInSandbox({
+    cwd,
+    workspaceRoot,
+    commandSpec: spec,
+    timeoutMs: 30000,
+  }));
+  return { ...summarizeFlakyBaseline(samples), testedAt };
+}
+
+/** Shared baseline classification for local and isolated execution workers. */
+export function summarizeFlakyBaseline(samples: readonly { passed: boolean; output: string }[]): {
+  records: FlakyTestRecord[];
+  status: MeasurementStatus;
+} {
+  const runs = samples.length;
+  let measuredRuns = 0;
+  let failingRuns = 0;
   const testRunResults = new Map<
     string,
     { runCount: number; failCount: number }
   >();
-  const spec = parseCommandSpec(testCommand);
-
-  for (let i = 0; i < runs; i++) {
-    const res = defaultSandboxRuntime.executeInSandbox({
-      cwd,
-      workspaceRoot,
-      commandSpec: spec,
-      timeoutMs: 30000,
-    });
+  for (const res of samples) {
+    if (parseTestCountsFromOutput(res.output).total > 0) measuredRuns++;
 
     if (!res.passed) {
+      failingRuns++;
       const full = res.output;
       const failureMatches =
-        full.match(/(?:FAIL|✕|FAILED)\s+([^\r\n]+)/g) || [];
-      for (const f of failureMatches) {
-        const testName = f.replace(/^(?:FAIL|✕|FAILED)\s+/, "").trim();
+        full.match(/(?:\(fail\)|FAIL|✕|FAILED)\s+([^\r\n]+)/g) || [];
+      for (const f of new Set(failureMatches)) {
+        const testName = f.replace(/^(?:\(fail\)|FAIL|✕|FAILED)\s+/, "").replace(/\s+\[\d+(?:\.\d+)?ms\]$/, "").trim();
         const current = testRunResults.get(testName) || {
           runCount: 0,
           failCount: 0,
@@ -169,7 +190,8 @@ export function recordFlakyBaseline(
     });
   }
 
-  return flakyRecords;
+  const records = flakyRecords.filter(record => record.isFlakyOnBaseline);
+  return { records, status: runs === 0 || measuredRuns !== runs ? "UNAVAILABLE" : records.length || (failingRuns > 0 && failingRuns < runs) ? "FAIL" : "PASS" };
 }
 
 export interface StressLoopResult {
@@ -842,6 +864,12 @@ export function captureRedEvidence(input: {
     );
   }
 
+  const sourceTreeSha256 = computeSourceTreeHash(input.cwd);
+  const baseline = measureFlakyBaseline(input.cwd, input.testCommand, 3, input.workspaceRoot);
+  if (computeSourceTreeHash(input.cwd) !== sourceTreeSha256) {
+    throw new Error("EvidenceBaselineMutationError: source tree changed while sampling the RED baseline.");
+  }
+
   return {
     command: input.testCommand,
     expectedAssertion: input.expectedAssertion,
@@ -849,7 +877,10 @@ export function captureRedEvidence(input: {
       (preFix as { baselineOutput?: string }).baselineOutput ?? ""
     ).slice(0, 500),
     exitCode,
-    sourceTreeSha256: computeSourceTreeHash(input.cwd),
+    sourceTreeSha256,
+    baselineTestedAt: baseline.testedAt,
+    baselineFlakyTests: baseline.records,
+    baselineCheckStatus: baseline.status,
     testFileSha256:
       testIdentity.testFiles.length === 1
         ? testIdentity.testFiles[0].sha256
@@ -875,7 +906,8 @@ function buildGreenEvidenceFromStress(input: {
   allTestsPassing: boolean;
 } {
   const { cwd, testCommand, redEvidence, stressResult } = input;
-  const passed = stressResult.passed;
+  const observedCounts = parseTestCountsFromOutput(stressResult.lastOutput);
+  const passed = stressResult.passed && observedCounts.passed > 0 && observedCounts.failed === 0;
   const greenTreeHash = computeSourceTreeHash(cwd);
   const treeChanged = greenTreeHash !== redEvidence.sourceTreeSha256;
   const greenFingerprint = computeTestIdentityFingerprint({
@@ -915,7 +947,7 @@ function buildGreenEvidenceFromStress(input: {
 
   const greenEvidence: GreenEvidence = {
     command: testCommand,
-    exitCode: passed ? 0 : 1,
+    exitCode: stressResult.passed ? 0 : 1,
     outputSnippet: stressResult.lastOutput.slice(0, 500),
     passed,
     sourceTreeSha256: greenTreeHash,
@@ -1074,28 +1106,18 @@ export async function collectEvidence(
     testCommand,
     stressLoopCount = 1,
     concurrencyWorkers = 1,
-    runFlakyBaseline = true,
     redEvidence,
   } = options;
-
-  // Generic coverage adapter seam: an explicit caller-supplied percentage
-  // always wins; otherwise ask the adapter (if any) for runner-produced
-  // coverage data. Neither present => UNAVAILABLE downstream.
-  let changedCodeCoveragePercent: number | undefined =
-    options.changedCodeCoveragePercent;
-  if (changedCodeCoveragePercent === undefined && options.coverageAdapter) {
-    changedCodeCoveragePercent = await options.coverageAdapter.resolve(cwd);
-  }
 
   // 1. Initial System Handle & FD Sampling
   const initialHandles = getProcessHandleCount();
 
-  // 2. Step 4.0 Flaky Baseline Isolation
-  const baselineFlakyTests = runFlakyBaseline
-    ? recordFlakyBaseline(cwd, testCommand, 3, workspaceRoot)
-    : [];
+  // Only RED owns baseline sampling. GREEN must not relabel its current
+  // working tree as the pre-fix baseline.
+  const baselineFlakyTests = redEvidence?.baselineFlakyTests ?? [];
 
   // 3. Stress Test Loop (consecutive runs executed in sanitized sandbox)
+  const coverageStartedAt = Date.now();
   const stressResult = await runStressLoopAsync(
     cwd,
     testCommand,
@@ -1103,6 +1125,11 @@ export async function collectEvidence(
     workspaceRoot,
     concurrencyWorkers,
   );
+  let changedCodeCoveragePercent = options.changedCodeCoveragePercent;
+  const coverageAdapter = options.coverageAdapter ?? new LcovChangedLineCoverageAdapter();
+  if (changedCodeCoveragePercent === undefined && coverageAdapter.scope === "changed-lines") {
+    changedCodeCoveragePercent = await coverageAdapter.resolve(cwd, { baselineCommitSha, startedAt: coverageStartedAt });
+  }
 
   // 4. Final System Handle & FD Sampling
   const finalHandles = getProcessHandleCount();
@@ -1115,10 +1142,7 @@ export async function collectEvidence(
     vcsAdapter,
   );
 
-  const hasZeroAssertions =
-    parsedCounts.passed === 0 &&
-    parsedCounts.total === 0 &&
-    !/PASS|pass/i.test(stressResult.lastOutput);
+  const hasZeroAssertions = parsedCounts.passed === 0;
 
   let handleLeakCheckPassed: "PASS" | "FAIL" | "UNAVAILABLE";
   if (initialHandles === null || finalHandles === null) {
@@ -1143,12 +1167,14 @@ export async function collectEvidence(
     : undefined;
   const allTestsPassing =
     stressResult.passed &&
+    !hasZeroAssertions &&
     parsedCounts.failed === 0 &&
     (greenVerification?.allTestsPassing ?? true);
 
   return {
-    baselineTestedAt: new Date().toISOString(),
+    baselineTestedAt: redEvidence?.baselineTestedAt ?? redEvidence?.capturedAt ?? new Date().toISOString(),
     baselineFlakyTests,
+    baselineCheckStatus: redEvidence?.baselineCheckStatus ?? "UNAVAILABLE",
     stressLoopRuns: stressResult.roundsRequested,
     roundsRequested: stressResult.roundsRequested,
     roundsCompleted: stressResult.roundsCompleted,
