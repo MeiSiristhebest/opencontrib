@@ -18,6 +18,20 @@ export interface CanonicalSubmissionRoute {
   securityDisclosure?: SecurityDisclosureArtifact;
 }
 
+/** Read the private-route flag only from a schema-valid canonical workspace gate. */
+export function requiresPrivateVulnerabilityDisclosure(
+  run: ContributionRunSummary,
+): boolean {
+  const workspace = run.artifacts.workspace as
+    | { communityGate?: unknown }
+    | undefined;
+  const gate = CommunityGateSnapshotSchema.safeParse(workspace?.communityGate);
+  return (
+    gate.success &&
+    gate.data.policy.privateVulnerabilityDisclosure === true
+  );
+}
+
 /** Hash the exact canonical JSON representation used for artifact bindings. */
 export function hashSubmissionArtifact(value: unknown): string {
   const content = typeof value === "string" ? value : JSON.stringify(value ?? "");

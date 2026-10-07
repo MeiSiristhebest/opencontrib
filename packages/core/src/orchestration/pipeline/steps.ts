@@ -56,7 +56,10 @@ import { RemoteCompletionAttestationSchema } from "../../run/completion-attestat
 import { WorkspaceService } from "../../workspace/workspace-service.js";
 import { IssueBindingService } from "../../github/issue-binding-service.js";
 import { SecurityDisclosureService } from "../../github/security-disclosure-service.js";
-import { resolveCanonicalSubmissionRoute } from "../../submission/submission-route.js";
+import {
+  requiresPrivateVulnerabilityDisclosure,
+  resolveCanonicalSubmissionRoute,
+} from "../../submission/submission-route.js";
 import { buildTurnPrompt } from "../agent-orchestrator.js";
 import type {
   PipelineContext,
@@ -68,7 +71,302 @@ import type {
 import { halt, continuePipeline } from "./types.js";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { posix as posixPath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+
+function normalizeSafeNodeTestFiles(files: readonly string[]): string[] | undefined {
+  const paths = files.map(file => file.replace(/\\/g, "/").replace(/^\.\//, ""));
+  if (paths.some(file =>
+    !/^[a-zA-Z0-9._/-]+$/.test(file) || file.startsWith("/") || file.startsWith("-") ||
+    file.split("/").some(part => part === ".." || part === "...") ||
+    !/\.[cm]?[jt]sx?$/i.test(file)
+  )) return undefined;
+  return [...new Set(paths)].sort();
+}
+
+function isSafeRelativeNodeConfigPath(path: string): boolean {
+  return /^[a-zA-Z0-9._/-]+$/.test(path) &&
+    !path.startsWith("/") &&
+    !path.startsWith("-") &&
+    !/^[a-z]:/i.test(path) &&
+    !path.split("/").some(part => part === ".." || part === "...");
+}
+
+function hasSafeNodeRunnerArguments(argumentsText: string | undefined): boolean {
+  const valueFlags = new Set(["--timeout", "--retry", "--reporter", "--maxWorkers"]);
+  const booleanFlags = new Set([
+    "--coverage",
+    "--runInBand",
+    "--parallel",
+    "--bail",
+    "--verbose",
+    "--silent",
+  ]);
+  const args = argumentsText?.trim().split(/\s+/).filter(Boolean) ?? [];
+
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+    if (argument === "--config" || argument === "-c") {
+      const path = args[++index];
+      if (!path || !isSafeRelativeNodeConfigPath(path)) return false;
+      continue;
+    }
+    if (argument.startsWith("--config=")) {
+      if (!isSafeRelativeNodeConfigPath(argument.slice("--config=".length))) return false;
+      continue;
+    }
+
+    const equalsIndex = argument.indexOf("=");
+    const flag = equalsIndex > 0 ? argument.slice(0, equalsIndex) : argument;
+    if (valueFlags.has(flag)) {
+      const value = equalsIndex > 0 ? argument.slice(equalsIndex + 1) : args[++index];
+      if (!value || !/^[A-Za-z0-9._+-]+$/.test(value)) return false;
+      continue;
+    }
+    if (!booleanFlags.has(argument)) return false;
+  }
+
+  return true;
+}
+
+function normalizeSafeSourceTestFiles(
+  files: readonly string[],
+  extension: RegExp,
+): string[] | undefined {
+  const paths = files.map(file => file.replace(/\\/g, "/").replace(/^\.\//, ""));
+  if (paths.length === 0 || paths.some(file =>
+    !/^[a-zA-Z0-9._/-]+$/.test(file) || file.startsWith("/") || file.startsWith("-") ||
+    file.split("/").some(part => part === ".." || part === "...") ||
+    !extension.test(file)
+  )) return undefined;
+  return [...new Set(paths)].sort();
+}
+
+function getJvmTestClassNames(testFiles: readonly string[]): string[] | undefined {
+  const paths = normalizeSafeSourceTestFiles(testFiles, /\.(?:java|kt)$/i);
+  if (!paths?.length) return undefined;
+
+  const classNames: string[] = [];
+  for (const path of paths) {
+    const parts = path.split("/");
+    const sourceRoot = parts.findIndex((part, index) =>
+      part === "src" && parts[index + 1] === "test" &&
+      (parts[index + 2] === "java" || parts[index + 2] === "kotlin")
+    );
+    if (sourceRoot < 0) return undefined;
+    const classParts = parts.slice(sourceRoot + 3);
+    const last = classParts.length - 1;
+    classParts[last] = classParts[last].replace(/\.(?:java|kt)$/i, "");
+    if (classParts.some(part => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(part))) {
+      return undefined;
+    }
+    classNames.push(classParts.join("."));
+  }
+  return [...new Set(classNames)].sort();
+}
+
+function getMavenModulePaths(testFiles: readonly string[]): string[] | undefined {
+  const paths = normalizeSafeSourceTestFiles(testFiles, /\.(?:java|kt)$/i);
+  if (!paths?.length) return undefined;
+
+  const modules = new Set<string>();
+  for (const path of paths) {
+    const parts = path.split("/");
+    const sourceRoot = parts.findIndex((part, index) =>
+      part === "src" && parts[index + 1] === "test" &&
+      (parts[index + 2] === "java" || parts[index + 2] === "kotlin")
+    );
+    if (sourceRoot < 0) return undefined;
+    modules.add(parts.slice(0, sourceRoot).join("/") || ".");
+  }
+
+  if (modules.size > 1 && modules.has(".")) return undefined;
+  return [...modules].sort();
+}
+
+function getCargoIntegrationTestTargets(
+  testFiles: readonly string[],
+): { manifestPath?: string; targets: string[] } | undefined {
+  const paths = normalizeSafeSourceTestFiles(testFiles, /\.rs$/i);
+  if (!paths?.length) return undefined;
+
+  const packageRoots = new Set<string>();
+  const targets = new Set<string>();
+  for (const path of paths) {
+    const parts = path.split("/");
+    const testsRoot = parts.lastIndexOf("tests");
+    if (testsRoot < 0) return undefined;
+    const targetParts = parts.slice(testsRoot + 1);
+    const fileName = targetParts[targetParts.length - 1];
+    let targetName: string | undefined;
+    if (targetParts.length === 1 && fileName.endsWith(".rs")) {
+      targetName = fileName.slice(0, -3);
+    } else if (targetParts.length === 2 && fileName === "main.rs") {
+      targetName = targetParts[0];
+    }
+    if (!targetName || !/^[A-Za-z0-9_-]+$/.test(targetName)) return undefined;
+    packageRoots.add(parts.slice(0, testsRoot).join("/"));
+    targets.add(targetName);
+  }
+  if (packageRoots.size !== 1) return undefined;
+  const packageRoot = [...packageRoots][0];
+  return {
+    manifestPath: packageRoot ? `${packageRoot}/Cargo.toml` : undefined,
+    targets: [...targets].sort(),
+  };
+}
+
+export function deriveTargetedReproductionTestCommand(
+  repositoryCommand: string,
+  testFiles: readonly string[],
+): string | undefined {
+  const command = repositoryCommand.trim();
+  const alreadyScopedNodeCommand =
+    /^(?:npm|pnpm) test -- (.+)$/.exec(command) ??
+    /^(?:yarn|bun) test ((?!-).+)$/.exec(command) ??
+    /^bun run test (.+)$/.exec(command);
+  if (alreadyScopedNodeCommand) {
+    const scopedPaths = normalizeSafeNodeTestFiles(alreadyScopedNodeCommand[1].split(/\s+/));
+    const expectedPaths = normalizeSafeNodeTestFiles(testFiles);
+    if (!scopedPaths?.length || !expectedPaths?.length ||
+      scopedPaths.length !== expectedPaths.length ||
+      scopedPaths.some((path, index) => path !== expectedPaths[index])) {
+      return undefined;
+    }
+    return command;
+  }
+
+  const nodeRunner = /^(npm|pnpm|yarn) test$/.exec(command)?.[1] ??
+    (command === "bun test" || command === "bun run test" ? "bun" : undefined);
+  if (nodeRunner) {
+    const paths = normalizeSafeNodeTestFiles(testFiles);
+    if (!paths?.length) return undefined;
+    const args = paths.map(file => nodeRunner === "bun" ? `./${file}` : file);
+    const baseCommand = command === "bun run test" ? "bun run test" : command;
+    const separator = nodeRunner === "npm" || nodeRunner === "pnpm" ? " --" : "";
+    return `${baseCommand}${separator} ${args.join(" ")}`;
+  }
+  const directNodeCommand = /^(?:node --test|bun test|npm exec --no -- (?:vitest(?: run)?|jest|mocha)|pnpm exec (?:vitest(?: run)?|jest|mocha)|yarn exec (?:vitest(?: run)?|jest|mocha))(?: (.*))?$/.exec(command);
+  if (directNodeCommand) {
+    if (!hasSafeNodeRunnerArguments(directNodeCommand[1])) return undefined;
+    const paths = normalizeSafeNodeTestFiles(testFiles);
+    if (!paths?.length) return undefined;
+    return `${command} ${paths.join(" ")}`;
+  }
+  if (/^(?:\.\/|\.\\)?vendor[\\/]bin[\\/]phpunit(?:\.bat)?$/i.test(command)) {
+    const paths = normalizeSafeSourceTestFiles(testFiles, /\.php$/i);
+    if (!paths?.length) return undefined;
+    return `${command.replace(/\\/g, "/")} ${paths.join(" ")}`;
+  }
+  const pythonRunner = /^(?:pytest|python -m pytest|python3 -m pytest|uv run pytest|poetry run pytest|pipenv run pytest|conda run pytest)$/.test(command);
+  if (pythonRunner) {
+    const paths = testFiles.map(file => file.replace(/\\/g, "/").replace(/^\.\//, ""));
+    if (paths.length === 0 || paths.some(file =>
+      !/^[a-zA-Z0-9._/-]+$/.test(file) || file.startsWith("/") || file.startsWith("-") ||
+      file.split("/").some(part => part === ".." || part === "...") || !/\.py$/i.test(file)
+    )) return undefined;
+    return `${command} ${[...new Set(paths)].sort().join(" ")}`;
+  }
+  if (command === "cargo test") {
+    const selection = getCargoIntegrationTestTargets(testFiles);
+    if (!selection) return undefined;
+    const manifest = selection.manifestPath
+      ? ` --manifest-path ${selection.manifestPath}`
+      : "";
+    return `cargo test${manifest}${selection.targets.map(target => ` --test ${target}`).join("")}`;
+  }
+  const gradlePrefix = /^(?:gradle|(?:\.\/|\.\\)?gradlew(?:\.bat)?) test$/.exec(command)?.[0]
+    .replace(/ test$/, "");
+  const mavenPrefix = /^(?:mvn|(?:\.\/|\.\\)?mvnw(?:\.cmd)?) test$/.exec(command)?.[0]
+    .replace(/ test$/, "");
+  if (gradlePrefix || mavenPrefix) {
+    const classNames = getJvmTestClassNames(testFiles);
+    if (!classNames?.length) return undefined;
+    if (mavenPrefix) {
+      const modules = getMavenModulePaths(testFiles);
+      if (!modules?.length) return undefined;
+      const selector = modules[0] === "." ? "" : ` -pl ${modules.join(",")} -am`;
+      const ignoreUnmatchedModules = selector
+        ? " -Dsurefire.failIfNoSpecifiedTests=false"
+        : "";
+      return `${mavenPrefix}${selector} test -Dtest=${classNames.join(",")}${ignoreUnmatchedModules}`;
+    }
+    return gradlePrefix
+      ? `${gradlePrefix} test${classNames.map(name => ` --tests ${name}`).join("")}`
+      : undefined;
+  }
+  if (command === "dotnet test") {
+    const paths = normalizeSafeSourceTestFiles(testFiles, /\.cs$/i);
+    if (paths?.length !== 1) return undefined;
+    const fileName = paths[0].split("/").pop()!;
+    const className = fileName.slice(0, -3);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(className)) return undefined;
+    return `${command} --filter FullyQualifiedName~${className}`;
+  }
+  if (command === "swift test") {
+    const paths = normalizeSafeSourceTestFiles(testFiles, /\.swift$/i);
+    if (paths?.length !== 1) return undefined;
+    const fileName = paths[0].split("/").pop()!;
+    const suiteName = fileName.slice(0, -6);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(suiteName)) return undefined;
+    return `${command} --filter ${suiteName}`;
+  }
+  if (command !== "go test ./...") return undefined;
+
+  const packageDirectories = new Set<string>();
+  for (const testFile of testFiles) {
+    const normalized = testFile.replace(/\\/g, "/").replace(/^\.\//, "");
+    if (
+      !normalized ||
+      normalized.startsWith("/") ||
+      /^[a-z]:/i.test(normalized) ||
+      normalized.split("/").some((part) => part === ".." || part === "...") ||
+      !/^[a-zA-Z0-9._/-]+$/.test(normalized) ||
+      !/_test\.go$/.test(normalized)
+    ) {
+      return undefined;
+    }
+    packageDirectories.add(posixPath.dirname(normalized));
+  }
+
+  if (packageDirectories.size === 0) return undefined;
+  const packages = [...packageDirectories]
+    .sort()
+    .map((directory) => (directory === "." ? "." : `./${directory}`));
+  return `go test ${packages.join(" ")}`;
+}
+
+export function buildReproductionDesignPrompt(
+  basePrompt: string | undefined,
+  repositoryTestCommand: string | undefined,
+): string {
+  const nodeRunner = repositoryTestCommand
+    ? /^(npm|pnpm|yarn) test$/.exec(repositoryTestCommand.trim())?.[1] ??
+      (/^(?:bun test|bun run test)$/.test(repositoryTestCommand.trim()) ? "bun" : undefined)
+    : undefined;
+  const nodeGuidance = nodeRunner
+    ? ` For Node test scripts, return only relative file paths in testFiles and return the exact scoped testCommand: npm and pnpm use " -- <files>", yarn uses " <files>", and both "bun run test" and direct "bun test" use " ./<files>". For example, "npm test" with "src/parser.test.ts" becomes "npm test -- src/parser.test.ts"; "bun run test" becomes "bun run test ./src/parser.test.ts"; "bun test" becomes "bun test ./src/parser.test.ts".`
+    : "";
+  const directNodeGuidance = repositoryTestCommand &&
+    /^(?:node --test|bun test|npm exec --no -- (?:vitest(?: run)?|jest|mocha)|pnpm exec (?:vitest(?: run)?|jest|mocha)|yarn exec (?:vitest(?: run)?|jest|mocha))/.test(repositoryTestCommand.trim())
+    ? " For the provided direct Node runner, return only relative test file paths; those paths replace the existing script operands and are appended to the supplied runner command."
+    : "";
+  return `${basePrompt ?? ""}\n\nDesign the target RED reproduction only. Return JSON conforming to ReproductionDesignSchema with the exact test command, a non-empty expected failure assertion, at least one concrete test file, and a short rationale. Do not describe the patch. When the repository command is 'go test ./...', choose test files in the target package and use 'go test .' for root-package files or 'go test ./<package>' for subpackages; never use 'go test ./...' for RED. For 'cargo test', select integration test targets under tests/ and use '--test <target>' (with '--manifest-path <package>/Cargo.toml' for a nested package). For Gradle or Maven, select files under src/test/java or src/test/kotlin and filter by their qualified class names using '--tests' or '-Dtest='. For 'dotnet test', select one .cs test file and use '--filter FullyQualifiedName~<ClassName>'. For 'swift test', select one .swift test file and use '--filter <SuiteName>'.${nodeGuidance}${directNodeGuidance}`;
+}
+
+export function selectVerificationCommand(
+  ctx: Pick<PipelineContext, "evidenceReport" | "testCmd" | "repositoryTestCmd">,
+): string {
+  if (!ctx.evidenceReport) return "";
+  return ctx.testCmd || ctx.repositoryTestCmd || "";
+}
+
+export function resolveGreenVerificationTestCommand(
+  scopedRedCommand: string | undefined,
+  repositoryCommand: string | undefined,
+): string | undefined {
+  return scopedRedCommand ?? repositoryCommand;
+}
 
 function getCoreDiffMetrics(
   ctx: PipelineContext,
@@ -303,7 +601,7 @@ export class WorkspaceAllocationStep implements PipelineStep {
     );
     const { context } = workspaceService.prepare({
       runId: ctx.runId!,
-      issueOrTaskId: selectedOpp.issueNumber,
+      issueOrTaskId: ctx.runId!,
       repoFullName: selectedOpp.repoFullName,
     });
     deps.stateMachine.setWorkspace(context.workspacePath);
@@ -324,27 +622,45 @@ export class ContextAssemblyStep implements PipelineStep {
     deps: PipelineDeps,
   ): Promise<StepOutcome> {
     const selectedOpp = ctx.selectedOpp!;
+    const isDocsOnly = selectedOpp.feasibility?.scope === "docs_only";
+    const runManager = deps.runManager ?? defaultRunManager;
+    const canonicalRun = ctx.runId ? runManager.getRun(ctx.runId) : undefined;
+    const privateDisclosureRequired = canonicalRun
+      ? requiresPrivateVulnerabilityDisclosure(canonicalRun)
+      : false;
     deps.stateMachine.transition(
       "PATCH_DESIGN",
       "Assembling multi-dimensional context",
     );
     const assembledContext = await deps.contextAssembler.assemble({
       repoFullName: selectedOpp.repoFullName,
-      issueNumber: selectedOpp.issueNumber,
+      issueNumber: privateDisclosureRequired
+        ? undefined
+        : selectedOpp.issueNumber,
       issueTitle: selectedOpp.title,
       issueBody: selectedOpp.body,
+      primaryLanguage: selectedOpp.primaryLanguage,
+      isDocsOnly,
       workspacePath: ctx.workspace?.workspacePath,
+      runGit: (args) => deps.worktreeManager.runGit(args),
     });
     const prompt = deps.contextAssembler.formatContextPrompt(assembledContext);
 
-    const testCmd =
-      assembledContext.repoContext.runnableCommands.testCommand ||
-      assembledContext.repoContext.testCommandHint;
+    const runnableCommands = assembledContext.repoContext.runnableCommands;
+    const testCmd = isDocsOnly
+      ? undefined
+      : runnableCommands.testCommand ||
+        assembledContext.repoContext.testCommandHint;
+    const redTestCmd = isDocsOnly
+      ? undefined
+      : runnableCommands.redTestCommand === null
+        ? undefined
+        : runnableCommands.redTestCommand || testCmd;
 
     ctx.assembledContext = assembledContext;
     ctx.prompt = prompt;
-    ctx.testCmd = testCmd;
-    const runManager = deps.runManager ?? defaultRunManager;
+    ctx.repositoryTestCmd = testCmd;
+    ctx.testCmd = redTestCmd;
     if (!ctx.runId || !runManager.getRun(ctx.runId)) {
       throw new Error(
         "CanonicalRunMissingError: context assembly cannot persist context without the Run-First canonical run.",
@@ -366,7 +682,8 @@ export class ReproductionDesignStep implements PipelineStep {
     ctx: PipelineContext,
     deps: PipelineDeps,
   ): Promise<StepOutcome> {
-    if (!ctx.testCmd) {
+    const repositoryTestCommand = ctx.testCmd;
+    if (!repositoryTestCommand) {
       // Documentation-only or testless runs remain eligible for dry-run output,
       // but cannot advance their canonical run into PATCH_DRAFTED.
       return continuePipeline();
@@ -389,7 +706,7 @@ export class ReproductionDesignStep implements PipelineStep {
     let design: ReproductionDesign;
     try {
       const result = await deps.llmService.generateStructured({
-        prompt: `${ctx.prompt}\n\nDesign the target RED reproduction only. Return JSON conforming to ReproductionDesignSchema with the exact test command, a non-empty expected failure assertion, at least one concrete test file, and a short rationale. Do not describe the patch.`,
+        prompt: buildReproductionDesignPrompt(ctx.prompt, repositoryTestCommand),
         schema: ReproductionDesignSchema,
       });
       design = result.data as ReproductionDesign;
@@ -405,7 +722,26 @@ export class ReproductionDesignStep implements PipelineStep {
       });
     }
 
-    if (design.command.trim() !== ctx.testCmd.trim()) {
+    const expectedTestCommand = deriveTargetedReproductionTestCommand(
+      repositoryTestCommand,
+      design.testFiles,
+    );
+    if (!expectedTestCommand) {
+      deps.stateMachine.transition(
+        "BLOCKED",
+        `Repository test command could not be safely scoped to the RED test files: ${repositoryTestCommand}`,
+      );
+      return halt({
+        status: "BLOCKED",
+        stage: "PATCH_DESIGN",
+        selectedOpportunity: ctx.selectedOpp,
+        workspacePath: ctx.workspace?.workspacePath,
+        reportSummary:
+          "Pipeline halted: the generated test files did not identify a safe target for RED.",
+      });
+    }
+
+    if (design.command.trim() !== expectedTestCommand) {
       deps.stateMachine.transition(
         "BLOCKED",
         "RED command changed by reproduction design",
@@ -416,9 +752,10 @@ export class ReproductionDesignStep implements PipelineStep {
         selectedOpportunity: ctx.selectedOpp,
         workspacePath: ctx.workspace?.workspacePath,
         reportSummary:
-          "Pipeline halted: reproduction design must use the repository-derived test command exactly.",
+          `Pipeline halted: reproduction design must use the scoped repository test command '${expectedTestCommand}'.`,
       });
     }
+    ctx.testCmd = expectedTestCommand;
 
     // If reproduction design provides newly generated regression test files,
     // apply them to the workspace BEFORE capturing the RED baseline!
@@ -579,7 +916,7 @@ export class ImplementValidateLoopStep implements PipelineStep {
     const workspacePath = ctx.workspace!.workspacePath;
     const runManager = deps.runManager ?? defaultRunManager;
     const prompt = ctx.prompt!;
-    const testCmd = ctx.testCmd;
+    const testCmd = resolveGreenVerificationTestCommand(ctx.testCmd, ctx.repositoryTestCmd);
     const activePatchRef = { patch: ctx.activePatch! };
 
     deps.stateMachine.transition(
@@ -1180,10 +1517,8 @@ export class PrSubmissionStep implements PipelineStep {
           "CanonicalWorkspaceRequiredError: submission requires the immutable workspace artifact; context fallback data is not authoritative.",
         );
       }
-      const privateDisclosureRequired = Boolean(
-        (canonicalBeforeDisclosure.artifacts.workspace as any)?.communityGate
-          ?.policy?.privateVulnerabilityDisclosure,
-      );
+      const privateDisclosureRequired =
+        requiresPrivateVulnerabilityDisclosure(canonicalBeforeDisclosure);
       const disclosureService = new SecurityDisclosureService(
         runManager,
         deps.securityPolicyProvider ?? deps.client,
@@ -1262,11 +1597,7 @@ export class PrSubmissionStep implements PipelineStep {
           rootCause:
             activePatch?.rationale || "Unavailable (root cause not recorded)",
           keyChanges: derivedKeyChanges,
-          verificationCommand: ctx.evidenceReport
-            ? (selectedOpp.feasibility as any)?.runnableCommands?.testCommand ||
-              ctx.testCmd ||
-              ""
-            : "",
+          verificationCommand: selectVerificationCommand(ctx),
           evidence: ctx.evidenceReport,
         },
         nativeTemplateContent,
@@ -1482,8 +1813,8 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   new RunCreationStep(),
   new DiscoveryScoutStep(),
   new RankingStep(),
-  new ContextAssemblyStep(),
   new WorkspaceAllocationStep(),
+  new ContextAssemblyStep(),
   new ReproductionDesignStep(),
   new PatchGenerationStep(),
   new ImplementValidateLoopStep(),

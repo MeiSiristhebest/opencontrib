@@ -1,5 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type {
+  ContributionRunManager,
+} from "@opencontrib/core";
+import type { IssueBindingProvider } from "../../../core/src/github/issue-binding-service.js";
 import {
   assessFeasibility,
   detectSystemCapabilities,
@@ -9,6 +13,12 @@ import {
   runDoctorAudit,
   scoutOpportunities,
 } from "@opencontrib/core";
+
+function normalizeRepoFullName(value: unknown): string | undefined {
+  return typeof value === "string"
+    ? value.trim().replace(/\.git$/i, "").toLowerCase()
+    : undefined;
+}
 
 function wrapHandler(fn: (args: any) => Promise<any>) {
   return async (args: any) => {
@@ -32,7 +42,11 @@ function wrapHandler(fn: (args: any) => Promise<any>) {
   };
 }
 
-export function registerDiscoveryTools(server: McpServer): void {
+export function registerDiscoveryTools(
+  server: McpServer,
+  suppliedRunManager?: ContributionRunManager,
+  issueBindingProvider?: IssueBindingProvider,
+): void {
   // -------------------------------------------------------------
   // Tool 1: contrib_assess_feasibility (纯算法：环境可行性矩阵)
   // -------------------------------------------------------------
@@ -318,7 +332,7 @@ export function registerDiscoveryTools(server: McpServer): void {
     "Assemble multi-dimensional context combining issue problem, repo skeleton, target test files, exploration reading order, memory pitfalls, and host environment",
     {
       issue: z.object({
-        number: z.number(),
+        number: z.number().optional(),
         title: z.string(),
         body: z.string(),
         labels: z.array(z.string()),
@@ -329,6 +343,7 @@ export function registerDiscoveryTools(server: McpServer): void {
         defaultBranch: z.string(),
         description: z.string().optional(),
         stars: z.number().optional(),
+        primaryLanguage: z.string().optional().describe("Primary language from repository metadata"),
       }),
       repoTree: z
         .array(
@@ -348,17 +363,122 @@ export function registerDiscoveryTools(server: McpServer): void {
         ),
     },
     wrapHandler(async (args) => {
-      const { ContextAssembler, buildContributionRunManager } = await import(
-        "@opencontrib/core"
+      const {
+        ContextAssembler,
+        IssueBindingArtifactSchema,
+        buildPublicIssueBindingProvider,
+        buildContributionRunManager,
+        isPreparedRepositoryWorkspace,
+        requiresPrivateVulnerabilityDisclosure,
+        runRepositoryGit,
+      } = await import("@opencontrib/core");
+      const { IssueBindingService } = await import(
+        "../../../core/src/github/issue-binding-service.js"
       );
       const assembler = new ContextAssembler();
+      const runManager = suppliedRunManager ?? buildContributionRunManager();
+      const runId = runManager.resolveRunId(args.runId);
+      const requestedRepoFullName = `${args.repoDetails.owner}/${args.repoDetails.repo}`;
+      const run = runId ? runManager.getRun(runId) : undefined;
+      if (runId && !run) {
+        throw new Error(`Contribution run ${runId} was not found.`);
+      }
+      const runRepo = normalizeRepoFullName(run?.manifest.repoFullName);
+      const requestedRepo = normalizeRepoFullName(requestedRepoFullName);
+      const workspace = run?.artifacts.workspace;
+      const workspaceRepo = normalizeRepoFullName(
+        workspace?.repoFullName,
+      );
+      if (
+        runId &&
+        (!runRepo || runRepo !== requestedRepo ||
+          (workspace && (!workspaceRepo || workspaceRepo !== requestedRepo))
+      )) {
+        throw new Error(
+          `Contribution run ${runId} is bound to ${run?.manifest.repoFullName || "an unknown repository"}, but the request names ${requestedRepoFullName}.`,
+        );
+      }
+      const privateDisclosureRoute = Boolean(
+        run && requiresPrivateVulnerabilityDisclosure(run),
+      );
+      if (
+        runId &&
+        !privateDisclosureRoute &&
+        run?.manifest.issueNumber !== undefined &&
+        args.issue.number !== run.manifest.issueNumber
+      ) {
+        throw new Error(
+          `Contribution run ${runId} is bound to issue #${run.manifest.issueNumber}, but the request names issue #${args.issue.number}.`,
+        );
+      }
+      const workspacePath = workspace?.workspacePath;
+      if (
+        runId &&
+        (typeof workspacePath !== "string" ||
+          typeof workspace?.repoFullName !== "string" ||
+          typeof workspace.baseCommitSha !== "string" ||
+          !isPreparedRepositoryWorkspace(workspacePath, {
+            repoFullName: workspace.repoFullName,
+            baseCommitSha: workspace.baseCommitSha,
+          }))
+      ) {
+        throw new Error(
+          `Contribution run ${runId} has no prepared workspace matching its recorded repository and base commit; prepare the workspace before assembling context.`,
+        );
+      }
+      const requestedIssueNumber = args.issue.number;
+      const issueBinding = IssueBindingArtifactSchema.safeParse(
+        run?.artifacts.issueBinding,
+      );
+      let verifiedIssueContext:
+        | { number: number; title: string; body: string; labels: string[] }
+        | undefined;
+      if (runId && privateDisclosureRoute) {
+        if (
+          requestedIssueNumber !== undefined ||
+          run?.manifest.issueNumber !== undefined ||
+          run?.artifacts.issueBinding !== undefined
+        ) {
+          throw new Error(
+            `Private disclosure run ${runId} cannot use a public issue number or binding during context assembly.`,
+          );
+        }
+      } else if (runId) {
+        if (
+          !Number.isSafeInteger(requestedIssueNumber) ||
+          requestedIssueNumber! <= 0 ||
+          !issueBinding.success ||
+          issueBinding.data.runId !== runId ||
+          issueBinding.data.repoFullName.toLowerCase() !== requestedRepo ||
+          issueBinding.data.provider !== "github" ||
+          issueBinding.data.providerVerified !== true ||
+          issueBinding.data.providerIssueId !== requestedIssueNumber ||
+          run?.manifest.issueNumber !== requestedIssueNumber ||
+          issueBinding.data.title !== args.issue.title
+        ) {
+          throw new Error(
+            `Contribution run ${runId} has no provider-verified issue binding matching issue #${args.issue.number}; prepare the workspace for that issue first.`,
+          );
+        }
+        const verified = await new IssueBindingService(
+          runManager,
+          issueBindingProvider ?? buildPublicIssueBindingProvider(),
+        ).verifyIssueContext({
+          runId,
+          repoFullName: requestedRepo!,
+          issueNumber: requestedIssueNumber!,
+        });
+        verifiedIssueContext = verified.issue;
+      }
 
       const context = await assembler.assembleContext({
         issue: {
-          number: args.issue.number,
-          title: args.issue.title,
-          body: args.issue.body,
-          labels: args.issue.labels,
+          ...(verifiedIssueContext === undefined && requestedIssueNumber === undefined
+            ? {}
+            : { number: verifiedIssueContext?.number ?? requestedIssueNumber }),
+          title: verifiedIssueContext?.title ?? args.issue.title,
+          body: verifiedIssueContext?.body ?? args.issue.body,
+          labels: verifiedIssueContext?.labels ?? args.issue.labels,
           isOpen: true,
           assignees: [],
           createdAt: new Date().toISOString(),
@@ -371,6 +491,7 @@ export function registerDiscoveryTools(server: McpServer): void {
           defaultBranch: args.repoDetails.defaultBranch,
           description: args.repoDetails.description || "",
           stars: args.repoDetails.stars || 0,
+          primaryLanguage: args.repoDetails.primaryLanguage,
         },
         repoTree: args.repoTree.map((item: any) => ({
           path: item.path,
@@ -378,17 +499,12 @@ export function registerDiscoveryTools(server: McpServer): void {
           type: item.type as any,
           ...(item.sha ? { sha: item.sha } : {}),
         })),
+        workspacePath: typeof workspacePath === "string" ? workspacePath : undefined,
+        runGit: typeof workspacePath === "string" ? runRepositoryGit : undefined,
       });
 
-      if (args.runId) {
-        try {
-          const runManager = buildContributionRunManager();
-          runManager.saveArtifact(args.runId, "context", context as any);
-        } catch (err: any) {
-          console.warn(
-            `[discovery-tools] Failed to auto-save context artifact: ${err.message}`,
-          );
-        }
+      if (runId) {
+        runManager.saveArtifact(runId, "context", context as any);
       }
 
       return {
@@ -461,7 +577,7 @@ export function registerDiscoveryTools(server: McpServer): void {
           const { buildContributionRunManager } = await import(
             "@opencontrib/core"
           );
-          const runManager = buildContributionRunManager();
+          const runManager = suppliedRunManager ?? buildContributionRunManager();
           runManager.saveArtifact(args.runId, "opportunity", {
             target: args.target,
             opportunities,

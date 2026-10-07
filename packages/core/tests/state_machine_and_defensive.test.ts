@@ -60,6 +60,20 @@ describe("Phase-Gated State Machine & Lifecycle Lock", () => {
       "RED_CAPTURED",
     );
     expect(pocToRed.ok).toBe(true);
+
+    const contextToRed = validatePhaseGate(
+      {
+        manifest: { ...base, currentPhase: "CONTEXT_ASSEMBLED" },
+        artifacts: {
+          workspace: artifacts.workspace,
+          context: {},
+          evidenceRed: artifacts.evidenceRed,
+        },
+        availableArtifactFiles: ["workspace.json", "context.json", "evidence_red.json"],
+      },
+      "RED_CAPTURED",
+    );
+    expect(contextToRed.ok).toBe(true);
   });
 
   it("strictly blocks advancing to GOVERNANCE_AUDITED without evidence artifact", () => {

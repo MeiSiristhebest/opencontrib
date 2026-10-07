@@ -6,3 +6,4 @@ export * from './doctor.js';
 export * from './context-assembler.js';
 export * from './ranking.js';
 export * from './manifest-diagnostics.js';
+export * from './repo-fingerprint.js';

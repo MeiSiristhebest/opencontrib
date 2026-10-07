@@ -5,6 +5,7 @@ import type {
   SavedArtifactResult,
 } from "./types.js";
 import type { ContributionRunManager } from "./run-manager.js";
+import type { ProviderIssue } from "../github/types.js";
 import { validatePhaseGate } from "./state-machine.js";
 import {
   PatchAttemptArtifactSchema,
@@ -42,6 +43,12 @@ export interface CanonicalRunWriter {
   ): ContributionRunManifest;
   /** Host-only hydration used by TrustedRunMaterializer before re-verification. */
   hydrateRun(manifest: ContributionRunManifest): ContributionRunManifest;
+  /** Pin an issue number from the provider response checked by IssueBindingService. */
+  pinIssueNumberFromProviderIssue(
+    runId: string,
+    issue: ProviderIssue,
+    issueUrlHost?: string,
+  ): ContributionRunManifest;
 }
 
 const writers = new WeakMap<object, CanonicalRunWriter>();
@@ -153,6 +160,24 @@ export function saveCanonicalArtifact(
     writer.transition(runId, trustedTargetPhase);
   }
   return saved;
+}
+
+/**
+ * Internal canonical mutation used only after IssueBindingService validates a
+ * provider response. This operation is intentionally absent from RunManager's
+ * agent-facing API.
+ */
+export function pinIssueNumberFromProviderIssue(
+  manager: ContributionRunManager,
+  runId: string,
+  issue: ProviderIssue,
+  issueUrlHost?: string,
+): ContributionRunManifest {
+  return getWriter(manager).pinIssueNumberFromProviderIssue(
+    runId,
+    issue,
+    issueUrlHost,
+  );
 }
 
 export function transitionCanonicalRun(

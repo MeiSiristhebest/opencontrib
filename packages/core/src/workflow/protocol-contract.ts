@@ -89,7 +89,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Target issues must meet feasibility scoring threshold before workspace isolation.",
     ],
-    suggestedNextAction: "assemble_context",
+    suggestedNextAction: "prepare_workspace",
   },
   PROBE_COMPLETED: {
     phase: "PROBE_COMPLETED",
@@ -112,18 +112,14 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Pinpoint symbols and defect context strictly via Smart Pointer slices (ptr://...).",
     ],
-    suggestedNextAction: "assemble_context",
+    suggestedNextAction: "prepare_workspace",
   },
   CONTEXT_ASSEMBLED: {
     phase: "CONTEXT_ASSEMBLED",
     name: "Context Assembled",
     description:
       "Minimal deterministic context bundle assembled without repository-wide token dump.",
-    allowedFromPhases: [
-      "INITIALIZED",
-      "OPPORTUNITY_SCOUTED",
-      "PROBE_COMPLETED",
-    ],
+    allowedFromPhases: ["WORKSPACE_PREPARED"],
     requiredArtifacts: ["context"],
     cli: {
       command: "discovery",
@@ -140,7 +136,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "Context bundle must be minimal, structured, and contain exploration guidance.",
     ],
-    suggestedNextAction: "prepare_workspace",
+    suggestedNextAction: "capture_red",
   },
   WORKSPACE_PREPARED: {
     phase: "WORKSPACE_PREPARED",
@@ -151,7 +147,6 @@ export const PROTOCOL_CONTRACT_PHASES = {
       "INITIALIZED",
       "OPPORTUNITY_SCOUTED",
       "PROBE_COMPLETED",
-      "CONTEXT_ASSEMBLED",
     ],
     requiredArtifacts: ["workspace"],
     cli: {
@@ -171,14 +166,18 @@ export const PROTOCOL_CONTRACT_PHASES = {
     invariants: [
       "All development must take place inside isolated worktree sandbox.",
     ],
-    suggestedNextAction: "capture_red",
+    suggestedNextAction: "assemble_context",
   },
   RED_CAPTURED: {
     phase: "RED_CAPTURED",
     name: "RED Baseline Captured",
     description:
       "A trusted host execution recorded the target assertion failing on the immutable workspace baseline.",
-    allowedFromPhases: ["WORKSPACE_PREPARED", "POC_GENERATED"],
+    allowedFromPhases: [
+      "WORKSPACE_PREPARED",
+      "CONTEXT_ASSEMBLED",
+      "POC_GENERATED",
+    ],
     requiredArtifacts: ["workspace", "evidence_red"],
     cli: {
       command: "evidence",
@@ -205,7 +204,7 @@ export const PROTOCOL_CONTRACT_PHASES = {
     name: "Reproduction PoC Generated",
     description:
       "Standalone reproducible test or script demonstrating the bug before fix.",
-    allowedFromPhases: ["WORKSPACE_PREPARED"],
+    allowedFromPhases: ["WORKSPACE_PREPARED", "CONTEXT_ASSEMBLED"],
     requiredArtifacts: ["workspace", "poc"],
     cli: {
       command: "verify",

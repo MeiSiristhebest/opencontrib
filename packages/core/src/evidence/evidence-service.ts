@@ -126,6 +126,8 @@ function gitOutput(cwd: string, args: string[], operation: string): string {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      timeout: 10_000,
+      maxBuffer: 64 * 1024 * 1024,
     });
   } catch (err: any) {
     const detail = typeof err?.stderr === "string" ? err.stderr.trim() : "";
@@ -721,6 +723,115 @@ export function countValidatedPatchChangedLinesAtGreenTree(
   }
   cacheValidatedPatchChangedLineCount(cacheKey, changedLines);
   return changedLines;
+}
+
+/** Return the actual base-to-GREEN diff for the files bound by validated evidence. */
+export function getValidatedPatchUnifiedDiffAtGreenTree(
+  cwd: string,
+  baseCommitSha: string,
+  files: readonly ValidatedPatchFile[],
+  expectedGreenTreeSha256: string,
+): string {
+  const requireGreenTree = (stage: string) => {
+    const actual = computeSourceTreeHash(cwd);
+    if (actual.toLowerCase() !== expectedGreenTreeSha256.toLowerCase()) {
+      throw new Error(
+        `EvidencePatchProvenanceError: workspace differs from canonical GREEN tree ${stage}.`,
+      );
+    }
+  };
+  requireGreenTree("before governance diff generation");
+
+  const maxAggregateDiffBytes = 64 * 1024 * 1024;
+  const diffs: string[] = [];
+  let aggregateDiffBytes = 0;
+  const appendDiff = (diff: string) => {
+    const bytes = Buffer.byteLength(diff, "utf8") + (diffs.length > 0 ? 1 : 0);
+    if (bytes > maxAggregateDiffBytes - aggregateDiffBytes) {
+      throw new Error(
+        "EvidencePatchProvenanceError: aggregate GREEN diff exceeds the safe read limit.",
+      );
+    }
+    aggregateDiffBytes += bytes;
+    diffs.push(diff);
+  };
+  for (const file of files) {
+    if (!isSafeRepositoryPath(file.path)) {
+      throw new Error(
+        `EvidencePatchProvenanceError: workspace has an unsafe validated patch path '${file.path}'.`,
+      );
+    }
+
+    if (file.operation !== "CREATE") {
+      appendDiff(
+        gitOutput(
+          cwd,
+          [
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--unified=3",
+            baseCommitSha,
+            "--",
+            `:(literal)${file.path}`,
+          ],
+          `read the base-to-GREEN diff for '${file.path}'`,
+        ),
+      );
+      continue;
+    }
+
+    try {
+      appendDiff(
+        execFileSync(
+          "git",
+          [
+            "diff",
+            "--no-index",
+            "--no-ext-diff",
+            "--unified=3",
+            "--",
+            "/dev/null",
+            file.path,
+          ],
+          {
+            cwd,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 10_000,
+            maxBuffer: 64 * 1024 * 1024,
+          },
+        ),
+      );
+    } catch (error: any) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith(
+          "EvidencePatchProvenanceError: aggregate GREEN diff",
+        )
+      ) {
+        throw error;
+      }
+      if (error?.status !== 1 && error?.code !== 1) {
+        const detail =
+          typeof error?.stderr === "string" ? error.stderr.trim() : "";
+        throw new Error(
+          `EvidencePatchProvenanceError: workspace diff for created file '${file.path}' failed${detail ? ` (${detail})` : ""}.`,
+        );
+      }
+      const stdout = error.stdout;
+      appendDiff(
+        typeof stdout === "string"
+          ? stdout
+          : Buffer.isBuffer(stdout)
+            ? stdout.toString("utf8")
+            : "",
+      );
+    }
+  }
+
+  requireGreenTree("after governance diff generation");
+  return diffs.join("\n");
 }
 
 function computeFinalTreeHash(cwd: string): string {

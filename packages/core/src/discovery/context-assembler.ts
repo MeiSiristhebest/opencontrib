@@ -2,9 +2,18 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { RepoMemoryLedger } from '../memory/repo-memory.js';
 import { runDoctorAudit, type DoctorReport } from './doctor.js';
+import {
+  analyzeRepoEngineeringFingerprint,
+  type RepoEngineeringFingerprint,
+} from './repo-fingerprint.js';
+import {
+  generateCombinatorialMatrix,
+  type CombinatorialMatrixReport,
+} from '../testing/combinatorial-matrix.js';
 
 export interface RunnableCommands {
   testCommand?: string;
+  redTestCommand?: string | null;
   buildCommand?: string;
   lintCommand?: string;
   packageManager?:
@@ -57,7 +66,9 @@ export interface AssembledContributionContext {
     detectedSkeletonFiles: string[];
     contributingGuidelinesSnippet?: string;
     nativePrTemplate?: string;
+    engineeringFingerprint?: RepoEngineeringFingerprint;
   };
+  combinatorialMatrix?: CombinatorialMatrixReport;
   memoryContext: {
     pastFailures: string[];
     successfulPatterns: string[];
@@ -86,18 +97,170 @@ function detectNodePackageManager(files: string[], pkg: any): 'npm' | 'pnpm' | '
   return 'npm';
 }
 
-function detectNodeCommands(files: string[], dirPath: string, commands: RunnableCommands): void {
-  if (!files.includes('package.json')) return;
+interface ParsedNodeTestScript {
+  runner: string;
+  runnerArguments: string[];
+  configArguments: string[];
+  testOperands: string[];
+  hasEnvironmentPrefix: boolean;
+}
+
+function parseNodeTestScript(script: unknown): ParsedNodeTestScript | undefined {
+  if (typeof script !== 'string') return undefined;
+  const trimmed = script.trim();
+  const match = /^(?<environmentPrefix>(?:[A-Za-z_][\w]*=(?:'[^']*'|"[^"]*"|[^\s]+)\s+)+)?(?<runner>vitest(?:\s+run)?|jest|mocha|bun\s+test|node\s+--test)(?:\s+(?<arguments>.*))?$/i.exec(trimmed);
+  if (!match?.groups?.runner) return undefined;
+
+  const argumentsText = match.groups.arguments || '';
+  const argumentsList = argumentsText.match(/"[^"]*"|'[^']*'|[^\s]+/g) || [];
+  if (argumentsText.replace(/"[^"]*"|'[^']*'|[^\s]+/g, '').trim()) return undefined;
+
+  const configArguments: string[] = [];
+  const runnerArguments: string[] = [];
+  const testOperands: string[] = [];
+  const flagsWithValues = new Set(['--timeout', '--retry', '--reporter', '--maxWorkers']);
+  const booleanFlags = new Set(['--coverage', '--runInBand', '--parallel', '--bail', '--verbose', '--silent']);
+  for (let index = 0; index < argumentsList.length; index++) {
+    const argument = argumentsList[index];
+    const unquoted =
+      (argument.startsWith('"') && argument.endsWith('"')) ||
+      (argument.startsWith("'") && argument.endsWith("'"))
+        ? argument.slice(1, -1)
+        : argument;
+    if (!/^[A-Za-z0-9._/*?{}\[\]:@+=,-]+$/.test(unquoted)) return undefined;
+
+    if (unquoted === '--config' || unquoted === '-c') {
+      const config = argumentsList[++index];
+      if (!config) return undefined;
+      const configPath =
+        (config.startsWith('"') && config.endsWith('"')) ||
+        (config.startsWith("'") && config.endsWith("'"))
+          ? config.slice(1, -1)
+          : config;
+      if (
+        !/^[A-Za-z0-9._/-]+$/.test(configPath) ||
+        configPath.startsWith('-') ||
+        configPath.split('/').some((part) => part === '..' || part === '...')
+      ) return undefined;
+      configArguments.push(`${unquoted} ${configPath}`);
+      continue;
+    }
+    if (/^--config=[A-Za-z0-9._/-]+$/.test(unquoted)) {
+      const configPath = unquoted.slice('--config='.length);
+      if (configPath.split('/').some((part) => part === '..' || part === '...')) {
+        return undefined;
+      }
+      configArguments.push(unquoted);
+      continue;
+    }
+    const equalsIndex = unquoted.indexOf('=');
+    if (equalsIndex > 0) {
+      const flag = unquoted.slice(0, equalsIndex);
+      const value = unquoted.slice(equalsIndex + 1);
+      if (
+        flagsWithValues.has(flag) &&
+        /^[A-Za-z0-9._+-]+$/.test(value)
+      ) {
+        runnerArguments.push(unquoted);
+        continue;
+      }
+    }
+    if (flagsWithValues.has(unquoted)) {
+      const value = argumentsList[++index];
+      const unquotedValue = value &&
+        ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'")))
+        ? value.slice(1, -1)
+        : value;
+      if (!unquotedValue || !/^[A-Za-z0-9._+-]+$/.test(unquotedValue)) {
+        return undefined;
+      }
+      runnerArguments.push(unquoted, unquotedValue);
+      continue;
+    }
+    if (booleanFlags.has(unquoted)) {
+      runnerArguments.push(unquoted);
+      continue;
+    }
+    if (
+      unquoted.startsWith('-') ||
+      unquoted.startsWith('/') ||
+      /^[a-z]:/i.test(unquoted) ||
+      unquoted.split(/[\\/]/).some((part) => part === '..' || part === '...')
+    ) return undefined;
+    testOperands.push(unquoted);
+  }
+
+  const runner = match.groups.runner.replace(/\s+/g, ' ').toLowerCase();
+  return {
+    runner,
+    runnerArguments,
+    configArguments,
+    testOperands,
+    hasEnvironmentPrefix: Boolean(match.groups.environmentPrefix),
+  };
+}
+
+function getScopedNodeTestCommand(
+  parsed: ParsedNodeTestScript,
+  packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun',
+  yarnBerry = false,
+): string | undefined {
+  if (parsed.hasEnvironmentPrefix) return undefined;
+
+  let baseCommand: string;
+  if (parsed.runner === 'node --test' || parsed.runner === 'bun test') {
+    baseCommand = parsed.runner;
+  } else if (packageManager === 'npm') {
+    baseCommand = `npm exec --no -- ${parsed.runner}`;
+  } else if (packageManager === 'pnpm') {
+    baseCommand = `pnpm exec ${parsed.runner}`;
+  } else if (packageManager === 'yarn') {
+    if (!yarnBerry) return undefined;
+    baseCommand = `yarn exec ${parsed.runner}`;
+  } else if (packageManager === 'bun') {
+    baseCommand = `bunx --no-install ${parsed.runner}`;
+  } else {
+    return undefined;
+  }
+  return [baseCommand, ...parsed.runnerArguments, ...parsed.configArguments].join(' ');
+}
+
+function hasKnownNodeTestFileArgumentContract(script: unknown): boolean {
+  const parsed = parseNodeTestScript(script);
+  return Boolean(parsed && parsed.testOperands.length === 0);
+}
+
+function getNodeTestCommand(packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun'): string {
+  if (packageManager === 'npm') return 'npm test';
+  if (packageManager === 'bun') return 'bun run test';
+  return `${packageManager} test`;
+}
+
+function detectNodeCommands(files: string[], dirPath: string, commands: RunnableCommands): boolean {
+  if (!files.includes('package.json')) return false;
   try {
     const pkg = JSON.parse(readFileSync(join(dirPath, 'package.json'), 'utf-8'));
     const scripts = pkg.scripts || {};
     const pm = detectNodePackageManager(files, pkg);
     commands.packageManager = pm;
 
-    if (scripts.test) commands.testCommand = pm === 'npm' ? 'npm test' : `${pm} test`;
+    const parsedTestScript = parseNodeTestScript(scripts.test);
+    if (parsedTestScript) {
+      commands.testCommand = getNodeTestCommand(pm);
+      const yarnBerry = typeof pkg.packageManager === 'string' &&
+        /^yarn@(?:[2-9]|\d{2,})\./.test(pkg.packageManager);
+      commands.redTestCommand =
+        pm === 'yarn' && !yarnBerry && parsedTestScript.testOperands.length === 0
+          ? commands.testCommand
+          : getScopedNodeTestCommand(parsedTestScript, pm, yarnBerry) ?? null;
+    }
     if (scripts.build) commands.buildCommand = pm === 'npm' ? 'npm run build' : `${pm} run build`;
     if (scripts.lint) commands.lintCommand = pm === 'npm' ? 'npm run lint' : `${pm} run lint`;
-  } catch {}
+    return typeof scripts.test === 'string' && scripts.test.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function detectCompiledEcosystemCommands(files: string[], dirPath: string, commands: RunnableCommands): void {
@@ -222,9 +385,11 @@ function detectCompiledEcosystemCommands(files: string[], dirPath: string, comma
   if (files.includes('composer.json') || files.includes('composer.lock')) {
     commands.packageManager = 'composer';
     commands.buildCommand = 'composer install';
-    commands.testCommand = existsSync(join(dirPath, 'vendor/bin/phpunit'))
-      ? (process.platform === 'win32' ? '.\\vendor\\bin\\phpunit' : './vendor/bin/phpunit')
-      : 'composer test';
+    if (existsSync(join(dirPath, 'vendor/bin/phpunit'))) {
+      commands.testCommand = process.platform === 'win32'
+        ? '.\\vendor\\bin\\phpunit'
+        : './vendor/bin/phpunit';
+    }
     commands.lintCommand = existsSync(join(dirPath, 'vendor/bin/phpcs'))
       ? (process.platform === 'win32' ? '.\\vendor\\bin\\phpcs' : './vendor/bin/phpcs')
       : 'composer check';
@@ -235,7 +400,6 @@ function detectCompiledEcosystemCommands(files: string[], dirPath: string, comma
   if (files.includes('Gemfile') || files.includes('Gemfile.lock')) {
     commands.packageManager = 'bundle';
     commands.buildCommand = 'bundle install';
-    commands.testCommand = 'bundle exec rake test';
     commands.lintCommand = 'bundle exec rubocop';
     return;
   }
@@ -244,19 +408,16 @@ function detectCompiledEcosystemCommands(files: string[], dirPath: string, comma
   if (files.includes('CMakeLists.txt')) {
     commands.packageManager = 'cmake';
     commands.buildCommand = 'cmake -B build && cmake --build build';
-    commands.testCommand = 'ctest --test-dir build';
     return;
   }
   if (files.includes('meson.build')) {
     commands.packageManager = 'meson';
     commands.buildCommand = 'meson setup build && meson compile -C build';
-    commands.testCommand = 'meson test -C build';
     return;
   }
   if (files.includes('Makefile') || files.includes('makefile') || files.includes('GNUmakefile')) {
     commands.packageManager = 'make';
     commands.buildCommand = 'make';
-    commands.testCommand = 'make test';
     commands.lintCommand = 'make check';
     return;
   }
@@ -271,8 +432,8 @@ export function detectRunnableCommandsFromDir(dirPath: string): RunnableCommands
 
   try {
     const files = readdirSync(dirPath);
-    detectNodeCommands(files, dirPath, commands);
-    if (!commands.testCommand) {
+    const hasNodeTestScript = detectNodeCommands(files, dirPath, commands);
+    if (!commands.testCommand && !hasNodeTestScript) {
       detectCompiledEcosystemCommands(files, dirPath, commands);
     }
 
@@ -491,7 +652,9 @@ export class ContextAssembler {
     packageManifest?: string;
     ciWorkflow?: string;
     primaryLanguage?: string;
+    isDocsOnly?: boolean;
     workspacePath?: string;
+    runGit?: (args: string[]) => { success: boolean; stdout: string };
     skeletonFiles?: string[];
     doctorReport?: DoctorReport;
   }): AssembledContributionContext {
@@ -504,7 +667,9 @@ export class ContextAssembler {
       packageManifest,
       ciWorkflow,
       primaryLanguage = 'TypeScript',
+      isDocsOnly = false,
       workspacePath,
+      runGit,
       skeletonFiles,
       doctorReport,
     } = input;
@@ -525,8 +690,18 @@ export class ContextAssembler {
 
     let testCommandHint = runnableCommands.testCommand;
     if (!testCommandHint && packageManifest) {
-      if (packageManifest.includes('"test":')) {
-        testCommandHint = packageManifest.includes('pnpm') ? 'pnpm test' : 'npm test';
+      let packageJson: any;
+      try {
+        packageJson = JSON.parse(packageManifest);
+      } catch {
+        packageJson = undefined;
+      }
+      if (
+        packageJson &&
+        hasKnownNodeTestFileArgumentContract(packageJson.scripts?.test)
+      ) {
+        const packageManager = detectNodePackageManager([], packageJson);
+        testCommandHint = getNodeTestCommand(packageManager);
       } else if (packageManifest.includes('Cargo.toml')) {
         testCommandHint = 'cargo test';
       } else if (packageManifest.includes('go.mod')) {
@@ -545,12 +720,6 @@ export class ContextAssembler {
         testCommandHint = 'dotnet test';
       } else if (packageManifest.includes('Package.swift')) {
         testCommandHint = 'swift test';
-      } else if (packageManifest.includes('composer.json')) {
-        testCommandHint = 'composer test';
-      } else if (packageManifest.includes('Gemfile')) {
-        testCommandHint = 'bundle exec rake test';
-      } else if (packageManifest.includes('CMakeLists.txt')) {
-        testCommandHint = 'ctest --test-dir build';
       }
     }
 
@@ -573,6 +742,26 @@ export class ContextAssembler {
     } else if (skeletonFiles && skeletonFiles.length > 0) {
       detectedSkeletonFiles.push(...skeletonFiles.slice(0, 20));
     }
+
+    // 4b. Detect repo engineering fingerprint & combinatorial matrix
+    let engineeringFingerprint: RepoEngineeringFingerprint | undefined;
+    if (workspacePath && existsSync(workspacePath)) {
+      try {
+        engineeringFingerprint = analyzeRepoEngineeringFingerprint({
+          repoPath: workspacePath,
+          repoFullName,
+          runGit,
+        });
+      } catch {}
+    }
+
+    const combinatorialMatrix = isDocsOnly
+      ? undefined
+      : generateCombinatorialMatrix({
+          issueTitle,
+          issueBody,
+          primaryLanguage,
+        });
 
     // 5. Generate Exploration Guidance (suggested reading order, target tests, risk surface)
     const guidance = buildExplorationGuidance(
@@ -600,7 +789,9 @@ export class ContextAssembler {
         detectedSkeletonFiles,
         contributingGuidelinesSnippet,
         nativePrTemplate,
+        engineeringFingerprint,
       },
+      combinatorialMatrix,
       memoryContext: {
         pastFailures,
         successfulPatterns,
@@ -646,6 +837,34 @@ export class ContextAssembler {
     sections.push(`- **Host Environment**: ${ctx.environmentContext.os} (Docker: ${ctx.environmentContext.hasDocker}, WSL: ${ctx.environmentContext.hasWsl})`);
     sections.push(`- **Node/Bun Runtime**: ${ctx.environmentContext.nodeVersion}`);
 
+    // Tier 2b: Upstream Engineering Fingerprint & Combinatorial Matrix
+    if (ctx.repoContext.engineeringFingerprint) {
+      const fp = ctx.repoContext.engineeringFingerprint;
+      const dcoPolicy = fp.commitStyle.requiresSignedOffBy;
+      const dcoDescription =
+        dcoPolicy === undefined
+          ? 'Unknown (shallow history)'
+          : dcoPolicy
+            ? 'MANDATORY (Signed-off-by trailer required)'
+            : 'Optional';
+      sections.push(`\n[UPSTREAM_ENGINEERING_FINGERPRINT - CLONED COMMUNITY CONVENTIONS]`);
+      sections.push(`- **Commit Convention**: ${fp.commitStyle.primaryConvention} (Recommended: "${fp.commitStyle.recommendedCommitExample}")`);
+      sections.push(`- **DCO Signed-off-by**: ${dcoDescription}`);
+      sections.push(`- **Test File Pattern**: ${fp.testConventions.filePattern} (${fp.testConventions.frameworkName})`);
+      sections.push(`- **Strictness**: ${fp.strictnessGateways.hasPreCommit ? 'Pre-commit enabled (strictly enforce formatting)' : 'Standard'}`);
+      sections.push(`- **Persona Guidance**: ${fp.contributorPersonaAdvice}`);
+    }
+
+    if (ctx.combinatorialMatrix) {
+      const cm = ctx.combinatorialMatrix;
+      sections.push(`\n[COMBINATORIAL_MUTATION_MATRIX - MULTI-DIMENSIONAL BOUNDARY GUIDANCE]`);
+      sections.push(`- **Detected Domain**: ${cm.domain} (${cm.domainRationale})`);
+      sections.push(`- **Boundary Scenarios to Defend** (Do NOT write a single naive test; cover these combinations):`);
+      for (const s of cm.scenarios) {
+        sections.push(`  * [${s.scenarioId}] ${s.description}\n    Risk: ${s.riskSurface}\n    Template: \`${s.testTemplateSnippet}\``);
+      }
+    }
+
     // Tier 3: UNTRUSTED REPOSITORY DATA - Issue, Guidelines, Skeleton, and Code
     sections.push(`\n[UNTRUSTED_REPOSITORY_DATA - UNTRUSTED CODE, ISSUES & USER COMMENTS]`);
     sections.push(`### 1. Problem Specification`);
@@ -663,6 +882,14 @@ export class ContextAssembler {
     }
     if (ctx.repoContext.runnableCommands.testCommand) {
       sections.push(`- **Test Command**: \`${ctx.repoContext.runnableCommands.testCommand}\``);
+    }
+    if (ctx.repoContext.runnableCommands.redTestCommand === null) {
+      sections.push('- **Scoped RED Command**: unavailable; do not use the repository-wide command as RED.');
+    } else if (
+      ctx.repoContext.runnableCommands.redTestCommand &&
+      ctx.repoContext.runnableCommands.redTestCommand !== ctx.repoContext.runnableCommands.testCommand
+    ) {
+      sections.push(`- **Scoped RED Runner**: \`${ctx.repoContext.runnableCommands.redTestCommand}\``);
     }
     if (ctx.repoContext.detectedSkeletonFiles.length > 0) {
       sections.push(`- **Top-level Structure**: ${ctx.repoContext.detectedSkeletonFiles.join(', ')}`);
@@ -734,6 +961,7 @@ export class ContextAssembler {
       ciWorkflow: manifests.ciWorkflow,
       primaryLanguage: repoDetails.primaryLanguage || 'TypeScript',
       workspacePath: input.workspacePath,
+      runGit: input.runGit,
       skeletonFiles: virtualSkeleton.length > 0 ? virtualSkeleton : undefined,
     });
   }

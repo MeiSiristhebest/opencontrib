@@ -1,9 +1,15 @@
 import { describe, expect, it } from "bun:test";
 import { execFileSync } from "child_process";
 import { createHash, generateKeyPairSync } from "crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import {
   ApprovalService,
@@ -19,8 +25,12 @@ import {
 } from "../src/index.js";
 import { ContributionPrService } from "../src/github/contribution-pr-service.js";
 import { createTrustedApprovalAuthority } from "../src/governance/approval-authority.js";
-import { EvidenceService } from "../src/evidence/evidence-service.js";
+import {
+  EvidenceService,
+  getValidatedPatchUnifiedDiffAtGreenTree,
+} from "../src/evidence/evidence-service.js";
 import { GovernanceService } from "../src/governance/governance-service.js";
+import { auditGovernance } from "../src/domain/governance.js";
 import { computeSourceTreeHash } from "../src/evidence/evidence-collector.js";
 import { hashValidatedPatchArtifact } from "../src/evidence/validated-patch.js";
 import { hashTrustedPolicySnapshot } from "../src/kernel/config.js";
@@ -31,6 +41,7 @@ import { TrustedRunMaterializer } from "../src/run/trusted-run-host.js";
 import { RunTransferBundleSchema } from "../src/run/run-transfer.js";
 import { runBranchName } from "../src/run/run-branch.js";
 import { ActiveSessionManager } from "../src/run/active-session.js";
+import type { PatchDraft } from "../src/contracts/llm-schemas.js";
 import { stateAssertionCommand } from "./helpers/bun-command.js";
 import {
   hashCommunityGateSnapshot,
@@ -44,6 +55,19 @@ function isolatedRunManager(baseDir: string): ContributionRunManager {
       join(baseDir, "active_session.json"),
     ),
   });
+}
+
+function createFilePatchDraft(path: string, content: string): PatchDraft {
+  return {
+    title: "fix: add regression coverage",
+    summary: "Add the target source file.",
+    rationale: "The fixture models a newly added source file.",
+    targetFiles: [{ path, reason: "Add the target source file." }],
+    files: [{ path, operation: "CREATE", mode: "100644", content, explanation: "Add source." }],
+    implementationSteps: ["Add the source file."],
+    regressionTestPlan: ["Run the focused test."],
+    estimatedDiffLines: content.split(/\r?\n/).length,
+  };
 }
 
 const testApprovalAuthority = (
@@ -162,23 +186,83 @@ function seedIssueBinding(
   });
 }
 
+function writeGreenFileAfterBaseCommit(
+  workspacePath: string,
+  content: string,
+  relativePath = "src/fix.ts",
+  baseContent: string | null = "const before = true;\n",
+): string {
+  const sourcePath = join(workspacePath, relativePath);
+  mkdirSync(dirname(sourcePath), { recursive: true });
+  if (baseContent !== null) writeFileSync(sourcePath, baseContent);
+  const hooksPath = join(workspacePath, ".opencontrib-test-hooks");
+  mkdirSync(hooksPath, { recursive: true });
+  execFileSync("git", ["init", "--quiet"], {
+    cwd: workspacePath,
+    stdio: "ignore",
+    timeout: 10_000,
+  });
+  execFileSync("git", ["add", "--all"], {
+    cwd: workspacePath,
+    stdio: "ignore",
+    timeout: 10_000,
+  });
+  execFileSync("git", [
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "user.name=OpenContrib Test",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "commit.template=",
+    "-c",
+    `core.hooksPath=${hooksPath}`,
+    "commit",
+    "--quiet",
+    "--allow-empty",
+    "--no-verify",
+    "--no-gpg-sign",
+    "-m",
+    "base",
+  ], {
+    cwd: workspacePath,
+    stdio: "ignore",
+    timeout: 10_000,
+  });
+  const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: workspacePath,
+    encoding: "utf8",
+    timeout: 10_000,
+  }).trim();
+  writeFileSync(sourcePath, content);
+  return baseCommitSha;
+}
+
 function seedGovernanceReadyRun(
   manager: ContributionRunManager,
   runId: string,
   workspacePath: string,
   body = "pr body",
   communityPolicy: Partial<CommunityGatePolicy> = {},
-  options: { baseCommitSha?: string; patchPath?: string } = {},
+  options: {
+    baseCommitSha?: string;
+    patchPath?: string;
+    patchContent?: string;
+    patchDraft?: PatchDraft;
+    changedLines?: number;
+    baseContent?: string;
+    providerIssueId?: number;
+    additionalBaseSourceFiles?: Array<{ path: string; content: string }>;
+  } = {},
 ) {
   mkdirSync(workspacePath, { recursive: true });
-  const greenTreeSha256 = computeSourceTreeHash(workspacePath);
   const canonicalRepoFullName = manager.getRun(runId)?.manifest.repoFullName;
   if (!canonicalRepoFullName) {
     throw new Error(`Fixture run ${runId} has no canonical repository binding.`);
   }
-  const baseCommitSha = options.baseCommitSha ?? "a".repeat(40);
-  const patchPath = options.patchPath ?? "src/fix.ts";
-  const patch = {
+  const patchPath = options.patchPath ?? options.patchDraft?.files[0]?.path ?? "src/fix.ts";
+  const patch: PatchDraft = options.patchDraft ?? {
     title: "fix: bug",
     summary: "fix",
     rationale: "reproduce and correct the defect",
@@ -196,7 +280,35 @@ function seedGovernanceReadyRun(
     regressionTestPlan: ["bun test"],
     estimatedDiffLines: 1,
   };
-  const patchContent = JSON.stringify(patch);
+  const patchFile = patch.files.find((file) => file.path === patchPath);
+  if (!patchFile) throw new Error(`Fixture patch has no file at '${patchPath}'.`);
+  if (patchFile.operation === "DELETE" && options.baseContent === undefined) {
+    throw new Error(
+      `DELETE fixture '${patchPath}' must provide its actual baseContent.`,
+    );
+  }
+  const patchContent = options.patchContent ?? JSON.stringify(patch);
+  const baseCommitSha =
+    options.baseCommitSha ??
+    (options.patchContent
+      ? "a".repeat(40)
+      : writeGreenFileAfterBaseCommit(
+          workspacePath,
+          patchFile.content,
+          patchPath,
+          options.baseContent ??
+            (patchFile.operation === "CREATE"
+              ? null
+              : "const before = true;\n"),
+        ));
+  const greenFilePath = join(workspacePath, patchPath);
+  if (patchFile.operation === "DELETE") {
+    rmSync(greenFilePath, { force: true });
+  } else {
+    mkdirSync(dirname(greenFilePath), { recursive: true });
+    writeFileSync(greenFilePath, patchFile.content);
+  }
+  const greenTreeSha256 = computeSourceTreeHash(workspacePath);
   const patchSha256 = createHash("sha256").update(patchContent).digest("hex");
   const validatedPatch = {
     runId,
@@ -206,14 +318,23 @@ function seedGovernanceReadyRun(
     redTreeSha256: "c".repeat(64),
     greenTreeSha256,
     artifactSha256: "",
-    changedLines: 0,
+    changedLines: options.changedLines ?? 0,
     files: [
       {
         path: patchPath,
+        operation: patchFile.operation,
+        mode: patchFile.mode,
+        contentSha256: createHash("sha256").update(patchFile.content).digest("hex"),
+        ...(options.changedLines === undefined
+          ? {}
+          : { changedLines: options.changedLines }),
+      },
+      ...(options.additionalBaseSourceFiles ?? []).map((file) => ({
+        path: file.path,
         operation: "MODIFY" as const,
         mode: "100644" as const,
-        contentSha256: createHash("sha256").update("fixed").digest("hex"),
-      },
+        contentSha256: createHash("sha256").update(file.content).digest("hex"),
+      })),
     ],
     validatedAt: "2026-01-01T00:01:00.000Z",
   };
@@ -237,7 +358,12 @@ function seedGovernanceReadyRun(
     "WORKSPACE_PREPARED",
   );
   if (communityPolicy.privateVulnerabilityDisclosure !== true) {
-    seedIssueBinding(manager, runId, canonicalRepoFullName);
+    seedIssueBinding(
+      manager,
+      runId,
+      canonicalRepoFullName,
+      options.providerIssueId ?? 42,
+    );
   }
   saveCanonicalArtifact(
     manager,
@@ -335,7 +461,399 @@ function seedGovernanceReadyRun(
   return audit;
 }
 
+describe("Validated base-to-GREEN governance diffs", () => {
+  it("keeps the real removed content for delete diffs", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-validated-delete-diff-"));
+    const workspacePath = join(baseDir, "repo");
+    const relativePath = "src/remove.ts";
+    const baseContent = 'if (repository === "org/repo") return old();\n';
+    try {
+      const baseCommitSha = writeGreenFileAfterBaseCommit(
+        workspacePath,
+        "",
+        relativePath,
+        baseContent,
+      );
+      rmSync(join(workspacePath, relativePath));
+      const diff = getValidatedPatchUnifiedDiffAtGreenTree(
+        workspacePath,
+        baseCommitSha,
+        [
+          {
+            path: relativePath,
+            operation: "DELETE",
+            mode: "100644",
+            contentSha256: createHash("sha256").update("").digest("hex"),
+          },
+        ],
+        computeSourceTreeHash(workspacePath),
+      );
+
+      expect(diff).toContain('-if (repository === "org/repo") return old();');
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads validated diffs larger than Node's default child-process buffer", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-validated-large-diff-"));
+    const workspacePath = join(baseDir, "repo");
+    const relativePath = "src/large.ts";
+    const content = `export const large = "${"x".repeat(1_100_000)}";\n`;
+    try {
+      const baseCommitSha = writeGreenFileAfterBaseCommit(
+        workspacePath,
+        content,
+        relativePath,
+        "export const large = \"before\";\n",
+      );
+      const diff = getValidatedPatchUnifiedDiffAtGreenTree(
+        workspacePath,
+        baseCommitSha,
+        [
+          {
+            path: relativePath,
+            operation: "MODIFY",
+            mode: "100644",
+            contentSha256: createHash("sha256").update(content).digest("hex"),
+          },
+        ],
+        computeSourceTreeHash(workspacePath),
+      );
+
+      expect(diff.length).toBeGreaterThan(1_048_576);
+      expect(diff).toContain("x".repeat(128));
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  if (process.platform !== "win32") {
+    it("passes filenames with Git pathspec magic as literal paths", () => {
+      const baseDir = mkdtempSync(join(tmpdir(), "oc-validated-literal-path-"));
+      const workspacePath = join(baseDir, "repo");
+      const relativePath = ":(glob)nope.ts";
+      const content = "export const after = true;\n";
+      try {
+        const baseCommitSha = writeGreenFileAfterBaseCommit(
+          workspacePath,
+          content,
+          relativePath,
+          "export const before = true;\n",
+        );
+        const diff = getValidatedPatchUnifiedDiffAtGreenTree(
+          workspacePath,
+          baseCommitSha,
+          [
+            {
+              path: relativePath,
+              operation: "MODIFY",
+              mode: "100644",
+              contentSha256: createHash("sha256").update(content).digest("hex"),
+            },
+          ],
+          computeSourceTreeHash(workspacePath),
+        );
+
+        expect(diff).toContain("+export const after = true;");
+      } finally {
+        rmSync(baseDir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+describe("Governance base source context limits", () => {
+  it("fails closed when selected base source contents exceed the cumulative limit", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-governance-source-budget-"));
+    const workspacePath = join(baseDir, "repo");
+    const sourceContent = "x".repeat(32 * 1024 * 1024 + 1);
+    const sourceFiles = [
+      { path: "src/large-a.ts", content: sourceContent },
+      { path: "src/large-b.ts", content: sourceContent },
+    ];
+    try {
+      for (const sourceFile of sourceFiles) {
+        const sourcePath = join(workspacePath, sourceFile.path);
+        mkdirSync(dirname(sourcePath), { recursive: true });
+        writeFileSync(sourcePath, sourceFile.content);
+      }
+      const baseCommitSha = writeGreenFileAfterBaseCommit(
+        workspacePath,
+        "const after = true;\n",
+        "src/fix.ts",
+        "const before = true;\n",
+      );
+      const manager = isolatedRunManager(join(baseDir, "runs"));
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+
+      expect(() =>
+        seedGovernanceReadyRun(
+          manager,
+          manifest.runId,
+          workspacePath,
+          "pr body",
+          {},
+          {
+            baseCommitSha,
+            patchPath: "src/fix.ts",
+            patchContent: "non-canonical fixture patch",
+            additionalBaseSourceFiles: sourceFiles,
+          },
+        ),
+      ).toThrow(/GovernanceBaseContentUnavailableError:.*aggregate safe read limit/);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("Governance audit impact context", () => {
+  it("does not report hazards that appear only in removed diff lines", () => {
+    const audit = auditGovernance({
+      diffText: [
+        "diff --git a/internal/tool/code_search.go b/internal/tool/code_search.go",
+        "--- a/internal/tool/code_search.go",
+        "+++ b/internal/tool/code_search.go",
+        "@@ -1 +1 @@",
+        '-if (repository === "org/repo") return special;',
+        "+normalized := filepath.FromSlash(input)",
+      ].join("\n"),
+      patchContent: JSON.stringify({
+        files: [
+          {
+            path: "internal/tool/code_search.go",
+            content: "normalized := filepath.FromSlash(input)",
+          },
+        ],
+      }),
+      modifiedFiles: ["internal/tool/code_search.go"],
+      lineCount: 1,
+      coreDiffLines: 1,
+    });
+
+    expect(audit.antiHardcodePassed).toBe(true);
+    expect(audit.impactAnalysisPassed).toBe(true);
+  });
+
+  it("analyzes the validated diff instead of unchanged PatchDraft content", () => {
+    const audit = auditGovernance({
+      diffText: [
+        "diff --git a/internal/tool/code_search.go b/internal/tool/code_search.go",
+        "--- a/internal/tool/code_search.go",
+        "+++ b/internal/tool/code_search.go",
+        "@@ -4,0 +4,1 @@",
+        "+normalized := filepath.FromSlash(input)",
+      ].join("\n"),
+      patchContent: JSON.stringify({
+        files: [
+          {
+            path: "internal/tool/code_search.go",
+            content:
+              "legacy := filepath.ToSlash(input)\nnormalized := filepath.FromSlash(input)",
+          },
+        ],
+      }),
+      modifiedFiles: ["internal/tool/code_search.go"],
+      lineCount: 1,
+      coreDiffLines: 1,
+    });
+
+    expect(audit.impactAnalysisPassed).toBe(true);
+  });
+
+  it("checks hardcoded repository branches in canonical PatchDraft files", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-patch-draft-hardcode-"));
+    try {
+      const repoPath = join(baseDir, "repo");
+      const sourcePath = join(repoPath, "src", "fix.ts");
+      const baseSource = [
+        "export function route(repo: string) {",
+        "  return repo;",
+        "}",
+        "",
+      ].join("\n");
+      const greenSource = [
+        "export function route(repo: string) {",
+        '  if (repo === "org/repo") return "special";',
+        "  return repo;",
+        "}",
+        "",
+      ].join("\n");
+
+      mkdirSync(join(repoPath, "src"), { recursive: true });
+      writeFileSync(sourcePath, baseSource);
+      execFileSync("git", ["init"], { cwd: repoPath, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "test@example.com"], {
+        cwd: repoPath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "OpenContrib Test"], {
+        cwd: repoPath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["add", "src/fix.ts"], {
+        cwd: repoPath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["commit", "-m", "base"], {
+        cwd: repoPath,
+        stdio: "ignore",
+      });
+      const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: repoPath,
+        encoding: "utf8",
+      }).trim();
+
+      writeFileSync(sourcePath, greenSource);
+      const patchDraft: PatchDraft = {
+        title: "fix: generalize route behavior",
+        summary: "Handle routes without repository-specific behavior.",
+        rationale: "Use the normal behavior for every repository.",
+        targetFiles: [{ path: "src/fix.ts", reason: "Correct route behavior." }],
+        files: [
+          {
+            path: "src/fix.ts",
+            operation: "MODIFY",
+            mode: "100644",
+            content: greenSource,
+            explanation: "Update route behavior.",
+          },
+        ],
+        implementationSteps: ["Update route handling."],
+        regressionTestPlan: ["Exercise repository-agnostic route behavior."],
+        estimatedDiffLines: 3,
+      };
+      const manager = isolatedRunManager(join(baseDir, "runs"));
+      const manifest = manager.createRun({ repoFullName: "org/repo" });
+      const decision = seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        repoPath,
+        "pr body",
+        {},
+        {
+          baseCommitSha,
+          patchPath: "src/fix.ts",
+          patchDraft,
+          changedLines: 3,
+        },
+      );
+
+      expect(decision.auditResult.antiHardcodePassed).toBe(false);
+      expect(
+        decision.auditResult.flaggedHardcodeIssues.some((issue: string) =>
+          issue.includes("REPO_LITERAL_DISCRIMINATION"),
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("passes canonical run issue metadata into the anti-hardcode gate", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-issue-hardcode-"));
+    try {
+      const repoPath = join(baseDir, "repo");
+      const manager = isolatedRunManager(join(baseDir, "runs"));
+      const manifest = manager.createRun({
+        repoFullName: "org/repo",
+        issueNumber: 1614,
+      });
+      const patchContent = `
+diff --git a/src/fix.ts b/src/fix.ts
+--- a/src/fix.ts
++++ b/src/fix.ts
+@@ -1,0 +1,1 @@
++if (issueNumber === 1614) return workaround();
+`;
+      const sourceContent = 'if (issueNumber === 1614) return workaround();\n';
+
+      const decision = seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        repoPath,
+        "pr body",
+        {},
+        {
+          patchContent,
+          patchDraft: createFilePatchDraft("src/fix.ts", sourceContent),
+          providerIssueId: 1614,
+        },
+      );
+
+      expect(decision.auditResult.antiHardcodePassed).toBe(false);
+      expect(
+        decision.auditResult.flaggedHardcodeIssues.some((issue: string) =>
+          issue.includes("issue #1614"),
+        ),
+      ).toBe(true);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not infer an issue-specific workaround from the manifest issue number alone", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-issue-hardcode-mismatch-"));
+    try {
+      const repoPath = join(baseDir, "repo");
+      const manager = isolatedRunManager(join(baseDir, "runs"));
+      const manifest = manager.createRun({
+        repoFullName: "org/repo",
+        issueNumber: 1614,
+      });
+      const patchContent = `
+diff --git a/src/fix.ts b/src/fix.ts
+--- a/src/fix.ts
++++ b/src/fix.ts
+@@ -1,0 +1,1 @@
++if (issueNumber === 1614) return workaround();
+`;
+      const sourceContent = 'if (issueNumber === 1614) return workaround();\n';
+
+      const decision = seedGovernanceReadyRun(
+        manager,
+        manifest.runId,
+        repoPath,
+        "pr body",
+        {},
+        {
+          patchContent,
+          patchDraft: createFilePatchDraft("src/fix.ts", sourceContent),
+        },
+      );
+
+      expect(decision.auditResult.antiHardcodePassed).toBe(true);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["vue", "svelte"])("seeds %s component comments from the canonical base", extension => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-component-base-"));
+    try {
+      const workspace = join(baseDir, "repo");
+      const manager = isolatedRunManager(join(baseDir, "runs"));
+      const run = manager.createRun({ repoFullName: "org/repo" });
+      const path = `src/App.${extension}`;
+      const baseContent = ["<template>", "<!--", ...Array.from({ length: 30 }, (_, i) => `Documentation line ${i}`), "-->", "</template>", ""].join("\n");
+      const greenSource = baseContent.replace("Documentation line 15", 'Documentation line 15\nif (repo === "owner/repo") return example();');
+      const patchDraft: PatchDraft = {
+        title: "docs: explain component behavior", summary: "Add an inert comment example.",
+        rationale: "Document the existing component.", targetFiles: [{ path, reason: "Document behavior." }],
+        files: [{ path, operation: "MODIFY", mode: "100644", content: greenSource, explanation: "Extend the existing HTML comment." }],
+        implementationSteps: ["Extend the comment."], regressionTestPlan: ["Verify base comment state."], estimatedDiffLines: 1,
+      };
+      const decision = seedGovernanceReadyRun(manager, run.runId, workspace, "pr body", {}, {
+        patchPath: path, patchDraft, baseContent, changedLines: 1,
+      });
+      expect(decision.auditResult.antiHardcodePassed).toBe(true);
+      expect(decision.auditResult.flaggedHardcodeIssues).toEqual([]);
+    } finally {
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it("passes validated patch paths and the base tree into sibling-file analysis", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-governance-impact-"));
     const repoPath = join(baseDir, "repo");
@@ -450,6 +968,14 @@ describe("Trusted private security materialization", () => {
     try {
       const manager = isolatedRunManager(baseDir);
       const manifest = manager.createRun({ repoFullName: "owner/private-repo" });
+      const publicRun = manager.createRun({ repoFullName: "owner/private-repo" });
+      const publicPolicy = fixtureCommunityGate("a".repeat(40), {
+        privateVulnerabilityDisclosure: false,
+      });
+      saveCanonicalArtifact(manager, publicRun.runId, "workspace", {
+        baseCommitSha: "a".repeat(40),
+        ...publicPolicy,
+      });
       const rateLimitError = Object.assign(new Error("rate limited"), {
         status: 429,
       });
@@ -460,7 +986,7 @@ describe("Trusted private security materialization", () => {
       });
       await expect(
         issueBinding.bind({
-          runId: manifest.runId,
+          runId: publicRun.runId,
           repoFullName: "owner/private-repo",
           issueNumber: 42,
         }),
@@ -1036,6 +1562,11 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         manifest.runId,
         join(baseDir, "workspace"),
       );
+      const baseCommitSha =
+        manager.getRun(manifest.runId)?.artifacts.workspace?.baseCommitSha;
+      if (!baseCommitSha) {
+        throw new Error("Fixture workspace has no base commit SHA.");
+      }
 
       // Fake or missing submission artifact cannot advance to PR_SUBMITTED
       const summaryWithoutSub = manager.getRun(manifest.runId)!;
@@ -1080,14 +1611,14 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
           rest: {
             git: {
               getRef: async () => ({
-                data: { object: { sha: "a".repeat(40) } },
+                data: { object: { sha: baseCommitSha } },
               }),
             },
             pulls: {
               get: async () => ({
                 data: {
                   head: { sha: "real_head_sha" },
-                  base: { sha: "a".repeat(40) },
+                  base: { sha: baseCommitSha },
                 },
               }),
             },
@@ -1381,6 +1912,14 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         },
         resourceLeakCheck: { required: false },
       });
+      expect(first.artifact.issueOrTaskId).toBe("1");
+
+      expect(() => {
+        service.prepare({
+          runId: manifest.runId,
+          issueOrTaskId: "TASK-17",
+        });
+      }).toThrow(/WorkspaceIssueOrTaskMismatchError/);
 
       // Second preparation returns existing canonical workspace if exists
       const second = service.prepare({
@@ -1388,6 +1927,31 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         issueOrTaskId: 1,
       });
       expect(second.alreadyPrepared).toBe(true);
+
+      const workspaceArtifactPath = join(
+        baseDir,
+        manifest.runId,
+        "workspace.json",
+      );
+      const savedWorkspaceArtifact = JSON.parse(
+        readFileSync(workspaceArtifactPath, "utf8"),
+      ) as Record<string, unknown>;
+      const legacyWorkspaceArtifact = { ...savedWorkspaceArtifact };
+      delete legacyWorkspaceArtifact.issueOrTaskId;
+      writeFileSync(
+        workspaceArtifactPath,
+        JSON.stringify(legacyWorkspaceArtifact),
+      );
+      expect(() =>
+        service.prepare({
+          runId: manifest.runId,
+          issueOrTaskId: 1,
+        }),
+      ).toThrow(/WorkspaceLegacyArtifactTargetUnknownError/);
+      writeFileSync(
+        workspaceArtifactPath,
+        JSON.stringify(savedWorkspaceArtifact),
+      );
 
       // Deleting the physical folder triggers WorkspaceImmutableViolationError (cannot allocate new workspace for same run)
       rmSync(first.context.workspacePath, { recursive: true, force: true });
@@ -1403,6 +1967,245 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       rmSync(baseDir, { recursive: true, force: true });
     }
   });
+
+  it("WorkspaceService allows retrying an unbound issue target only from a clean baseline", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-issue-retry-"));
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = join(baseDir, "isolated-home");
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/repo" });
+      const workspacePath = join(baseDir, "allocated-ws");
+      mkdirSync(workspacePath, { recursive: true });
+      writeFileSync(join(workspacePath, "README.md"), "baseline\n");
+      execFileSync("git", ["init", "-b", "main"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "Tester"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.email", "test@example.com"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "core.ignoreStat", "false"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["add", "README.md"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["commit", "-m", "baseline"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/repo.git"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
+      const baseCommitSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: workspacePath,
+        encoding: "utf8",
+      }).trim();
+
+      const fakeWorktreeManager = {
+        runGit: (args: string[]) => {
+          if (args.includes("ls-tree")) {
+            return {
+              success: true,
+              stdout: args.includes(".opencontrib.json")
+                ? ".opencontrib.json\n"
+                : "",
+              stderr: "",
+            };
+          }
+          if (args.includes("show")) {
+            return {
+              success: true,
+              stdout: JSON.stringify({
+                policy: {
+                  coverage: {
+                    required: true,
+                    minimumChangedLineCoverage: 90,
+                  },
+                },
+              }),
+              stderr: "",
+            };
+          }
+          return { success: true, stdout: "", stderr: "" };
+        },
+        createIsolatedWorkspace: () => ({
+          workspacePath,
+          branchName: "opencontrib/run-issue-retry",
+          isWorktree: true,
+          baseRepoPath: workspacePath,
+          baseCommitSha,
+          baseBranch: "main",
+        }),
+        detectDefaultBranch: () => "main",
+      } as any;
+      const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+      const service = new WorkspaceService(manager, fakeWorktreeManager);
+      service.prepare({ runId: manifest.runId, issueOrTaskId: 1 });
+
+      const missingIssueBinding = new IssueBindingService(manager, {
+        getIssue: async () => ({ status: "NOT_FOUND", data: undefined as never }),
+      });
+      await expect(
+        missingIssueBinding.bind({
+          runId: manifest.runId,
+          repoFullName: "owner/repo",
+          issueNumber: 1,
+        }),
+      ).rejects.toThrow(/IssueBindingProviderError/);
+      expect(manager.getRun(manifest.runId)?.manifest.issueNumber).toBeUndefined();
+      expect(manager.getRun(manifest.runId)?.artifacts.issueBinding).toBeUndefined();
+
+      const untrackedFile = join(workspacePath, "untracked.txt");
+      writeFileSync(untrackedFile, "unverified work\n");
+      expect(() =>
+        service.prepare({ runId: manifest.runId, issueOrTaskId: 2 }),
+      ).toThrow(/WorkspaceIssueRetargetUnsafeError/);
+      rmSync(untrackedFile);
+
+      const retried = service.prepare({
+        runId: manifest.runId,
+        issueOrTaskId: 2,
+      });
+      expect(retried.alreadyPrepared).toBe(true);
+      expect(retried.artifact.issueOrTaskId).toBe("1");
+
+      const issueBinding = new IssueBindingService(manager, {
+        getIssue: async (_owner, _repo, issueNumber) => ({
+          status: "OK",
+          data: {
+            number: issueNumber,
+            title: `Issue ${issueNumber}`,
+            state: "open",
+            htmlUrl: `https://github.com/owner/repo/issues/${issueNumber}`,
+          },
+        }),
+      });
+      await issueBinding.bind({
+        runId: manifest.runId,
+        repoFullName: "owner/repo",
+        issueNumber: 2,
+      });
+      expect(
+        service.prepare({ runId: manifest.runId, issueOrTaskId: 2 })
+          .alreadyPrepared,
+      ).toBe(true);
+      expect(() =>
+        service.prepare({ runId: manifest.runId, issueOrTaskId: 1 }),
+      ).toThrow(/WorkspaceIssueMismatchError/);
+    } finally {
+      if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+      else process.env.OPENCONTRIB_HOME = previousHome;
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("WorkspaceService rejects numeric targets for private disclosure policy before saving a workspace", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-private-issue-"));
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = join(baseDir, "isolated-home");
+    let cleanupCount = 0;
+    try {
+      const manager = new ContributionRunManager({ baseDir });
+      const manifest = manager.createRun({ repoFullName: "owner/repo" });
+      const workspacePath = join(baseDir, "allocated-ws");
+      mkdirSync(workspacePath, { recursive: true });
+      const baseCommitSha = "a".repeat(40);
+      const fakeWorktreeManager = {
+        runGit: (args: string[]) => {
+          const target = args.at(-1) ?? "";
+          if (args.includes("ls-tree")) {
+            return {
+              success: true,
+              stdout:
+                target === ".opencontrib.json"
+                  ? ".opencontrib.json\n"
+                  : target === "SECURITY.md"
+                    ? "SECURITY.md\n"
+                    : "",
+              stderr: "",
+            };
+          }
+          if (args.includes("show")) {
+            return {
+              success: true,
+              stdout: target.endsWith(":.opencontrib.json")
+                ? JSON.stringify({
+                    policy: {
+                      coverage: {
+                        required: true,
+                        minimumChangedLineCoverage: 90,
+                      },
+                    },
+                  })
+                : target.endsWith(":SECURITY.md")
+                  ? "Report vulnerabilities privately.\n"
+                  : "",
+              stderr: "",
+            };
+          }
+          return { success: true, stdout: "", stderr: "" };
+        },
+        createIsolatedWorkspace: () => ({
+          workspacePath,
+          branchName: "opencontrib/run-private",
+          isWorktree: true,
+          baseRepoPath: workspacePath,
+          baseCommitSha,
+          baseBranch: "main",
+        }),
+        cleanupWorkspace: () => {
+          cleanupCount += 1;
+        },
+        detectDefaultBranch: () => "main",
+      } as any;
+      const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+
+      expect(() =>
+        new WorkspaceService(manager, fakeWorktreeManager).prepare({
+          runId: manifest.runId,
+          issueOrTaskId: 42,
+        }),
+      ).toThrow(/private disclosure workspaces require a nonnumeric task identifier/i);
+      expect(manager.getRun(manifest.runId)?.artifacts.workspace).toBeUndefined();
+      expect(cleanupCount).toBe(1);
+    } finally {
+      if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+      else process.env.OPENCONTRIB_HOME = previousHome;
+      rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([1.5, -1, Number.NaN, 0])(
+    "WorkspaceService rejects invalid numeric task identifiers (%s)",
+    (issueOrTaskId) => {
+      const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-invalid-number-"));
+      const previousHome = process.env.OPENCONTRIB_HOME;
+      process.env.OPENCONTRIB_HOME = join(baseDir, "isolated-home");
+      try {
+        const manager = new ContributionRunManager({ baseDir });
+        const run = manager.createRun({ repoFullName: "owner/repo" });
+        const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+        expect(() => new WorkspaceService(manager, {} as any).prepare({
+          runId: run.runId,
+          issueOrTaskId,
+        })).toThrow(/issue number must be a positive safe integer/);
+      } finally {
+        if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+        else process.env.OPENCONTRIB_HOME = previousHome;
+        rmSync(baseDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("WorkspaceService fails closed when baseline policy inspection fails", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-policy-failure-"));
@@ -1719,8 +2522,11 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manifest2 = manager.createRun({ repoFullName: "owner/repo2" });
       const workspacePath = join(baseDir, "workspace-override");
       mkdirSync(workspacePath, { recursive: true });
+      const baseCommitSha = writeGreenFileAfterBaseCommit(
+        workspacePath,
+        "fixed",
+      );
       const greenTreeSha256 = computeSourceTreeHash(workspacePath);
-      const baseCommitSha = "e".repeat(40);
       const patch = {
         title: "fix",
         summary: "fix",
@@ -1902,12 +2708,15 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       const manifest = manager.createRun({ repoFullName: "org/repo" });
       const workspacePath = join(baseDir, "workspace");
       mkdirSync(workspacePath, { recursive: true });
+      const baseCommitSha = writeGreenFileAfterBaseCommit(
+        workspacePath,
+        "fixed",
+      );
       const greenTreeSha256 = computeSourceTreeHash(workspacePath);
 
       const {
         saveCanonicalArtifact,
       } = require("../src/run/canonical-writer.js");
-      const baseCommitSha = "a".repeat(40);
       const patch = {
         title: "fix",
         summary: "fix",

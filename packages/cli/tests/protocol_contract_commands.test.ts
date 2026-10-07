@@ -32,11 +32,11 @@ describe("Canonical protocol contract registration", () => {
     }
   });
 
-  it("derives workspace next-step guidance from the RED protocol phase", () => {
+  it("derives workspace next-step guidance from the context protocol phase", () => {
     const guidance = getProtocolGuidance("WORKSPACE_PREPARED");
-    expect(guidance.suggestedNextAction).toBe("capture_red");
-    expect(guidance.cliExample).toContain("evidence capture-red");
-    expect(guidance.mcpTool).toBe("contrib_capture_red");
+    expect(guidance.suggestedNextAction).toBe("assemble_context");
+    expect(guidance.cliExample).toContain("discovery context");
+    expect(guidance.mcpTool).toBe("contrib_assemble_context");
     expect(guidance.forbiddenActions.length).toBeGreaterThan(0);
     expect(guidance.invariants.length).toBeGreaterThan(0);
   });
@@ -47,5 +47,14 @@ describe("Canonical protocol contract registration", () => {
         "NOT_A_PHASE" as keyof typeof PROTOCOL_CONTRACT_PHASES,
       ),
     ).toThrow("Unknown protocol phase");
+  });
+});
+
+describe("Lifecycle review regressions", () => {
+  it("guides workspace preparation before context and RED", () => {
+    expect(PROTOCOL_CONTRACT_PHASES.OPPORTUNITY_SCOUTED.suggestedNextAction).toBe("prepare_workspace");
+    expect(PROTOCOL_CONTRACT_PHASES.PROBE_COMPLETED.suggestedNextAction).toBe("prepare_workspace");
+    expect(PROTOCOL_CONTRACT_PHASES.WORKSPACE_PREPARED.suggestedNextAction).toBe("assemble_context");
+    expect(PROTOCOL_CONTRACT_PHASES.CONTEXT_ASSEMBLED.suggestedNextAction).toBe("capture_red");
   });
 });

@@ -8,6 +8,20 @@ import type {
 } from './types.js';
 import type { ResponseCache } from '../ports/response-cache.port.js';
 import { requestWithRetry } from './retry-strategy.js';
+import { normalizeGitHubIssueHost } from './issue-url.js';
+
+function mapIssueLabels(labels: unknown): string[] {
+  if (!Array.isArray(labels)) return [];
+  return labels
+    .map((label) =>
+      typeof label === 'string'
+        ? label
+        : label && typeof label === 'object' && 'name' in label
+          ? String((label as { name?: unknown }).name ?? '')
+          : '',
+    )
+    .filter((label) => label.length > 0);
+}
 
 export interface OctokitIssueSourceOptions {
   token: string;
@@ -27,15 +41,10 @@ export class OctokitIssueSource {
   private cache: ResponseCache;
 
   constructor(opts: OctokitIssueSourceOptions) {
-    const normalizedHost = opts.host
-      .trim()
-      .replace(/^https?:\/\//i, '')
-      .replace(/\/+$/, '')
-      .toLowerCase();
+    const normalizedHost = normalizeGitHubIssueHost(opts.host);
     const isCustomEnterpriseHost =
       normalizedHost &&
-      normalizedHost !== 'github.com' &&
-      normalizedHost !== 'api.github.com';
+      normalizedHost !== 'github.com';
     this.octokit = new Octokit({
       auth: opts.token || undefined,
       baseUrl: isCustomEnterpriseHost
@@ -242,6 +251,8 @@ export class OctokitIssueSource {
         title: String(issue.title || ''),
         state: issue.state === 'open' ? 'open' : 'closed',
         htmlUrl: String(issue.html_url || ''),
+        body: String(issue.body ?? ''),
+        labels: mapIssueLabels(issue.labels),
       },
     };
   }
@@ -280,6 +291,8 @@ export class OctokitIssueSource {
         title: String(issue.title || ""),
         state: issue.state === "open" ? "open" : "closed",
         htmlUrl: String(issue.html_url || ""),
+        body: String(issue.body ?? ""),
+        labels: mapIssueLabels(issue.labels),
       },
     };
   }
@@ -421,6 +434,9 @@ export class OctokitIssueSource {
       isFork: res.data.data.fork ?? false,
       isArchived: res.data.data.archived ?? false,
       description: res.data.data.description ?? '',
+      ...(typeof res.data.data.language === 'string'
+        ? { primaryLanguage: res.data.data.language }
+        : {}),
     };
 
     this.cache.set(cacheKey, details);

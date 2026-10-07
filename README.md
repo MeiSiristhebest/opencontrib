@@ -184,7 +184,7 @@ npx -y @opencontrib/cli doctor
 ### Step 1: Create the run anchor
 
 ```bash
-opencontrib run create --repo owner/repo --issue 0 --title "target defect"
+opencontrib run create --repo owner/repo --issue 1 --title "target defect"
 ```
 
 ### Step 2: Scan & Triage High-Value Defects (Proactive Track A)
@@ -202,7 +202,7 @@ opencontrib pointer resolve ptr://findings/<pointer_id> --view slice
 ### Step 4: Prepare Clean-Room Worktree Sandbox
 
 ```bash
-opencontrib workspace prepare --repo owner/repo --issue 0 --run-id "$RUN_ID"
+opencontrib workspace prepare --repo owner/repo --issue 1 --run-id "$RUN_ID"
 # Captures isolated workspacePath
 ```
 

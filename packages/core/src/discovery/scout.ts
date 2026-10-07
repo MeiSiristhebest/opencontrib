@@ -514,6 +514,7 @@ export async function scoutOpportunities(
 
       const opp: Opportunity = {
         repoFullName,
+        primaryLanguage: repoDetails.primaryLanguage,
         repoStars: repoDetails.stars,
         issueNumber: item.number,
         title: item.title,

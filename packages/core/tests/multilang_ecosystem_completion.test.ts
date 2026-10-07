@@ -351,7 +351,7 @@ diff --git a/tests/parser.test.ts b/tests/parser.test.ts
         writeFileSync(join(tempDir, 'Gemfile'), 'source "https://rubygems.org"');
         const rubyCmds = detectRunnableCommandsFromDir(tempDir);
         expect(rubyCmds.packageManager).toBe('bundle');
-        expect(rubyCmds.testCommand).toBe('bundle exec rake test');
+        expect(rubyCmds.testCommand).toBeUndefined();
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
@@ -376,7 +376,7 @@ diff --git a/tests/parser.test.ts b/tests/parser.test.ts
         writeFileSync(join(tempDir, 'composer.json'), '{"name":"fixture/app"}');
         const commands = detectRunnableCommandsFromDir(tempDir);
         expect(commands.packageManager).toBe('composer');
-        expect(commands.testCommand).toBe('composer test');
+        expect(commands.testCommand).toBeUndefined();
         expect(commands.buildCommand).toBe('composer install');
       } finally {
         rmSync(tempDir, { recursive: true, force: true });

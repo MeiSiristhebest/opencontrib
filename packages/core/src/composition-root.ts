@@ -14,6 +14,9 @@
  */
 
 import { GitHubClient } from "./discovery/github-client.js";
+import type { IssueBindingProvider } from "./github/issue-binding-service.js";
+import type { CredentialsProvider } from "./ports/credentials-provider.port.js";
+import type { ResponseCache } from "./ports/response-cache.port.js";
 import { ContributionPipeline } from "./application/index.js";
 import { SystemClock } from "./ports/clock.port.js";
 import { LLMService } from "./llm/llm-service.js";
@@ -39,6 +42,30 @@ export function buildProductionGitHubClient(
   options: GitHubClientOptions = {},
 ): GitHubClient {
   return new GitHubClient(options);
+}
+
+/** Build an unauthenticated, read-only issue provider for agent-facing paths. */
+export function buildPublicIssueBindingProvider(options: {
+  host?: string;
+} = {}): IssueBindingProvider {
+  const credentials: CredentialsProvider = {
+    getToken: () => "",
+    getTokenScope: () => "anonymous",
+  };
+  const cache: ResponseCache = {
+    get: (_key) => null,
+    set: (_key, _payload) => undefined,
+  };
+  const client = new GitHubClient(
+    { host: options.host },
+    { credentials, cache },
+  );
+
+  return {
+    issueUrlHost: client.issueUrlHost,
+    getIssue: (owner, repo, issueNumber) =>
+      client.getIssue(owner, repo, issueNumber),
+  };
 }
 
 /**

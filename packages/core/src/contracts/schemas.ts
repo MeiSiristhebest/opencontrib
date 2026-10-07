@@ -107,6 +107,7 @@ export type MaintainerApprovalSignal = z.infer<typeof MaintainerApprovalSignalSc
 
 export const OpportunitySchema = z.object({
   repoFullName: z.string(),
+  primaryLanguage: z.string().optional(),
   repoStars: z.number(),
   issueNumber: z.number(),
   title: z.string(),
@@ -1171,6 +1172,8 @@ export const GovernanceAuditResultSchema = z.object({
   impactAnalysisIssues: z.array(z.string()).default([]).optional(),
   preflightLintPassed: z.boolean().default(true).optional(),
   preflightLintIssues: z.array(z.string()).default([]).optional(),
+  antiHardcodePassed: z.boolean().optional().default(true),
+  flaggedHardcodeIssues: z.array(z.string()).optional().default([]),
   remediationSuggestions: z.array(z.string()),
   guidance: z
     .object({

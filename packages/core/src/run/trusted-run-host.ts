@@ -223,9 +223,9 @@ export class TrustedRunMaterializer {
         await import("../workspace/workspace-service.js")
       ).WorkspaceService(this.runManager, this.worktreeManager).prepare({
         runId: bundle.manifest.runId,
-        // The host workspace path uses the opaque run ID; do not propagate an
-        // untrusted public Issue number into private-workflow storage paths.
-        issueOrTaskId: bundle.manifest.runId,
+        // Keep private workspace paths opaque; public transfers must match the
+        // issue declared by the canonical run before provider verification.
+        issueOrTaskId: bundle.manifest.issueNumber ?? bundle.manifest.runId,
         repoFullName: bundle.manifest.repoFullName,
       });
       allocatedWorkspace = workspaceResult.context;

@@ -35,6 +35,20 @@ class LocalFetchWorktreeManager extends WorktreeManager {
   }
 }
 
+const testIssueBindingProvider = {
+  getIssue: async (owner: string, repo: string, issueNumber: number) => ({
+    status: "OK" as const,
+    data: {
+      number: issueNumber,
+      title: "Provider test issue",
+      state: "open" as const,
+      htmlUrl: `https://github.com/${owner}/${repo}/issues/${issueNumber}`,
+      body: "Provider test body.",
+      labels: ["provider-label"],
+    },
+  }),
+};
+
 describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
   const server = createOpenContribMcpServer();
   const tools = (server as any)._registeredTools;
@@ -191,6 +205,7 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     const localTools = (
       createOpenContribMcpServer({
         worktreeManager: new LocalFetchWorktreeManager(bareDir),
+        issueBindingProvider: testIssueBindingProvider,
       }) as any
     )._registeredTools;
     const createResult = await localTools["contrib_create_run"].handler({
@@ -308,12 +323,12 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     const localTools = (
       createOpenContribMcpServer({
         worktreeManager: new LocalFetchWorktreeManager(bareDir),
+        issueBindingProvider: testIssueBindingProvider,
       }) as any
     )._registeredTools;
 
     const runResult = await localTools["contrib_create_run"].handler({
       repoFullName: "test-org/test-repo",
-      issueNumber: 101,
     });
     const runId = JSON.parse(runResult.content[0].text).manifest.runId;
 
@@ -330,6 +345,12 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
     expect(ws.branchName).toMatch(/opencontrib\/(fix-101|run-)/);
     expect(ws.baseCommitSha).toBeDefined();
     expect(ws.persistence?.saved).toBe(true);
+    const boundRunResult = await localTools["contrib_get_run"].handler({
+      runId,
+    });
+    const boundRun = JSON.parse(boundRunResult.content[0].text).run;
+    expect(boundRun.manifest.issueNumber).toBe(101);
+    expect(boundRun.artifacts.issueBinding.providerIssueId).toBe(101);
 
     // Verify evidence boundary auto-resolution from runId
     const evResult = await localTools["contrib_collect_evidence"].handler({

@@ -36,6 +36,8 @@ export interface ProviderIssue {
   title: string;
   state: 'open' | 'closed';
   htmlUrl: string;
+  body?: string;
+  labels?: string[];
 }
 
 export interface RepoDetails {
@@ -44,6 +46,7 @@ export interface RepoDetails {
   isFork: boolean;
   isArchived: boolean;
   description: string;
+  primaryLanguage?: string;
 }
 
 export interface RepoDirectoryEntry {

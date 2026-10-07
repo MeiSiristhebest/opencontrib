@@ -2,14 +2,22 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
+
+const MAX_BASE_SOURCE_CONTENT_BYTES = 64 * 1024 * 1024;
+const MAX_BASE_SOURCE_CONTENT_TOTAL_BYTES = 64 * 1024 * 1024;
 import {
   CommunityGateSnapshotSchema,
   GovernanceDecisionArtifactSchema,
+  IssueBindingArtifactSchema,
   ValidatedPatchArtifactSchema,
   type GovernanceDecisionArtifact,
 } from "../contracts/schemas.js";
+import { PatchDraftSchema } from "../contracts/llm-schemas.js";
 import { auditGovernance, isSupportingFile } from "./governance-auditor.js";
-import { countValidatedPatchChangedLinesAtGreenTree } from "../evidence/evidence-service.js";
+import {
+  countValidatedPatchChangedLinesAtGreenTree,
+  getValidatedPatchUnifiedDiffAtGreenTree,
+} from "../evidence/evidence-service.js";
 import { hashValidatedPatchArtifact } from "../evidence/validated-patch.js";
 import {
   hashTrustedPolicySnapshot,
@@ -39,6 +47,32 @@ function hash(value: unknown): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+function parseCanonicalPatchDraft(value: unknown) {
+  let candidate = value;
+  if (typeof candidate === "string") {
+    try {
+      candidate = JSON.parse(candidate);
+    } catch {
+      return undefined;
+    }
+  }
+  if (
+    !candidate ||
+    typeof candidate !== "object" ||
+    Array.isArray(candidate) ||
+    !Object.prototype.hasOwnProperty.call(candidate, "files")
+  ) {
+    return undefined;
+  }
+  const parsed = PatchDraftSchema.safeParse(candidate);
+  if (!parsed.success) {
+    throw new Error(
+      "GovernancePatchDraftError: canonical patch artifact does not satisfy PatchDraftSchema.",
+    );
+  }
+  return parsed.data;
+}
+
 function readTrackedFilesAtCommit(
   repositoryPath: string,
   baseCommitSha: string,
@@ -60,6 +94,59 @@ function readTrackedFilesAtCommit(
     // Repository context is advisory; an unavailable tree is never evidence of compliance.
     return [];
   }
+}
+
+function readSourceFileContentsAtCommit(
+  repositoryPath: string,
+  baseCommitSha: string,
+  files: readonly { path: string; operation: string }[],
+): Map<string, string> {
+  const contents = new Map<string, string>();
+  const sourceExtension =
+    /\.(?:[cm]?[jt]sx?|vue|svelte|py|go|rs|java|kt|kts|swift|cs|c|h|cc|cpp|hpp|php|rb|sh|bash|zsh|ps1|scala|sc|dart|ex|exs|lua|sql|sol)$/i;
+  if (!/^[a-f0-9]{40,64}$/i.test(baseCommitSha)) return contents;
+
+  let totalBytes = 0;
+  for (const file of files) {
+    if (file.operation === "CREATE") continue;
+    const filePath = file.path;
+    if (/\.[^/]+$/.test(filePath) && !sourceExtension.test(filePath)) continue;
+    let source: string;
+    try {
+      source = execFileSync(
+        "git",
+        ["-C", repositoryPath, "show", `${baseCommitSha}:${filePath}`],
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 10_000,
+          maxBuffer: MAX_BASE_SOURCE_CONTENT_BYTES,
+        },
+      );
+    } catch (error) {
+      const errorCode = error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : "UNKNOWN";
+      const reason = errorCode === "ETIMEDOUT"
+        ? "timed out while reading"
+        : errorCode === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" || errorCode === "ENOBUFS"
+          ? "exceeded the safe read limit while reading"
+          : "could not be read";
+      throw new Error(
+        `GovernanceBaseContentUnavailableError: base source '${filePath}' ${reason} at the recorded commit.`,
+      );
+    }
+
+    const sourceBytes = Buffer.byteLength(source, "utf8");
+    if (sourceBytes > MAX_BASE_SOURCE_CONTENT_TOTAL_BYTES - totalBytes) {
+      throw new Error(
+        `GovernanceBaseContentUnavailableError: selected base sources exceed the aggregate safe read limit at '${filePath}'.`,
+      );
+    }
+    totalBytes += sourceBytes;
+    contents.set(filePath.replace(/\\/g, "/"), source);
+  }
+  return contents;
 }
 
 export class GovernanceService {
@@ -113,6 +200,7 @@ export class GovernanceService {
         `GovernanceProvenanceError: current patch or ValidatedPatchArtifact integrity does not match the canonical GREEN result for run ${runId}.`,
       );
     }
+    const canonicalPatchDraft = parseCanonicalPatchDraft(patchRaw);
     const evidenceArtifact = run.artifacts.evidence;
     if (!evidenceArtifact) {
       throw new Error(
@@ -190,6 +278,18 @@ export class GovernanceService {
       );
     }
     const communityGate = communityGateResult.data;
+    const issueBinding = IssueBindingArtifactSchema.safeParse(
+      run.artifacts.issueBinding,
+    );
+    const providerVerifiedIssueNumber =
+      communityGate.policy.privateVulnerabilityDisclosure !== true &&
+      issueBinding.success &&
+      issueBinding.data.runId === runId &&
+      issueBinding.data.repoFullName.toLowerCase() ===
+        run.manifest.repoFullName.toLowerCase() &&
+      issueBinding.data.state === "open"
+        ? issueBinding.data.providerIssueId
+        : undefined;
 
     const requestedCoverageMinimum =
       options.coveragePolicy?.minimumChangedLineCoverage;
@@ -234,6 +334,10 @@ export class GovernanceService {
 
     let coreDiffLines: number | undefined;
     let repoContextFiles: string[] = [];
+    let baseFileContents = new Map<string, string>();
+    let governanceDiffText: string | undefined = canonicalPatchDraft
+      ? undefined
+      : patchContent;
     try {
       if (
         typeof workspaceArtifact.workspacePath !== "string" ||
@@ -245,9 +349,22 @@ export class GovernanceService {
         );
       }
       const workspacePath = workspaceArtifact.workspacePath;
+      if (canonicalPatchDraft) {
+        governanceDiffText = getValidatedPatchUnifiedDiffAtGreenTree(
+          workspacePath,
+          validatedPatch.baseCommitSha,
+          validatedPatch.files,
+          validatedPatch.greenTreeSha256,
+        );
+      }
       repoContextFiles = readTrackedFilesAtCommit(
         workspacePath,
         validatedPatch.baseCommitSha,
+      );
+      baseFileContents = readSourceFileContentsAtCommit(
+        workspacePath,
+        validatedPatch.baseCommitSha,
+        validatedPatch.files,
       );
       const coreFiles = validatedPatch.files.filter(
         (file) => !isSupportingFile(file.path),
@@ -261,8 +378,12 @@ export class GovernanceService {
     } catch (error) {
       if (
         error instanceof Error &&
-        error.message.startsWith("EvidencePatchProvenanceError: workspace ")
+        (error.message.startsWith("EvidencePatchProvenanceError: workspace ") ||
+          error.message.startsWith("GovernanceBaseContentUnavailableError:"))
       ) {
+        throw error;
+      }
+      if (canonicalPatchDraft && governanceDiffText === undefined) {
         throw error;
       }
       // If canonical counting is unavailable, auditGovernance falls back to
@@ -271,9 +392,12 @@ export class GovernanceService {
     }
 
     const auditResult = auditGovernance({
+      diffText: governanceDiffText,
       patchContent,
       prTitle,
       prBody: prDraftRaw,
+      targetRepo: run.manifest.repoFullName,
+      issueNumber: providerVerifiedIssueNumber,
       evidence: evidenceArtifact as any,
       lineCount: validatedPatch.changedLines,
       coreDiffLines,
@@ -283,6 +407,7 @@ export class GovernanceService {
       resourceLeakPolicy: effectiveResourceLeakPolicy,
       modifiedFiles: validatedPatch.files.map((file) => file.path),
       repoContextFiles,
+      baseFileContents,
       maxDiffLines:
         communityGate.policy.maxDiffCeiling === undefined
           ? undefined

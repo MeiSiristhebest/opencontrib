@@ -5,15 +5,25 @@ import {
   ContributionRunManager,
   WorktreeManager,
   WorkspaceService,
+  buildPublicIssueBindingProvider,
   resolveOpenContribPaths,
 } from "@opencontrib/core";
+import {
+  IssueBindingService,
+  parsePublicIssueNumber,
+} from "../../../core/src/github/issue-binding-service.js";
+import type { IssueBindingProvider } from "../../../core/src/github/issue-binding-service.js";
 
 export function registerWorkspaceTools(
   server: McpServer,
   worktreeManager: WorktreeManager,
   runManager: ContributionRunManager,
+  issueBindingProvider?: IssueBindingProvider,
 ): void {
   const workspaceService = new WorkspaceService(runManager, worktreeManager);
+  let productionIssueBindingProvider: IssueBindingProvider | undefined;
+  const getIssueBindingProvider = () =>
+    (productionIssueBindingProvider ??= buildPublicIssueBindingProvider());
 
   // -------------------------------------------------------------
   // Tool: contrib_prepare_workspace (本地沙箱：Git Worktree)
@@ -44,6 +54,19 @@ export function registerWorkspaceTools(
     async (args) => {
       try {
         if (args.runId) {
+          const issueNumber = parsePublicIssueNumber(args.issueOrTaskId);
+          const run = runManager.getRun(args.runId);
+          if (!run) {
+            throw new Error(`Contribution run ${args.runId} was not found.`);
+          }
+          if (
+            run.manifest.issueNumber !== undefined &&
+            run.manifest.issueNumber !== issueNumber
+          ) {
+            throw new Error(
+              `WorkspaceIssueMismatchError: run is bound to issue #${run.manifest.issueNumber}, but workspace preparation received ${args.issueOrTaskId}.`,
+            );
+          }
           const { context, artifact, alreadyPrepared } =
             workspaceService.prepare({
               runId: args.runId,
@@ -51,6 +74,17 @@ export function registerWorkspaceTools(
               localRepoPath: args.localRepoPath,
               repoFullName: args.repoFullName,
             });
+
+          if (issueNumber !== undefined) {
+            await new IssueBindingService(
+              runManager,
+              issueBindingProvider ?? getIssueBindingProvider(),
+            ).bind({
+              runId: args.runId,
+              repoFullName: args.repoFullName,
+              issueNumber,
+            });
+          }
 
           return {
             content: [

@@ -293,6 +293,7 @@ describe('Commit 3 (1479b9b): Host-Agent Bridge, --home option, --patch-file', (
     process.env.OPENCONTRIB_HOME = '/tmp/test-home';
     expect(process.env.OPENCONTRIB_HOME).toBe('/tmp/test-home');
     if (originalHome) process.env.OPENCONTRIB_HOME = originalHome;
+    else delete process.env.OPENCONTRIB_HOME;
   });
 
   it('normalizePatchLineEndings handles Windows-generated patches', () => {

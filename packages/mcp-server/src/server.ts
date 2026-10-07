@@ -5,6 +5,7 @@ import {
   WorktreeManager,
   buildContributionRunManager,
 } from "@opencontrib/core";
+import type { IssueBindingProvider } from "../../core/src/github/issue-binding-service.js";
 import { registerDiscoveryTools } from "./tools/discovery-tools.js";
 import { registerWorkspaceTools } from "./tools/workspace-tools.js";
 import { registerEvidenceTools } from "./tools/evidence-tools.js";
@@ -21,6 +22,7 @@ export function createOpenContribMcpServer(
   options: {
     worktreeManager?: WorktreeManager;
     runManager?: ReturnType<typeof buildContributionRunManager>;
+    issueBindingProvider?: IssueBindingProvider;
   } = {},
 ): McpServer {
   const server = new McpServer({
@@ -35,8 +37,13 @@ export function createOpenContribMcpServer(
   const runManager = options.runManager ?? buildContributionRunManager();
 
   // Register modular tools across domains
-  registerDiscoveryTools(server);
-  registerWorkspaceTools(server, worktreeManager, runManager);
+  registerDiscoveryTools(server, runManager, options.issueBindingProvider);
+  registerWorkspaceTools(
+    server,
+    worktreeManager,
+    runManager,
+    options.issueBindingProvider,
+  );
   registerEvidenceTools(server, runManager);
   registerGovernanceTools(server, memory, flywheel, runManager);
   registerRunTools(server, runManager);
