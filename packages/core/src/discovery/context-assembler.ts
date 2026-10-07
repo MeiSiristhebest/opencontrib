@@ -99,6 +99,7 @@ function detectNodePackageManager(files: string[], pkg: any): 'npm' | 'pnpm' | '
 
 interface ParsedNodeTestScript {
   runner: string;
+  runnerArguments: string[];
   configArguments: string[];
   testOperands: string[];
   hasEnvironmentPrefix: boolean;
@@ -115,7 +116,10 @@ function parseNodeTestScript(script: unknown): ParsedNodeTestScript | undefined 
   if (argumentsText.replace(/"[^"]*"|'[^']*'|[^\s]+/g, '').trim()) return undefined;
 
   const configArguments: string[] = [];
+  const runnerArguments: string[] = [];
   const testOperands: string[] = [];
+  const flagsWithValues = new Set(['--timeout', '--retry', '--reporter', '--maxWorkers']);
+  const booleanFlags = new Set(['--coverage', '--runInBand', '--parallel', '--bail', '--verbose', '--silent']);
   for (let index = 0; index < argumentsList.length; index++) {
     const argument = argumentsList[index];
     const unquoted =
@@ -149,6 +153,35 @@ function parseNodeTestScript(script: unknown): ParsedNodeTestScript | undefined 
       configArguments.push(unquoted);
       continue;
     }
+    const equalsIndex = unquoted.indexOf('=');
+    if (equalsIndex > 0) {
+      const flag = unquoted.slice(0, equalsIndex);
+      const value = unquoted.slice(equalsIndex + 1);
+      if (
+        flagsWithValues.has(flag) &&
+        /^[A-Za-z0-9._+-]+$/.test(value)
+      ) {
+        runnerArguments.push(unquoted);
+        continue;
+      }
+    }
+    if (flagsWithValues.has(unquoted)) {
+      const value = argumentsList[++index];
+      const unquotedValue = value &&
+        ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'")))
+        ? value.slice(1, -1)
+        : value;
+      if (!unquotedValue || !/^[A-Za-z0-9._+-]+$/.test(unquotedValue)) {
+        return undefined;
+      }
+      runnerArguments.push(unquoted, unquotedValue);
+      continue;
+    }
+    if (booleanFlags.has(unquoted)) {
+      runnerArguments.push(unquoted);
+      continue;
+    }
     if (
       unquoted.startsWith('-') ||
       unquoted.startsWith('/') ||
@@ -161,6 +194,7 @@ function parseNodeTestScript(script: unknown): ParsedNodeTestScript | undefined 
   const runner = match.groups.runner.replace(/\s+/g, ' ').toLowerCase();
   return {
     runner,
+    runnerArguments,
     configArguments,
     testOperands,
     hasEnvironmentPrefix: Boolean(match.groups.environmentPrefix),
@@ -170,8 +204,9 @@ function parseNodeTestScript(script: unknown): ParsedNodeTestScript | undefined 
 function getScopedNodeTestCommand(
   parsed: ParsedNodeTestScript,
   packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun',
+  yarnBerry = false,
 ): string | undefined {
-  if (parsed.testOperands.length === 0 || parsed.hasEnvironmentPrefix) return undefined;
+  if (parsed.hasEnvironmentPrefix) return undefined;
 
   let baseCommand: string;
   if (parsed.runner === 'node --test' || parsed.runner === 'bun test') {
@@ -181,11 +216,12 @@ function getScopedNodeTestCommand(
   } else if (packageManager === 'pnpm') {
     baseCommand = `pnpm exec ${parsed.runner}`;
   } else if (packageManager === 'yarn') {
+    if (!yarnBerry) return undefined;
     baseCommand = `yarn exec ${parsed.runner}`;
   } else {
     return undefined;
   }
-  return [baseCommand, ...parsed.configArguments].join(' ');
+  return [baseCommand, ...parsed.runnerArguments, ...parsed.configArguments].join(' ');
 }
 
 function hasKnownNodeTestFileArgumentContract(script: unknown): boolean {
@@ -210,9 +246,12 @@ function detectNodeCommands(files: string[], dirPath: string, commands: Runnable
     const parsedTestScript = parseNodeTestScript(scripts.test);
     if (parsedTestScript) {
       commands.testCommand = getNodeTestCommand(pm);
-      commands.redTestCommand = parsedTestScript.testOperands.length === 0
-        ? commands.testCommand
-        : getScopedNodeTestCommand(parsedTestScript, pm) ?? null;
+      const yarnBerry = typeof pkg.packageManager === 'string' &&
+        /^yarn@(?:[2-9]|\d{2,})\./.test(pkg.packageManager);
+      commands.redTestCommand =
+        pm === 'yarn' && !yarnBerry && parsedTestScript.testOperands.length === 0
+          ? commands.testCommand
+          : getScopedNodeTestCommand(parsedTestScript, pm, yarnBerry) ?? null;
     }
     if (scripts.build) commands.buildCommand = pm === 'npm' ? 'npm run build' : `${pm} run build`;
     if (scripts.lint) commands.lintCommand = pm === 'npm' ? 'npm run lint' : `${pm} run lint`;

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ArtifactBundleManager } from "../src/run/artifact-bundle.js";
 import { ContributionRunManager } from "../src/run/run-manager.js";
+import { ActiveSessionManager } from "../src/run/active-session.js";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import { IssueBindingService } from "../src/github/issue-binding-service.js";
 import { buildPublicIssueBindingProvider } from "../src/composition-root.js";
@@ -159,7 +160,9 @@ describe("Authority closure", () => {
   });
 
   it("creates issue_binding only from a provider response", async () => {
-    const manager = new ContributionRunManager({ baseDir: baseDir("issue") });
+    const storageDir = baseDir("issue");
+    const activeSession = new ActiveSessionManager(join(storageDir, "active-session.json"));
+    const manager = new ContributionRunManager({ baseDir: storageDir, activeSession });
     const run = manager.createRun({ repoFullName: "owner/repo" });
     savePublicCommunityGate(manager, run.runId);
     const provider = {
@@ -185,6 +188,8 @@ describe("Authority closure", () => {
     expect(artifact.providerVerified).toBe(true);
     expect(manager.getRun(run.runId)?.artifacts.issueBinding).toEqual(artifact);
     expect(manager.getRun(run.runId)?.manifest.issueNumber).toBe(42);
+    expect(activeSession.getActiveSession()?.issueNumber).toBe(42);
+    expect(activeSession.getActiveSession()?.issueTitle).toBe("Fix the verified issue");
     expect(() =>
       manager.saveArtifact(run.runId, "issue_binding", artifact as any),
     ).toThrow("AuthoritativeArtifactViolationError");

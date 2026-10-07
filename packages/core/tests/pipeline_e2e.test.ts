@@ -581,6 +581,30 @@ describe("Pipeline command review regressions", () => {
     ).toBeUndefined();
   });
 
+  it("retains supported Node test runner flags when appending scoped RED files", () => {
+    expect(
+      deriveTargetedReproductionTestCommand("bun test --timeout 30000", ["tests/parser.test.ts"]),
+    ).toBe("bun test --timeout 30000 tests/parser.test.ts");
+    expect(
+      deriveTargetedReproductionTestCommand("bun test --timeout=30000", ["tests/parser.test.ts"]),
+    ).toBe("bun test --timeout=30000 tests/parser.test.ts");
+    expect(
+      deriveTargetedReproductionTestCommand("npm exec --no -- mocha --timeout 1000", ["test/parser.test.js"]),
+    ).toBe("npm exec --no -- mocha --timeout 1000 test/parser.test.js");
+    expect(
+      deriveTargetedReproductionTestCommand("yarn exec mocha --timeout 1000", ["test/parser.test.js"]),
+    ).toBe("yarn exec mocha --timeout 1000 test/parser.test.js");
+    expect(
+      deriveTargetedReproductionTestCommand("bun test --timeout 1000; echo unsafe", ["tests/parser.test.ts"]),
+    ).toBeUndefined();
+    expect(
+      deriveTargetedReproductionTestCommand("bun test --timeout ../outside", ["tests/parser.test.ts"]),
+    ).toBeUndefined();
+    expect(
+      deriveTargetedReproductionTestCommand("bun test --timeout *", ["tests/parser.test.ts"]),
+    ).toBeUndefined();
+  });
+
   it("scopes supported compiled-language commands to selected test targets", () => {
     expect(deriveTargetedReproductionTestCommand("cargo test", ["tests/parser.rs"]))
       .toBe("cargo test --test parser");

@@ -465,7 +465,7 @@ export function registerDiscoveryTools(
           issueBindingProvider ?? buildPublicIssueBindingProvider(),
         ).verifyIssueContext({
           runId,
-          repoFullName: requestedRepoFullName,
+          repoFullName: requestedRepo!,
           issueNumber: requestedIssueNumber!,
         });
         verifiedIssueContext = verified.issue;

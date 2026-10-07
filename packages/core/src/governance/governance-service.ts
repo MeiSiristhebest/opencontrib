@@ -99,7 +99,7 @@ function readTrackedFilesAtCommit(
 function readSourceFileContentsAtCommit(
   repositoryPath: string,
   baseCommitSha: string,
-  paths: readonly string[],
+  files: readonly { path: string; operation: string }[],
 ): Map<string, string> {
   const contents = new Map<string, string>();
   const sourceExtension =
@@ -107,7 +107,9 @@ function readSourceFileContentsAtCommit(
   if (!/^[a-f0-9]{40,64}$/i.test(baseCommitSha)) return contents;
 
   let totalBytes = 0;
-  for (const filePath of paths) {
+  for (const file of files) {
+    if (file.operation === "CREATE") continue;
+    const filePath = file.path;
     if (/\.[^/]+$/.test(filePath) && !sourceExtension.test(filePath)) continue;
     let source: string;
     try {
@@ -122,20 +124,17 @@ function readSourceFileContentsAtCommit(
         },
       );
     } catch (error) {
-      const errorCode =
-        error && typeof error === "object" && "code" in error
-          ? error.code
-          : undefined;
-      if (
-        errorCode === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" ||
-        errorCode === "ENOBUFS"
-      ) {
-        throw new Error(
-          `GovernanceBaseContentUnavailableError: base source '${filePath}' exceeds the safe read limit.`,
-        );
-      }
-      // New files have no base content to use for lexical-state seeding.
-      continue;
+      const errorCode = error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : "UNKNOWN";
+      const reason = errorCode === "ETIMEDOUT"
+        ? "timed out while reading"
+        : errorCode === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" || errorCode === "ENOBUFS"
+          ? "exceeded the safe read limit while reading"
+          : "could not be read";
+      throw new Error(
+        `GovernanceBaseContentUnavailableError: base source '${filePath}' ${reason} at the recorded commit.`,
+      );
     }
 
     const sourceBytes = Buffer.byteLength(source, "utf8");
@@ -365,7 +364,7 @@ export class GovernanceService {
       baseFileContents = readSourceFileContentsAtCommit(
         workspacePath,
         validatedPatch.baseCommitSha,
-        validatedPatch.files.map((file) => file.path),
+        validatedPatch.files,
       );
       const coreFiles = validatedPatch.files.filter(
         (file) => !isSupportingFile(file.path),

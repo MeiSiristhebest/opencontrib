@@ -69,7 +69,7 @@ function hasNonDefaultTrackedIndexEntries(repositoryRoot: string): boolean {
 export function runRepositoryGit(args: string[]): { success: boolean; stdout: string } {
   const result = spawnSync('git', args, {
     encoding: 'utf8',
-    maxBuffer: 1024 * 1024,
+    maxBuffer: 64 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'ignore'],
     timeout: 25_000,
     env: {

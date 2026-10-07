@@ -127,6 +127,19 @@ describe("anti-hardcode review regressions", () => {
     )).toBe(true);
   });
 
+  it.each([
+    ["src/Feature.java", '+if (repo.equals("owner/repo")) return fallback();'],
+    ["src/Feature.cs", '+if (string.Equals(repo, "owner/repo")) return fallback();'],
+  ])("recognizes language-native repository equality in %s", (filePath, source) => {
+    const result = lintAntiHardcode(diff(filePath, source), {
+      targetRepo: "owner/repo",
+    });
+
+    expect(result.violations.some(
+      (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+    )).toBe(true);
+  });
+
   it("recognizes unparenthesized Go and Swift repository switches", () => {
     for (const [filePath, source] of [
       ["src/feature.go", '+switch repo { case "owner/repo": return fallback() }'],
@@ -140,6 +153,34 @@ describe("anti-hardcode review regressions", () => {
         (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
       )).toBe(true);
     }
+  });
+
+  it("attributes new behavior inside existing Swift repository guards", () => {
+    const filePath = "src/Feature.swift";
+    const baseFile = [
+      'if repo == "owner/repo" {',
+      "    return fallback()",
+      "}",
+    ].join("\n");
+    const guardedAddition = [
+      `diff --git a/${filePath} b/${filePath}`,
+      `--- a/${filePath}`,
+      `+++ b/${filePath}`,
+      "@@ -1,3 +1,4 @@",
+      ' if repo == "owner/repo" {',
+      "     return fallback()",
+      "+    return specialCase()",
+      " }",
+    ].join("\n");
+
+    const result = lintAntiHardcode(guardedAddition, {
+      targetRepo: "owner/repo",
+      baseFileContents: new Map([[filePath, baseFile]]),
+    });
+
+    expect(result.violations.some(
+      (entry) => entry.rule === "REPO_LITERAL_DISCRIMINATION",
+    )).toBe(true);
   });
 
   it("scans C# interpolated verbatim strings that begin with three quotes", () => {

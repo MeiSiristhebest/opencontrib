@@ -8,6 +8,7 @@ import type {
 } from './types.js';
 import type { ResponseCache } from '../ports/response-cache.port.js';
 import { requestWithRetry } from './retry-strategy.js';
+import { normalizeGitHubIssueHost } from './issue-url.js';
 
 function mapIssueLabels(labels: unknown): string[] {
   if (!Array.isArray(labels)) return [];
@@ -40,11 +41,7 @@ export class OctokitIssueSource {
   private cache: ResponseCache;
 
   constructor(opts: OctokitIssueSourceOptions) {
-    const normalizedHost = opts.host
-      .trim()
-      .replace(/^https?:\/\//i, '')
-      .replace(/\/+$/, '')
-      .toLowerCase();
+    const normalizedHost = normalizeGitHubIssueHost(opts.host);
     const isCustomEnterpriseHost =
       normalizedHost &&
       normalizedHost !== 'github.com' &&

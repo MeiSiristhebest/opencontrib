@@ -18,8 +18,14 @@ export function normalizeGitHubIssueHost(host = "github.com"): string {
     throw new Error("GitHubHostError: configured GitHub host must be a host name.");
   }
 
-  const normalized = parsed.host.toLowerCase();
-  return normalized === "api.github.com" ? "github.com" : normalized;
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    !parsed.port &&
+    (hostname === "github.com" || hostname === "api.github.com")
+  ) {
+    return "github.com";
+  }
+  return parsed.host.toLowerCase();
 }
 
 export function canonicalGitHubIssueUrl(

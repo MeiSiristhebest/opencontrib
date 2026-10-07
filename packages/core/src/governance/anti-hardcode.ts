@@ -1139,7 +1139,7 @@ function findEnclosingIfBody(
   matchEnd: number,
   filePath: string,
 ): { start: number; end: number } | undefined {
-  const supportsUnparenthesizedIf = /\.(?:go|py|rb|rs)$/i.test(filePath);
+  const supportsUnparenthesizedIf = /\.(?:go|py|rb|rs|swift)$/i.test(filePath);
   const ifStatements = [...source.matchAll(/\bif\b\s*/gi)];
   for (const statement of ifStatements.reverse()) {
     const statementStart = statement.index ?? 0;
@@ -1163,7 +1163,7 @@ function findEnclosingIfBody(
     } else if (/\.py$/i.test(filePath)) {
       conditionEnd = findTopLevelIfDelimiter(source, conditionStart, ':') ?? -1;
       bodyStart = conditionEnd;
-    } else if (/\.(?:go|rs)$/i.test(filePath)) {
+    } else if (/\.(?:go|rs|swift)$/i.test(filePath)) {
       conditionEnd = findTopLevelIfDelimiter(source, conditionStart, '{') ?? -1;
       bodyStart = conditionEnd;
     } else if (/\.rb$/i.test(filePath)) {

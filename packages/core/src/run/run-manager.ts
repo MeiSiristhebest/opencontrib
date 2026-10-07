@@ -179,6 +179,10 @@ export class ContributionRunManager {
       manifest.issueNumber = binding.data.providerIssueId;
       manifest.updatedAt = this.clock.nowIso();
       this.bundleManager.saveManifest(manifest);
+      this.activeSession.patchActiveSession(runId, {
+        issueNumber: binding.data.providerIssueId,
+        issueTitle: binding.data.title,
+      });
       this.bundleManager.appendEvent(runId, {
         phase: manifest.currentPhase,
         eventType: "ISSUE_NUMBER_BOUND_BY_PROVIDER",

@@ -5,6 +5,7 @@ import {
 } from '../src/github/retry-strategy.js';
 import { GitHubClient } from '../src/discovery/github-client.js';
 import { OctokitIssueSource } from '../src/github/octokit-issue-source.js';
+import { normalizeGitHubIssueHost } from '../src/github/issue-url.js';
 import { scoutOpportunities } from '../src/discovery/scout.js';
 import { COMMUNITY_GATE_POLICY_PATHS } from '../src/governance/community-gate.js';
 import type { CredentialsProvider } from '../src/ports/credentials-provider.port.js';
@@ -53,6 +54,34 @@ function createMockIssueSource(cache: ResponseCache): OctokitIssueSource {
   };
   return source;
 }
+
+describe('GitHub issue host normalization', () => {
+  it('normalizes the explicit default public port before configuring Octokit', () => {
+    expect(normalizeGitHubIssueHost('https://github.com:443')).toBe('github.com');
+    const source = new OctokitIssueSource({
+      token: '',
+      host: 'https://github.com:443',
+      cache: createMemoryCache().cache,
+    });
+
+    expect((source as any).octokit.request.endpoint.DEFAULTS.baseUrl).toBe(
+      'https://api.github.com',
+    );
+  });
+
+  it('preserves a non-default public-host port when configuring Octokit', () => {
+    expect(normalizeGitHubIssueHost('https://github.com:8443')).toBe('github.com:8443');
+    const source = new OctokitIssueSource({
+      token: '',
+      host: 'https://github.com:8443',
+      cache: createMemoryCache().cache,
+    });
+
+    expect((source as any).octokit.request.endpoint.DEFAULTS.baseUrl).toBe(
+      'https://github.com:8443/api/v3',
+    );
+  });
+});
 
 interface ScoutFixtureComment {
   body: string;

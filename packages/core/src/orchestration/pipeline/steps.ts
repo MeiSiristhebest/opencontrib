@@ -92,6 +92,43 @@ function isSafeRelativeNodeConfigPath(path: string): boolean {
     !path.split("/").some(part => part === ".." || part === "...");
 }
 
+function hasSafeNodeRunnerArguments(argumentsText: string | undefined): boolean {
+  const valueFlags = new Set(["--timeout", "--retry", "--reporter", "--maxWorkers"]);
+  const booleanFlags = new Set([
+    "--coverage",
+    "--runInBand",
+    "--parallel",
+    "--bail",
+    "--verbose",
+    "--silent",
+  ]);
+  const args = argumentsText?.trim().split(/\s+/).filter(Boolean) ?? [];
+
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+    if (argument === "--config" || argument === "-c") {
+      const path = args[++index];
+      if (!path || !isSafeRelativeNodeConfigPath(path)) return false;
+      continue;
+    }
+    if (argument.startsWith("--config=")) {
+      if (!isSafeRelativeNodeConfigPath(argument.slice("--config=".length))) return false;
+      continue;
+    }
+
+    const equalsIndex = argument.indexOf("=");
+    const flag = equalsIndex > 0 ? argument.slice(0, equalsIndex) : argument;
+    if (valueFlags.has(flag)) {
+      const value = equalsIndex > 0 ? argument.slice(equalsIndex + 1) : args[++index];
+      if (!value || !/^[A-Za-z0-9._+-]+$/.test(value)) return false;
+      continue;
+    }
+    if (!booleanFlags.has(argument)) return false;
+  }
+
+  return true;
+}
+
 function normalizeSafeSourceTestFiles(
   files: readonly string[],
   extension: RegExp,
@@ -184,22 +221,9 @@ export function deriveTargetedReproductionTestCommand(
   testFiles: readonly string[],
 ): string | undefined {
   const command = repositoryCommand.trim();
-  const directNodeCommand = /^(?:node --test|bun test|npm exec --no -- (?:vitest(?: run)?|jest|mocha)|pnpm exec (?:vitest(?: run)?|jest|mocha)|yarn exec (?:vitest(?: run)?|jest|mocha))(?:(?: --config(?: [A-Za-z0-9._/-]+|=[A-Za-z0-9._/-]+)| -c [A-Za-z0-9._/-]+))*$/.exec(command);
-  if (directNodeCommand && /(?:^|\s)(?:--config(?:=|\s)|-c\s)/.test(command)) {
-    const configPaths = [...command.matchAll(/(?:--config(?:=|\s+)|-c\s+)([^\s]+)/g)]
-      .map(match => match[1]);
-    if (configPaths.some(path => !isSafeRelativeNodeConfigPath(path))) {
-      return undefined;
-    }
-    if (/(?:^|[\s=\\/])\.\.(?:[\\/]|$)/.test(command)) return undefined;
-    const paths = normalizeSafeNodeTestFiles(testFiles);
-    if (!paths?.length) return undefined;
-    return `${command} ${paths.join(" ")}`;
-  }
-
   const alreadyScopedNodeCommand =
     /^(?:npm|pnpm) test -- (.+)$/.exec(command) ??
-    /^(?:yarn|bun) test (.+)$/.exec(command) ??
+    /^(?:yarn|bun) test ((?!-).+)$/.exec(command) ??
     /^bun run test (.+)$/.exec(command);
   if (alreadyScopedNodeCommand) {
     const scopedPaths = normalizeSafeNodeTestFiles(alreadyScopedNodeCommand[1].split(/\s+/));
@@ -222,7 +246,9 @@ export function deriveTargetedReproductionTestCommand(
     const separator = nodeRunner === "npm" || nodeRunner === "pnpm" ? " --" : "";
     return `${baseCommand}${separator} ${args.join(" ")}`;
   }
+  const directNodeCommand = /^(?:node --test|bun test|npm exec --no -- (?:vitest(?: run)?|jest|mocha)|pnpm exec (?:vitest(?: run)?|jest|mocha)|yarn exec (?:vitest(?: run)?|jest|mocha))(?: (.*))?$/.exec(command);
   if (directNodeCommand) {
+    if (!hasSafeNodeRunnerArguments(directNodeCommand[1])) return undefined;
     const paths = normalizeSafeNodeTestFiles(testFiles);
     if (!paths?.length) return undefined;
     return `${command} ${paths.join(" ")}`;

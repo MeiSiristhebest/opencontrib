@@ -168,7 +168,7 @@ export class WorkspaceService {
     if (!run) {
       throw new Error(`Contribution run ${input.runId} does not exist`);
     }
-    const publicIssueNumber = parsePublicIssueNumber(issueOrTaskId);
+    const publicIssueNumber = parsePublicIssueNumber(input.issueOrTaskId);
     if (
       publicIssueNumber !== undefined &&
       requiresPrivateVulnerabilityDisclosure(run)

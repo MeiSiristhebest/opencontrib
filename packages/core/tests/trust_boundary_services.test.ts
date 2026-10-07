@@ -57,6 +57,19 @@ function isolatedRunManager(baseDir: string): ContributionRunManager {
   });
 }
 
+function createFilePatchDraft(path: string, content: string): PatchDraft {
+  return {
+    title: "fix: add regression coverage",
+    summary: "Add the target source file.",
+    rationale: "The fixture models a newly added source file.",
+    targetFiles: [{ path, reason: "Add the target source file." }],
+    files: [{ path, operation: "CREATE", mode: "100644", content, explanation: "Add source." }],
+    implementationSteps: ["Add the source file."],
+    regressionTestPlan: ["Run the focused test."],
+    estimatedDiffLines: content.split(/\r?\n/).length,
+  };
+}
+
 const testApprovalAuthority = (
   approvalMode:
     | "explicit_human"
@@ -754,6 +767,7 @@ diff --git a/src/fix.ts b/src/fix.ts
 @@ -1,0 +1,1 @@
 +if (issueNumber === 1614) return workaround();
 `;
+      const sourceContent = 'if (issueNumber === 1614) return workaround();\n';
 
       const decision = seedGovernanceReadyRun(
         manager,
@@ -761,7 +775,11 @@ diff --git a/src/fix.ts b/src/fix.ts
         repoPath,
         "pr body",
         {},
-        { patchContent, providerIssueId: 1614 },
+        {
+          patchContent,
+          patchDraft: createFilePatchDraft("src/fix.ts", sourceContent),
+          providerIssueId: 1614,
+        },
       );
 
       expect(decision.auditResult.antiHardcodePassed).toBe(false);
@@ -791,6 +809,7 @@ diff --git a/src/fix.ts b/src/fix.ts
 @@ -1,0 +1,1 @@
 +if (issueNumber === 1614) return workaround();
 `;
+      const sourceContent = 'if (issueNumber === 1614) return workaround();\n';
 
       const decision = seedGovernanceReadyRun(
         manager,
@@ -798,7 +817,10 @@ diff --git a/src/fix.ts b/src/fix.ts
         repoPath,
         "pr body",
         {},
-        { patchContent },
+        {
+          patchContent,
+          patchDraft: createFilePatchDraft("src/fix.ts", sourceContent),
+        },
       );
 
       expect(decision.auditResult.antiHardcodePassed).toBe(true);
@@ -1980,6 +2002,10 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         cwd: workspacePath,
         stdio: "ignore",
       });
+      execFileSync("git", ["config", "core.ignoreStat", "true"], {
+        cwd: workspacePath,
+        stdio: "ignore",
+      });
       execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/repo.git"], {
         cwd: workspacePath,
         stdio: "ignore",
@@ -2162,6 +2188,28 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       rmSync(baseDir, { recursive: true, force: true });
     }
   });
+
+  it.each([1.5, -1, Number.NaN, 0])(
+    "WorkspaceService rejects invalid numeric task identifiers (%s)",
+    (issueOrTaskId) => {
+      const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-invalid-number-"));
+      const previousHome = process.env.OPENCONTRIB_HOME;
+      process.env.OPENCONTRIB_HOME = join(baseDir, "isolated-home");
+      try {
+        const manager = new ContributionRunManager({ baseDir });
+        const run = manager.createRun({ repoFullName: "owner/repo" });
+        const { WorkspaceService } = require("../src/workspace/workspace-service.js");
+        expect(() => new WorkspaceService(manager, {} as any).prepare({
+          runId: run.runId,
+          issueOrTaskId,
+        })).toThrow(/issue number must be a positive safe integer/);
+      } finally {
+        if (previousHome === undefined) delete process.env.OPENCONTRIB_HOME;
+        else process.env.OPENCONTRIB_HOME = previousHome;
+        rmSync(baseDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("WorkspaceService fails closed when baseline policy inspection fails", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "oc-test-ws-policy-failure-"));

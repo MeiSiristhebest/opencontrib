@@ -115,6 +115,7 @@ contextTest("MCP context uses the prepared workspace and repository language", a
       "commit", "--allow-empty", "-m", "Update parser",
       "-m", "Signed-off-by: OpenContrib Test <test@example.invalid>",
     ], { stdio: "ignore" });
+    execFileSync("git", ["-C", workspace, "config", "--local", "core.ignoreStat", "true"], { stdio: "ignore" });
     execFileSync("git", [
       "-C", workspace,
       "remote", "add", "origin", "https://github.com/example/parser.git",
@@ -133,7 +134,7 @@ contextTest("MCP context uses the prepared workspace and repository language", a
     const tool = (server as any)._registeredTools.contrib_assemble_context;
     const result = await tool.handler({ runId: run.runId,
       issue: { number: 1, title: "Fix chunking token loss", body: "", labels: [] },
-      repoDetails: { owner: "example", repo: "parser", defaultBranch: "main", primaryLanguage: "Go" },
+      repoDetails: { owner: "example", repo: "parser.git", defaultBranch: "main", primaryLanguage: "Go" },
       repoTree: [],
     });
     if (result.isError) {

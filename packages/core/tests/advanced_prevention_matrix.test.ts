@@ -59,6 +59,70 @@ describe('Advanced Prevention & Anti-Hardcode Engine Suite', () => {
     }
   });
 
+  it('preserves supported timeout flags for scoped Bun RED commands', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-bun-test-timeout-'));
+    try {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
+        packageManager: 'bun@1.3.14',
+        scripts: { test: 'bun test --timeout 30000' },
+      }));
+
+      const commands = detectRunnableCommandsFromDir(tempDir);
+      expect(commands.testCommand).toBe('bun run test');
+      expect(commands.redTestCommand).toBe('bun test --timeout 30000');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects shell glob values in Node test runner flags', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-node-test-unsafe-flag-'));
+    try {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
+        packageManager: 'bun@1.3.14',
+        scripts: { test: 'bun test --timeout *' },
+      }));
+
+      const commands = detectRunnableCommandsFromDir(tempDir);
+      expect(commands.testCommand).toBeUndefined();
+      expect(commands.redTestCommand).toBeUndefined();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not emit Yarn Berry scoped commands for classic Yarn', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-yarn-classic-test-'));
+    try {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
+        packageManager: 'yarn@1.22.22',
+        scripts: { test: 'mocha "test/**/*.js"' },
+      }));
+
+      const commands = detectRunnableCommandsFromDir(tempDir);
+      expect(commands.testCommand).toBe('yarn test');
+      expect(commands.redTestCommand).toBeNull();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the classic Yarn test script to scope RED when the script has no test operands', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'oc-yarn-classic-scoped-test-'));
+    try {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({
+        packageManager: 'yarn@1.22.22',
+        scripts: { test: 'mocha --timeout 5000' },
+      }));
+
+      const commands = detectRunnableCommandsFromDir(tempDir);
+      expect(commands.testCommand).toBe('yarn test');
+      expect(commands.redTestCommand).toBe('yarn test');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     'VITEST_POOL_ID=1 vitest tests/**/*.spec.ts',
     'MOCHA_REPORTER=dot mocha "test/**/*.js"',

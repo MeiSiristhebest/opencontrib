@@ -251,7 +251,7 @@ export class WorktreeManager {
     const { repoFullName, issueOrTaskId, localRepoPath, runId } = input;
     const sanitizedRepoName = repoFullName.replace("/", "__");
     const cleanRunId = runId ? sanitizeRunId(runId) : "";
-    const runSuffix = cleanRunId ? `-${cleanRunId.slice(-6)}` : "";
+    const runSuffix = cleanRunId ? `-${cleanRunId}` : "";
     const branchName = runId
       ? runBranchName(runId)
       : `opencontrib/fix-${issueOrTaskId}${runSuffix}`;
