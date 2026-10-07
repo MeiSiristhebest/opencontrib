@@ -25,10 +25,10 @@ When an open-source task begins, identify the track and load the corresponding r
 ```mermaid
 graph LR
     P1["1. Initialize"] --> P2["2. Probe (A) or Scout (B)"]
-    P2 --> P3["3. Assemble Context"]
-    P3 --> P4["4. Prepare Workspace"]
-    P4 --> P5["5. Optional PoC / Capture RED & Fix"]
-    P5 --> P6["6. Capture RED / Verify GREEN"]
+    P2 --> P3["3. Prepare Workspace"]
+    P3 --> P4["4. Assemble Context"]
+    P4 --> P5["5. Optional PoC / Capture RED"]
+    P5 --> P6["6. Save Patch / Verify GREEN"]
     P6 --> P7["7. Governance Audit"]
     P7 --> P8["8. Canonical Route & PR"]
     P8 --> P9["9. Flywheel Sync"]
@@ -40,9 +40,9 @@ graph LR
 
 Load these modular references into context **only when entering that specific phase**:
 
-- **Phase 2 & 3 (Scouting & Context):** Read [`references/discovery.md`](./references/discovery.md) for qualification filters, scoring heuristics, and context bundling.
+- **Phase 2 & 4 (Scouting & Context):** Read [`references/discovery.md`](./references/discovery.md) for qualification filters, scoring heuristics, and context bundling.
 - **Phase 2 (Deep SAST & AST Probes):** Read [`references/probe.md`](./references/probe.md) for Smart Pointer (`ptr://...`) slicing, Semgrep packs, and Tree-sitter AST queries.
-- **Phase 4 (Workspace Sandbox):** Read [`references/workspace.md`](./references/workspace.md) for git worktree isolation and environment sanitization.
+- **Phase 3 (Workspace Sandbox):** Read [`references/workspace.md`](./references/workspace.md) for git worktree isolation and environment sanitization.
 - **Phase 5 & 6 (Empirical Verification):** Read [`references/evidence.md`](./references/evidence.md) for fail-first baseline assertions and targeted verification (use stress loops only when testing concurrency or race conditions).
 - **Phase 7 & 8 (Governance & Pull Requests):** Read [`references/governance.md`](./references/governance.md) for anti-AI linting, RFC-100 diff constraints, and native PR template merging.
 - **Phase 9 (Memory & Profile):** Read [`references/flywheel.md`](./references/flywheel.md) for ledger synchronization.
@@ -86,9 +86,9 @@ Load these modular references into context **only when entering that specific ph
    - **NEVER** run broad root tests (`go test ./...` or `npm test` at repo root) without isolation.
    - Always scope test commands strictly to the modified sub-package (e.g. `bun test ./packages/ai/test/...`).
 
-9. **PR Accompanying Test Coverage ($\ge 85\%$ on Modified Code)**:
+9. **Repository Coverage Policy**:
    - Every submitted PR **MUST include comprehensive regression/unit tests** covering the modified target code.
-   - Accompanying tests must achieve **$\ge 85\%$ statement, branch, and line coverage** on the modified logic (covering main paths, edge cases, and error branches). PRs with absent or superficial tests are strictly blocked at Phase 7 Governance Audit.
+   - The trusted repository policy controls `coverage.required` and `minimumChangedLineCoverage`. GREEN reads fresh LCOV executable-line hits from `coverage/lcov.info` (CLI `--coverage-report` / MCP `coverageReport` selects another workspace-relative report). Only changed executable source lines count. Required coverage blocks missing, malformed, stale, or below-threshold reports. The default policy makes coverage advisory; it does not promise statement or branch coverage for every language.
 
 ---
 
@@ -105,6 +105,9 @@ Pause and obtain user confirmation at these three gates:
 
 - **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
 - **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <issue-or-task-id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **Lifecycle order**: Run → scout/probe → workspace → context → RED → patch → GREEN → PR draft → governance → trusted approval → submission → flywheel. The canonical RunManager phase is the lifecycle; pipeline stage labels record execution progress only.
+- **Coverage policy**: the trusted repository sets coverage.required and minimumChangedLineCoverage. GREEN reads fresh LCOV changed executable source lines after execution; missing or unusable reports are UNAVAILABLE and block required coverage. Whole-project summaries do not satisfy changed-line coverage. Zero observed tests block GREEN and governance.
+- **Setup and deployment**: @opencontrib/mcp setup --all configures MCP clients; @opencontrib/cli setup checks the development toolchain. Provider-write credentials and approval keys belong only to the trusted broker. Physical isolation requires a separate worker with no host credentials or metadata access; unrestricted host shell access can bypass an in-process protocol gate.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
 - **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route. Use a non-public task identifier when preparing a private-work workspace.
 - **PR draft**: while still in EVIDENCE_COLLECTED, create and persist immutable pr_draft with opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>" / contrib_render_pr_template; private security drafts must omit public Issue references. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP order is contrib_render_pr_template → contrib_audit_governance → contrib_request_approval → contrib_submit_pr / SubmissionPort.

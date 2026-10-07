@@ -70,7 +70,7 @@ opencontrib probe run ./<repo_dir> --limit 5 --pretty
 >
 > Running these commands during Track A wastes API calls and fundamentally changes the contribution from "proactive deep-water bug discovery" to "cherry-picking easy existing issues" — which is NOT what the user requested.
 
-### Phase 3: Dereference Smart Pointer & Context Assembly
+### Phase 3: Dereference Smart Pointer
 
 Inspect the top Smart Pointer finding using progressive dereferencing:
 
@@ -99,6 +99,8 @@ opencontrib workspace prepare \
 
 - **Capture**: The returned `workspacePath` is automatically registered to the active session.
 
+After workspace preparation, run `opencontrib discovery context --input context.json`. The input repository must match the canonical Run and its prepared clean baseline.
+
 ---
 
 ### Phase 5: Construct Minimal Failing Test Case (RED Phase)
@@ -114,6 +116,9 @@ bun test packages/core/tests/specific.test.ts
 
 # For Python:
 pytest tests/test_specific.py -k test_defect
+
+# Capture authoritative RED before editing production code
+opencontrib evidence capture-red --test-cmd "<targeted_test_command>" --assertion "<failure_regex>"
 ```
 
 > [!IMPORTANT]
@@ -126,9 +131,8 @@ pytest tests/test_specific.py -k test_defect
 Apply the minimal, idiomatic code modification (strictly $\le 100$ lines). Then run targeted evidence verification:
 
 ```bash
-# Preferred RED→GREEN flow (required to advance to EVIDENCE_COLLECTED):
-opencontrib evidence capture-red --test-cmd "<targeted_test_command>" --assertion "<failure_regex>"
-# ... apply the fix ...
+# RED was captured in Phase 5. Apply the fix and save its exact patch draft.
+opencontrib run save "$RUN_ID" --type patch < patch.json
 opencontrib evidence verify-green --test-cmd "<targeted_test_command>"
 
 # For concurrency / race / flaky defects, pass --concurrency and --stress-loop
@@ -141,10 +145,15 @@ opencontrib evidence verify-green --test-cmd "<targeted_test_command>"
 
 ### Phase 7: Governance Quality & Markdown Integrity Audit
 
+The trusted host must bind the public Issue or authorized private disclosure route before rendering the PR draft. While still in `EVIDENCE_COLLECTED`, save the draft, then audit it:
+
 Verify RFC-100 line limit, anti-AI linting, and 7D quality rubric:
 
 ```bash
+opencontrib governance pr-template --run-id "$RUN_ID" --issue-title "<title>" --summary "<summary>"
+
 opencontrib governance audit \
+  --run-id "$RUN_ID" \
   --patch diff.patch \
   --pr-title "fix(<subsystem>): <concise fix description>" \
   --pr-body-file pr_body.md \
@@ -160,27 +169,9 @@ opencontrib governance audit \
 
 ### Phase 8: Canonical Submission Route & PR Submission
 
-Before opening a PR, select the route pinned by the run's community policy:
+The route, PR draft, and governance audit were completed in Phase 7. Request trusted approval and submit through the canonical service:
 
 ```bash
-# 1. Generate Claim statement / Issue draft when the selected route is public
-opencontrib governance claim \
-  --title "[Bug]: <Precise Defect Title>" \
-  --finding "Root cause in <file>:<line>" \
-  --pretty
-
-# 2. A trusted host creates or re-reads the provider Issue and seals IssueBindingArtifact.
-#    For private vulnerability policy, the trusted host instead records the provider
-#    security-disclosure lifecycle and its public-fix authorization.
-
-# 3. Render PR template and submit PR (the run selects the canonical route)
-opencontrib governance pr-template \
-  --run-id "$RUN_ID" \
-  --issue-title "<Precise Defect Title>" \
-  --summary "<Concise explanation of the surgical fix>" \
-  --validation-cmd "<targeted_test_command>" \
-  --validation-output "User-provided note only; canonical EvidenceReport is required for verified claims"
-
 opencontrib governance request-approval --run-id "$RUN_ID"
 opencontrib submission submit --run-id "$RUN_ID"
 ```
@@ -203,7 +194,7 @@ cat <<JSON | opencontrib flywheel sync --repo <owner>/<repo>
 JSON
 ```
 
-- Advances the active session to `COMPLETED`.
+- Only a canonical `PR_SUBMITTED` Run with verified submission and completion evidence can advance to `COMPLETED`; caller-supplied PR numbers are metadata, not proof.
 
 ---
 
@@ -234,6 +225,9 @@ opencontrib evidence capture-red --test-cmd "bun test" --assertion "<failure_reg
 
 - **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
 - **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <issue-or-task-id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **Lifecycle order**: Run → scout/probe → workspace → context → RED → patch → GREEN → PR draft → governance → trusted approval → submission → flywheel. The canonical RunManager phase is the lifecycle; pipeline stage labels record execution progress only.
+- **Coverage policy**: the trusted repository sets coverage.required and minimumChangedLineCoverage. GREEN reads fresh LCOV changed executable source lines after execution; missing or unusable reports are UNAVAILABLE and block required coverage. Whole-project summaries do not satisfy changed-line coverage. Zero observed tests block GREEN and governance.
+- **Setup and deployment**: @opencontrib/mcp setup --all configures MCP clients; @opencontrib/cli setup checks the development toolchain. Provider-write credentials and approval keys belong only to the trusted broker. Physical isolation requires a separate worker with no host credentials or metadata access; unrestricted host shell access can bypass an in-process protocol gate.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
 - **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route. Use a non-public task identifier when preparing a private-work workspace.
 - **PR draft**: while still in EVIDENCE_COLLECTED, create and persist immutable pr_draft with opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>" / contrib_render_pr_template; private security drafts must omit public Issue references. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP order is contrib_render_pr_template → contrib_audit_governance → contrib_request_approval → contrib_submit_pr / SubmissionPort.

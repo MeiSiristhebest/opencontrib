@@ -244,6 +244,9 @@ Agent 在进行开源问题挖掘或自身架构审计时，优先识别并锁�
 <!-- OPENCONTRIB:GENERATED protocol:start -->
 ## OpenContrib 权威协议（自动生成）
 
+- **生命周期顺序**：Run → 侦察/探测 → 工作区 → 上下文 → RED → 补丁 → GREEN → PR 草稿 → 治理 → 受信任审批 → 提交 → Flywheel。RunManager 的 canonical phase 是生命周期；Pipeline stage 只记录执行进度。
+- **覆盖率策略**：可信仓库策略指定 coverage.required 与 minimumChangedLineCoverage；GREEN 执行后读取新 LCOV 与修改的可执行源码行。缺失或无效报告标为 UNAVAILABLE，不能满足强制覆盖率策略；整项目汇总不能替代修改行覆盖率。没有已执行测试的结果会被 GREEN 和治理拒绝。
+- **安装与部署**：@opencontrib/mcp setup --all 配置 MCP 客户端；@opencontrib/cli setup 检查开发工具链。提供方写入凭据与审批密钥只能存于可信 broker；物理隔离依赖无宿主凭据及元数据权限的独立 worker。持有独立宿主 shell 权限的调用方仍可绕过进程内协议门禁。
 - **运行锚点（必须首先执行）**：`opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`；没有 runId 不得侦察、准备工作区或修改源码。
 - **工作区与证据**：`opencontrib workspace prepare --repo <owner/repo> --issue <issue-or-task-id>` / `contrib_prepare_workspace`；PoC（contrib_verify_poc）是可选复现步骤，不能替代 contrib_capture_red 的权威 RED。
 - **RED → PATCH → GREEN**：必须先执行 contrib_capture_red，再通过 contrib_save_artifact 保存补丁，最后执行 contrib_verify_green 验证 GREEN；没有 RED 不得进入 PATCH_DRAFTED。

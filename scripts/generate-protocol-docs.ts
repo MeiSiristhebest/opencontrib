@@ -73,6 +73,23 @@ export function checkProtocolDocs(rootDir = process.cwd()): void {
       `Generated protocol documentation is stale: ${result.changed.join(", ")}. Run bun run docs:generate.`,
     );
   }
+  for (const target of PROTOCOL_DOCUMENTATION_TARGETS) {
+    checkProtocolDocumentationSemantics(readFileSync(resolve(rootDir, target.path), "utf8"), target.path);
+  }
+}
+
+/** Detect contradictory handwritten instructions outside generated sections. */
+export function checkProtocolDocumentationSemantics(content: string, path: string): void {
+  const problems: string[] = [];
+  if (/(?:Auto-configure MCP|自动[^\n]*MCP)[^\n]*\r?\n(?:[^\n]*\r?\n){0,2}npx -y @opencontrib\/cli setup/i.test(content) || /\|\s*`setup`\s*\|[^\n]*MCP/i.test(content)) problems.push("MCP configuration must use @opencontrib/mcp setup --all");
+  if (/85[^\n]{0,160}statement[^\n]*branch/i.test(content)) problems.push("coverage must follow the trusted changed-line policy");
+  if (/physically (?:prevent|block)[^\n]*PR|物理阻断[^\n]*PR/i.test(content)) problems.push("protocol exit codes do not provide physical credential isolation");
+  for (const diagram of content.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)) {
+    const context = diagram[1].indexOf("Assemble Context");
+    const workspace = diagram[1].indexOf("Prepare Workspace");
+    if (context >= 0 && workspace >= 0 && context < workspace) problems.push("workspace must precede context assembly");
+  }
+  if (problems.length) throw new Error(`Protocol documentation semantics drift in ${path}: ${problems.join("; ")}.`);
 }
 
 if (import.meta.main) {

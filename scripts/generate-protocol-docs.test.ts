@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   checkProtocolDocs,
+  checkProtocolDocumentationSemantics,
   PROTOCOL_DOCUMENTATION_TARGETS,
 } from "./generate-protocol-docs.ts";
 import {
@@ -37,5 +38,14 @@ describe("generated protocol documentation", () => {
       expect(content).not.toContain("contrib_collect_evidence");
       expect(content).not.toMatch(/(?:^|\s)gh\s+pr\s+create(?:\s|$)/i);
     }
+  });
+  it("rejects conflicting handwritten setup, coverage, isolation, and lifecycle instructions", () => {
+    for (const content of [
+      "# Auto-configure MCP clients\nnpx -y @opencontrib/cli setup",
+      "Tests must achieve 85% statement, branch and line coverage.",
+      "Exit 2 physically prevents agents from opening PRs.",
+      '```mermaid\ngraph LR\nP3["Assemble Context"] --> P4["Prepare Workspace"]\n```',
+    ]) expect(() => checkProtocolDocumentationSemantics(content, "fixture.md")).toThrow(/Protocol documentation semantics drift/);
+    expect(() => checkProtocolDocumentationSemantics("Toolchain: @opencontrib/cli setup. MCP: @opencontrib/mcp setup --all. Coverage is repository policy.", "fixture.md")).not.toThrow();
   });
 });
