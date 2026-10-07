@@ -262,6 +262,17 @@ describe("Repository literal review regressions", () => {
   });
 
   it.each([
+    'WORKDIR "/usr/src/app"',
+    'COPY tool "/usr/local/bin/tool"',
+    'COPY ["tool", "/usr/local/bin/tool"]',
+    'RUN "/usr/bin/tool"',
+    'RUN ["/usr/bin/tool", "--version"]',
+  ])("exempts container paths in %s", instruction => {
+    const result = lintAntiHardcode(patch("Dockerfile", instruction));
+    expect(result.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toBe(false);
+  });
+
+  it.each([
     "src/ParserTest.java",
     "src/ParserTests.cs",
     "src/ParserSpec.kt",

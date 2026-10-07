@@ -49,7 +49,7 @@ export function createOpenContribMcpServer(
   registerRunTools(server, runManager);
   registerEvalTools(server);
   registerPointerTools(server);
-  registerProbeTools(server);
+  registerProbeTools(server, runManager);
   registerCapabilityTools(server);
 
   // Register resources and workflow prompts

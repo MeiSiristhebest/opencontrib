@@ -129,13 +129,19 @@ function isModuleAliasSpecifierReference(
   );
 }
 
-function isDockerfileCopyFromPathReference(
+function isDockerfileContainerPathReference(
   filePath: string,
   code: string,
+  pathToken: string,
 ): boolean {
   if (!isDockerfile(filePath)) return false;
+  if (/^\s*(?:WORKDIR|RUN|CMD|ENTRYPOINT|ENV|VOLUME|HEALTHCHECK)\b/i.test(code)) return true;
   const copyInstruction = /^\s*COPY\b[^\n]*/i.exec(code)?.[0];
-  return Boolean(copyInstruction && /\s--from(?:=|\s+)/i.test(copyInstruction));
+  if (!copyInstruction) return false;
+  if (/\s--from(?:=|\s+)/i.test(copyInstruction)) return true;
+  // COPY sources are build-context inputs; only the final operand is a
+  // container destination, in both shell and JSON-array forms.
+  return new RegExp(`${pathToken}\\s*(?:\\])?\\s*$`).test(copyInstruction);
 }
 
 function readDiffPathToken(input: string, start = 0): DiffPathToken | undefined {
@@ -1493,7 +1499,7 @@ function analyzeFileChanges(
         absolutePathPatterns.some((pattern) => pattern.test(value)) &&
         !isWebRoutePathReference(record.code, pathToken) &&
         !isModuleAliasSpecifierReference(record.code, pathToken, value) &&
-        !isDockerfileCopyFromPathReference(filePath, record.code)
+          !isDockerfileContainerPathReference(filePath, record.code, pathToken)
       ) {
         addViolation(
           violations,

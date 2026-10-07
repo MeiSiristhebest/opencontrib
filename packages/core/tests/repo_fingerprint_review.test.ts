@@ -119,7 +119,22 @@ describe("Prepared repository workspace binding", () => {
         { encoding: "utf8" },
       ).trim();
       const binding = { repoFullName: "example/parser", baseCommitSha };
-      expect(isPreparedRepositoryWorkspace(root, binding)).toBe(true);
+      const prepared = isPreparedRepositoryWorkspace(root, binding);
+      if (!prepared) {
+        const commands = [
+          ["rev-parse", "--show-toplevel"],
+          ["rev-parse", "HEAD"],
+          ["remote", "get-url", "origin"],
+          ["status", "--porcelain", "--untracked-files=all"],
+          ["ls-files", "-v", "-z"],
+          ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
+        ].map(args => {
+          const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+          return { args, status: result.status, stdout: result.stdout, stderr: result.stderr };
+        });
+        throw new Error(`Clean fixture was rejected: ${JSON.stringify({ root, commands })}`);
+      }
+      expect(prepared).toBe(true);
 
       mkdirSync(join(root, "node_modules", "fixture"), { recursive: true });
       writeFileSync(join(root, "node_modules", "fixture", "index.js"), "module.exports = {};\n");

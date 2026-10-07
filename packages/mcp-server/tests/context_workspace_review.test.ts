@@ -1,4 +1,4 @@
-import { expect, it } from "bun:test";
+import { expect, it, spyOn } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -84,6 +84,73 @@ async function bindIssue(
     issueNumber,
   });
 }
+
+it("MCP context rejects requests without a canonical run", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-mcp-context-no-run-"));
+  try {
+    const manager = new ContributionRunManager({
+      baseDir: join(root, "runs"),
+      activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+    });
+    const server = createOpenContribMcpServer({ runManager: manager });
+    const tool = (server as any)._registeredTools.contrib_assemble_context;
+    const result = await tool.handler({
+      issue: { number: 1, title: "Fix parser", body: "", labels: [] },
+      repoDetails: { owner: "example", repo: "parser", defaultBranch: "main" },
+      repoTree: [],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("run");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("MCP scout and probe reject missing runs before executing providers or scanners", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-mcp-discovery-no-run-"));
+  try {
+    const manager = new ContributionRunManager({
+      baseDir: join(root, "runs"),
+      activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+    });
+    const tools = (createOpenContribMcpServer({ runManager: manager }) as any)._registeredTools;
+    for (const [name, args] of [
+      ["contrib_scout", { target: "example/parser" }],
+      ["contrib_probe_run", { targetPath: root, onlyProbes: [] }],
+    ] as const) {
+      const result = await tools[name].handler(args);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("run");
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("MCP probe does not report success when canonical persistence fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-mcp-probe-save-"));
+  const workspace = join(root, "workspace");
+  mkdirSync(workspace);
+  try {
+    const manager = new ContributionRunManager({
+      baseDir: join(root, "runs"),
+      activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+    });
+    const run = manager.createRun({ repoFullName: "example/parser" });
+    const save = spyOn(manager, "saveArtifact").mockImplementation(() => { throw new Error("Fixture persistence failure"); });
+    try {
+      const tool = (createOpenContribMcpServer({ runManager: manager }) as any)._registeredTools.contrib_probe_run;
+      const result = await tool.handler({ runId: run.runId, targetPath: workspace, onlyProbes: [] });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Fixture persistence failure");
+      expect(manager.getRun(run.runId)!.manifest.currentPhase).toBe("INITIALIZED");
+    } finally {
+      save.mockRestore();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 contextTest("MCP context uses the prepared workspace and repository language", async () => {
   const root = mkdtempSync(join(tmpdir(), "oc-mcp-context-review-"));

@@ -56,6 +56,10 @@ export const scoutCommand = new Command("scout")
             "Target repository is required: provide <target> argument or --repo <target>",
           );
         }
+        const runId = getRunManager().resolveRunId(opts.runId);
+        if (!runId || !getRunManager().getRun(runId)) {
+          throw new Error("An existing contribution run is required before scouting; create a run first.");
+        }
         const profile = {
           techStack: opts.techStack ?? ["typescript", "javascript"],
           focusAreas: opts.focus ?? ["bugfix", "testing", "docs"],
@@ -71,19 +75,12 @@ export const scoutCommand = new Command("scout")
           excludeCompletedRuns: !opts.includeAttempted,
         });
 
-        const runId = getRunManager().resolveRunId(opts.runId);
-        if (runId && opportunities.length > 0) {
-          try {
-            getRunManager().saveArtifact(runId, "opportunity", {
-              target,
-              opportunities,
-              topOpportunity: opportunities[0],
-            });
-          } catch (err: any) {
-            console.warn(
-              `[Scout] Failed to auto-save opportunity artifact: ${err.message}`,
-            );
-          }
+        if (opportunities.length > 0) {
+          getRunManager().saveArtifact(runId, "opportunity", {
+            target,
+            opportunities,
+            topOpportunity: opportunities[0],
+          });
         }
 
         printJSON(
@@ -102,9 +99,9 @@ export const scoutCommand = new Command("scout")
           : `opencontrib workspace prepare --repo ${target} --issue <id>`;
 
         printPhaseGuidance({
-          currentPhase: "OPPORTUNITY_SCOUTED",
+          currentPhase: getRunManager().getRun(runId)!.manifest.currentPhase,
           runId,
-          status: "SUCCESS",
+          status: opportunities.length > 0 ? "SUCCESS" : "WARNING",
           humanCheckpoint: "Checkpoint 1 (Candidate Issue Selection)",
           nextCommand: nextCmd,
           forbiddenActions: [

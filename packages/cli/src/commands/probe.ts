@@ -123,6 +123,10 @@ probeCommand
   .option("--pretty", "Pretty-print JSON output", false)
   .action(async (target, opts) => {
     try {
+      const runId = getRunManager().resolveRunId(opts.runId);
+      if (!runId || !getRunManager().getRun(runId)) {
+        throw new Error("An existing contribution run is required before probing; create a run first.");
+      }
       const resolved = resolveTargetDirectory(target);
       const fingerprint = await extractRepoFingerprint(resolved);
       const host = await createDefaultPluginHost({
@@ -155,22 +159,13 @@ probeCommand
         includeAll: Boolean(opts.all),
       });
 
-      const runId = getRunManager().resolveRunId(opts.runId);
-      if (runId) {
-        try {
-          getRunManager().saveArtifact(runId, "probe", {
-            target: resolved,
-            executedProbes: scanResult.executedProbes,
-            totalPointersCount: scanResult.pointersCreated.length,
-            triagedPointersCount: triaged.triagedCount,
-            topPointers: triaged.topPointers,
-          });
-        } catch (err: any) {
-          console.warn(
-            `[Probe] Failed to auto-save probe artifact: ${err.message}`,
-          );
-        }
-      }
+      getRunManager().saveArtifact(runId, "probe", {
+        target: resolved,
+        executedProbes: scanResult.executedProbes,
+        totalPointersCount: scanResult.pointersCreated.length,
+        triagedPointersCount: triaged.triagedCount,
+        topPointers: triaged.topPointers,
+      });
 
       printJSON(
         {
@@ -186,7 +181,7 @@ probeCommand
       );
 
       printPhaseGuidance({
-        currentPhase: "PROBE_COMPLETED",
+        currentPhase: getRunManager().getRun(runId)!.manifest.currentPhase,
         runId,
         status: "SUCCESS",
         humanCheckpoint: "Checkpoint 1 (Review Smart Pointer Findings)",

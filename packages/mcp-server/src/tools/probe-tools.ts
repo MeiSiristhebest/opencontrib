@@ -9,11 +9,13 @@ import {
   ProbeRegistry,
   createDefaultPluginHost,
   triagePointerFindings,
+  buildContributionRunManager,
+  type ContributionRunManager,
   type ProbeCost,
   type DefectCategory,
 } from '@opencontrib/core';
 
-export function registerProbeTools(server: McpServer): void {
+export function registerProbeTools(server: McpServer, suppliedRunManager?: ContributionRunManager): void {
   // -------------------------------------------------------------
   // Tool: contrib_probe_plan (仓库指纹与探测规划)
   // -------------------------------------------------------------
@@ -79,6 +81,7 @@ export function registerProbeTools(server: McpServer): void {
     'contrib_probe_run',
     'Execute negotiated SAST/AST probe plugins against repository and return triaged Top-K Smart Pointer URIs (ptr://...)',
     {
+      runId: z.string().optional().describe('Contribution run ID (defaults to the active run)'),
       targetPath: z.string().optional().default('.').describe('Target repository workspace path'),
       onlyProbes: z.array(z.string()).optional().describe('Execute only specific probe IDs (e.g. ["ast-grep", "semgrep-sast"])'),
       skipProbes: z.array(z.string()).optional().describe('Skip specific probe IDs'),
@@ -87,6 +90,11 @@ export function registerProbeTools(server: McpServer): void {
     },
     async (args) => {
       try {
+        const runManager = suppliedRunManager ?? buildContributionRunManager();
+        const runId = runManager.resolveRunId(args.runId);
+        if (!runId || !runManager.getRun(runId)) {
+          throw new Error('An existing contribution run is required before probing; create a run first.');
+        }
         const resolved = path.resolve(args.targetPath || '.');
         const fingerprint = await extractRepoFingerprint(resolved);
         const host = await createDefaultPluginHost({ workspacePath: resolved });
@@ -104,6 +112,13 @@ export function registerProbeTools(server: McpServer): void {
           minConfidence: args.minConfidence ?? 80,
           includeAll: false,
         });
+        runManager.saveArtifact(runId, 'probe', {
+          target: resolved,
+          executedProbes: scanResult.executedProbes,
+          totalPointersCount: scanResult.pointersCreated.length,
+          triagedPointersCount: triaged.triagedCount,
+          topPointers: triaged.topPointers,
+        });
 
         return {
           content: [
@@ -114,6 +129,8 @@ export function registerProbeTools(server: McpServer): void {
                   status: 'success',
                   target: resolved,
                   executedProbes: scanResult.executedProbes,
+                  runId,
+                  currentPhase: runManager.getRun(runId)!.manifest.currentPhase,
                   totalFindingsCount: scanResult.pointersCreated.length,
                   triagedPointersCount: triaged.triagedCount,
                   triageSummary: triaged.summary,

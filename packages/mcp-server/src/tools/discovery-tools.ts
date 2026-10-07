@@ -359,7 +359,7 @@ export function registerDiscoveryTools(
         .string()
         .optional()
         .describe(
-          "Optional runId to automatically save context artifact and advance phase to CONTEXT_ASSEMBLED",
+          "Contribution run ID (defaults to the active run); context requires its prepared workspace",
         ),
     },
     wrapHandler(async (args) => {
@@ -378,6 +378,9 @@ export function registerDiscoveryTools(
       const assembler = new ContextAssembler();
       const runManager = suppliedRunManager ?? buildContributionRunManager();
       const runId = runManager.resolveRunId(args.runId);
+      if (!runId) {
+        throw new Error("A canonical contribution run is required before assembling context; create a run and prepare its workspace first.");
+      }
       const requestedRepoFullName = `${args.repoDetails.owner}/${args.repoDetails.repo}`;
       const run = runId ? runManager.getRun(runId) : undefined;
       if (runId && !run) {
@@ -563,6 +566,13 @@ export function registerDiscoveryTools(
         minMatchScore: 60,
       };
 
+      const { buildContributionRunManager } = await import("@opencontrib/core");
+      const runManager = suppliedRunManager ?? buildContributionRunManager();
+      const runId = runManager.resolveRunId(args.runId);
+      if (!runId || !runManager.getRun(runId)) {
+        throw new Error("An existing contribution run is required before scouting; create a run first.");
+      }
+
       const isOrg = !args.target.includes("/");
       const scoutOpts = {
         repo: isOrg ? undefined : args.target,
@@ -572,22 +582,12 @@ export function registerDiscoveryTools(
 
       const opportunities = await scoutOpportunities(profile, scoutOpts);
 
-      if (args.runId && opportunities.length > 0) {
-        try {
-          const { buildContributionRunManager } = await import(
-            "@opencontrib/core"
-          );
-          const runManager = suppliedRunManager ?? buildContributionRunManager();
-          runManager.saveArtifact(args.runId, "opportunity", {
-            target: args.target,
-            opportunities,
-            topOpportunity: opportunities[0],
-          });
-        } catch (err: any) {
-          console.warn(
-            `[discovery-tools] Failed to auto-save opportunity artifact: ${err.message}`,
-          );
-        }
+      if (opportunities.length > 0) {
+        runManager.saveArtifact(runId, "opportunity", {
+          target: args.target,
+          opportunities,
+          topOpportunity: opportunities[0],
+        });
       }
 
       return {

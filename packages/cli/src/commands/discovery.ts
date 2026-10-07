@@ -172,6 +172,9 @@ export function createContextCommand(
         const runManager =
           dependencies.runManager ?? buildContributionRunManager();
         const runId = runManager.resolveRunId(opts.runId);
+        if (!runId) {
+          throw new Error("A canonical contribution run is required before assembling context; create a run and prepare its workspace first.");
+        }
         const requestedRepoFullName =
           parsed.repoDetails.fullName ||
           `${parsed.repoDetails.owner}/${parsed.repoDetails.repo}`;

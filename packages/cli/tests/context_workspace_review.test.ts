@@ -180,6 +180,21 @@ function parseCliResponse(result: {
   return JSON.parse(responseLine);
 }
 
+it("CLI context rejects requests without a canonical run", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-cli-context-no-run-"));
+  try {
+    const manager = new ContributionRunManager({
+      baseDir: join(root, "runs"),
+      activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+    });
+    const result = await runContextCli(manager, "", "example/parser", 1);
+    expect(result.status).toBe(1);
+    expect(parseCliResponse(result).message).toContain("run");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 async function expectRunContextFailure(
   manager: ContributionRunManager,
   runId: string,
