@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { detectRunnableCommandsFromDir } from './context-assembler.js';
@@ -117,7 +117,12 @@ export function isPreparedRepositoryWorkspace(
       normalizeForComparison(workspaceRoot) !==
       normalizeForComparison(repositoryRoot)
     ) {
-      return false;
+      // Windows 8.3 aliases may survive realpath under Bun. Compare filesystem
+      // identity so the exact same directory is accepted without admitting a
+      // parent, nested checkout, or another repository.
+      const workspaceStat = statSync(workspaceRoot, { bigint: true });
+      const repositoryStat = statSync(repositoryRoot, { bigint: true });
+      if (workspaceStat.ino === 0n || workspaceStat.dev !== repositoryStat.dev || workspaceStat.ino !== repositoryStat.ino) return false;
     }
 
     const expectedRepo = binding.repoFullName.trim().toLowerCase();

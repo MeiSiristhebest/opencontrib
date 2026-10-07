@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -135,6 +135,13 @@ describe("Prepared repository workspace binding", () => {
         throw new Error(`Clean fixture was rejected: ${JSON.stringify({ root, commands })}`);
       }
       expect(prepared).toBe(true);
+      if (process.platform === "win32") {
+        const shortPath = execFileSync("cmd.exe", ["/d", "/c", "for %I in (.) do @echo %~fsI"], { cwd: root, encoding: "utf8" }).trim();
+        if (!isPreparedRepositoryWorkspace(shortPath, binding)) {
+          throw new Error(JSON.stringify({ shortPath, long: realpathSync(root), short: realpathSync(shortPath), longNative: realpathSync.native(root), shortNative: realpathSync.native(shortPath), longStat: statSync(root), shortStat: statSync(shortPath), gitRoot: execFileSync("git", ["-C", shortPath, "rev-parse", "--show-toplevel"], { encoding: "utf8" }) }));
+        }
+        expect(isPreparedRepositoryWorkspace(shortPath, binding)).toBe(true);
+      }
 
       mkdirSync(join(root, "node_modules", "fixture"), { recursive: true });
       writeFileSync(join(root, "node_modules", "fixture", "index.js"), "module.exports = {};\n");
