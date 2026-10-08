@@ -1,4 +1,4 @@
-import type { RedEvidence, TestIdentity } from "../contracts/schemas.js";
+import type { RedEvidence, TestIdentity, FlakyTestRecord, MeasurementStatus } from "../contracts/schemas.js";
 
 export interface ExecutionWorkspaceRef {
  /** Repository full name, e.g. "owner/repo" */
@@ -27,6 +27,9 @@ export interface RawRedExecutionResult {
  capturedAt: string;
  sourceTreeSha256: string;
  testIdentity?: TestIdentity;
+ baselineTestedAt: string;
+ baselineFlakyTests: FlakyTestRecord[];
+ baselineCheckStatus: MeasurementStatus;
 }
 
 export interface GreenExecutionJob {

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
+import { ActiveSessionManager } from "../src/run/active-session.js";
 import {
   ContextAssembler,
   ContributionRunManager,
@@ -68,6 +69,30 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
 
     expect(() => manager.saveArtifact(manifest.runId, "pr_draft", "premature"))
       .toThrow(/first PR draft must be created in EVIDENCE_COLLECTED/);
+  });
+
+  it("keeps probe planning in the current phase and protects completed scan results", () => {
+    const customBase = makeTempDir();
+    const manager = new ContributionRunManager({
+      baseDir: customBase,
+      activeSession: new ActiveSessionManager(
+        join(customBase, "active_session.json"),
+      ),
+    });
+    const manifest = manager.createRun({ repoFullName: "example/parser" });
+
+    manager.saveArtifact(manifest.runId, "probe", { plan: [{ id: "static" }] });
+    expect(manager.getRun(manifest.runId)?.manifest.currentPhase).toBe("INITIALIZED");
+
+    manager.saveArtifact(manifest.runId, "probe", {
+      plan: [{ id: "static" }],
+      executedProbes: ["static"],
+    });
+    expect(manager.getRun(manifest.runId)?.manifest.currentPhase).toBe("PROBE_COMPLETED");
+    expect(() => manager.saveArtifact(manifest.runId, "probe", { plan: [] }))
+      .toThrow(/cannot replace a completed probe scan/);
+    expect(manager.getRun(manifest.runId)?.artifacts.probe?.executedProbes)
+      .toEqual(["static"]);
   });
 
   it("saves context after canonical workspace preparation", () => {
@@ -271,6 +296,7 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
         executionsExpected: 1,
         executionCount: 1,
         allTestsPassing: true,
+        passedUnitTestsCount: 1,
         appliedPatchSha256: patchSha256,
         validatedPatchArtifactSha256: validatedPatch.artifactSha256,
         assertionMatchedFingerprint: "fp-1",

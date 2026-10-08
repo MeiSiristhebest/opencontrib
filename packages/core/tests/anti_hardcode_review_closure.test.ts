@@ -262,6 +262,38 @@ describe("Repository literal review regressions", () => {
   });
 
   it.each([
+    'WORKDIR "/usr/src/app"',
+    'COPY tool "/usr/local/bin/tool"',
+    'COPY ["tool", "/usr/local/bin/tool"]',
+    'RUN "/usr/bin/tool"',
+    'RUN ["/usr/bin/tool", "--version"]',
+    'ADD archive "/usr/local/bin/tool"',
+    'SHELL ["/bin/sh", "-c"]',
+  ])("exempts container paths in %s", instruction => {
+    const result = lintAntiHardcode(patch("Dockerfile", instruction));
+    expect(result.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toBe(false);
+  });
+
+  it("keeps Docker build-context paths and bind-mount sources visible to lint", () => {
+    const copiedSecret = lintAntiHardcode(patch("Dockerfile", 'COPY ["/home/me/private-key", "/root/.ssh"]'));
+    expect(copiedSecret.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toBe(true);
+
+    const addedSecret = lintAntiHardcode(patch("Dockerfile", 'ADD "/home/me/archive" "/opt/app"'));
+    expect(addedSecret.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toBe(true);
+
+    const continuedCopy = lintAntiHardcode(patch("Dockerfile", 'COPY \\\n  "/home/me/private-key" \\\n  "/root/.ssh"'));
+    expect(continuedCopy.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toBe(true);
+
+    const mountedSecret = lintAntiHardcode(patch("Dockerfile", 'RUN --mount=type=bind,source="/home/me/secrets",target="/app/secrets" cat /app/secrets/key'));
+    expect(mountedSecret.violations.filter(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toHaveLength(1);
+  });
+
+  it("does not exempt host-specific Dockerfile environment values", () => {
+    const result = lintAntiHardcode(patch("Dockerfile", 'ENV APP_HOME="/home/me/private"'));
+    expect(result.violations.some(entry => entry.rule === "ABSOLUTE_ENVIRONMENT_PATH")).toBe(true);
+  });
+
+  it.each([
     "src/ParserTest.java",
     "src/ParserTests.cs",
     "src/ParserSpec.kt",

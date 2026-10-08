@@ -23,6 +23,8 @@ opencontrib evidence capture-red \
   --run-id "$RUN_ID"
 
 # 2. Apply the fix
+# Save the exact patch draft before verifying GREEN
+opencontrib run save "$RUN_ID" --type patch < patch.json
 
 # 3. After the fix: verify GREEN against the captured RED (advances to EVIDENCE_COLLECTED when verified)
 opencontrib evidence verify-green \
@@ -31,7 +33,9 @@ opencontrib evidence verify-green \
   --run-id "$RUN_ID"
 ```
 
-`verify-green` only reports a verified reproduction when the RED assertion matched, the source tree changed, and the GREEN run passes.
+`verify-green` requires the matched RED assertion, a changed source tree, and passing GREEN results with observed executed tests. RED samples the unchanged pre-fix tree three additional times; GREEN reuses that record. Intermittent RED samples are rejected.
+
+Coverage follows trusted repository policy (`coverage.required` and `minimumChangedLineCoverage`). Use the same coverage-enabled command at RED and GREEN, for example `bun test src/specific.test.ts --coverage --coverage-reporter=lcov`. GREEN reads fresh `coverage/lcov.info` after execution; `--coverage-report <relative-path>` selects another report. LCOV executable lines are intersected with actual baseline-to-workspace source changes; tests and documentation are excluded. Missing, malformed, stale or out-of-workspace reports are `UNAVAILABLE` and cannot satisfy required coverage. Whole-project summaries cannot substitute. Ignore generated coverage files in the workspace baseline.
 
 ---
 
@@ -80,6 +84,9 @@ For example, `--stress-loop 3 --concurrency 5` requests 15 executions in three r
 
 - **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
 - **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <issue-or-task-id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **Lifecycle order**: Run → scout/probe → workspace → context → RED → patch → GREEN → PR draft → governance → trusted approval → submission → flywheel. The canonical RunManager phase is the lifecycle; pipeline stage labels record execution progress only.
+- **Coverage policy**: the trusted repository sets coverage.required and minimumChangedLineCoverage. GREEN measures changed source lines from native `bun test --coverage --coverage-reporter=lcov`; a custom LCOV path must match the runner's `--coverage-dir`. Unsupported instrumenters and missing, incomplete, stale or unusable reports are UNAVAILABLE and block required coverage. Whole-project summaries do not satisfy changed-line coverage. Unknown output scripts and any execution with zero observed tests block GREEN and governance.
+- **Setup and deployment**: @opencontrib/mcp setup --all configures MCP clients; @opencontrib/cli setup checks the development toolchain. Provider-write credentials and approval keys belong only to the trusted broker. Physical isolation requires a separate worker with no host credentials or metadata access; unrestricted host shell access can bypass an in-process protocol gate.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
 - **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route. Use a non-public task identifier when preparing a private-work workspace.
 - **PR draft**: while still in EVIDENCE_COLLECTED, create and persist immutable pr_draft with opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>" / contrib_render_pr_template; private security drafts must omit public Issue references. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP order is contrib_render_pr_template → contrib_audit_governance → contrib_request_approval → contrib_submit_pr / SubmissionPort.

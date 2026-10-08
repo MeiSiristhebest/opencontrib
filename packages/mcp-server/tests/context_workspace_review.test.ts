@@ -1,4 +1,4 @@
-import { expect, it } from "bun:test";
+import { expect, it, spyOn } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +11,7 @@ import {
 import { IssueBindingService } from "../../core/src/github/issue-binding-service.js";
 import { saveCanonicalArtifact } from "../../core/src/run/canonical-writer.js";
 import { createOpenContribMcpServer } from "../src/server.js";
+import * as core from "@opencontrib/core";
 
 const gitAvailable = spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0;
 const contextTest = gitAvailable ? it : it.skip;
@@ -84,6 +85,177 @@ async function bindIssue(
     issueNumber,
   });
 }
+
+it("MCP context rejects requests without a canonical run", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-mcp-context-no-run-"));
+  try {
+    const manager = new ContributionRunManager({
+      baseDir: join(root, "runs"),
+      activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+    });
+    const server = createOpenContribMcpServer({ runManager: manager });
+    const tool = (server as any)._registeredTools.contrib_assemble_context;
+    const result = await tool.handler({
+      issue: { number: 1, title: "Fix parser", body: "", labels: [] },
+      repoDetails: { owner: "example", repo: "parser", defaultBranch: "main" },
+      repoTree: [],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("A canonical contribution run is required before assembling context");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("MCP scout and probe reject missing runs before executing providers or scanners", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-mcp-discovery-no-run-"));
+  const fingerprint = spyOn(core, "extractRepoFingerprint");
+  const scout = spyOn(core, "scoutOpportunities");
+  const hotspot = spyOn(core, "analyzeGitHotspots");
+  const fuzz = spyOn(core, "generatePropertyTest");
+  try {
+    const manager = new ContributionRunManager({
+      baseDir: join(root, "runs"),
+      activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+    });
+    const tools = (createOpenContribMcpServer({ runManager: manager }) as any)._registeredTools;
+    for (const [name, args, message] of [
+      ["contrib_scout", { target: "example/parser" }, "An existing contribution run is required before scouting"],
+      ["contrib_probe_run", { targetPath: root, onlyProbes: [] }, "An existing contribution run is required before probing"],
+      ["contrib_probe_plan", { targetPath: root }, "An existing contribution run is required before probing"],
+      ["contrib_probe_hotspot", { targetPath: root }, "An existing contribution run is required before probing"],
+      ["contrib_probe_fuzz", { targetPath: root, language: "typescript" }, "An existing contribution run is required before probing"],
+    ] as const) {
+      const result = await tools[name].handler(args);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain(message);
+    }
+    expect(fingerprint).not.toHaveBeenCalled();
+    expect(scout).not.toHaveBeenCalled();
+    expect(hotspot).not.toHaveBeenCalled();
+    expect(fuzz).not.toHaveBeenCalled();
+  } finally {
+    fingerprint.mockRestore();
+    scout.mockRestore();
+    hotspot.mockRestore();
+    fuzz.mockRestore();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("MCP scout defaults to zero stars and uses the canonical repository", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-mcp-scout-defaults-"));
+  const scout = spyOn(core, "scoutOpportunities").mockResolvedValue([]);
+  try {
+    const manager = new ContributionRunManager({
+      baseDir: join(root, "runs"),
+      activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+    });
+    const run = manager.createRun({ repoFullName: "example/parser" });
+    const tool = (createOpenContribMcpServer({ runManager: manager }) as any)._registeredTools.contrib_scout;
+    const result = await tool.handler({ runId: run.runId, target: "example/parser" });
+    expect(result.isError).not.toBe(true);
+    expect(scout.mock.calls[0]?.[1]).toMatchObject({ repo: "example/parser", minStars: 0 });
+  } finally {
+    scout.mockRestore();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+contextTest("MCP probe does not report success when canonical persistence fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-mcp-probe-save-"));
+  const workspace = join(root, "workspace");
+  mkdirSync(workspace);
+  execFileSync("git", ["init", "-q"], { cwd: workspace });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/example/parser.git"], { cwd: workspace });
+  try {
+    const manager = new ContributionRunManager({
+      baseDir: join(root, "runs"),
+      activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+    });
+    const run = manager.createRun({ repoFullName: "example/parser" });
+    const save = spyOn(manager, "saveArtifact").mockImplementation(() => { throw new Error("Fixture persistence failure"); });
+    try {
+      const tool = (createOpenContribMcpServer({ runManager: manager }) as any)._registeredTools.contrib_probe_run;
+      const result = await tool.handler({ runId: run.runId, targetPath: workspace, onlyProbes: [] });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Fixture persistence failure");
+      expect(manager.getRun(run.runId)!.manifest.currentPhase).toBe("INITIALIZED");
+    } finally {
+      save.mockRestore();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+contextTest("MCP discovery rejects other repositories and organization targets before execution", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-mcp-discovery-binding-"));
+  const fingerprint = spyOn(core, "extractRepoFingerprint");
+  const scout = spyOn(core, "scoutOpportunities");
+  const hotspot = spyOn(core, "analyzeGitHotspots");
+  const fuzz = spyOn(core, "generatePropertyTest");
+  try {
+    const workspace = join(root, "workspace");
+    mkdirSync(workspace);
+    execFileSync("git", ["init", "-q"], { cwd: workspace });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/other/parser.git"], { cwd: workspace });
+    const manager = new ContributionRunManager({ baseDir: join(root, "runs"), activeSession: new ActiveSessionManager(join(root, "active_session.json")) });
+    const run = manager.createRun({ repoFullName: "example/parser" });
+    const tools = (createOpenContribMcpServer({ runManager: manager }) as any)._registeredTools;
+    for (const [name, args] of [
+      ["contrib_scout", { target: "other/parser" }],
+      ["contrib_scout", { target: "example" }],
+      ["contrib_probe_run", { targetPath: workspace, onlyProbes: [] }],
+      ["contrib_probe_plan", { targetPath: workspace }],
+      ["contrib_probe_hotspot", { targetPath: workspace }],
+      ["contrib_probe_fuzz", { targetPath: workspace, language: "typescript" }],
+    ] as const) {
+      const result = await tools[name].handler({ ...args, runId: run.runId });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("DiscoveryRepoMismatchError");
+    }
+    expect(fingerprint).not.toHaveBeenCalled();
+    expect(scout).not.toHaveBeenCalled();
+    expect(hotspot).not.toHaveBeenCalled();
+    expect(fuzz).not.toHaveBeenCalled();
+    expect(manager.getRun(run.runId)!.manifest.currentPhase).toBe("INITIALIZED");
+    expect(manager.getRun(run.runId)!.artifacts.probe).toBeUndefined();
+    expect(manager.getRun(run.runId)!.artifacts.opportunity).toBeUndefined();
+  } finally {
+    fingerprint.mockRestore(); scout.mockRestore(); hotspot.mockRestore(); fuzz.mockRestore();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+contextTest("MCP planning, hotspot and fuzz results persist without completing an unexecuted scan", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-mcp-probe-drafts-"));
+  try {
+    const workspace = join(root, "workspace");
+    mkdirSync(workspace);
+    execFileSync("git", ["init", "-q"], { cwd: workspace });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/example/parser.git"], { cwd: workspace });
+    const manager = new ContributionRunManager({ baseDir: join(root, "runs"), activeSession: new ActiveSessionManager(join(root, "active_session.json")) });
+    const run = manager.createRun({ repoFullName: "example/parser" });
+    const tools = (createOpenContribMcpServer({ runManager: manager }) as any)._registeredTools;
+    for (const name of ["contrib_probe_plan", "contrib_probe_hotspot", "contrib_probe_fuzz"]) {
+      const result = await tools[name].handler({ runId: run.runId, targetPath: workspace, language: "typescript" });
+      expect(result.isError).not.toBe(true);
+      expect(manager.getRun(run.runId)!.manifest.currentPhase).toBe("INITIALIZED");
+    }
+    const artifact = manager.getRun(run.runId)!.artifacts.probe!;
+    expect(artifact.plan).toBeDefined();
+    expect(artifact.hotspots).toBeDefined();
+    expect(artifact.fuzz).toBeDefined();
+    const result = await tools.contrib_probe_run.handler({ runId: run.runId, targetPath: workspace, onlyProbes: [] });
+    expect(result.isError).not.toBe(true);
+    expect(manager.getRun(run.runId)!.artifacts.probe!.executedProbes).toEqual([]);
+    expect(manager.getRun(run.runId)!.manifest.currentPhase).toBe("INITIALIZED");
+    expect(manager.getRun(run.runId)!.artifacts.probe!.plan).toBeDefined();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 contextTest("MCP context uses the prepared workspace and repository language", async () => {
   const root = mkdtempSync(join(tmpdir(), "oc-mcp-context-review-"));

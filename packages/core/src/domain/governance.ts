@@ -108,19 +108,25 @@ function isTestPath(
   const baseName = normalizedPath.slice(normalizedPath.lastIndexOf("/") + 1);
   return (
     /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalizedPath) ||
-    /\.(?:test|spec)\.[^/]+$/.test(baseName) ||
-    /tests?\.[^/]+$/.test(baseName) ||
+    /\.(?:tests?|specs?)\.[^/]+$/.test(baseName) ||
+    /^setup[_-]?tests?\.[^/]+$/.test(baseName) ||
+    /^tests?\.[^/]+$/.test(baseName) ||
     /_test\.[^/]+$/.test(baseName) ||
     /^test_[^/]+\.[^/]+$/.test(baseName) ||
     (includeTestPrefixedBasename && /^test[^/]*\.[^/]+$/.test(baseName))
   );
 }
 
+function hasPascalCaseTestSuffix(filePath: string): boolean {
+  const basename = filePath.replace(/\\/g, "/").split("/").pop() ?? "";
+  return /(?:Test|Tests|Spec|Specs)\.(?:java|cs|kts|kt)$/.test(basename);
+}
+
 function isTestSourcePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/").toLowerCase();
   // Assertion analysis treats names such as testUtils.ts as test sources;
   // supporting-file classification intentionally requires clearer test markers.
-  return isTestPath(normalized, true);
+  return isTestPath(normalized, true) || hasPascalCaseTestSuffix(filePath);
 }
 
 /**
@@ -503,6 +509,7 @@ export function isSupportingFile(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/").toLowerCase();
   return (
     isTestPath(normalized, false) ||
+    hasPascalCaseTestSuffix(filePath) ||
     /\.(?:md|mdx|rst)$/.test(normalized) ||
     /(^|\/)docs?(?:\/|$)/.test(normalized)
   );
@@ -785,6 +792,13 @@ export function auditGovernance(
   const resourceLeakGatePassed =
     input.resourceLeakPolicy?.required !== true ||
     input.evidence?.handleLeakCheckPassed === "PASS";
+  const executedTestsGatePassed =
+    input.evidence?.zeroAssertionWarning !== true &&
+    Number.isSafeInteger(input.evidence?.passedUnitTestsCount) &&
+    (input.evidence?.passedUnitTestsCount ?? 0) > 0 &&
+    input.evidence?.allTestsPassing === true &&
+    input.evidence?.reproductionVerified === true &&
+    input.evidence?.failedUnitTestsCount === 0;
 
   // 3b. Cross-Platform, Collision & Lifecycle Impact Analysis Check
   let impactAnalysisPassed = true;
@@ -845,6 +859,7 @@ export function auditGovernance(
     confidence.isPassed &&
     coverageGatePassed &&
     resourceLeakGatePassed &&
+    executedTestsGatePassed &&
     impactAnalysisPassed &&
     preflightLintPassed &&
     antiHardcodePassed;
@@ -879,6 +894,9 @@ export function auditGovernance(
   };
 
   const remediationSuggestions: string[] = [];
+  if (!executedTestsGatePassed) {
+    remediationSuggestions.push("Evidence contains no verified executed tests. Run a supported test runner with a non-empty test selection before governance audit.");
+  }
   if (!markdownIntegrityPassed) {
     remediationSuggestions.push(
       `Fix Markdown encoding/corruption issues: ${corruptedMarkdownIssues.join("; ")}`,
@@ -1259,6 +1277,7 @@ function updateNativeTemplateIssueReference(
 }
 
 export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
+  const aiDisclosureRequired = data.aiDisclosureRequired === true || data.conditionalAiRequired === true;
   const submissionRoute = data.submissionRoute ?? "PUBLIC_ISSUE";
   if (
     submissionRoute === "PUBLIC_ISSUE" &&
@@ -1403,7 +1422,7 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
 
 
     const complianceNotes = [
-      data.aiDisclosureRequired
+      aiDisclosureRequired
         ? "Automated assistance disclosure: This contribution was prepared using OpenContrib AI-assisted tooling; specific model details were not recorded in this run."
         : "",
       data.dcoRequired
@@ -1419,8 +1438,8 @@ export function renderMasterPrTemplate(data: MasterPrTemplateInput): string {
     regressionLine = `- **Regression Isolation**: ${validatedEvidence.baselineFlakyTests.length} baseline flaky test(s) observed.`;
   }
 
-  const aiDisclosureSection = data.aiDisclosureRequired
-    ? `\n\n### Automated Assistance Disclosure\nIn accordance with repository policies, this contribution was developed with AI-assisted tooling (OpenContrib autonomous engine) with deterministic local reproduction and human verification.`
+  const aiDisclosureSection = aiDisclosureRequired
+    ? `\n\n### Automated Assistance Disclosure\nThis contribution was prepared using OpenContrib AI-assisted tooling; specific model details were not recorded in this run.`
     : "";
 
   return `### Problem Description

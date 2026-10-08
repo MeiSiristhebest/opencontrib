@@ -1,4 +1,5 @@
 import os from 'os';
+import { CLI_VERSION } from '../version.js';
 
 export interface AnonymousTelemetryPayload {
   command: string;
@@ -30,7 +31,7 @@ export function isTelemetryEnabled(): boolean {
  * Strictly anonymous: NO paths, NO file contents, NO user IDs, NO auth tokens.
  * Completely non-blocking and fails silently.
  */
-export function sendAnonymousPing(commandName: string, cliVersion = '1.0.0'): void {
+export function sendAnonymousPing(commandName: string, cliVersion = CLI_VERSION): void {
   if (!isTelemetryEnabled()) {
     return;
   }

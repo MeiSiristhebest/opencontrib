@@ -1,10 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   analyzeRepoEngineeringFingerprint,
+  getLocalRepositoryFullName,
   isPreparedRepositoryWorkspace,
 } from "../src/discovery/repo-fingerprint.js";
 
@@ -119,7 +120,27 @@ describe("Prepared repository workspace binding", () => {
         { encoding: "utf8" },
       ).trim();
       const binding = { repoFullName: "example/parser", baseCommitSha };
-      expect(isPreparedRepositoryWorkspace(root, binding)).toBe(true);
+      const prepared = isPreparedRepositoryWorkspace(root, binding);
+      if (!prepared) {
+        const commands = [
+          ["rev-parse", "--show-toplevel"],
+          ["rev-parse", "HEAD"],
+          ["remote", "get-url", "origin"],
+          ["status", "--porcelain", "--untracked-files=all"],
+          ["ls-files", "-v", "-z"],
+          ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
+        ].map(args => {
+          const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+          return { args, status: result.status, stdout: result.stdout, stderr: result.stderr };
+        });
+        throw new Error(`Clean fixture was rejected: ${JSON.stringify({ root, commands })}`);
+      }
+      if (process.platform === "win32") {
+        const shortPath = execFileSync("cmd.exe", ["/d", "/c", "for %I in (.) do @echo %~fsI"], { cwd: root, encoding: "utf8" }).trim();
+        if (!isPreparedRepositoryWorkspace(shortPath, binding)) {
+          throw new Error(JSON.stringify({ shortPath, long: realpathSync(root), short: realpathSync(shortPath), longNative: realpathSync.native(root), shortNative: realpathSync.native(shortPath), longStat: statSync(root), shortStat: statSync(shortPath), gitRoot: execFileSync("git", ["-C", shortPath, "rev-parse", "--show-toplevel"], { encoding: "utf8" }) }));
+        }
+      }
 
       mkdirSync(join(root, "node_modules", "fixture"), { recursive: true });
       writeFileSync(join(root, "node_modules", "fixture", "index.js"), "module.exports = {};\n");
@@ -157,6 +178,26 @@ describe("Prepared repository workspace binding", () => {
         "commit", "-m", "Advanced workspace",
       ], { stdio: "ignore" });
       expect(isPreparedRepositoryWorkspace(root, binding)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  gitTest("accepts only GitHub remotes as repository identities", () => {
+    const root = mkdtempSync(join(tmpdir(), "oc-github-remote-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: root });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: root });
+      expect(getLocalRepositoryFullName(root)).toBe("owner/repo");
+
+      execFileSync("git", ["remote", "set-url", "origin", "git@github.com:owner/repo.git"], { cwd: root });
+      expect(getLocalRepositoryFullName(root)).toBe("owner/repo");
+
+      execFileSync("git", ["remote", "set-url", "origin", "https://attacker.example/github.com/owner/repo.git"], { cwd: root });
+      expect(getLocalRepositoryFullName(root)).toBeUndefined();
+
+      execFileSync("git", ["remote", "set-url", "origin", "https://github.com.attacker.example/owner/repo.git"], { cwd: root });
+      expect(getLocalRepositoryFullName(root)).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

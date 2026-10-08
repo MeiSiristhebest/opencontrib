@@ -228,6 +228,30 @@ export const TestMutationPolicySchema = z.object({
 });
 export type TestMutationPolicy = z.infer<typeof TestMutationPolicySchema>;
 
+export const FlakyTestRecordSchema = z
+  .object({
+    testName: z.string().trim().min(1),
+    runCount: z.number().finite().int().min(1).max(MAX_STRESS_ROUNDS),
+    failCount: z.number().finite().int().min(0).max(MAX_STRESS_ROUNDS),
+    isFlakyOnBaseline: z.boolean(),
+  })
+  .superRefine((record, ctx) => {
+    if (record.failCount > record.runCount) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["failCount"],
+        message: "failCount cannot exceed runCount",
+      });
+    }
+    if (record.isFlakyOnBaseline !== (record.failCount > 0 && record.failCount < record.runCount)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["isFlakyOnBaseline"], message: "baseline flaky flag must match observed partial failures" });
+    }
+  });
+export type FlakyTestRecord = z.infer<typeof FlakyTestRecordSchema>;
+
+export const MeasurementStatusSchema = z.enum(["PASS", "FAIL", "UNAVAILABLE"]);
+export type MeasurementStatus = z.infer<typeof MeasurementStatusSchema>;
+
 export const RedEvidenceSchema = z.object({
   command: z.string(),
   expectedAssertion: z.string().optional(),
@@ -237,6 +261,9 @@ export const RedEvidenceSchema = z.object({
   testFileSha256: z.string().optional(),
   baselineCommitSha: z.string().optional(),
   capturedAt: z.string(),
+  baselineTestedAt: z.string().optional(),
+  baselineFlakyTests: z.array(FlakyTestRecordSchema).optional(),
+  baselineCheckStatus: MeasurementStatusSchema.optional(),
   assertionMatched: z.boolean(),
   assertionMatchedFingerprint: z.string().optional(),
   testIdentity: TestIdentitySchema.optional(),
@@ -261,6 +288,9 @@ export const TrustedRedExecutionResultSchema = z.object({
   capturedAt: z.string().min(1),
   sourceTreeSha256: Sha256HexSchema,
   testIdentity: AuthoritativeTestIdentitySchema.optional(),
+  baselineTestedAt: z.string().min(1),
+  baselineFlakyTests: z.array(FlakyTestRecordSchema),
+  baselineCheckStatus: MeasurementStatusSchema,
 });
 export type TrustedRedExecutionResult = z.infer<
   typeof TrustedRedExecutionResultSchema
@@ -644,27 +674,6 @@ export const SubmissionArtifactSchema = z.object({
 });
 export type SubmissionArtifact = z.infer<typeof SubmissionArtifactSchema>;
 
-export const FlakyTestRecordSchema = z
-  .object({
-    testName: z.string().trim().min(1),
-    runCount: z.number().finite().int().min(1).max(MAX_STRESS_ROUNDS),
-    failCount: z.number().finite().int().min(0).max(MAX_STRESS_ROUNDS),
-    isFlakyOnBaseline: z.boolean(),
-  })
-  .superRefine((record, ctx) => {
-    if (record.failCount > record.runCount) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["failCount"],
-        message: "failCount cannot exceed runCount",
-      });
-    }
-  });
-export type FlakyTestRecord = z.infer<typeof FlakyTestRecordSchema>;
-
-export const MeasurementStatusSchema = z.enum(["PASS", "FAIL", "UNAVAILABLE"]);
-export type MeasurementStatus = z.infer<typeof MeasurementStatusSchema>;
-
 /** Host-side validation contract for worker-reported GREEN metrics. */
 export const TrustedGreenExecutionResultSchema = z
   .object({
@@ -783,6 +792,9 @@ export const TrustedGreenExecutionResultSchema = z
       });
     }
     if (result.passed) {
+      if (result.passedUnitTestsCount === 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["passedUnitTestsCount"], message: "passed GREEN results require observed executed tests" });
+      }
       if (result.exitCode !== 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -831,6 +843,7 @@ export type TrustedGreenExecutionResult = z.infer<
 const evidenceReportSchemaBase = z.object({
   baselineTestedAt: z.string(),
   baselineFlakyTests: z.array(FlakyTestRecordSchema),
+  baselineCheckStatus: MeasurementStatusSchema.optional(),
   // Stress semantics: one round starts workersPerRound workers; requested
   // executions are roundsRequested * workersPerRound.
   // 0 is reserved for a pre-GREEN/failed artifact; explicit execution inputs
@@ -944,6 +957,9 @@ const evidenceReportSchemaBase = z.object({
 
 export const EvidenceReportSchema = evidenceReportSchemaBase.superRefine(
   (report, ctx) => {
+    if (report.allTestsPassing === true && (!(report.passedUnitTestsCount > 0) || report.zeroAssertionWarning === true)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["allTestsPassing"], message: "passing evidence requires observed executed tests" });
+    }
     if (
       report.roundsRequested !== undefined &&
       report.workersPerRound !== undefined &&
@@ -1063,6 +1079,7 @@ export const EvidenceBundleV2Schema = z
     }),
     greenEvidence: GreenEvidenceSchema.extend({
       testIdentity: TestIdentitySchema,
+      passedUnitTestsCount: z.number().finite().int().positive().max(MAX_REPORTED_TEST_COUNT),
       actualTestDiffSha256: z.string().optional(),
       validatedPatchArtifactSha256: z.string(),
     }),

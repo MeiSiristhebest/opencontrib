@@ -27,7 +27,7 @@ export function createOpenContribMcpServer(
 ): McpServer {
   const server = new McpServer({
     name: "opencontrib-engine",
-    version: "1.0.0",
+    version: "1.0.2",
   });
 
   // Domain state singletons
@@ -49,7 +49,7 @@ export function createOpenContribMcpServer(
   registerRunTools(server, runManager);
   registerEvalTools(server);
   registerPointerTools(server);
-  registerProbeTools(server);
+  registerProbeTools(server, runManager);
   registerCapabilityTools(server);
 
   // Register resources and workflow prompts

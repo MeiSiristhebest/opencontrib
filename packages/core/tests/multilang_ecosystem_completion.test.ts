@@ -39,7 +39,7 @@ describe('Multi-Language Ecosystem Completion & Deep Parity', () => {
       const parsed = parser.parse(output);
       expect(parsed.total).toBe(24);
       expect(parsed.failed).toBe(1);
-      expect(parsed.passed).toBe(23);
+      expect(parsed.passed).toBe(21);
     });
 
     it('parses Gradle test execution output accurately', () => {
@@ -49,7 +49,7 @@ describe('Multi-Language Ecosystem Completion & Deep Parity', () => {
       const parsed = parser.parse(output);
       expect(parsed.total).toBe(18);
       expect(parsed.failed).toBe(0);
-      expect(parsed.passed).toBe(18);
+      expect(parsed.passed).toBe(17);
     });
 
     it('parses C / C++ Google Test output accurately', () => {
@@ -98,14 +98,29 @@ Passed!  - Failed:     0, Passed:    22, Skipped:     0, Total:    22, Duration:
       expect(parser.supports(rspecOut)).toBe(true);
       const parsedRspec = parser.parse(rspecOut);
       expect(parsedRspec.total).toBe(28);
-      expect(parsedRspec.passed).toBe(28);
+      expect(parsedRspec.passed).toBe(27);
       expect(parsedRspec.failed).toBe(0);
+
+      const allPending = parser.parse("3 examples, 0 failures, 3 pending");
+      expect(allPending.total).toBe(3);
+      expect(allPending.passed).toBe(0);
+      expect(allPending.failed).toBe(0);
 
       const minitestOut = `12 runs, 30 assertions, 0 failures, 0 errors, 0 skips`;
       expect(parser.supports(minitestOut)).toBe(true);
       const parsedMini = parser.parse(minitestOut);
       expect(parsedMini.total).toBe(12);
       expect(parsedMini.passed).toBe(12);
+
+      const skippedMini = parser.parse("12 runs, 30 assertions, 0 failures, 0 errors, 3 skips");
+      expect(skippedMini.total).toBe(12);
+      expect(skippedMini.passed).toBe(9);
+      expect(skippedMini.failed).toBe(0);
+
+      const allSkippedMini = parser.parse("3 runs, 3 assertions, 0 failures, 0 errors, 3 skips");
+      expect(allSkippedMini.total).toBe(3);
+      expect(allSkippedMini.passed).toBe(0);
+      expect(allSkippedMini.failed).toBe(0);
     });
 
     it('parses PHP PHPUnit output accurately', () => {

@@ -6,6 +6,7 @@ import type { ContributionRunManager } from "../run/run-manager.js";
 import { saveCanonicalArtifact } from "../run/canonical-writer.js";
 import {
   AuthoritativeRedEvidenceSchema,
+  RedEvidenceSchema,
   TrustedGreenExecutionResultSchema,
   EvidenceReportSchema,
   TrustedRedExecutionResultSchema,
@@ -28,7 +29,8 @@ import {
 } from "./evidence-collector.js";
 import { isSafeRepositoryPath } from "../submission/submission-intent-service.js";
 import { hashValidatedPatchArtifact } from "./validated-patch.js";
-import type { TestCoverageAdapter } from "./coverage-adapter.js";
+import { LcovChangedLineCoverageAdapter, type TestCoverageAdapter } from "./coverage-adapter.js";
+import { prepareTestExecutionSpec } from "./parsers/executed-counts.js";
 import type {
   RawRedExecutionResult,
   RedExecutionJob,
@@ -61,10 +63,12 @@ export interface VerifyGreenInput {
   concurrencyWorkers?: number;
   /**
    * Optional generic coverage adapter: resolves a 0-100 coverage percent
-   * from a runner-produced artifact after GREEN. Absent => coverage stays
-   * explicitly UNAVAILABLE (the governance gate never sees invented data).
+   * from a runner-produced artifact after GREEN. The default reads LCOV
+   * changed-line coverage; absent or unusable reports remain UNAVAILABLE.
    */
   coverageAdapter?: TestCoverageAdapter;
+  /** Workspace-relative LCOV report produced by the GREEN command. */
+  coverageReport?: string;
 }
 
 export interface PorcelainV1Record {
@@ -917,7 +921,7 @@ export class EvidenceService {
     }
     validateExpectedFailurePattern(expectedAssertion);
 
-    const red = captureRedEvidence({
+    const red = RedEvidenceSchema.parse(captureRedEvidence({
       cwd: targetCwd,
       testCommand: input.testCommand,
       workspaceRoot: resolvedWorkspaceRoot,
@@ -925,7 +929,7 @@ export class EvidenceService {
       testFileSha256: input.testFileSha256,
       baselineCommitSha,
       testFile: input.testFile,
-    });
+    }));
     requireWorkspaceHead(targetCwd, baselineCommitSha);
 
     // Only seal authoritative evidence_red when RED actually reproduced a valid failure (exitCode !== 0)
@@ -939,6 +943,9 @@ export class EvidenceService {
       throw new Error(
         `RedAssertionMismatchError: expected assertion "${expectedAssertion}" was not observed in test output. Evidence_red not saved. Output snippet: ${red.observedOutputSnippet.slice(0, 200)}`,
       );
+    }
+    if (red.baselineCheckStatus === "FAIL") {
+      throw new Error("RedFlakyBaselineError: the target reproduction is intermittent on the RED tree; make it deterministic before sealing evidence.");
     }
 
     // Save authoritative evidence_red artifact only after passing verification and advance to RED_CAPTURED.
@@ -955,8 +962,9 @@ export class EvidenceService {
 
     // Also update partial evidence report for convenience (does not advance phase)
     saveCanonicalArtifact(this.runManager, input.runId, "evidence", {
-      baselineTestedAt: red.capturedAt,
-      baselineFlakyTests: [],
+      baselineTestedAt: red.baselineTestedAt ?? red.capturedAt,
+      baselineFlakyTests: red.baselineFlakyTests ?? [],
+      baselineCheckStatus: red.baselineCheckStatus ?? "UNAVAILABLE",
       stressLoopRuns: 0,
       stressLoopPassed: false,
       executionCount: 0,
@@ -1098,7 +1106,7 @@ export class EvidenceService {
       testCommand: input.testCommand,
       stressLoopCount: dimensions.rounds,
       concurrencyWorkers: dimensions.workersPerRound,
-      coverageAdapter: input.coverageAdapter,
+      coverageAdapter: input.coverageAdapter ?? new LcovChangedLineCoverageAdapter(input.coverageReport),
       redEvidence,
     });
     requireWorkspaceHead(targetCwd, baselineCommitSha);
@@ -1244,6 +1252,9 @@ export class EvidenceService {
 
     const contract = requireRedContract(executionContract, runId);
     const trustedRawResult = requireRawRedResult(rawResult, runId);
+    if (trustedRawResult.baselineCheckStatus !== "PASS" || trustedRawResult.baselineFlakyTests.some(record => record.isFlakyOnBaseline)) {
+      throw new Error("RedBaselineFlakyError: isolated RED baseline is intermittent. Evidence_red not saved.");
+    }
     if (trustedRawResult.exitCode === 0) {
       throw new Error(
         `RedReproductionFailedError: test command exited with code 0 (expected failure). Evidence_red not saved.`,
@@ -1293,6 +1304,9 @@ export class EvidenceService {
           : undefined,
       baselineCommitSha,
       capturedAt: new Date().toISOString(),
+      baselineTestedAt: trustedRawResult.baselineTestedAt,
+      baselineFlakyTests: trustedRawResult.baselineFlakyTests,
+      baselineCheckStatus: trustedRawResult.baselineCheckStatus,
       assertionMatched: true,
       assertionMatchedFingerprint,
       testIdentity,
@@ -1313,8 +1327,9 @@ export class EvidenceService {
     );
 
     const partialEvidence = EvidenceReportSchema.parse({
-      baselineTestedAt: red.capturedAt,
-      baselineFlakyTests: [],
+      baselineTestedAt: red.baselineTestedAt ?? red.capturedAt,
+      baselineFlakyTests: red.baselineFlakyTests ?? [],
+      baselineCheckStatus: red.baselineCheckStatus ?? "UNAVAILABLE",
       stressLoopRuns: 0,
       stressLoopPassed: false,
       executionCount: 0,
@@ -1347,6 +1362,7 @@ export class EvidenceService {
   async recordGreenExecution(
     runId: string,
     rawResult: import("../run/trusted-execution.port.js").RawGreenExecutionResult,
+    coverageStartedAt?: number,
   ): Promise<EvidenceReport> {
     const rawValidation =
       TrustedGreenExecutionResultSchema.safeParse(rawResult);
@@ -1539,9 +1555,17 @@ export class EvidenceService {
     const workersPerRound = trustedRawResult.workersPerRound;
     const executionsExpected = trustedRawResult.executionsExpected;
 
+    const changedCodeCoveragePercent = coverageStartedAt === undefined ? undefined : await new LcovChangedLineCoverageAdapter().resolve(targetCwd, {
+      baselineCommitSha,
+      startedAt: coverageStartedAt,
+      sourceRoot: "/workspace",
+      executionSpec: prepareTestExecutionSpec(trustedRawResult.command, targetCwd),
+    });
+    const coverageStatus = changedCodeCoveragePercent === undefined ? "UNAVAILABLE" : "PASS";
     let report: EvidenceReport = {
-      baselineTestedAt: trustedRawResult.capturedAt,
-      baselineFlakyTests: [],
+      baselineTestedAt: redEvidence.baselineTestedAt ?? redEvidence.capturedAt,
+      baselineFlakyTests: redEvidence.baselineFlakyTests ?? [],
+      baselineCheckStatus: redEvidence.baselineCheckStatus ?? "UNAVAILABLE",
       stressLoopRuns: roundsRequested ?? 0,
       ...(roundsRequested === undefined ? {} : { roundsRequested }),
       ...(roundsCompleted === undefined ? {} : { roundsCompleted }),
@@ -1559,8 +1583,9 @@ export class EvidenceService {
       finalDescriptorCount: trustedRawResult.finalDescriptorCount,
       passedUnitTestsCount: trustedRawResult.passedUnitTestsCount,
       failedUnitTestsCount: trustedRawResult.failedUnitTestsCount,
-      testCoverageStatus: "UNAVAILABLE",
-      changedCodeCoverageStatus: "UNAVAILABLE",
+      testCoverageStatus: coverageStatus,
+      changedCodeCoverageStatus: coverageStatus,
+      changedCodeCoveragePercent,
       allTestsPassing: trustedRawResult.passed,
       redEvidence,
       greenEvidence: greenEvidenceBase,

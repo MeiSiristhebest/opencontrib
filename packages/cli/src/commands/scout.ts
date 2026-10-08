@@ -15,12 +15,12 @@ const getRunManager = (): ContributionRunManager =>
 
 export const scoutCommand = new Command("scout")
   .description(
-    "Scout high-value, unclaimed contribution opportunities for a repo or org",
+    "Scout high-value, unclaimed contribution opportunities for the run repository",
   )
   .addArgument(
-    new Argument("[target]", "Repo full name (owner/repo) or org name"),
+    new Argument("[target]", "Repository full name (owner/repo), matching the run"),
   )
-  .option("-r, --repo <target>", "Target repository (owner/repo) or org name")
+  .option("-r, --repo <target>", "Target repository (owner/repo), matching the run")
   .option(
     "--tech-stack <list>",
     "Developer tech stack keywords, comma-separated",
@@ -28,7 +28,7 @@ export const scoutCommand = new Command("scout")
   )
   .option("--focus <list>", "Focus areas, comma-separated", (v) => v.split(","))
   .option("--limit <n>", "Max candidates to return", (v) => Number(v), 5)
-  .option("--min-stars <n>", "Minimum repository stars", (v) => Number(v), 50)
+  .option("--min-stars <n>", "Minimum repository stars", (v) => Number(v), 0)
   .option("--token <token>", "GitHub token (or set GITHUB_TOKEN env)")
   .option("--run-id <id>", "Contribution run ID (defaults to active session)")
   .option("--include-attempted", "Include issues even if previously attempted in local runs", false)
@@ -56,40 +56,38 @@ export const scoutCommand = new Command("scout")
             "Target repository is required: provide <target> argument or --repo <target>",
           );
         }
+        const runId = getRunManager().resolveRunId(opts.runId);
+        if (!runId || !getRunManager().getRun(runId)) {
+          throw new Error("An existing contribution run is required before scouting; create a run first.");
+        }
+        getRunManager().assertRepositoryTarget(runId, target);
+        const canonicalTarget = getRunManager().getRun(runId)!.manifest.repoFullName;
         const profile = {
           techStack: opts.techStack ?? ["typescript", "javascript"],
           focusAreas: opts.focus ?? ["bugfix", "testing", "docs"],
           proficiency: "intermediate" as const,
           minMatchScore: 60,
         };
-        const isOrg = !target.includes("/");
         const opportunities = await scoutOpportunities(profile, {
-          repo: isOrg ? undefined : target,
+          repo: canonicalTarget,
           limit: opts.limit ?? 5,
-          minStars: opts.minStars ?? (isOrg ? 100 : 0),
+          minStars: opts.minStars ?? 0,
           githubToken: opts.token || process.env.GITHUB_TOKEN,
           excludeCompletedRuns: !opts.includeAttempted,
         });
 
-        const runId = getRunManager().resolveRunId(opts.runId);
-        if (runId && opportunities.length > 0) {
-          try {
-            getRunManager().saveArtifact(runId, "opportunity", {
-              target,
-              opportunities,
-              topOpportunity: opportunities[0],
-            });
-          } catch (err: any) {
-            console.warn(
-              `[Scout] Failed to auto-save opportunity artifact: ${err.message}`,
-            );
-          }
+        if (opportunities.length > 0) {
+          getRunManager().saveArtifact(runId, "opportunity", {
+            target: canonicalTarget,
+            opportunities,
+            topOpportunity: opportunities[0],
+          });
         }
 
         printJSON(
           {
             status: "success",
-            target,
+            target: canonicalTarget,
             foundCount: opportunities.length,
             opportunities,
           },
@@ -98,13 +96,13 @@ export const scoutCommand = new Command("scout")
 
         const top = opportunities[0];
         const nextCmd = top
-          ? `opencontrib workspace prepare --repo ${top.repoFullName} --issue ${top.issueNumber}`
-          : `opencontrib workspace prepare --repo ${target} --issue <id>`;
+          ? `opencontrib workspace prepare --run-id ${runId} --repo ${top.repoFullName} --issue ${top.issueNumber}`
+          : `opencontrib workspace prepare --run-id ${runId} --repo ${canonicalTarget} --issue <id>`;
 
         printPhaseGuidance({
-          currentPhase: "OPPORTUNITY_SCOUTED",
+          currentPhase: getRunManager().getRun(runId)!.manifest.currentPhase,
           runId,
-          status: "SUCCESS",
+          status: opportunities.length > 0 ? "SUCCESS" : "WARNING",
           humanCheckpoint: "Checkpoint 1 (Candidate Issue Selection)",
           nextCommand: nextCmd,
           forbiddenActions: [

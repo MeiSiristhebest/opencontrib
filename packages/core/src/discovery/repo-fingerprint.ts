@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { detectRunnableCommandsFromDir } from './context-assembler.js';
@@ -87,10 +87,23 @@ export interface PreparedRepositoryWorkspaceBinding {
 }
 
 function repositoryNameFromRemote(remoteUrl: string): string | undefined {
-  const match = remoteUrl.trim().match(
-    /(?:^|[@/])github\.com[:/]([^/:]+)\/([^/?#]+?)(?:\.git)?(?:[?#].*)?$/i,
-  );
-  return match ? `${match[1]}/${match[2]}`.toLowerCase() : undefined;
+  const remote = remoteUrl.trim();
+  const scp = /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/i.exec(remote);
+  if (scp) return `${scp[1]}/${scp[2]}`.toLowerCase();
+  try {
+    const url = new URL(remote);
+    if (url.hostname.toLowerCase() !== "github.com" || !["https:", "http:", "ssh:", "git:"].includes(url.protocol)) return undefined;
+    const path = /^\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url.pathname);
+    return path ? `${path[1]}/${path[2]}`.toLowerCase() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Repository identity from the local origin, without trusting a caller label. */
+export function getLocalRepositoryFullName(repoPath: string): string | undefined {
+  const remote = runRepositoryGit(['-C', repoPath, 'remote', 'get-url', 'origin']);
+  return remote.success ? repositoryNameFromRemote(remote.stdout) : undefined;
 }
 
 export function isPreparedRepositoryWorkspace(
@@ -117,7 +130,12 @@ export function isPreparedRepositoryWorkspace(
       normalizeForComparison(workspaceRoot) !==
       normalizeForComparison(repositoryRoot)
     ) {
-      return false;
+      // Windows 8.3 aliases may survive realpath under Bun. Compare filesystem
+      // identity so the exact same directory is accepted without admitting a
+      // parent, nested checkout, or another repository.
+      const workspaceStat = statSync(workspaceRoot, { bigint: true });
+      const repositoryStat = statSync(repositoryRoot, { bigint: true });
+      if (workspaceStat.ino === 0n || workspaceStat.dev !== repositoryStat.dev || workspaceStat.ino !== repositoryStat.ino) return false;
     }
 
     const expectedRepo = binding.repoFullName.trim().toLowerCase();

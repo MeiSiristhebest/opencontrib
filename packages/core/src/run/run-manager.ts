@@ -340,10 +340,30 @@ export class ContributionRunManager {
       );
     }
 
+    let draft: unknown = content;
+    if (type === "probe" && typeof content === "string") {
+      try { draft = JSON.parse(content); } catch { draft = undefined; }
+    }
+    // Planning and scaffolds remain tracked drafts. Only an executed scan
+    // completes the probe phase.
+    const executedProbes = typeof draft === "object" && draft !== null
+      ? (draft as Record<string, unknown>).executedProbes : undefined;
+    const shouldAdvance = type !== "probe" || (Array.isArray(executedProbes) && executedProbes.length > 0);
     const expectedPhase = DRAFT_PHASE_BY_ARTIFACT[type];
     const summary = this.getRun(runId);
     if (!summary) {
       throw new Error(`Contribution run ${runId} does not exist`);
+    }
+
+    if (
+      type === "probe" &&
+      expectedPhase === "PROBE_COMPLETED" &&
+      summary.manifest.currentPhase === expectedPhase &&
+      !shouldAdvance
+    ) {
+      throw new Error(
+        "ArtifactPhaseViolationError: probe planning data cannot replace a completed probe scan.",
+      );
     }
 
     // A PR body is a proposal over the collected evidence. It may first be
@@ -397,6 +417,7 @@ export class ContributionRunManager {
     // transition.  PR drafts have no lifecycle phase of their own and remain
     // ordinary draft artifacts after EVIDENCE_COLLECTED.
     const derivedPhase =
+      shouldAdvance &&
       expectedPhase &&
       summary.manifest.currentPhase !== expectedPhase &&
       PHASE_REQUIREMENTS[expectedPhase].fromPhases.includes(
@@ -526,6 +547,15 @@ export class ContributionRunManager {
 
   getRun(runId: string): ContributionRunSummary | null {
     return this.bundleManager.getRunSummary(runId);
+  }
+
+  assertRepositoryTarget(runId: string, requestedRepo: string | undefined): void {
+    const run = this.getRun(runId);
+    if (!run) throw new Error(`Contribution run ${runId} does not exist`);
+    const normalize = (value: string) => value.trim().replace(/\.git$/i, "").toLowerCase();
+    if (!requestedRepo || !/^[^/]+\/[^/]+$/.test(normalize(requestedRepo)) || normalize(requestedRepo) !== normalize(run.manifest.repoFullName)) {
+      throw new Error(`DiscoveryRepoMismatchError: discovery target must match run repository "${run.manifest.repoFullName}".`);
+    }
   }
 
   listRuns(): ContributionRunManifest[] {

@@ -395,11 +395,14 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
   it("runs the full pipeline to DRY_RUN_COMPLETED", async () => {
     const { AgentOrchestrator } =
       await import("../src/orchestration/agent-orchestrator.js");
-    const orchestrator = new AgentOrchestrator({ deps: buildDeps() });
+    const deps = buildDeps();
+    const orchestrator = new AgentOrchestrator({ deps });
 
     const result = await orchestrator.runPipeline({ profile: profile(), targetRepo: "octocat/hello-world" });
 
     expect(result.status).toBe("DRY_RUN_COMPLETED");
+    expect(result.runId).toBeDefined();
+    expect(result.currentPhase).toBe("CONTEXT_ASSEMBLED");
     expect(result.stage).toBe("COMPLETED");
     expect(result.selectedOpportunity?.repoFullName).toBe(
       "octocat/hello-world",
@@ -519,6 +522,9 @@ describe("Pipeline command review regressions", () => {
     ["pnpm test", "pnpm test -- tests/parser.test.ts"],
     ["yarn test", "yarn test tests/parser.test.ts"],
     ["bun test", "bun test ./tests/parser.test.ts"],
+    ["bunx --no-install vitest run", "bunx --no-install vitest run tests/parser.test.ts"],
+    ["bunx --no-install jest", "bunx --no-install jest tests/parser.test.ts"],
+    ["bunx --no-install mocha", "bunx --no-install mocha tests/parser.test.ts"],
   ])("scopes root command %s", (command, expected) => {
     expect(deriveTargetedReproductionTestCommand(command, ["tests/parser.test.ts"])).toBe(expected);
     expect(deriveTargetedReproductionTestCommand(command, [])).toBeUndefined();

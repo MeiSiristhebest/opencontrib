@@ -143,7 +143,7 @@ Replaces superficial single-run test loops with multi-worker parallel execution:
 - **`concurrencyWorkers`**: Concurrent worker processes executing under shared workspace execution.
 - **`raceCollisionsDetected`**: Catches mutex collisions, duplicate key bypasses, and data races.
 - **`latencyJitterMs`**: Quantifies execution time variance across concurrent workers.
-- **`zeroAssertionWarning`**: Flags no-op tests containing 0 real assertions.
+- **`zeroAssertionWarning`**: Flags results with no observed executed tests; GREEN verification and governance reject these results.
 
 ### 7. In-Domain Sister-Module Variant Hunting
 
@@ -185,6 +185,7 @@ npx -y @opencontrib/cli doctor
 
 ```bash
 opencontrib run create --repo owner/repo --issue 1 --title "target defect"
+RUN_ID="<runId returned by run create>"
 ```
 
 ### Step 2: Scan & Triage High-Value Defects (Proactive Track A)
@@ -292,7 +293,7 @@ Industrial-grade command set spanning 16 core capability domains:
 | **Eval**       | `eval judge` / `parse-judgment` | G-Eval trajectory compression and agent blind judgment parser              |
 |                | `eval reflexion` / `benchmark`  | Extract reflexion insights to memory and run benchmark suites              |
 | **System**     | `doctor`                        | Diagnose local toolchain, probe binaries, and environment health           |
-|                | `setup`                         | Auto-configure MCP servers across Claude Code, Cursor, Windsurf            |
+|                | `setup`                         | Check the configured development toolchain; use `--install` to install missing tools |
 |                | `config` / `verify`             | Inspect workspace config, execute dual-stage verification                  |
 
 ---
@@ -334,7 +335,7 @@ OpenContrib includes standard `AGENTS.md` directives to orchestrate the canonica
 
 ```bash
 # Auto-configure MCP servers across all detected IDEs & agents
-npx -y @opencontrib/cli setup
+npx -y @opencontrib/mcp setup --all
 ```
 
 Or add to client configuration:
@@ -359,6 +360,9 @@ Or add to client configuration:
 
 - **Run anchor (first)**: `opencontrib run create --repo <owner/repo> [--issue <id>]` / `contrib_create_run`; no scouting, workspace preparation, or source edits before a runId exists.
 - **Workspace and evidence**: `opencontrib workspace prepare --repo <owner/repo> --issue <issue-or-task-id>` / `contrib_prepare_workspace`; PoC (contrib_verify_poc) is optional and never replaces authoritative RED via contrib_capture_red.
+- **Lifecycle order**: Run → scout/probe → workspace → context → RED → patch → GREEN → PR draft → governance → trusted approval → submission → flywheel. The canonical RunManager phase is the lifecycle; pipeline stage labels record execution progress only.
+- **Coverage policy**: the trusted repository sets coverage.required and minimumChangedLineCoverage. GREEN measures changed source lines from native `bun test --coverage --coverage-reporter=lcov`; a custom LCOV path must match the runner's `--coverage-dir`. Unsupported instrumenters and missing, incomplete, stale or unusable reports are UNAVAILABLE and block required coverage. Whole-project summaries do not satisfy changed-line coverage. Unknown output scripts and any execution with zero observed tests block GREEN and governance.
+- **Setup and deployment**: @opencontrib/mcp setup --all configures MCP clients; @opencontrib/cli setup checks the development toolchain. Provider-write credentials and approval keys belong only to the trusted broker. Physical isolation requires a separate worker with no host credentials or metadata access; unrestricted host shell access can bypass an in-process protocol gate.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
 - **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route. Use a non-public task identifier when preparing a private-work workspace.
 - **PR draft**: while still in EVIDENCE_COLLECTED, create and persist immutable pr_draft with opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>" / contrib_render_pr_template; private security drafts must omit public Issue references. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP order is contrib_render_pr_template → contrib_audit_governance → contrib_request_approval → contrib_submit_pr / SubmissionPort.

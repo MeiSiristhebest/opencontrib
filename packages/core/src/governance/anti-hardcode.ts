@@ -129,13 +129,45 @@ function isModuleAliasSpecifierReference(
   );
 }
 
-function isDockerfileCopyFromPathReference(
+function isDockerfileContainerPathReference(
   filePath: string,
   code: string,
+  pathToken: string,
+  hunkCode = code,
 ): boolean {
   if (!isDockerfile(filePath)) return false;
-  const copyInstruction = /^\s*COPY\b[^\n]*/i.exec(code)?.[0];
-  return Boolean(copyInstruction && /\s--from(?:=|\s+)/i.test(copyInstruction));
+  const lines = hunkCode.split(/\r?\n/);
+  const tokenLine = lines.findIndex(line => line.includes(pathToken));
+  if (tokenLine < 0) return false;
+  let start = tokenLine;
+  while (start > 0 && /\\\s*$/.test(lines[start - 1])) start--;
+  let end = tokenLine;
+  while (end + 1 < lines.length && /\\\s*$/.test(lines[end])) end++;
+  const instruction = lines.slice(start, end + 1).map(line => line.replace(/\\\s*$/, " ")).join(" ").trim();
+  const name = /^([A-Z]+)\b/i.exec(instruction)?.[1]?.toUpperCase();
+  if (!name) return false;
+  const tokens = [...instruction.matchAll(/__STR_\d+__|[^\s,\[\]]+/g)].map(match => match[0]);
+  const tokenIndex = tokens.indexOf(pathToken);
+  if (tokenIndex < 1) return false;
+  const operands = tokens.slice(1).filter(token => !token.startsWith("--"));
+
+  if (name === "COPY" || name === "ADD") {
+    if (tokens.slice(1).some(token => /^--from(?:=|$)/i.test(token))) return true;
+    // Only the final source/destination operand is a container path. Earlier
+    // ADD/COPY operands come from the build context and remain subject to lint.
+    return operands.at(-1) === pathToken;
+  }
+  if (name === "WORKDIR") return operands[0] === pathToken;
+  if (name === "VOLUME") return operands.includes(pathToken);
+  if (name === "SHELL" || name === "CMD" || name === "ENTRYPOINT") return operands[0] === pathToken;
+  if (name === "RUN") {
+    // RUN commands execute in the image, except a bind-mount source, which
+    // resolves on the build host and must stay visible to the host-path rule.
+    const escaped = pathToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const bindSource = new RegExp(`--mount(?:=|\\s+)[^\\s]*?(?:,|^)(?:source|src)=${escaped}(?=,|\\s|$)`, "i");
+    return !bindSource.test(instruction);
+  }
+  return false;
 }
 
 function readDiffPathToken(input: string, start = 0): DiffPathToken | undefined {
@@ -1481,6 +1513,11 @@ function analyzeFileChanges(
     /^\/Users(?:\/|$)/,
   ];
 
+  const hunkCode = new Map<number, string>();
+  for (const record of records) {
+    hunkCode.set(record.hunk, `${hunkCode.get(record.hunk) ?? ""}${record.code}\n`);
+  }
+
   for (const record of records) {
     if (!record.added) continue;
     const code = record.code.trim();
@@ -1493,7 +1530,7 @@ function analyzeFileChanges(
         absolutePathPatterns.some((pattern) => pattern.test(value)) &&
         !isWebRoutePathReference(record.code, pathToken) &&
         !isModuleAliasSpecifierReference(record.code, pathToken, value) &&
-        !isDockerfileCopyFromPathReference(filePath, record.code)
+        !isDockerfileContainerPathReference(filePath, record.code, pathToken, hunkCode.get(record.hunk))
       ) {
         addViolation(
           violations,

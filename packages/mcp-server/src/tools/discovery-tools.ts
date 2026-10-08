@@ -359,7 +359,7 @@ export function registerDiscoveryTools(
         .string()
         .optional()
         .describe(
-          "Optional runId to automatically save context artifact and advance phase to CONTEXT_ASSEMBLED",
+          "Contribution run ID (defaults to the active run); context requires its prepared workspace",
         ),
     },
     wrapHandler(async (args) => {
@@ -378,6 +378,9 @@ export function registerDiscoveryTools(
       const assembler = new ContextAssembler();
       const runManager = suppliedRunManager ?? buildContributionRunManager();
       const runId = runManager.resolveRunId(args.runId);
+      if (!runId) {
+        throw new Error("A canonical contribution run is required before assembling context; create a run and prepare its workspace first.");
+      }
       const requestedRepoFullName = `${args.repoDetails.owner}/${args.repoDetails.repo}`;
       const run = runId ? runManager.getRun(runId) : undefined;
       if (runId && !run) {
@@ -523,12 +526,12 @@ export function registerDiscoveryTools(
   // -------------------------------------------------------------
   server.tool(
     "contrib_scout",
-    "Scout high-value, unclaimed contribution opportunities for an organization or repository, filtered by feasibility and developer profile",
+    "Scout high-value, unclaimed contribution opportunities for the run repository, filtered by feasibility and developer profile",
     {
       target: z
         .string()
         .describe(
-          'GitHub repository full name (e.g. "owner/repo") or organization name (e.g. "org-name")',
+          'GitHub repository full name (e.g. "owner/repo"), matching the canonical run',
         ),
       techStack: z
         .array(z.string())
@@ -547,12 +550,12 @@ export function registerDiscoveryTools(
       minStars: z
         .number()
         .optional()
-        .describe("Minimum repository stars filter (default 50)"),
+        .describe("Minimum repository stars filter (default 0)"),
       runId: z
         .string()
         .optional()
         .describe(
-          "Optional runId to automatically save opportunity artifact and advance phase to OPPORTUNITY_SCOUTED",
+          "Contribution run ID (defaults to the active run)",
         ),
     },
     wrapHandler(async (args) => {
@@ -563,31 +566,29 @@ export function registerDiscoveryTools(
         minMatchScore: 60,
       };
 
-      const isOrg = !args.target.includes("/");
+      const { buildContributionRunManager } = await import("@opencontrib/core");
+      const runManager = suppliedRunManager ?? buildContributionRunManager();
+      const runId = runManager.resolveRunId(args.runId);
+      if (!runId || !runManager.getRun(runId)) {
+        throw new Error("An existing contribution run is required before scouting; create a run first.");
+      }
+      runManager.assertRepositoryTarget(runId, args.target);
+      const canonicalTarget = runManager.getRun(runId)!.manifest.repoFullName;
+
       const scoutOpts = {
-        repo: isOrg ? undefined : args.target,
+        repo: canonicalTarget,
         limit: args.limit ?? 5,
-        minStars: args.minStars ?? (isOrg ? 100 : 0),
+        minStars: args.minStars ?? 0,
       };
 
       const opportunities = await scoutOpportunities(profile, scoutOpts);
 
-      if (args.runId && opportunities.length > 0) {
-        try {
-          const { buildContributionRunManager } = await import(
-            "@opencontrib/core"
-          );
-          const runManager = suppliedRunManager ?? buildContributionRunManager();
-          runManager.saveArtifact(args.runId, "opportunity", {
-            target: args.target,
-            opportunities,
-            topOpportunity: opportunities[0],
-          });
-        } catch (err: any) {
-          console.warn(
-            `[discovery-tools] Failed to auto-save opportunity artifact: ${err.message}`,
-          );
-        }
+      if (opportunities.length > 0) {
+        runManager.saveArtifact(runId, "opportunity", {
+          target: canonicalTarget,
+          opportunities,
+          topOpportunity: opportunities[0],
+        });
       }
 
       return {
@@ -597,7 +598,7 @@ export function registerDiscoveryTools(
             text: JSON.stringify(
               {
                 status: "success",
-                target: args.target,
+                target: canonicalTarget,
                 foundCount: opportunities.length,
                 opportunities,
               },
