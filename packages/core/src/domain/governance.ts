@@ -108,7 +108,8 @@ function isTestPath(
   const baseName = normalizedPath.slice(normalizedPath.lastIndexOf("/") + 1);
   return (
     /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalizedPath) ||
-    /\.(?:test|spec)\.[^/]+$/.test(baseName) ||
+    /\.(?:tests?|specs?)\.[^/]+$/.test(baseName) ||
+    /^setup[_-]?tests?\.[^/]+$/.test(baseName) ||
     /^tests?\.[^/]+$/.test(baseName) ||
     /_test\.[^/]+$/.test(baseName) ||
     /^test_[^/]+\.[^/]+$/.test(baseName) ||

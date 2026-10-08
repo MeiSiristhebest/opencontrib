@@ -265,6 +265,9 @@ describe("Governance & Anti-AI Audit Engine", () => {
     expect(isSupportingFile("src/testHarness.ts")).toBe(false);
     expect(isSupportingFile("src/latest.ts")).toBe(false);
     expect(isSupportingFile("src/contest.ts")).toBe(false);
+    expect(isSupportingFile("src/setupTests.ts")).toBe(true);
+    expect(isSupportingFile("src/api.tests.ts")).toBe(true);
+    expect(isSupportingFile("src/service.tests.spec.ts")).toBe(true);
     expect(isSupportingFile("src/test.ts")).toBe(true);
     expect(isSupportingFile("docs/guide.mdx")).toBe(true);
     expect(isSupportingFile("src/config.txt")).toBe(false);

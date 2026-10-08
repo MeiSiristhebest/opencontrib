@@ -25,11 +25,11 @@ export class RubyRSpecOutputParser implements TestOutputParser {
     }
 
     // Minitest: "10 runs, 25 assertions, 0 failures, 0 errors, 0 skips"
-    const minitestMatch = output.match(/(\d+)\s+runs?,\s*\d+\s+assertions?,\s*(\d+)\s+failures?,\s*(\d+)\s+errors?/i);
+    const minitestMatch = output.match(/(\d+)\s+runs?,\s*\d+\s+assertions?,\s*(\d+)\s+failures?,\s*(\d+)\s+errors?(?:,\s*(\d+)\s+skips?)?/i);
     if (minitestMatch) {
       total = parseInt(minitestMatch[1], 10);
       failed = parseInt(minitestMatch[2], 10) + parseInt(minitestMatch[3], 10);
-      passed = Math.max(0, total - failed);
+      passed = Math.max(0, total - failed - parseInt(minitestMatch[4] ?? "0", 10));
       return { passed, failed, total };
     }
 

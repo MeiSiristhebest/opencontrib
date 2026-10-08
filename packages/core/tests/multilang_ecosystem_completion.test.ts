@@ -111,6 +111,16 @@ Passed!  - Failed:     0, Passed:    22, Skipped:     0, Total:    22, Duration:
       const parsedMini = parser.parse(minitestOut);
       expect(parsedMini.total).toBe(12);
       expect(parsedMini.passed).toBe(12);
+
+      const skippedMini = parser.parse("12 runs, 30 assertions, 0 failures, 0 errors, 3 skips");
+      expect(skippedMini.total).toBe(12);
+      expect(skippedMini.passed).toBe(9);
+      expect(skippedMini.failed).toBe(0);
+
+      const allSkippedMini = parser.parse("3 runs, 3 assertions, 0 failures, 0 errors, 3 skips");
+      expect(allSkippedMini.total).toBe(3);
+      expect(allSkippedMini.passed).toBe(0);
+      expect(allSkippedMini.failed).toBe(0);
     });
 
     it('parses PHP PHPUnit output accurately', () => {
