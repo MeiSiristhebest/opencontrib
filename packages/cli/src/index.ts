@@ -33,7 +33,7 @@ export const program = new Command();
 program
   .name("opencontrib")
   .description("Agent-Native Open Source Contribution Engine — CLI")
-  .version("1.0.0")
+  .version("1.0.1")
   .option(
     "--home <dir>",
     "Set custom OpenContrib home directory (overrides ~/.opencontrib and OPENCONTRIB_HOME env)",
@@ -50,7 +50,7 @@ program
     displayFirstRunBannerIfNeeded(process.env.OPENCONTRIB_HOME);
     // 2. Dispatch lightweight non-blocking telemetry heartbeat
     const cmdName = actionCommand ? actionCommand.name() : thisCommand.name();
-    sendAnonymousPing(cmdName, "1.0.0");
+    sendAnonymousPing(cmdName, "1.0.1");
   })
   .configureHelp({
     subcommandTerm: (cmd) =>

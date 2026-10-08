@@ -30,7 +30,7 @@ export function isTelemetryEnabled(): boolean {
  * Strictly anonymous: NO paths, NO file contents, NO user IDs, NO auth tokens.
  * Completely non-blocking and fails silently.
  */
-export function sendAnonymousPing(commandName: string, cliVersion = '1.0.0'): void {
+export function sendAnonymousPing(commandName: string, cliVersion = '1.0.1'): void {
   if (!isTelemetryEnabled()) {
     return;
   }
