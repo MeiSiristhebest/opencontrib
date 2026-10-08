@@ -787,7 +787,8 @@ export function auditGovernance(
     input.evidence?.handleLeakCheckPassed === "PASS";
   const executedTestsGatePassed =
     input.evidence?.zeroAssertionWarning !== true &&
-    input.evidence?.passedUnitTestsCount !== 0;
+    Number.isSafeInteger(input.evidence?.passedUnitTestsCount) &&
+    (input.evidence?.passedUnitTestsCount ?? 0) > 0;
 
   // 3b. Cross-Platform, Collision & Lifecycle Impact Analysis Check
   let impactAnalysisPassed = true;

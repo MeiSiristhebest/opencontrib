@@ -1,3 +1,6 @@
+import { writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
 /**
  * Build a direct command for a Bun fixture used by sandbox/evidence tests.
  *
@@ -20,12 +23,11 @@ export function stateAssertionCommand(
 ): string {
   const statePath = JSON.stringify(stateFile.replace(/\\/g, "/"));
   const source = [
-    `const state = require("node:fs").readFileSync(${statePath}, "utf8");`,
-    `if (state.includes("FAIL")) {`,
-    `console.log(${JSON.stringify(assertion)});`,
-    'console.log("0 pass, 1 fail");',
-    "process.exitCode = 1;",
-    `} else { console.log("1 pass, 0 fail"); }`,
-  ].join(" ");
-  return bunCommand(source);
+    'import { expect, test } from "bun:test";',
+    'import { readFileSync } from "node:fs";',
+    `test("immutable regression", () => expect(readFileSync(${statePath}, "utf8"), ${JSON.stringify(assertion)}).not.toContain("FAIL"));`,
+  ].join("\n");
+  const fixture = join(dirname(stateFile), "regression.test.ts");
+  writeFileSync(fixture, `${source}\n`);
+  return `${quoteCommandArgument(process.execPath.replace(/\\/g, "/"))} test ${quoteCommandArgument(fixture.replace(/\\/g, "/"))}`;
 }

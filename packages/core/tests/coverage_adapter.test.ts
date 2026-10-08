@@ -10,6 +10,7 @@ import {
   type TestCoverageAdapter,
 } from "../src/evidence/coverage-adapter.js";
 import { getCoverageMeasurementStatus } from "../src/evidence/evidence-collector.js";
+import { prepareTestExecutionSpec } from "../src/evidence/parsers/executed-counts.js";
 
 function withTmpDir<T>(fn: (dir: string) => Promise<T> | T): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "oc-coverage-"));
@@ -90,6 +91,7 @@ describe("IstanbulSummaryCoverageAdapter", () => {
 });
 
 describe("LCOV changed-line coverage", () => {
+  const executionContext = { startedAt: 0, executionSpec: prepareTestExecutionSpec("bun test --coverage --coverage-reporter=lcov") };
   function prepare(dir: string) {
     execFileSync("git", ["init", "-q"], { cwd: dir });
     writeFileSync(join(dir, ".gitignore"), "coverage/\n");
@@ -106,25 +108,32 @@ describe("LCOV changed-line coverage", () => {
     writeFileSync(join(dir, "added.ts"), "export const added = 1;\n");
     writeFileSync(join(dir, "value.test.ts"), "test('regression', () => {});\n");
     writeFileSync(file, "SF:value.ts\nDA:1,1\nDA:2,0\nDA:3,0\nend_of_record\nSF:added.ts\nDA:1,1\nend_of_record\n");
-    expect(await new LcovChangedLineCoverageAdapter().resolve(dir)).toBe(200 / 3);
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext)).toBe(200 / 3);
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir)).toBeUndefined();
   }));
 
   test("rejects missing source records, invalid counts, and incomplete LCOV", () => withTmpDir(async dir => {
     const file = prepare(dir);
     for (const report of ["SF:other.ts\nDA:1,1\nend_of_record\n", "SF:value.ts\nDA:1,-1\nend_of_record\n", "SF:value.ts\nDA:1,1\n"]) {
       writeFileSync(file, report);
-      expect(await new LcovChangedLineCoverageAdapter().resolve(dir)).toBeUndefined();
+      expect(await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext)).toBeUndefined();
     }
+  }));
+
+  test("does not remove an omitted changed executable line from the denominator", () => withTmpDir(async dir => {
+    const file = prepare(dir);
+    writeFileSync(file, "SF:value.ts\nDA:1,1\nend_of_record\n");
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext)).toBeUndefined();
   }));
 
   test("rejects stale reports and paths outside the workspace", () => withTmpDir(async dir => {
     const file = prepare(dir);
     writeFileSync(file, "SF:value.ts\nDA:1,1\nDA:2,1\nend_of_record\n");
     utimesSync(file, new Date(0), new Date(0));
-    expect(await new LcovChangedLineCoverageAdapter().resolve(dir, { startedAt: Date.now() })).toBeUndefined();
-    expect(await new LcovChangedLineCoverageAdapter("../coverage/lcov.info").resolve(dir)).toBeUndefined();
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir, { ...executionContext, startedAt: Date.now() })).toBeUndefined();
+    expect(await new LcovChangedLineCoverageAdapter("../coverage/lcov.info").resolve(dir, executionContext)).toBeUndefined();
     writeFileSync(file, "SF:../value.ts\nDA:1,1\nend_of_record\n");
-    expect(await new LcovChangedLineCoverageAdapter().resolve(dir)).toBeUndefined();
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext)).toBeUndefined();
   }));
 });
 

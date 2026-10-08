@@ -526,12 +526,12 @@ export function registerDiscoveryTools(
   // -------------------------------------------------------------
   server.tool(
     "contrib_scout",
-    "Scout high-value, unclaimed contribution opportunities for an organization or repository, filtered by feasibility and developer profile",
+    "Scout high-value, unclaimed contribution opportunities for the run repository, filtered by feasibility and developer profile",
     {
       target: z
         .string()
         .describe(
-          'GitHub repository full name (e.g. "owner/repo") or organization name (e.g. "org-name")',
+          'GitHub repository full name (e.g. "owner/repo"), matching the canonical run',
         ),
       techStack: z
         .array(z.string())
@@ -555,7 +555,7 @@ export function registerDiscoveryTools(
         .string()
         .optional()
         .describe(
-          "Optional runId to automatically save opportunity artifact and advance phase to OPPORTUNITY_SCOUTED",
+          "Contribution run ID (defaults to the active run)",
         ),
     },
     wrapHandler(async (args) => {
@@ -572,12 +572,12 @@ export function registerDiscoveryTools(
       if (!runId || !runManager.getRun(runId)) {
         throw new Error("An existing contribution run is required before scouting; create a run first.");
       }
+      runManager.assertRepositoryTarget(runId, args.target);
 
-      const isOrg = !args.target.includes("/");
       const scoutOpts = {
-        repo: isOrg ? undefined : args.target,
+        repo: args.target,
         limit: args.limit ?? 5,
-        minStars: args.minStars ?? (isOrg ? 100 : 0),
+        minStars: args.minStars ?? 0,
       };
 
       const opportunities = await scoutOpportunities(profile, scoutOpts);

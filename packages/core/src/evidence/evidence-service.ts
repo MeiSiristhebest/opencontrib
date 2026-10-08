@@ -30,6 +30,7 @@ import {
 import { isSafeRepositoryPath } from "../submission/submission-intent-service.js";
 import { hashValidatedPatchArtifact } from "./validated-patch.js";
 import { LcovChangedLineCoverageAdapter, type TestCoverageAdapter } from "./coverage-adapter.js";
+import { prepareTestExecutionSpec } from "./parsers/executed-counts.js";
 import type {
   RawRedExecutionResult,
   RedExecutionJob,
@@ -1558,6 +1559,7 @@ export class EvidenceService {
       baselineCommitSha,
       startedAt: coverageStartedAt,
       sourceRoot: "/workspace",
+      executionSpec: prepareTestExecutionSpec(trustedRawResult.command),
     });
     const coverageStatus = changedCodeCoveragePercent === undefined ? "UNAVAILABLE" : "PASS";
     let report: EvidenceReport = {

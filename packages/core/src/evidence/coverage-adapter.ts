@@ -9,12 +9,16 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { execFileSync } from "node:child_process";
 import { isSupportingFile } from "../domain/governance.js";
 import { isEligibleSourceCodeFile } from "../probe/forensics.js";
+import type { CommandSpec } from "../sandbox/command-spec.js";
+import { bunLcovReportPath } from "./parsers/executed-counts.js";
 
 export interface CoverageMeasurementContext {
   baselineCommitSha?: string;
   startedAt?: number;
   /** Container source prefix; only the trusted worker supplies this mapping. */
   sourceRoot?: string;
+  /** Host-derived invocation of the supported native coverage instrumenter. */
+  executionSpec?: CommandSpec;
 }
 
 /**
@@ -83,6 +87,9 @@ export class LcovChangedLineCoverageAdapter implements TestCoverageAdapter {
   constructor(private readonly fileName = "coverage/lcov.info") {}
 
   async resolve(cwd: string, context: CoverageMeasurementContext = {}): Promise<number | undefined> {
+    if (!context.executionSpec || context.startedAt === undefined) return undefined;
+    const reportPath = bunLcovReportPath(context.executionSpec);
+    if (!reportPath || resolve(cwd, reportPath) !== resolve(cwd, this.fileName)) return undefined;
     const report = readReport(cwd, this.fileName, context.startedAt);
     if (!report) return undefined;
     try {
@@ -148,8 +155,14 @@ export class LcovChangedLineCoverageAdapter implements TestCoverageAdapter {
       for (const [file, numbers] of changed) {
         const hits = sourceFiles.get(file);
         if (!hits) return undefined;
+        const lines = readFileSync(containedPath(cwd, file)!, "utf8").split(/\r?\n/);
         for (const number of numbers) {
-          if (!hits.has(number)) continue; // LCOV omits non-executable lines.
+          if (!hits.has(number)) {
+            // A report cannot establish that omitted source is non-executable.
+            // Only blank lines are independently known to have no code here.
+            if (lines[number - 1]?.trim() === "") continue;
+            return undefined;
+          }
           total++;
           if (hits.get(number)! > 0) covered++;
         }

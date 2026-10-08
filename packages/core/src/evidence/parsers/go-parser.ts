@@ -21,30 +21,17 @@ export class GoTestOutputParser implements TestOutputParser {
     let failed = 0;
 
     // 1. Precise per-test matching (go test -v)
-    const passMatches = output.match(/---\s+PASS:\s+\S+/g);
+    const passMatches = output.match(/^\s*---\s+PASS:\s+\S+\s+\([\d.]+s\)\s*$/gm);
     if (passMatches) {
       passed += passMatches.length;
     }
 
-    const failMatches = output.match(/---\s+FAIL:\s+\S+/g);
+    const failMatches = output.match(/^\s*---\s+FAIL:\s+\S+\s+\([\d.]+s\)\s*$/gm);
     if (failMatches) {
       failed += failMatches.length;
     }
 
-    // 2. Fallback: package-level summary matching (go test standard)
-    if (passed === 0 && failed === 0) {
-      const okMatches = output.split(/\r?\n/).filter(line => !/\[no (?:test files|tests to run)\]/i.test(line)).join("\n").match(/ok\s+\S+\s+[\d\.]+s/g);
-      if (okMatches) {
-        passed = okMatches.length;
-      }
-      const failPkgMatches = output.match(/FAIL\s+\S+\s+[\d\.]+s/g);
-      if (failPkgMatches) {
-        failed = failPkgMatches.length;
-      }
-      if (failed === 0 && (output.includes('FAIL\t') || output.includes('FAIL\n'))) {
-        failed = 1;
-      }
-    }
+    // Package success, cached results and no-test packages do not count tests.
 
     return { passed, failed, total: passed + failed };
   }

@@ -2261,13 +2261,14 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       } = require("../src/run/canonical-writer.js");
       const stateFile = join(wsDir, "test.txt");
       writeFileSync(stateFile, "FAIL\n");
+      const testCmd = stateAssertionCommand(stateFile, "ASSERTION_ERR");
       const { execSync } = require("child_process");
       execSync("git init -b main", { cwd: wsDir, stdio: "ignore" });
       execSync(
         "git config user.name Tester && git config user.email test@example.com",
         { cwd: wsDir, stdio: "ignore" },
       );
-      execSync("git add test.txt && git commit -m baseline", {
+      execSync("git add test.txt regression.test.ts && git commit -m baseline", {
         cwd: wsDir,
         stdio: "ignore",
       });
@@ -2289,14 +2290,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         "WORKSPACE_PREPARED",
       );
 
-      const testCmd = stateAssertionCommand(stateFile, "ASSERTION_ERR");
-
       const evidenceService = new EvidenceService(manager);
       evidenceService.captureRed({
         runId: manifest.runId,
         testCommand: testCmd,
         expectedAssertion: "ASSERTION_ERR",
-        testFile: "test.txt",
+        testFile: "regression.test.ts",
       });
 
       // Save a patch artifact that claims to have fixed src/fix.ts with content "fixed code"
@@ -2377,13 +2376,14 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
       } = require("../src/run/canonical-writer.js");
       const stateFile = join(wsDir, "test.txt");
       writeFileSync(stateFile, "FAIL\n");
+      const testCmd = stateAssertionCommand(stateFile, "ASSERTION_ERR");
       const { execSync } = require("child_process");
       execSync("git init -b main", { cwd: wsDir, stdio: "ignore" });
       execSync(
         "git config user.name Tester && git config user.email test@example.com",
         { cwd: wsDir, stdio: "ignore" },
       );
-      execSync("git add test.txt && git commit -m baseline", {
+      execSync("git add test.txt regression.test.ts && git commit -m baseline", {
         cwd: wsDir,
         stdio: "ignore",
       });
@@ -2405,14 +2405,12 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         "WORKSPACE_PREPARED",
       );
 
-      const testCmd = stateAssertionCommand(stateFile, "ASSERTION_ERR");
-
       const evidenceService = new EvidenceService(manager);
       evidenceService.captureRed({
         runId: manifest.runId,
         testCommand: testCmd,
         expectedAssertion: "ASSERTION_ERR",
-        testFile: "test.txt",
+        testFile: "regression.test.ts",
       });
 
       // Patch declares the intended source and regression-fixture changes, but not sneaky.txt.

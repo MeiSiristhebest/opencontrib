@@ -39,7 +39,7 @@ describe('Multi-Language Ecosystem Completion & Deep Parity', () => {
       const parsed = parser.parse(output);
       expect(parsed.total).toBe(24);
       expect(parsed.failed).toBe(1);
-      expect(parsed.passed).toBe(23);
+      expect(parsed.passed).toBe(21);
     });
 
     it('parses Gradle test execution output accurately', () => {
@@ -49,7 +49,7 @@ describe('Multi-Language Ecosystem Completion & Deep Parity', () => {
       const parsed = parser.parse(output);
       expect(parsed.total).toBe(18);
       expect(parsed.failed).toBe(0);
-      expect(parsed.passed).toBe(18);
+      expect(parsed.passed).toBe(17);
     });
 
     it('parses C / C++ Google Test output accurately', () => {

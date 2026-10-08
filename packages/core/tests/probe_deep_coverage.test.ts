@@ -146,14 +146,16 @@ describe('Deep Probe & Triage Coverage', () => {
     expect(cargoCounts.failed).toBe(1);
 
     const nodeParser = new NodeTestOutputParser();
-    expect(nodeParser.supports('331 pass, 0 fail')).toBe(true);
-    const nodeCounts = nodeParser.parse('331 pass, 0 fail');
+    const bunSummary = '331 pass\n0 fail\nRan 331 tests across 1 file. [1.00ms]';
+    expect(nodeParser.supports(bunSummary)).toBe(true);
+    const nodeCounts = nodeParser.parse(bunSummary);
     expect(nodeCounts.passed).toBe(331);
     expect(nodeCounts.failed).toBe(0);
     const tap = "TAP version 13\n# tests 3\n# pass 2\n# fail 1\n";
     expect(nodeParser.supports(tap)).toBe(true);
     expect(nodeParser.parse(tap)).toEqual({ passed: 2, failed: 1, total: 3 });
     expect(nodeParser.parse("PASS")).toEqual({ passed: 0, failed: 0, total: 0 });
+    expect(nodeParser.parse("331 pass, 0 fail")).toEqual({ passed: 0, failed: 0, total: 0 });
   });
 
   it('Forensics & Hotspots: runs git hotspots analysis and fuzz generation', async () => {

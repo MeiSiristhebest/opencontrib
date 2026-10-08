@@ -80,7 +80,7 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
   async verifyGreen(
     job: import("./trusted-execution.port.js").GreenExecutionJob,
   ): Promise<import("./trusted-execution.port.js").RawGreenExecutionResult> {
-    const { verifyGreenEvidence, getProcessHandleCount, parseTestCountsFromOutput } =
+    const { verifyGreenEvidence, getProcessHandleCount, parseExecutedTestCounts } =
       await import("../evidence/evidence-collector.js");
     const initialHandles = getProcessHandleCount();
     const green = await verifyGreenEvidence({
@@ -91,7 +91,7 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
       concurrencyWorkers: job.concurrencyWorkers ?? 1,
     });
     const finalHandles = getProcessHandleCount();
-    const counts = parseTestCountsFromOutput(green.stressResult.lastOutput);
+    const counts = parseExecutedTestCounts(green.stressResult.lastOutput, job.testCommand, job.workspace.workspacePath);
     const passed = green.greenEvidence.passed && counts.passed > 0 && counts.failed === 0;
     let handleLeakCheckPassed: "PASS" | "FAIL" | "UNAVAILABLE" = "UNAVAILABLE";
     if (initialHandles !== null && finalHandles !== null) {

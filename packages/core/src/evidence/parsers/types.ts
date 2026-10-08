@@ -7,5 +7,5 @@ export interface ParsedTestCounts {
 export interface TestOutputParser {
   readonly id: string;
   supports(output: string): boolean;
-  parse(output: string): ParsedTestCounts;
+  parse(output: string, runner?: string): ParsedTestCounts;
 }

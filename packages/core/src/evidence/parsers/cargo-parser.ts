@@ -11,11 +11,10 @@ export class CargoTestOutputParser implements TestOutputParser {
     let passed = 0;
     let failed = 0;
 
-    const cargoPass = output.match(/(\d+)\s+passed/i);
-    if (cargoPass) passed = parseInt(cargoPass[1], 10);
-
-    const cargoFail = output.match(/(\d+)\s+failed/i);
-    if (cargoFail) failed = parseInt(cargoFail[1], 10);
+    for (const summary of output.matchAll(/^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed;/gm)) {
+      passed += Number(summary[1]);
+      failed += Number(summary[2]);
+    }
 
     return { passed, failed, total: passed + failed };
   }

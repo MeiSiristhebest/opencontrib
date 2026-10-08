@@ -15,12 +15,12 @@ const getRunManager = (): ContributionRunManager =>
 
 export const scoutCommand = new Command("scout")
   .description(
-    "Scout high-value, unclaimed contribution opportunities for a repo or org",
+    "Scout high-value, unclaimed contribution opportunities for the run repository",
   )
   .addArgument(
-    new Argument("[target]", "Repo full name (owner/repo) or org name"),
+    new Argument("[target]", "Repository full name (owner/repo), matching the run"),
   )
-  .option("-r, --repo <target>", "Target repository (owner/repo) or org name")
+  .option("-r, --repo <target>", "Target repository (owner/repo), matching the run")
   .option(
     "--tech-stack <list>",
     "Developer tech stack keywords, comma-separated",
@@ -60,17 +60,17 @@ export const scoutCommand = new Command("scout")
         if (!runId || !getRunManager().getRun(runId)) {
           throw new Error("An existing contribution run is required before scouting; create a run first.");
         }
+        getRunManager().assertRepositoryTarget(runId, target);
         const profile = {
           techStack: opts.techStack ?? ["typescript", "javascript"],
           focusAreas: opts.focus ?? ["bugfix", "testing", "docs"],
           proficiency: "intermediate" as const,
           minMatchScore: 60,
         };
-        const isOrg = !target.includes("/");
         const opportunities = await scoutOpportunities(profile, {
-          repo: isOrg ? undefined : target,
+          repo: target,
           limit: opts.limit ?? 5,
-          minStars: opts.minStars ?? (isOrg ? 100 : 0),
+          minStars: opts.minStars ?? 0,
           githubToken: opts.token || process.env.GITHUB_TOKEN,
           excludeCompletedRuns: !opts.includeAttempted,
         });

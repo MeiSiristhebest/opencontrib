@@ -954,7 +954,7 @@ const evidenceReportSchemaBase = z.object({
 
 export const EvidenceReportSchema = evidenceReportSchemaBase.superRefine(
   (report, ctx) => {
-    if (report.allTestsPassing === true && (report.passedUnitTestsCount === 0 || report.zeroAssertionWarning === true)) {
+    if (report.allTestsPassing === true && (!(report.passedUnitTestsCount > 0) || report.zeroAssertionWarning === true)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["allTestsPassing"], message: "passing evidence requires observed executed tests" });
     }
     if (

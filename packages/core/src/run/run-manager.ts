@@ -340,7 +340,11 @@ export class ContributionRunManager {
       );
     }
 
-    const expectedPhase = DRAFT_PHASE_BY_ARTIFACT[type];
+    const draft = type === "probe" && typeof content === "string" ? JSON.parse(content) : content;
+    // Planning and scaffolds remain tracked drafts. Only an executed scan
+    // completes the probe phase.
+    const expectedPhase = type === "probe" && !Array.isArray((draft as Record<string, unknown>).executedProbes)
+      ? undefined : DRAFT_PHASE_BY_ARTIFACT[type];
     const summary = this.getRun(runId);
     if (!summary) {
       throw new Error(`Contribution run ${runId} does not exist`);
@@ -526,6 +530,15 @@ export class ContributionRunManager {
 
   getRun(runId: string): ContributionRunSummary | null {
     return this.bundleManager.getRunSummary(runId);
+  }
+
+  assertRepositoryTarget(runId: string, requestedRepo: string | undefined): void {
+    const run = this.getRun(runId);
+    if (!run) throw new Error(`Contribution run ${runId} does not exist`);
+    const normalize = (value: string) => value.trim().replace(/\.git$/i, "").toLowerCase();
+    if (!requestedRepo || !/^[^/]+\/[^/]+$/.test(normalize(requestedRepo)) || normalize(requestedRepo) !== normalize(run.manifest.repoFullName)) {
+      throw new Error(`DiscoveryRepoMismatchError: discovery target must match run repository "${run.manifest.repoFullName}".`);
+    }
   }
 
   listRuns(): ContributionRunManifest[] {

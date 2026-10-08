@@ -4,22 +4,24 @@ Commands for finding, scoring, and qualifying contribution opportunities.
 
 ## `scout <target>`
 
-Discover high-value, unclaimed contribution opportunities for a repository or organization.
+Discover high-value, unclaimed contribution opportunities for the canonical run's repository. Create a run first; the target must match its repository.
 
 ```bash
+opencontrib run create --repo facebook/react
 opencontrib scout facebook/react
 opencontrib scout facebook/react --tech-stack typescript,react --limit 5
-opencontrib scout bytedance --focus bugfix,testing --min-stars 100
+opencontrib scout facebook/react --focus bugfix,testing --min-stars 100
 opencontrib scout --help
 ```
 
 | Flag | Type | Default | Description |
 | ------ | ------ | --------- | ------------- |
-| `<target>` | string | — | Repo full name (`owner/repo`) or org name |
+| `<target>` | string | — | Repository full name (`owner/repo`), matching the run |
 | `--tech-stack` | list | `typescript,javascript` | Comma-separated developer tech stack |
 | `--focus` | list | `bugfix,testing,docs` | Comma-separated focus areas |
 | `--limit` | number | `5` | Max candidates to return |
-| `--min-stars` | number | `50` (repo) / `100` (org) | Minimum repository stars |
+| `--min-stars` | number | `50` | Minimum repository stars |
+| `--run-id` | string | active run | Canonical contribution run |
 | `--token` | string | `GITHUB_TOKEN` env | GitHub token |
 | `--pretty` | flag | false | Pretty-print output |
 

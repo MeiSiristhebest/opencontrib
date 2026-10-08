@@ -24,6 +24,8 @@ import type {
   TestIdentityFile,
 } from "../contracts/schemas.js";
 import { defaultTestOutputParserRegistry } from "./parsers/registry.js";
+import { parseExecutedTestCounts, prepareTestExecutionSpec } from "./parsers/executed-counts.js";
+export { parseExecutedTestCounts, prepareTestExecutionSpec } from "./parsers/executed-counts.js";
 import { defaultVcsDeltaAdapter, type VcsDeltaPort } from "./vcs-delta.port.js";
 import { LcovChangedLineCoverageAdapter, type TestCoverageAdapter } from "./coverage-adapter.js";
 import {
@@ -135,35 +137,39 @@ function measureFlakyBaseline(
   testCommand: string,
   runs: number,
   workspaceRoot?: string,
+  initialSample?: { passed: boolean; output: string },
+  expectedAssertion?: string,
 ): { records: FlakyTestRecord[]; status: MeasurementStatus; testedAt: string } {
   const testedAt = new Date().toISOString();
-  const spec = parseCommandSpec(testCommand);
+  const spec = prepareTestExecutionSpec(testCommand);
   const samples = Array.from({ length: runs }, () => defaultSandboxRuntime.executeInSandbox({
     cwd,
     workspaceRoot,
     commandSpec: spec,
     timeoutMs: 30000,
   }));
-  return { ...summarizeFlakyBaseline(samples), testedAt };
+  return { ...summarizeFlakyBaseline(initialSample ? [initialSample, ...samples] : samples, { testCommand, cwd, expectedAssertion }), testedAt };
 }
 
 /** Shared baseline classification for local and isolated execution workers. */
-export function summarizeFlakyBaseline(samples: readonly { passed: boolean; output: string }[]): {
+export function summarizeFlakyBaseline(samples: readonly { passed: boolean; output: string }[], invocation?: { testCommand: string; cwd: string; expectedAssertion?: string }): {
   records: FlakyTestRecord[];
   status: MeasurementStatus;
 } {
   const runs = samples.length;
   let measuredRuns = 0;
   let failingRuns = 0;
+  let assertionMismatch = false;
   const testRunResults = new Map<
     string,
     { runCount: number; failCount: number }
   >();
   for (const res of samples) {
-    if (parseTestCountsFromOutput(res.output).total > 0) measuredRuns++;
+    if ((invocation ? parseExecutedTestCounts(res.output, invocation.testCommand, invocation.cwd) : parseTestCountsFromOutput(res.output)).total > 0) measuredRuns++;
 
     if (!res.passed) {
       failingRuns++;
+      if (invocation?.expectedAssertion && !matchExpectedFailure({ output: res.output, pattern: invocation.expectedAssertion }).matched) assertionMismatch = true;
       const full = res.output;
       const failureMatches =
         full.match(/(?:\(fail\)|FAIL|✕|FAILED)\s+([^\r\n]+)/g) || [];
@@ -191,11 +197,12 @@ export function summarizeFlakyBaseline(samples: readonly { passed: boolean; outp
   }
 
   const records = flakyRecords.filter(record => record.isFlakyOnBaseline);
-  return { records, status: runs === 0 || measuredRuns !== runs ? "UNAVAILABLE" : records.length || (failingRuns > 0 && failingRuns < runs) ? "FAIL" : "PASS" };
+  return { records, status: assertionMismatch ? "FAIL" : runs === 0 || measuredRuns !== runs ? "UNAVAILABLE" : records.length || (failingRuns > 0 && failingRuns < runs) ? "FAIL" : "PASS" };
 }
 
 export interface StressLoopResult {
   passed: boolean;
+  testsPassed: boolean;
   completedRuns: number;
   roundsRequested: number;
   roundsCompleted: number;
@@ -234,7 +241,7 @@ export async function runStressLoopAsync(
     requestedRounds,
     concurrencyWorkers,
   );
-  const spec = parseCommandSpec(testCommand);
+  const spec = prepareTestExecutionSpec(testCommand);
   const results = await runConcurrentRounds({
     rounds: dimensions.rounds,
     workersPerRound: dimensions.workersPerRound,
@@ -296,6 +303,10 @@ export async function runStressLoopAsync(
 
   return {
     passed: allPassed,
+    testsPassed: allPassed && results.results.every(result => {
+      const counts = parseExecutedTestCounts(result.output, testCommand, cwd);
+      return counts.passed > 0 && counts.failed === 0;
+    }),
     completedRuns,
     roundsRequested: results.roundsRequested,
     roundsCompleted: results.roundsCompleted,
@@ -341,7 +352,7 @@ export function verifyEmpiricalReproduction(input: {
       timeoutMs: 15000,
     });
   } else if (testCommand) {
-    const spec = parseCommandSpec(testCommand);
+    const spec = prepareTestExecutionSpec(testCommand);
     res = defaultSandboxRuntime.executeInSandbox({
       cwd,
       workspaceRoot,
@@ -819,8 +830,8 @@ export function computeTestFileDiffSha256(
 
 /**
  * Evidence V2 — capture an immutable RED baseline artifact.
- * Runs the test command once, records the observed failure, and binds the
- * current source tree hash so a later GREEN can be proven to have mutated the tree.
+ * Records the initial failure and three further stability samples on the
+ * unchanged source tree so GREEN can be bound to that baseline.
  */
 export function captureRedEvidence(input: {
   cwd: string;
@@ -832,12 +843,17 @@ export function captureRedEvidence(input: {
   baselineCommitSha?: string;
   testMutationAllowed?: boolean;
 }): RedEvidence {
+  const sourceTreeSha256 = computeSourceTreeHash(input.cwd);
+  const baselineTestedAt = new Date().toISOString();
   const preFix = capturePreFixAssertion(
     input.cwd,
     input.testCommand,
     input.workspaceRoot,
     input.expectedAssertion,
   );
+  if (computeSourceTreeHash(input.cwd) !== sourceTreeSha256) {
+    throw new Error("EvidenceBaselineMutationError: source tree changed during the initial RED execution.");
+  }
   const assertionMatched = Boolean(preFix.assertionCaptured);
   const observedExitCode = (preFix as { exitCode?: number }).exitCode;
   let exitCode = observedExitCode;
@@ -864,8 +880,10 @@ export function captureRedEvidence(input: {
     );
   }
 
-  const sourceTreeSha256 = computeSourceTreeHash(input.cwd);
-  const baseline = measureFlakyBaseline(input.cwd, input.testCommand, 3, input.workspaceRoot);
+  const baseline = measureFlakyBaseline(input.cwd, input.testCommand, 3, input.workspaceRoot, {
+    passed: exitCode === 0,
+    output: (preFix as { baselineOutput?: string }).baselineOutput ?? "",
+  }, input.expectedAssertion);
   if (computeSourceTreeHash(input.cwd) !== sourceTreeSha256) {
     throw new Error("EvidenceBaselineMutationError: source tree changed while sampling the RED baseline.");
   }
@@ -878,7 +896,7 @@ export function captureRedEvidence(input: {
     ).slice(0, 500),
     exitCode,
     sourceTreeSha256,
-    baselineTestedAt: baseline.testedAt,
+    baselineTestedAt,
     baselineFlakyTests: baseline.records,
     baselineCheckStatus: baseline.status,
     testFileSha256:
@@ -906,8 +924,8 @@ function buildGreenEvidenceFromStress(input: {
   allTestsPassing: boolean;
 } {
   const { cwd, testCommand, redEvidence, stressResult } = input;
-  const observedCounts = parseTestCountsFromOutput(stressResult.lastOutput);
-  const passed = stressResult.passed && observedCounts.passed > 0 && observedCounts.failed === 0;
+  const observedCounts = parseExecutedTestCounts(stressResult.lastOutput, testCommand, cwd);
+  const passed = stressResult.testsPassed && observedCounts.passed > 0 && observedCounts.failed === 0;
   const greenTreeHash = computeSourceTreeHash(cwd);
   const treeChanged = greenTreeHash !== redEvidence.sourceTreeSha256;
   const greenFingerprint = computeTestIdentityFingerprint({
@@ -1128,14 +1146,14 @@ export async function collectEvidence(
   let changedCodeCoveragePercent = options.changedCodeCoveragePercent;
   const coverageAdapter = options.coverageAdapter ?? new LcovChangedLineCoverageAdapter();
   if (changedCodeCoveragePercent === undefined && coverageAdapter.scope === "changed-lines") {
-    changedCodeCoveragePercent = await coverageAdapter.resolve(cwd, { baselineCommitSha, startedAt: coverageStartedAt });
+    changedCodeCoveragePercent = await coverageAdapter.resolve(cwd, { baselineCommitSha, startedAt: coverageStartedAt, executionSpec: prepareTestExecutionSpec(testCommand) });
   }
 
   // 4. Final System Handle & FD Sampling
   const finalHandles = getProcessHandleCount();
 
   // 5. Real Test Metrics Extraction (diff-backed additions + output parser)
-  const parsedCounts = parseTestCountsFromOutput(stressResult.lastOutput);
+  const parsedCounts = parseExecutedTestCounts(stressResult.lastOutput, testCommand, cwd);
   const addedUnitTestsCount = await countAddedTestCasesFromGitDiff(
     cwd,
     baselineCommitSha,
@@ -1166,7 +1184,7 @@ export async function collectEvidence(
       })
     : undefined;
   const allTestsPassing =
-    stressResult.passed &&
+    stressResult.testsPassed &&
     !hasZeroAssertions &&
     parsedCounts.failed === 0 &&
     (greenVerification?.allTestsPassing ?? true);

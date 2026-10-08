@@ -259,6 +259,7 @@ flaml/automl/task/ts_forecast.py:240:80: E501 line too long (88 > 79 characters)
       const passResult = auditGovernance({
         diffText: 'const x = 1;',
         prBodyText: 'Fixes bug cleanly.',
+        evidence: { passedUnitTestsCount: 1, allTestsPassing: true },
         confidenceBreakdown: {
           rootCause: 95,
           implementation: 95,

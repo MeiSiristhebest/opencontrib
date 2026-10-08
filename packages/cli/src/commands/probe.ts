@@ -12,6 +12,7 @@ import {
   triagePointerFindings,
   ActiveSessionManager,
   buildContributionRunManager,
+  getLocalRepositoryFullName,
   type ContributionRunManager,
   type ProbeCost,
   type DefectCategory,
@@ -128,6 +129,7 @@ probeCommand
         throw new Error("An existing contribution run is required before probing; create a run first.");
       }
       const resolved = resolveTargetDirectory(target);
+      getRunManager().assertRepositoryTarget(runId, getLocalRepositoryFullName(resolved));
       const fingerprint = await extractRepoFingerprint(resolved);
       const host = await createDefaultPluginHost({
         workspacePath: resolved,

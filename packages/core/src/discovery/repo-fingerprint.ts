@@ -93,6 +93,12 @@ function repositoryNameFromRemote(remoteUrl: string): string | undefined {
   return match ? `${match[1]}/${match[2]}`.toLowerCase() : undefined;
 }
 
+/** Repository identity from the local origin, without trusting a caller label. */
+export function getLocalRepositoryFullName(repoPath: string): string | undefined {
+  const remote = runRepositoryGit(['-C', repoPath, 'remote', 'get-url', 'origin']);
+  return remote.success ? repositoryNameFromRemote(remote.stdout) : undefined;
+}
+
 export function isPreparedRepositoryWorkspace(
   workspacePath: string,
   binding: PreparedRepositoryWorkspaceBinding,

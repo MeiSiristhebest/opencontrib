@@ -14,11 +14,20 @@ import type {
 import {
   computeSourceTreeHash,
   computeTestIdentity,
-  parseTestCountsFromOutput,
+  parseExecutedTestCounts,
+  prepareTestExecutionSpec,
   summarizeFlakyBaseline,
 } from "../evidence/evidence-collector.js";
 import { matchExpectedFailure } from "../evidence/expected-failure-matcher.js";
 import { runConcurrentRounds } from "../evidence/stress-runner.js";
+import { parseCommandSpec } from "../sandbox/command-spec.js";
+
+function executionCommand(command: string): string {
+  const spec = prepareTestExecutionSpec(command);
+  if (JSON.stringify(spec.args) === JSON.stringify(parseCommandSpec(command).args)) return command;
+  const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+  return [spec.executable, ...spec.args].map(quote).join(" ");
+}
 
 export interface DockerExecutionWorkerOptions {
   image?: string;
@@ -107,16 +116,16 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
 
   async captureRed(job: RedExecutionJob): Promise<RawRedExecutionResult> {
     const before = computeSourceTreeHash(job.workspace.workspacePath);
+    const baselineTestedAt = new Date().toISOString();
     const first = await this.executeRedOnce(job);
     if (first.sourceTreeSha256 !== before) throw new Error("RedBaselineMutationError: isolated RED execution changed the source tree.");
-    const baselineTestedAt = new Date().toISOString();
-    const samples = [];
+    const samples = [{ passed: first.exitCode === 0, output: `${first.stdout}\n${first.stderr}` }];
     for (let index = 0; index < 3; index++) {
       const sample = await this.executeRedOnce(job);
       if (sample.sourceTreeSha256 !== first.sourceTreeSha256) throw new Error("RedBaselineMutationError: isolated baseline sampling changed the RED source tree.");
       samples.push({ passed: sample.exitCode === 0, output: `${sample.stdout}\n${sample.stderr}` });
     }
-    const baseline = summarizeFlakyBaseline(samples);
+    const baseline = summarizeFlakyBaseline(samples, { testCommand: job.testCommand, cwd: job.workspace.workspacePath, expectedAssertion: job.expectedAssertion });
     return { ...first, baselineTestedAt, baselineFlakyTests: baseline.records, baselineCheckStatus: baseline.status };
   }
 
@@ -155,7 +164,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       this.image,
       "sh",
       "-c",
-      job.testCommand,
+      executionCommand(job.testCommand),
     ];
 
     try {
@@ -280,7 +289,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         this.image,
         "sh",
         "-c",
-        job.testCommand,
+        executionCommand(job.testCommand),
       ];
 
       try {
@@ -341,9 +350,9 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
 
     const minLat = latencies.length > 0 ? Math.min(...latencies) : 0;
     const maxLat = latencies.length > 0 ? Math.max(...latencies) : 0;
-    const observedCounts = parseTestCountsFromOutput(lastOutput);
+    const observedCounts = parseExecutedTestCounts(lastOutput, job.testCommand, cwd);
     const testsPassed = allPassed && scheduled.results.every(result => {
-      const counts = parseTestCountsFromOutput(result.output);
+      const counts = parseExecutedTestCounts(result.output, job.testCommand, cwd);
       return counts.passed > 0 && counts.failed === 0;
     });
     const concurrencyStampedePassed =

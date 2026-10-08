@@ -340,10 +340,7 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       // Initially failing state (RED). Keep the test file itself unchanged;
       // the patch changes only the fixture input inspected by the command.
       writeFileSync(stateFile, "FAIL\n");
-      writeFileSync(
-        join(wsDir, "regression.test.ts"),
-        "// immutable test fixture\n",
-      );
+      const testCmd = stateAssertionCommand(stateFile, "ASSERTION_ERROR_SAMPLE");
       execFileSync("git", ["init"], { cwd: wsDir, stdio: "ignore" });
       execFileSync("git", ["config", "user.email", "test@example.com"], {
         cwd: wsDir,
@@ -364,11 +361,6 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
       }).trim();
 
       // Test command that inspects status.txt without depending on a shell.
-      const testCmd = stateAssertionCommand(
-        stateFile,
-        "ASSERTION_ERROR_SAMPLE",
-      );
-
       const { ContributionRunManager } =
         await import("../src/run/run-manager.js");
       const manager = new ContributionRunManager({ baseDir });

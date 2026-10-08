@@ -34,7 +34,7 @@ describe("Governance & Anti-AI Audit Engine", () => {
         styleMatch: 100,
         securityAudit: 100,
       },
-      evidence: { allTestsPassing: true, reproductionVerified: true, passedUnitTestsCount: passed, zeroAssertionWarning: true },
+      evidence: { allTestsPassing: true, reproductionVerified: true, passedUnitTestsCount: passed, zeroAssertionWarning: false },
     });
     expect(audit.technicalGate?.status).toBe("FAIL");
     expect(audit.remediationSuggestions.join("\n")).toContain("executed tests");
@@ -106,6 +106,7 @@ describe("Governance & Anti-AI Audit Engine", () => {
 
   it("enforces RFC 100-line diff gate", () => {
     const auditPass = auditGovernance({
+      evidence: { passedUnitTestsCount: 1, allTestsPassing: true },
       diffText: "const clean = true;",
       prBodyText: "Fixes bug cleanly without robotic tags.",
       confidenceBreakdown: {
@@ -130,6 +131,7 @@ describe("Governance & Anti-AI Audit Engine", () => {
 
     // Test that unapproved draft is gated
     const auditUnapproved = auditGovernance({
+      evidence: { passedUnitTestsCount: 1, allTestsPassing: true },
       diffText: "const clean = true;",
       prBodyText: "Fixes bug cleanly.",
       confidenceBreakdown: {
@@ -150,6 +152,7 @@ describe("Governance & Anti-AI Audit Engine", () => {
     const auditFailRfc = auditGovernance({
       diffText: "const x = 1;",
       prBodyText: "Fixes bug cleanly without fluff.",
+      evidence: { passedUnitTestsCount: 1, allTestsPassing: true },
       confidenceBreakdown: {
         rootCause: 95,
         implementation: 95,
@@ -181,6 +184,7 @@ describe("Governance & Anti-AI Audit Engine", () => {
     };
     const result = auditGovernance({
       prBodyText: "Fixes bug with regression tests and documentation.",
+      evidence: { passedUnitTestsCount: 1, allTestsPassing: true },
       lineCount: 150,
       coreDiffLines: 40,
       confidenceBreakdown,

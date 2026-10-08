@@ -10,12 +10,27 @@ import {
   createDefaultPluginHost,
   triagePointerFindings,
   buildContributionRunManager,
+  getLocalRepositoryFullName,
   type ContributionRunManager,
   type ProbeCost,
   type DefectCategory,
 } from '@opencontrib/core';
 
 export function registerProbeTools(server: McpServer, suppliedRunManager?: ContributionRunManager): void {
+  const runManager = suppliedRunManager ?? buildContributionRunManager();
+  const requireRun = (requestedRunId?: string): string => {
+    const runId = runManager.resolveRunId(requestedRunId);
+    if (!runId || !runManager.getRun(runId)) {
+      throw new Error('An existing contribution run is required before probing; create a run first.');
+    }
+    return runId;
+  };
+  const saveProbe = (runId: string, result: Record<string, unknown>): void => {
+    runManager.saveArtifact(runId, 'probe', {
+      ...runManager.getRun(runId)!.artifacts.probe,
+      ...result,
+    });
+  };
   // -------------------------------------------------------------
   // Tool: contrib_probe_plan (仓库指纹与探测规划)
   // -------------------------------------------------------------
@@ -23,6 +38,7 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
     'contrib_probe_plan',
     'Extract repository fingerprint and negotiate matching active SAST/AST/Concurrency probe plugins with cost profiles',
     {
+      runId: z.string().optional().describe('Contribution run ID (defaults to the active run)'),
       targetPath: z.string().optional().default('.').describe('Target repository workspace path'),
       category: z
         .enum([
@@ -41,13 +57,16 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
     },
     async (args) => {
       try {
+        const runId = requireRun(args.runId);
         const resolved = path.resolve(args.targetPath || '.');
+        runManager.assertRepositoryTarget(runId, getLocalRepositoryFullName(resolved));
         const fingerprint = await extractRepoFingerprint(resolved);
         const plan = await negotiateProbes(fingerprint, {
           categoryFilter: args.category as DefectCategory | undefined,
           maxCost: args.maxCost as ProbeCost,
           includeOptional: args.includeOptional,
         } as any);
+        saveProbe(runId, { target: resolved, plan });
 
         return {
           content: [
@@ -56,6 +75,8 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
               text: JSON.stringify(
                 {
                   status: 'success',
+                  runId,
+                  currentPhase: runManager.getRun(runId)!.manifest.currentPhase,
                   target: resolved,
                   plan,
                 },
@@ -90,12 +111,9 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
     },
     async (args) => {
       try {
-        const runManager = suppliedRunManager ?? buildContributionRunManager();
-        const runId = runManager.resolveRunId(args.runId);
-        if (!runId || !runManager.getRun(runId)) {
-          throw new Error('An existing contribution run is required before probing; create a run first.');
-        }
+        const runId = requireRun(args.runId);
         const resolved = path.resolve(args.targetPath || '.');
+        runManager.assertRepositoryTarget(runId, getLocalRepositoryFullName(resolved));
         const fingerprint = await extractRepoFingerprint(resolved);
         const host = await createDefaultPluginHost({ workspacePath: resolved });
 
@@ -112,7 +130,7 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
           minConfidence: args.minConfidence ?? 80,
           includeAll: false,
         });
-        runManager.saveArtifact(runId, 'probe', {
+        saveProbe(runId, {
           target: resolved,
           executedProbes: scanResult.executedProbes,
           totalPointersCount: scanResult.pointersCreated.length,
@@ -158,17 +176,21 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
     'contrib_probe_hotspot',
     'Analyze Git commit churn and cyclomatic complexity hotspots to pinpoint high-risk, defect-prone files',
     {
+      runId: z.string().optional().describe('Contribution run ID (defaults to the active run)'),
       targetPath: z.string().optional().default('.').describe('Target repository workspace path'),
       limit: z.number().optional().default(5).describe('Number of top hotspot files to return'),
       sinceMonths: z.number().optional().default(6).describe('Months of Git history to analyze'),
     },
     async (args) => {
       try {
+        const runId = requireRun(args.runId);
         const resolved = path.resolve(args.targetPath || '.');
+        runManager.assertRepositoryTarget(runId, getLocalRepositoryFullName(resolved));
         const result = analyzeGitHotspots(resolved, {
           limit: args.limit ?? 5,
           sinceMonths: args.sinceMonths ?? 6,
         });
+        saveProbe(runId, { target: resolved, hotspots: result });
 
         return {
           content: [
@@ -177,6 +199,8 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
               text: JSON.stringify(
                 {
                   status: 'success',
+                  runId,
+                  currentPhase: runManager.getRun(runId)!.manifest.currentPhase,
                   target: resolved,
                   result,
                 },
@@ -202,6 +226,7 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
     'contrib_probe_fuzz',
     'Generate property-based boundary fuzzing test scaffold for target language and defect category',
     {
+      runId: z.string().optional().describe('Contribution run ID (defaults to the active run)'),
       targetPath: z.string().optional().default('.').describe('Target repository workspace path'),
       category: z
         .string()
@@ -213,7 +238,9 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
     },
     async (args) => {
       try {
+        const runId = requireRun(args.runId);
         const resolved = path.resolve(args.targetPath || '.');
+        runManager.assertRepositoryTarget(runId, getLocalRepositoryFullName(resolved));
         let lang = args.language;
         if (!lang) {
           const fingerprint = await extractRepoFingerprint(resolved);
@@ -224,6 +251,7 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
         }
 
         const spec = generatePropertyTest(args.category as DefectCategory, lang as any, args.functionName || 'processInput');
+        saveProbe(runId, { target: resolved, fuzz: { language: lang, spec } });
 
         return {
           content: [
@@ -232,6 +260,8 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
               text: JSON.stringify(
                 {
                   status: 'success',
+                  runId,
+                  currentPhase: runManager.getRun(runId)!.manifest.currentPhase,
                   target: resolved,
                   language: lang,
                   spec,
