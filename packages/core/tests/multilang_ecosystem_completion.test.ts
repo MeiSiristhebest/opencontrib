@@ -98,8 +98,13 @@ Passed!  - Failed:     0, Passed:    22, Skipped:     0, Total:    22, Duration:
       expect(parser.supports(rspecOut)).toBe(true);
       const parsedRspec = parser.parse(rspecOut);
       expect(parsedRspec.total).toBe(28);
-      expect(parsedRspec.passed).toBe(28);
+      expect(parsedRspec.passed).toBe(27);
       expect(parsedRspec.failed).toBe(0);
+
+      const allPending = parser.parse("3 examples, 0 failures, 3 pending");
+      expect(allPending.total).toBe(3);
+      expect(allPending.passed).toBe(0);
+      expect(allPending.failed).toBe(0);
 
       const minitestOut = `12 runs, 30 assertions, 0 failures, 0 errors, 0 skips`;
       expect(parser.supports(minitestOut)).toBe(true);

@@ -20,7 +20,7 @@ export class RubyRSpecOutputParser implements TestOutputParser {
     if (rspecMatch) {
       total = parseInt(rspecMatch[1], 10);
       failed = parseInt(rspecMatch[2], 10);
-      passed = Math.max(0, total - failed);
+      passed = Math.max(0, total - failed - parseInt(rspecMatch[3] ?? "0", 10));
       return { passed, failed, total };
     }
 

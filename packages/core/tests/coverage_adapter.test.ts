@@ -152,6 +152,14 @@ describe("LCOV changed-line coverage", () => {
     expect(await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext)).toBeUndefined();
   }));
 
+  test("includes production filenames that contain the word test", () => withTmpDir(async dir => {
+    const file = prepare(dir);
+    writeFileSync(join(dir, "latest.ts"), "export const latest = 1;\n");
+    writeFileSync(join(dir, "contest.ts"), "export const contest = 1;\n");
+    writeFileSync(file, "SF:value.ts\nDA:1,1\nDA:2,1\nDA:3,0\nend_of_record\n");
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext)).toBeUndefined();
+  }));
+
   test("rejects stale reports and paths outside the workspace", () => withTmpDir(async dir => {
     const file = prepare(dir);
     writeFileSync(file, "SF:value.ts\nDA:1,1\nDA:2,1\nend_of_record\n");

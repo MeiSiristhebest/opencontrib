@@ -109,18 +109,23 @@ function isTestPath(
   return (
     /(^|\/)(?:tests?|__tests__)(?:\/|$)/.test(normalizedPath) ||
     /\.(?:test|spec)\.[^/]+$/.test(baseName) ||
-    /tests?\.[^/]+$/.test(baseName) ||
+    /^tests?\.[^/]+$/.test(baseName) ||
     /_test\.[^/]+$/.test(baseName) ||
     /^test_[^/]+\.[^/]+$/.test(baseName) ||
     (includeTestPrefixedBasename && /^test[^/]*\.[^/]+$/.test(baseName))
   );
 }
 
+function hasPascalCaseTestSuffix(filePath: string): boolean {
+  const basename = filePath.replace(/\\/g, "/").split("/").pop() ?? "";
+  return /(?:Test|Tests|Spec|Specs)\.(?:java|cs|kts|kt)$/.test(basename);
+}
+
 function isTestSourcePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/").toLowerCase();
   // Assertion analysis treats names such as testUtils.ts as test sources;
   // supporting-file classification intentionally requires clearer test markers.
-  return isTestPath(normalized, true);
+  return isTestPath(normalized, true) || hasPascalCaseTestSuffix(filePath);
 }
 
 /**
@@ -503,6 +508,7 @@ export function isSupportingFile(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/").toLowerCase();
   return (
     isTestPath(normalized, false) ||
+    hasPascalCaseTestSuffix(filePath) ||
     /\.(?:md|mdx|rst)$/.test(normalized) ||
     /(^|\/)docs?(?:\/|$)/.test(normalized)
   );
@@ -789,8 +795,9 @@ export function auditGovernance(
     input.evidence?.zeroAssertionWarning !== true &&
     Number.isSafeInteger(input.evidence?.passedUnitTestsCount) &&
     (input.evidence?.passedUnitTestsCount ?? 0) > 0 &&
-    input.evidence?.allTestsPassing !== false &&
-    (input.evidence?.failedUnitTestsCount ?? 0) === 0;
+    input.evidence?.allTestsPassing === true &&
+    input.evidence?.reproductionVerified === true &&
+    input.evidence?.failedUnitTestsCount === 0;
 
   // 3b. Cross-Platform, Collision & Lifecycle Impact Analysis Check
   let impactAnalysisPassed = true;

@@ -61,7 +61,7 @@ Upgrade deprecated \`actions/checkout@v3\` and \`actions/setup-node@v3\` in CI w
     const audit = auditGovernance({
       diffText: diff,
       prBodyText: prBody,
-      evidence: { passedUnitTestsCount: 1, allTestsPassing: true },
+      evidence: { passedUnitTestsCount: 1, failedUnitTestsCount: 0, allTestsPassing: true, reproductionVerified: true },
       lineCount: 14,
       confidenceBreakdown: {
         rootCause: 95,

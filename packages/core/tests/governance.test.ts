@@ -41,6 +41,36 @@ describe("Governance & Anti-AI Audit Engine", () => {
   });
 
   it.each([
+    ["allTestsPassing", { allTestsPassing: undefined }],
+    ["failedUnitTestsCount", { failedUnitTestsCount: undefined }],
+    ["reproductionVerified", { reproductionVerified: undefined }],
+  ])("blocks GREEN evidence when %s is missing", (_field, missingField) => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/parser.ts b/parser.ts\n+export const value = 2;",
+      prTitle: "fix(parser): handle empty input",
+      prBody: "Handle empty input.",
+      confidenceBreakdown: {
+        rootCause: 100,
+        implementation: 100,
+        regression: 100,
+        defensiveCoverage: 100,
+        testCoverage: 100,
+        styleMatch: 100,
+        securityAudit: 100,
+      },
+      evidence: {
+        allTestsPassing: true,
+        failedUnitTestsCount: 0,
+        passedUnitTestsCount: 1,
+        reproductionVerified: true,
+        zeroAssertionWarning: false,
+        ...missingField,
+      },
+    });
+    expect(audit.technicalGate?.status).toBe("FAIL");
+  });
+
+  it.each([
     ["failed GREEN evidence", { allTestsPassing: false, passedUnitTestsCount: 1, failedUnitTestsCount: 1 }],
     ["nonzero failed test count", { allTestsPassing: true, passedUnitTestsCount: 1, failedUnitTestsCount: 1 }],
   ])("blocks %s even when test counts are positive", (_label, testEvidence) => {
@@ -128,7 +158,7 @@ describe("Governance & Anti-AI Audit Engine", () => {
 
   it("enforces RFC 100-line diff gate", () => {
     const auditPass = auditGovernance({
-      evidence: { passedUnitTestsCount: 1, allTestsPassing: true },
+      evidence: { passedUnitTestsCount: 1, failedUnitTestsCount: 0, allTestsPassing: true, reproductionVerified: true },
       diffText: "const clean = true;",
       prBodyText: "Fixes bug cleanly without robotic tags.",
       confidenceBreakdown: {
@@ -153,7 +183,7 @@ describe("Governance & Anti-AI Audit Engine", () => {
 
     // Test that unapproved draft is gated
     const auditUnapproved = auditGovernance({
-      evidence: { passedUnitTestsCount: 1, allTestsPassing: true },
+      evidence: { passedUnitTestsCount: 1, failedUnitTestsCount: 0, allTestsPassing: true, reproductionVerified: true },
       diffText: "const clean = true;",
       prBodyText: "Fixes bug cleanly.",
       confidenceBreakdown: {
@@ -174,7 +204,7 @@ describe("Governance & Anti-AI Audit Engine", () => {
     const auditFailRfc = auditGovernance({
       diffText: "const x = 1;",
       prBodyText: "Fixes bug cleanly without fluff.",
-      evidence: { passedUnitTestsCount: 1, allTestsPassing: true },
+      evidence: { passedUnitTestsCount: 1, failedUnitTestsCount: 0, allTestsPassing: true, reproductionVerified: true },
       confidenceBreakdown: {
         rootCause: 95,
         implementation: 95,
@@ -206,7 +236,7 @@ describe("Governance & Anti-AI Audit Engine", () => {
     };
     const result = auditGovernance({
       prBodyText: "Fixes bug with regression tests and documentation.",
-      evidence: { passedUnitTestsCount: 1, allTestsPassing: true },
+      evidence: { passedUnitTestsCount: 1, failedUnitTestsCount: 0, allTestsPassing: true, reproductionVerified: true },
       lineCount: 150,
       coreDiffLines: 40,
       confidenceBreakdown,
@@ -233,6 +263,9 @@ describe("Governance & Anti-AI Audit Engine", () => {
     expect(isSupportingFile("README.md")).toBe(true);
     expect(isSupportingFile("apps/web/pages/index.tsx")).toBe(false);
     expect(isSupportingFile("src/testHarness.ts")).toBe(false);
+    expect(isSupportingFile("src/latest.ts")).toBe(false);
+    expect(isSupportingFile("src/contest.ts")).toBe(false);
+    expect(isSupportingFile("src/test.ts")).toBe(true);
     expect(isSupportingFile("docs/guide.mdx")).toBe(true);
     expect(isSupportingFile("src/config.txt")).toBe(false);
   });
@@ -461,6 +494,7 @@ Fixes #1106
       evidence: {
         reproductionVerified: true,
         allTestsPassing: true,
+        failedUnitTestsCount: 0,
         passedUnitTestsCount: 5,
         testCoveragePercent: 70, // Below 85% threshold
       },
@@ -484,6 +518,7 @@ Fixes #1106
       evidence: {
         reproductionVerified: true,
         allTestsPassing: true,
+        failedUnitTestsCount: 0,
         passedUnitTestsCount: 5,
         testCoveragePercent: 95, // Above 85% threshold
       },
@@ -502,6 +537,8 @@ Fixes #1106
         allTestsPassing: true,
         changedCodeCoverageStatus: "PASS",
         changedCodeCoveragePercent: 70,
+        failedUnitTestsCount: 0,
+        zeroAssertionWarning: false,
         passedUnitTestsCount: 5,
       },
       coveragePolicy: { required: true, minimumChangedLineCoverage: 85 },
@@ -527,6 +564,10 @@ Fixes #1106
       },
       evidence: {
         changedCodeCoverageStatus: "UNAVAILABLE",
+        allTestsPassing: true,
+        reproductionVerified: true,
+        failedUnitTestsCount: 0,
+        zeroAssertionWarning: false,
         passedUnitTestsCount: 4,
       },
       coveragePolicy: { required: true, minimumChangedLineCoverage: 85 },
@@ -556,6 +597,10 @@ Fixes #1106
       evidence: {
         changedCodeCoverageStatus: "PASS",
         changedCodeCoveragePercent: 90,
+        allTestsPassing: true,
+        reproductionVerified: true,
+        failedUnitTestsCount: 0,
+        zeroAssertionWarning: false,
         passedUnitTestsCount: 4,
       },
       coveragePolicy: { required: true, minimumChangedLineCoverage: 85 },
@@ -582,6 +627,10 @@ Fixes #1106
       evidence: {
         changedCodeCoverageStatus: "PASS",
         changedCodeCoveragePercent: 75,
+        allTestsPassing: true,
+        reproductionVerified: true,
+        failedUnitTestsCount: 0,
+        zeroAssertionWarning: false,
         passedUnitTestsCount: 4,
       },
       coveragePolicy: { required: true, minimumChangedLineCoverage: 70 },
@@ -607,6 +656,10 @@ Fixes #1106
       },
       evidence: {
         handleLeakCheckPassed: "UNAVAILABLE",
+        allTestsPassing: true,
+        reproductionVerified: true,
+        failedUnitTestsCount: 0,
+        zeroAssertionWarning: false,
         passedUnitTestsCount: 4,
       },
       resourceLeakPolicy: { required: true },
@@ -766,6 +819,8 @@ diff --git a/foo_test.go b/foo_test.go
       },
       evidence: {
         allTestsPassing: true,
+          reproductionVerified: true,
+          failedUnitTestsCount: 0,
         passedUnitTestsCount: 1,
         redEvidence: {
           exitCode: 1,
