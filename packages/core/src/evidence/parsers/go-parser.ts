@@ -17,16 +17,25 @@ export class GoTestOutputParser implements TestOutputParser {
   }
 
   parse(output: string): ParsedTestCounts {
+    output = output.split(/\r?\n/).map(line => {
+      if (!line.startsWith("{")) return line;
+      try {
+        const event = JSON.parse(line);
+        return typeof event.Output === "string" ? event.Output : "";
+      } catch {
+        return "";
+      }
+    }).join("\n");
     let passed = 0;
     let failed = 0;
 
     // 1. Precise per-test matching (go test -v)
-    const passMatches = output.match(/^\s*---\s+PASS:\s+\S+\s+\([\d.]+s\)\s*$/gm);
+    const passMatches = output.match(/^\s*---\s+PASS:\s+\S+\s+\([\dhms.]+\)\s*$/gm);
     if (passMatches) {
       passed += passMatches.length;
     }
 
-    const failMatches = output.match(/^\s*---\s+FAIL:\s+\S+\s+\([\d.]+s\)\s*$/gm);
+    const failMatches = output.match(/^\s*---\s+FAIL:\s+\S+\s+\([\dhms.]+\)\s*$/gm);
     if (failMatches) {
       failed += failMatches.length;
     }

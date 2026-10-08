@@ -25,8 +25,8 @@ When an open-source task begins, identify the track and load the corresponding r
 ```mermaid
 graph LR
     P1["1. Initialize"] --> P2["2. Probe (A) or Scout (B)"]
-    P2 --> P3["3. Prepare Workspace"]
-    P3 --> P4["4. Assemble Context"]
+    P2 --> P3["3. Triage Findings (A) or Select Issue (B)"]
+    P3 --> P4["4. Prepare Workspace and Assemble Context"]
     P4 --> P5["5. Optional PoC / Capture RED"]
     P5 --> P6["6. Save Patch / Verify GREEN"]
     P6 --> P7["7. Governance Audit"]
@@ -40,9 +40,9 @@ graph LR
 
 Load these modular references into context **only when entering that specific phase**:
 
-- **Phase 2 & 4 (Scouting & Context):** Read [`references/discovery.md`](./references/discovery.md) for qualification filters, scoring heuristics, and context bundling.
-- **Phase 2 (Deep SAST & AST Probes):** Read [`references/probe.md`](./references/probe.md) for Smart Pointer (`ptr://...`) slicing, Semgrep packs, and Tree-sitter AST queries.
-- **Phase 3 (Workspace Sandbox):** Read [`references/workspace.md`](./references/workspace.md) for git worktree isolation and environment sanitization.
+- **Phase 2 (Scouting & Probing):** Read [`references/discovery.md`](./references/discovery.md) for qualification filters and scoring; read [`references/probe.md`](./references/probe.md) for Deep SAST and AST probes.
+- **Phase 3 (Pointer Navigation):** Read [`references/probe.md`](./references/probe.md) for Smart Pointer (`ptr://...`) slicing and finding triage.
+- **Phase 4 (Workspace & Context):** Read [`references/workspace.md`](./references/workspace.md) for git worktree isolation and environment sanitization; read [`references/discovery.md`](./references/discovery.md) for context bundling.
 - **Phase 5 & 6 (Empirical Verification):** Read [`references/evidence.md`](./references/evidence.md) for fail-first baseline assertions and targeted verification (use stress loops only when testing concurrency or race conditions).
 - **Phase 7 & 8 (Governance & Pull Requests):** Read [`references/governance.md`](./references/governance.md) for anti-AI linting, RFC-100 diff constraints, and native PR template merging.
 - **Phase 9 (Memory & Profile):** Read [`references/flywheel.md`](./references/flywheel.md) for ledger synchronization.

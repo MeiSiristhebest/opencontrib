@@ -101,7 +101,7 @@ it("MCP context rejects requests without a canonical run", async () => {
       repoTree: [],
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("run");
+    expect(result.content[0].text).toContain("A canonical contribution run is required before assembling context");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -119,16 +119,16 @@ it("MCP scout and probe reject missing runs before executing providers or scanne
       activeSession: new ActiveSessionManager(join(root, "active_session.json")),
     });
     const tools = (createOpenContribMcpServer({ runManager: manager }) as any)._registeredTools;
-    for (const [name, args] of [
-      ["contrib_scout", { target: "example/parser" }],
-      ["contrib_probe_run", { targetPath: root, onlyProbes: [] }],
-      ["contrib_probe_plan", { targetPath: root }],
-      ["contrib_probe_hotspot", { targetPath: root }],
-      ["contrib_probe_fuzz", { targetPath: root, language: "typescript" }],
+    for (const [name, args, message] of [
+      ["contrib_scout", { target: "example/parser" }, "An existing contribution run is required before scouting"],
+      ["contrib_probe_run", { targetPath: root, onlyProbes: [] }, "An existing contribution run is required before probing"],
+      ["contrib_probe_plan", { targetPath: root }, "An existing contribution run is required before probing"],
+      ["contrib_probe_hotspot", { targetPath: root }, "An existing contribution run is required before probing"],
+      ["contrib_probe_fuzz", { targetPath: root, language: "typescript" }, "An existing contribution run is required before probing"],
     ] as const) {
       const result = await tools[name].handler(args);
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("run");
+      expect(result.content[0].text).toContain(message);
     }
     expect(fingerprint).not.toHaveBeenCalled();
     expect(scout).not.toHaveBeenCalled();
@@ -139,6 +139,25 @@ it("MCP scout and probe reject missing runs before executing providers or scanne
     scout.mockRestore();
     hotspot.mockRestore();
     fuzz.mockRestore();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("MCP scout defaults to zero stars and uses the canonical repository", async () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-mcp-scout-defaults-"));
+  const scout = spyOn(core, "scoutOpportunities").mockResolvedValue([]);
+  try {
+    const manager = new ContributionRunManager({
+      baseDir: join(root, "runs"),
+      activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+    });
+    const run = manager.createRun({ repoFullName: "example/parser" });
+    const tool = (createOpenContribMcpServer({ runManager: manager }) as any)._registeredTools.contrib_scout;
+    const result = await tool.handler({ runId: run.runId, target: "example/parser" });
+    expect(result.isError).not.toBe(true);
+    expect(scout.mock.calls[0]?.[1]).toMatchObject({ repo: "example/parser", minStars: 0 });
+  } finally {
+    scout.mockRestore();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -230,7 +249,8 @@ contextTest("MCP planning, hotspot and fuzz results persist without completing a
     expect(artifact.fuzz).toBeDefined();
     const result = await tools.contrib_probe_run.handler({ runId: run.runId, targetPath: workspace, onlyProbes: [] });
     expect(result.isError).not.toBe(true);
-    expect(manager.getRun(run.runId)!.manifest.currentPhase).toBe("PROBE_COMPLETED");
+    expect(manager.getRun(run.runId)!.artifacts.probe!.executedProbes).toEqual([]);
+    expect(manager.getRun(run.runId)!.manifest.currentPhase).toBe("INITIALIZED");
     expect(manager.getRun(run.runId)!.artifacts.probe!.plan).toBeDefined();
   } finally {
     rmSync(root, { recursive: true, force: true });

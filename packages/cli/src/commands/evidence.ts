@@ -343,7 +343,7 @@ export const verifyGreenCommand = evidenceCommand
   )
   .option("--baseline-sha <sha>", "Baseline commit SHA")
   .option("--workspace-root <path>", "Root workspace for security boundary")
-  .option("--coverage-report <path>", "Workspace-relative LCOV report produced by GREEN (default: coverage/lcov.info)")
+  .option("--coverage-report <path>", "Native Bun LCOV path; must match --coverage-dir (defaults to the runner's directory)")
   .option("--pretty", "Pretty-print", false)
   .action(
     async (opts: {

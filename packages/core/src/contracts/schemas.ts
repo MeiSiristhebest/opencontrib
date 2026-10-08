@@ -243,6 +243,9 @@ export const FlakyTestRecordSchema = z
         message: "failCount cannot exceed runCount",
       });
     }
+    if (record.isFlakyOnBaseline !== (record.failCount > 0 && record.failCount < record.runCount)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["isFlakyOnBaseline"], message: "baseline flaky flag must match observed partial failures" });
+    }
   });
 export type FlakyTestRecord = z.infer<typeof FlakyTestRecordSchema>;
 
@@ -285,9 +288,9 @@ export const TrustedRedExecutionResultSchema = z.object({
   capturedAt: z.string().min(1),
   sourceTreeSha256: Sha256HexSchema,
   testIdentity: AuthoritativeTestIdentitySchema.optional(),
-  baselineTestedAt: z.string().optional(),
-  baselineFlakyTests: z.array(FlakyTestRecordSchema).optional(),
-  baselineCheckStatus: MeasurementStatusSchema.optional(),
+  baselineTestedAt: z.string().min(1),
+  baselineFlakyTests: z.array(FlakyTestRecordSchema),
+  baselineCheckStatus: MeasurementStatusSchema,
 });
 export type TrustedRedExecutionResult = z.infer<
   typeof TrustedRedExecutionResultSchema
@@ -1076,6 +1079,7 @@ export const EvidenceBundleV2Schema = z
     }),
     greenEvidence: GreenEvidenceSchema.extend({
       testIdentity: TestIdentitySchema,
+      passedUnitTestsCount: z.number().finite().int().positive().max(MAX_REPORTED_TEST_COUNT),
       actualTestDiffSha256: z.string().optional(),
       validatedPatchArtifactSha256: z.string(),
     }),

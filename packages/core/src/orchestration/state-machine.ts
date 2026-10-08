@@ -93,6 +93,16 @@ export class ContributionStateMachine {
     };
   }
 
+  reset(): void {
+    this.phaseSource = undefined;
+    this.state = {
+      stage: "IDLE",
+      policy: this.state.policy,
+      reproductionCaptured: false,
+      history: [{ stage: "IDLE", timestamp: new Date().toISOString() }],
+    };
+  }
+
   transition(nextStage: PipelineStage, note?: string): void {
     // Execution progress only. RunManager and its canonical contract own all
     // lifecycle transitions and artifact gates, including completion.

@@ -185,6 +185,7 @@ npx -y @opencontrib/cli doctor
 
 ```bash
 opencontrib run create --repo owner/repo --issue 1 --title "target defect"
+RUN_ID="<runId returned by run create>"
 ```
 
 ### 第 2 步：主动探针扫描与 Top-K 收敛（Track A 主动模式）
@@ -291,7 +292,7 @@ opencontrib submission submit --run-id "$RUN_ID"
 | **Eval（评测）**         | `eval judge` / `parse-judgment` | G-Eval 轨迹压缩与 Agent 盲评判定解析                           |
 |                          | `eval reflexion` / `benchmark`  | 提取反思沉淀至记忆库，执行基准场景评测                         |
 | **System（系统）**       | `doctor`                        | 诊断本地环境、探针二进制可执行性与系统健康度                   |
-|                          | `setup`                         | 检查并安装配置的开发工具链                                   |
+|                          | `setup`                         | 检查开发工具链；传入 `--install` 时安装缺失工具                 |
 |                          | `config` / `verify`             | 查看工作区配置，执行双阶段经验物证校验                         |
 
 ---

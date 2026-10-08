@@ -22,11 +22,13 @@ import { matchExpectedFailure } from "../evidence/expected-failure-matcher.js";
 import { runConcurrentRounds } from "../evidence/stress-runner.js";
 import { parseCommandSpec } from "../sandbox/command-spec.js";
 
-function executionCommand(command: string): string {
-  const spec = prepareTestExecutionSpec(command);
-  if (JSON.stringify(spec.args) === JSON.stringify(parseCommandSpec(command).args)) return command;
+function executionCommand(command: string, cwd: string): string {
+  const spec = prepareTestExecutionSpec(command, cwd);
+  const original = parseCommandSpec(command);
+  if (spec.executable === original.executable && JSON.stringify(spec.args) === JSON.stringify(original.args) && !Object.keys(spec.env ?? {}).length) return command;
   const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
-  return [spec.executable, ...spec.args].map(quote).join(" ");
+  const environment = Object.entries(spec.env ?? {}).map(([key, value]) => `${key}=${value}`);
+  return [...(environment.length ? ["env", ...environment] : []), spec.executable, ...spec.args].map(quote).join(" ");
 }
 
 export interface DockerExecutionWorkerOptions {
@@ -116,20 +118,20 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
 
   async captureRed(job: RedExecutionJob): Promise<RawRedExecutionResult> {
     const before = computeSourceTreeHash(job.workspace.workspacePath);
-    const baselineTestedAt = new Date().toISOString();
     const first = await this.executeRedOnce(job);
     if (first.sourceTreeSha256 !== before) throw new Error("RedBaselineMutationError: isolated RED execution changed the source tree.");
-    const samples = [{ passed: first.exitCode === 0, output: `${first.stdout}\n${first.stderr}` }];
+    const samples = [{ passed: first.exitCode === 0, output: `${first.stdout}\n${first.stderr}`, observedCounts: first.observedTestCounts }];
     for (let index = 0; index < 3; index++) {
       const sample = await this.executeRedOnce(job);
       if (sample.sourceTreeSha256 !== first.sourceTreeSha256) throw new Error("RedBaselineMutationError: isolated baseline sampling changed the RED source tree.");
-      samples.push({ passed: sample.exitCode === 0, output: `${sample.stdout}\n${sample.stderr}` });
+      samples.push({ passed: sample.exitCode === 0, output: `${sample.stdout}\n${sample.stderr}`, observedCounts: sample.observedTestCounts });
     }
     const baseline = summarizeFlakyBaseline(samples, { testCommand: job.testCommand, cwd: job.workspace.workspacePath, expectedAssertion: job.expectedAssertion });
-    return { ...first, baselineTestedAt, baselineFlakyTests: baseline.records, baselineCheckStatus: baseline.status };
+    const { testExecutionStartedAt: _startedAt, observedTestCounts: _counts, ...rawFirst } = first;
+    return { ...rawFirst, baselineTestedAt: new Date().toISOString(), baselineFlakyTests: baseline.records, baselineCheckStatus: baseline.status };
   }
 
-  private async executeRedOnce(job: RedExecutionJob): Promise<RawRedExecutionResult> {
+  private async executeRedOnce(job: RedExecutionJob): Promise<Omit<RawRedExecutionResult, "baselineTestedAt" | "baselineFlakyTests" | "baselineCheckStatus"> & { testExecutionStartedAt: number; observedTestCounts: { passed: number; failed: number; total: number } }> {
     const cwd = job.workspace.workspacePath;
     const testIdentity = computeTestIdentity(
       cwd,
@@ -164,10 +166,11 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       this.image,
       "sh",
       "-c",
-      executionCommand(job.testCommand),
+      executionCommand(job.testCommand, job.workspace.workspacePath),
     ];
 
     try {
+      const testExecutionStartedAt = Date.now();
       const res = await runDockerProcessAsync(dockerArgs, this.timeoutMs);
       if (res.exitCode === 124) {
         killContainerByCidFile(cidFile);
@@ -187,6 +190,8 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         outputSnippet: res.output.slice(0, 500),
         assertionMatched,
         capturedAt: new Date().toISOString(),
+        testExecutionStartedAt,
+        observedTestCounts: parseExecutedTestCounts(res.output, job.testCommand, cwd, testExecutionStartedAt),
         sourceTreeSha256: computeSourceTreeHash(cwd),
         testIdentity,
       };
@@ -289,7 +294,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         this.image,
         "sh",
         "-c",
-        executionCommand(job.testCommand),
+        executionCommand(job.testCommand, job.workspace.workspacePath),
       ];
 
       try {
@@ -302,6 +307,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
           exitCode: res.exitCode,
           output: res.output,
           elapsed: Date.now() - start,
+          observedTestCounts: parseExecutedTestCounts(res.output, job.testCommand, cwd, start),
         };
       } finally {
         try {
@@ -316,12 +322,13 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       rounds: job.stressLoopCount ?? 1,
       workersPerRound: job.concurrencyWorkers ?? 1,
       execute: executeOne,
-      isSuccess: (result) => result.passed,
+      isSuccess: (result) => result.passed && result.observedTestCounts.passed > 0 && result.observedTestCounts.failed === 0,
       onError: (error) => ({
         passed: false,
         exitCode: 1,
         output: error instanceof Error ? error.message : String(error),
         elapsed: 0,
+        observedTestCounts: { passed: 0, failed: 0, total: 0 },
       }),
     });
 
@@ -350,11 +357,8 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
 
     const minLat = latencies.length > 0 ? Math.min(...latencies) : 0;
     const maxLat = latencies.length > 0 ? Math.max(...latencies) : 0;
-    const observedCounts = parseExecutedTestCounts(lastOutput, job.testCommand, cwd);
-    const testsPassed = allPassed && scheduled.results.every(result => {
-      const counts = parseExecutedTestCounts(result.output, job.testCommand, cwd);
-      return counts.passed > 0 && counts.failed === 0;
-    });
+    const observedCounts = scheduled.results.at(-1)?.observedTestCounts ?? { passed: 0, failed: 0, total: 0 };
+    const testsPassed = allPassed && scheduled.results.every(result => result.observedTestCounts.passed > 0 && result.observedTestCounts.failed === 0);
     const concurrencyStampedePassed =
       testsPassed &&
       raceCollisions === 0 &&
@@ -363,7 +367,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
 
     return {
       command: job.testCommand,
-      exitCode: allPassed ? 0 : 1,
+      exitCode: testsPassed ? 0 : 1,
       outputSnippet: lastOutput.slice(0, 500),
       passed: testsPassed,
       sourceTreeSha256: greenTree,

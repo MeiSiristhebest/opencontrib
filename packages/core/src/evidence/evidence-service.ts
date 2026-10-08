@@ -1252,7 +1252,7 @@ export class EvidenceService {
 
     const contract = requireRedContract(executionContract, runId);
     const trustedRawResult = requireRawRedResult(rawResult, runId);
-    if (trustedRawResult.baselineCheckStatus === "FAIL" || trustedRawResult.baselineFlakyTests?.some(record => record.isFlakyOnBaseline)) {
+    if (trustedRawResult.baselineCheckStatus !== "PASS" || trustedRawResult.baselineFlakyTests.some(record => record.isFlakyOnBaseline)) {
       throw new Error("RedBaselineFlakyError: isolated RED baseline is intermittent. Evidence_red not saved.");
     }
     if (trustedRawResult.exitCode === 0) {
@@ -1559,7 +1559,7 @@ export class EvidenceService {
       baselineCommitSha,
       startedAt: coverageStartedAt,
       sourceRoot: "/workspace",
-      executionSpec: prepareTestExecutionSpec(trustedRawResult.command),
+      executionSpec: prepareTestExecutionSpec(trustedRawResult.command, targetCwd),
     });
     const coverageStatus = changedCodeCoveragePercent === undefined ? "UNAVAILABLE" : "PASS";
     let report: EvidenceReport = {

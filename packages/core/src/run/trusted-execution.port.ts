@@ -27,9 +27,9 @@ export interface RawRedExecutionResult {
  capturedAt: string;
  sourceTreeSha256: string;
  testIdentity?: TestIdentity;
- baselineTestedAt?: string;
- baselineFlakyTests?: FlakyTestRecord[];
- baselineCheckStatus?: MeasurementStatus;
+ baselineTestedAt: string;
+ baselineFlakyTests: FlakyTestRecord[];
+ baselineCheckStatus: MeasurementStatus;
 }
 
 export interface GreenExecutionJob {

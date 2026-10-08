@@ -28,7 +28,7 @@ export const scoutCommand = new Command("scout")
   )
   .option("--focus <list>", "Focus areas, comma-separated", (v) => v.split(","))
   .option("--limit <n>", "Max candidates to return", (v) => Number(v), 5)
-  .option("--min-stars <n>", "Minimum repository stars", (v) => Number(v), 50)
+  .option("--min-stars <n>", "Minimum repository stars", (v) => Number(v), 0)
   .option("--token <token>", "GitHub token (or set GITHUB_TOKEN env)")
   .option("--run-id <id>", "Contribution run ID (defaults to active session)")
   .option("--include-attempted", "Include issues even if previously attempted in local runs", false)
@@ -61,6 +61,7 @@ export const scoutCommand = new Command("scout")
           throw new Error("An existing contribution run is required before scouting; create a run first.");
         }
         getRunManager().assertRepositoryTarget(runId, target);
+        const canonicalTarget = getRunManager().getRun(runId)!.manifest.repoFullName;
         const profile = {
           techStack: opts.techStack ?? ["typescript", "javascript"],
           focusAreas: opts.focus ?? ["bugfix", "testing", "docs"],
@@ -68,7 +69,7 @@ export const scoutCommand = new Command("scout")
           minMatchScore: 60,
         };
         const opportunities = await scoutOpportunities(profile, {
-          repo: target,
+          repo: canonicalTarget,
           limit: opts.limit ?? 5,
           minStars: opts.minStars ?? 0,
           githubToken: opts.token || process.env.GITHUB_TOKEN,
@@ -77,7 +78,7 @@ export const scoutCommand = new Command("scout")
 
         if (opportunities.length > 0) {
           getRunManager().saveArtifact(runId, "opportunity", {
-            target,
+            target: canonicalTarget,
             opportunities,
             topOpportunity: opportunities[0],
           });
@@ -86,7 +87,7 @@ export const scoutCommand = new Command("scout")
         printJSON(
           {
             status: "success",
-            target,
+            target: canonicalTarget,
             foundCount: opportunities.length,
             opportunities,
           },
@@ -95,8 +96,8 @@ export const scoutCommand = new Command("scout")
 
         const top = opportunities[0];
         const nextCmd = top
-          ? `opencontrib workspace prepare --repo ${top.repoFullName} --issue ${top.issueNumber}`
-          : `opencontrib workspace prepare --repo ${target} --issue <id>`;
+          ? `opencontrib workspace prepare --run-id ${runId} --repo ${top.repoFullName} --issue ${top.issueNumber}`
+          : `opencontrib workspace prepare --run-id ${runId} --repo ${canonicalTarget} --issue <id>`;
 
         printPhaseGuidance({
           currentPhase: getRunManager().getRun(runId)!.manifest.currentPhase,

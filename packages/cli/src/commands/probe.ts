@@ -31,6 +31,39 @@ function resolveTargetDirectory(target?: string): string {
   return path.resolve(".");
 }
 
+function resolveTrackedTarget(runIdArg: string | undefined, target?: string) {
+  const manager = getRunManager();
+  const runId = manager.resolveRunId(runIdArg);
+  if (!runId || !manager.getRun(runId)) {
+    throw new Error("An existing contribution run is required before probing; create a run first.");
+  }
+  const resolved = resolveTargetDirectory(target);
+  manager.assertRepositoryTarget(runId, getLocalRepositoryFullName(resolved));
+  return { manager, runId, resolved };
+}
+
+function saveProbeArtifact(
+  manager: ContributionRunManager,
+  runId: string,
+  result: Record<string, unknown>,
+): void {
+  const previous = manager.getRun(runId)?.artifacts.probe;
+  let existing: Record<string, unknown> = {};
+  if (typeof previous === "string") {
+    try {
+      const parsed: unknown = JSON.parse(previous);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        existing = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // An unstructured legacy artifact has no fields that can be merged.
+    }
+  } else if (typeof previous === "object" && previous !== null && !Array.isArray(previous)) {
+    existing = previous as Record<string, unknown>;
+  }
+  manager.saveArtifact(runId, "probe", { ...existing, ...result });
+}
+
 export const probeCommand = new Command("probe").description(
   "Progressive probe discovery, repository fingerprinting, hotspot forensics, and targeted scanning",
 );
@@ -51,10 +84,11 @@ probeCommand
     "medium",
   )
   .option("--no-check-binaries", "Skip checking host binary existence")
+  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
   .option("--pretty", "Pretty-print JSON output", false)
   .action(async (target, opts) => {
     try {
-      const resolved = resolveTargetDirectory(target);
+      const { manager, runId, resolved } = resolveTrackedTarget(opts.runId, target);
       const fingerprint = await extractRepoFingerprint(resolved);
 
       const only = opts.only
@@ -74,10 +108,14 @@ probeCommand
         },
         new ProbeRegistry(),
       );
+      saveProbeArtifact(manager, runId, { target: resolved, plan });
 
       printJSON(
         {
           status: "success",
+          runId,
+          currentPhase: manager.getRun(runId)!.manifest.currentPhase,
+          target: resolved,
           plan,
         },
         opts.pretty,
@@ -161,7 +199,7 @@ probeCommand
         includeAll: Boolean(opts.all),
       });
 
-      getRunManager().saveArtifact(runId, "probe", {
+      saveProbeArtifact(getRunManager(), runId, {
         target: resolved,
         executedProbes: scanResult.executedProbes,
         totalPointersCount: scanResult.pointersCreated.length,
@@ -203,18 +241,23 @@ probeCommand
   )
   .option("--limit <number>", "Number of top hotspot files to return", "5")
   .option("--since-months <number>", "Months of commit history to inspect", "6")
+  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
   .option("--pretty", "Pretty-print JSON output", false)
   .action((target, opts) => {
     try {
-      const resolved = resolveTargetDirectory(target);
+      const { manager, runId, resolved } = resolveTrackedTarget(opts.runId, target);
       const result = analyzeGitHotspots(resolved, {
         limit: parseInt(opts.limit, 10),
         sinceMonths: parseInt(opts.sinceMonths, 10),
       });
+      saveProbeArtifact(manager, runId, { target: resolved, hotspots: result });
 
       printJSON(
         {
           status: "success",
+          runId,
+          currentPhase: manager.getRun(runId)!.manifest.currentPhase,
+          target: resolved,
           result,
         },
         opts.pretty,
@@ -236,10 +279,11 @@ probeCommand
     "numerical_bounds",
   )
   .option("--function-name <name>", "Target function to fuzz", "processInput")
+  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
   .option("--pretty", "Pretty-print JSON output", false)
   .action(async (target, opts) => {
     try {
-      const resolved = resolveTargetDirectory(target);
+      const { manager, runId, resolved } = resolveTrackedTarget(opts.runId, target);
       const fingerprint = await extractRepoFingerprint(resolved);
 
       const langLower = fingerprint.primaryLanguage.toLowerCase();
@@ -258,10 +302,14 @@ probeCommand
         lang,
         opts.functionName,
       );
+      saveProbeArtifact(manager, runId, { target: resolved, fuzz: spec });
 
       printJSON(
         {
           status: "success",
+          runId,
+          currentPhase: manager.getRun(runId)!.manifest.currentPhase,
+          target: resolved,
           spec,
         },
         opts.pretty,

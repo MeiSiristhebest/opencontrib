@@ -17,7 +17,7 @@ export interface CoverageMeasurementContext {
   startedAt?: number;
   /** Container source prefix; only the trusted worker supplies this mapping. */
   sourceRoot?: string;
-  /** Host-derived invocation of the supported native coverage instrumenter. */
+  /** Host-derived native `bun test --coverage --coverage-reporter=lcov` invocation. */
   executionSpec?: CommandSpec;
 }
 
@@ -84,13 +84,13 @@ export class LcovChangedLineCoverageAdapter implements TestCoverageAdapter {
   readonly name = "lcov-changed-lines";
   readonly scope = "changed-lines";
 
-  constructor(private readonly fileName = "coverage/lcov.info") {}
+  constructor(private readonly fileName?: string) {}
 
   async resolve(cwd: string, context: CoverageMeasurementContext = {}): Promise<number | undefined> {
     if (!context.executionSpec || context.startedAt === undefined) return undefined;
     const reportPath = bunLcovReportPath(context.executionSpec);
-    if (!reportPath || resolve(cwd, reportPath) !== resolve(cwd, this.fileName)) return undefined;
-    const report = readReport(cwd, this.fileName, context.startedAt);
+    if (!reportPath || (this.fileName !== undefined && resolve(cwd, reportPath) !== resolve(cwd, this.fileName))) return undefined;
+    const report = readReport(cwd, reportPath, context.startedAt);
     if (!report) return undefined;
     try {
       const sourceFiles = new Map<string, Map<number, number>>();
@@ -119,6 +119,13 @@ export class LcovChangedLineCoverageAdapter implements TestCoverageAdapter {
           sourceFiles.set(path, accumulated);
           record = undefined;
           path = undefined;
+        } else if (line && !/^TN:[^\0]*$/.test(line)) {
+          if (!record) return undefined;
+          const numeric = /^(?:FNF|FNH|LF|LH|BRF|BRH):(\d+)$/.exec(line);
+          if (numeric) {
+            if (!Number.isSafeInteger(Number(numeric[1]))) return undefined;
+          } else if (!/^FN:\d+,(?:\d+,)?[^\0]+$/.test(line) &&
+              !/^FNDA:\d+,[^\0]+$/.test(line) && !/^BRDA:\d+,\d+,\d+,(?:\d+|-)$/.test(line)) return undefined;
         }
       }
       if (record) return undefined;
@@ -127,11 +134,18 @@ export class LcovChangedLineCoverageAdapter implements TestCoverageAdapter {
       const changed = new Map<string, Set<number>>();
       const eligible = (file: string) => !isSupportingFile(file) && isEligibleSourceCodeFile(file);
       let current: string | undefined;
+      let fileHeader = false;
       for (const line of diff.split(/\r?\n/)) {
-        if (line.startsWith("+++ ")) {
+        if (line.startsWith("diff --git ")) {
+          current = undefined;
+          fileHeader = false;
+        } else if (line.startsWith("--- ") && current === undefined) {
+          fileHeader = true;
+        } else if (line.startsWith("+++ ") && fileHeader) {
           const raw = line.slice(4);
           const file = (raw.startsWith('"') ? JSON.parse(raw) : raw).replace(/^b\//, "");
           current = eligible(file) ? file : undefined;
+          fileHeader = false;
         } else if (current && line.startsWith("@@ ")) {
           const match = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
           if (!match) return undefined;

@@ -40,6 +40,28 @@ describe("Governance & Anti-AI Audit Engine", () => {
     expect(audit.remediationSuggestions.join("\n")).toContain("executed tests");
   });
 
+  it.each([
+    ["failed GREEN evidence", { allTestsPassing: false, passedUnitTestsCount: 1, failedUnitTestsCount: 1 }],
+    ["nonzero failed test count", { allTestsPassing: true, passedUnitTestsCount: 1, failedUnitTestsCount: 1 }],
+  ])("blocks %s even when test counts are positive", (_label, testEvidence) => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/parser.ts b/parser.ts\n+export const value = 2;",
+      prTitle: "fix(parser): handle empty input",
+      prBody: "Handle empty input.",
+      confidenceBreakdown: {
+        rootCause: 100,
+        implementation: 100,
+        regression: 100,
+        defensiveCoverage: 100,
+        testCoverage: 100,
+        styleMatch: 100,
+        securityAudit: 100,
+      },
+      evidence: { reproductionVerified: true, zeroAssertionWarning: false, ...testEvidence },
+    });
+    expect(audit.technicalGate?.status).toBe("FAIL");
+  });
+
   it.each([undefined, "## Description\nFix parser.\n"])("renders conditional AI disclosure without invented verification (%s)", nativeTemplateContent => {
     const template = renderMasterPrTemplate({
       issueNumber: 1,

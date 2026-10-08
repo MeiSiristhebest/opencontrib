@@ -10,6 +10,7 @@ When conducting open-source scouting, vulnerability probing, bug fixing, or pull
 
    ```bash
    opencontrib run create --repo <owner/repo> --issue <issue_id>
+   RUN_ID="<runId returned by run create>"
    ```
 
    Then verify environment and capabilities:
@@ -52,16 +53,16 @@ When conducting open-source scouting, vulnerability probing, bug fixing, or pull
    opencontrib evidence verify-green --test-cmd "<test_cmd>"
    ```
 
-6. **RFC-100 Governance Pre-Flight Audit:**
+6. **PR Description Draft:**
 
    ```bash
-   opencontrib governance audit --patch <patch_file> --pr-title "<title>"
+   opencontrib governance pr-template --run-id "$RUN_ID" --issue <id> --issue-title "<title>" --summary "<summary>"
    ```
 
-7. **PR Description Generation & Submission:**
+7. **RFC-100 Governance Audit & Submission:**
 
    ```bash
-   opencontrib governance pr-template --issue <id> --issue-title "<title>" --summary "<summary>"
+   opencontrib governance audit --run-id "$RUN_ID" --patch diff.patch --pr-title "<title>"
    opencontrib governance request-approval --run-id "$RUN_ID"
    opencontrib submission submit --run-id "$RUN_ID"
    ```

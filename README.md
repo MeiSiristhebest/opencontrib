@@ -185,6 +185,7 @@ npx -y @opencontrib/cli doctor
 
 ```bash
 opencontrib run create --repo owner/repo --issue 1 --title "target defect"
+RUN_ID="<runId returned by run create>"
 ```
 
 ### Step 2: Scan & Triage High-Value Defects (Proactive Track A)
@@ -292,7 +293,7 @@ Industrial-grade command set spanning 16 core capability domains:
 | **Eval**       | `eval judge` / `parse-judgment` | G-Eval trajectory compression and agent blind judgment parser              |
 |                | `eval reflexion` / `benchmark`  | Extract reflexion insights to memory and run benchmark suites              |
 | **System**     | `doctor`                        | Diagnose local toolchain, probe binaries, and environment health           |
-|                | `setup`                         | Check and install the configured development toolchain                     |
+|                | `setup`                         | Check the configured development toolchain; use `--install` to install missing tools |
 |                | `config` / `verify`             | Inspect workspace config, execute dual-stage verification                  |
 
 ---

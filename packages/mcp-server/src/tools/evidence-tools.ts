@@ -352,7 +352,7 @@ export function registerEvidenceTools(
         .describe("Concurrent workers (integer 1..32)"),
       baselineCommitSha: z.string().optional().describe("Baseline commit SHA"),
       workspaceRoot: z.string().optional().describe("Root workspace directory"),
-      coverageReport: z.string().optional().describe("Workspace-relative LCOV report produced by GREEN (default: coverage/lcov.info)"),
+      coverageReport: z.string().optional().describe("Optional native Bun LCOV path; it must match the test command's --coverage-dir"),
     },
     async (args) => {
       try {

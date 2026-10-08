@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   analyzeRepoEngineeringFingerprint,
+  getLocalRepositoryFullName,
   isPreparedRepositoryWorkspace,
 } from "../src/discovery/repo-fingerprint.js";
 
@@ -134,13 +135,11 @@ describe("Prepared repository workspace binding", () => {
         });
         throw new Error(`Clean fixture was rejected: ${JSON.stringify({ root, commands })}`);
       }
-      expect(prepared).toBe(true);
       if (process.platform === "win32") {
         const shortPath = execFileSync("cmd.exe", ["/d", "/c", "for %I in (.) do @echo %~fsI"], { cwd: root, encoding: "utf8" }).trim();
         if (!isPreparedRepositoryWorkspace(shortPath, binding)) {
           throw new Error(JSON.stringify({ shortPath, long: realpathSync(root), short: realpathSync(shortPath), longNative: realpathSync.native(root), shortNative: realpathSync.native(shortPath), longStat: statSync(root), shortStat: statSync(shortPath), gitRoot: execFileSync("git", ["-C", shortPath, "rev-parse", "--show-toplevel"], { encoding: "utf8" }) }));
         }
-        expect(isPreparedRepositoryWorkspace(shortPath, binding)).toBe(true);
       }
 
       mkdirSync(join(root, "node_modules", "fixture"), { recursive: true });
@@ -179,6 +178,26 @@ describe("Prepared repository workspace binding", () => {
         "commit", "-m", "Advanced workspace",
       ], { stdio: "ignore" });
       expect(isPreparedRepositoryWorkspace(root, binding)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  gitTest("accepts only GitHub remotes as repository identities", () => {
+    const root = mkdtempSync(join(tmpdir(), "oc-github-remote-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: root });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: root });
+      expect(getLocalRepositoryFullName(root)).toBe("owner/repo");
+
+      execFileSync("git", ["remote", "set-url", "origin", "git@github.com:owner/repo.git"], { cwd: root });
+      expect(getLocalRepositoryFullName(root)).toBe("owner/repo");
+
+      execFileSync("git", ["remote", "set-url", "origin", "https://attacker.example/github.com/owner/repo.git"], { cwd: root });
+      expect(getLocalRepositoryFullName(root)).toBeUndefined();
+
+      execFileSync("git", ["remote", "set-url", "origin", "https://github.com.attacker.example/owner/repo.git"], { cwd: root });
+      expect(getLocalRepositoryFullName(root)).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -34,6 +34,8 @@ export class NodeTestOutputParser implements TestOutputParser {
         if (summary) {
           passed = Number(/(\d+) passed/.exec(summary)?.[1] ?? 0);
           failed = Number(/(\d+) failed/.exec(summary)?.[1] ?? 0);
+          const total = /(?:\b(\d+) total\b|\((\d+)\)\s*$)/.exec(summary);
+          if (total && passed + failed > Number(total[1] ?? total[2])) return { passed: 0, failed: 0, total: 0 };
         } else if (!runner || runner === "mocha") {
           passed = Number(last(/^\s*(\d+) passing \([^)]+\)\s*$/gm)?.[1] ?? 0);
           failed = Number(last(/^\s*(\d+) failing\s*$/gm)?.[1] ?? 0);

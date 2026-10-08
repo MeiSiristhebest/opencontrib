@@ -179,7 +179,7 @@ export function createBenchmarkFixture(rootDir: string): BenchmarkFixture {
       explanation: "Fix mul to return the product",
     },
     prDraft:
-      "## Summary\n\nFixes `mul` returning 0 and adds a regression test.\n\n## Validation\n\nbun math.test.js",
+      "## Summary\n\nFixes `mul` returning 0 and adds a regression test.\n\n## Validation\n\nbun test math.test.js",
   };
 }
 
@@ -410,6 +410,9 @@ export class TimedOutExecutionPort implements TrustedExecutionPort {
       outputSnippet: "execution timed out (exit 124)",
       assertionMatched: false,
       capturedAt: new Date().toISOString(),
+      baselineTestedAt: new Date().toISOString(),
+      baselineFlakyTests: [],
+      baselineCheckStatus: "PASS",
       sourceTreeSha256:
         computeSourceTreeHash(job.workspace.workspacePath) || "",
     };

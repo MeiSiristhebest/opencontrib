@@ -41,8 +41,9 @@ Use Track A when the user asks to "audit", "find deep-water bugs", "scan reposit
 ### Phase 1: Initialize Run Session
 
 ```bash
-opencontrib doctor --pretty
 opencontrib run create --repo <owner>/<repo> --issue <issue_number> --title "<title>" --pretty
+RUN_ID="<runId returned by run create>"
+opencontrib doctor --pretty
 ```
 
 > [!NOTE]
@@ -131,8 +132,10 @@ opencontrib evidence capture-red --test-cmd "<targeted_test_command>" --assertio
 Apply the minimal, idiomatic code modification (strictly $\le 100$ lines). Then run targeted evidence verification:
 
 ```bash
-# RED was captured in Phase 5. Apply the fix and save its exact patch draft.
+# RED was captured in Phase 5. Save the structured patch artifact, then create
+# the raw diff consumed by the Phase 7 governance audit.
 opencontrib run save "$RUN_ID" --type patch < patch.json
+git diff --binary > diff.patch
 opencontrib evidence verify-green --test-cmd "<targeted_test_command>"
 
 # For concurrency / race / flaky defects, pass --concurrency and --stress-loop
@@ -140,6 +143,7 @@ opencontrib evidence verify-green --test-cmd "<targeted_test_command>"
 ```
 
 - **Auto-Sync**: `--cwd` and `--run-id` are automatically resolved from the active session.
+- `patch.json` must be a structured patch artifact with a `files` array. Each file entry carries its repository-relative `path`, `operation` (`CREATE`, `MODIFY`, or `DELETE`), exact post-fix `content`, and optional file `mode`.
 
 ---
 

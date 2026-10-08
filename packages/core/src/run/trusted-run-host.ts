@@ -71,16 +71,16 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
       capturedAt: red.capturedAt,
       sourceTreeSha256: red.sourceTreeSha256,
       testIdentity: red.testIdentity,
-      baselineTestedAt: red.baselineTestedAt,
-      baselineFlakyTests: red.baselineFlakyTests,
-      baselineCheckStatus: red.baselineCheckStatus,
+      baselineTestedAt: red.baselineTestedAt ?? red.capturedAt,
+      baselineFlakyTests: red.baselineFlakyTests ?? [],
+      baselineCheckStatus: red.baselineCheckStatus ?? "UNAVAILABLE",
     };
   }
 
   async verifyGreen(
     job: import("./trusted-execution.port.js").GreenExecutionJob,
   ): Promise<import("./trusted-execution.port.js").RawGreenExecutionResult> {
-    const { verifyGreenEvidence, getProcessHandleCount, parseExecutedTestCounts } =
+    const { verifyGreenEvidence, getProcessHandleCount } =
       await import("../evidence/evidence-collector.js");
     const initialHandles = getProcessHandleCount();
     const green = await verifyGreenEvidence({
@@ -91,7 +91,7 @@ export class DevelopmentUnsafeExecutionPort implements TrustedExecutionPort {
       concurrencyWorkers: job.concurrencyWorkers ?? 1,
     });
     const finalHandles = getProcessHandleCount();
-    const counts = parseExecutedTestCounts(green.stressResult.lastOutput, job.testCommand, job.workspace.workspacePath);
+    const counts = green.stressResult.lastTestCounts;
     const passed = green.greenEvidence.passed && counts.passed > 0 && counts.failed === 0;
     let handleLeakCheckPassed: "PASS" | "FAIL" | "UNAVAILABLE" = "UNAVAILABLE";
     if (initialHandles !== null && finalHandles !== null) {

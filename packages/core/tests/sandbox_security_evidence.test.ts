@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunCommand } from "./helpers/bun-command.js";
+import { bunCommand, bunTestCommand } from "./helpers/bun-command.js";
 import {
   SandboxRuntime,
   SanitizedLocalSandboxProvider,
@@ -292,11 +292,15 @@ describe("Workspace Security Boundaries & Path Traversal Protection", () => {
 describe("Pre-Fix to Post-Fix Dual-Stage Empirical Verification", () => {
   test("verifies dual-stage reproduction: pre-fix failure assertion + post-fix pass", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "dual-stage-test-"));
+    const passingSuite = bunTestCommand(
+      'import { expect, test } from "bun:test"; test("passes", () => expect(true).toBe(true));',
+      tempDir,
+    );
 
     try {
       const dualResult = await verifyDualStageReproduction({
         cwd: tempDir,
-        testCommand: bunCommand('console.log("TEST_PASS")'),
+        testCommand: passingSuite.command,
         preFixBaselineCaptured: true,
         preFixFailureOutput: "AssertionError: Expected 42 but got undefined",
         stressLoopCount: 3,
@@ -308,6 +312,7 @@ describe("Pre-Fix to Post-Fix Dual-Stage Empirical Verification", () => {
       expect(dualResult.stressLoopPassed).toBe(true);
       expect(dualResult.completedRuns).toBe(3);
     } finally {
+      passingSuite.cleanup();
       try {
         rmSync(tempDir, {
           recursive: true,

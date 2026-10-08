@@ -16,7 +16,10 @@ import {
   validatePhaseGate,
   type ContributionRunSummary,
 } from "../src/index.js";
-import type { RedEvidence } from "../src/contracts/schemas.js";
+import {
+  EvidenceBundleV2Schema,
+  type RedEvidence,
+} from "../src/contracts/schemas.js";
 import { bunCommand, stateAssertionCommand } from "./helpers/bun-command.js";
 import {
   countValidatedPatchChangedLines,
@@ -51,6 +54,53 @@ const FAILING_CMD = bunCommand(
 );
 
 describe("Evidence V2 — RED→GREEN trust boundary", () => {
+  test("requires positive observed-test counts in canonical GREEN evidence", () => {
+    const testIdentity = {
+      normalizedCommand: "bun test regression.test.ts",
+      testFiles: [{ path: "regression.test.ts", sha256: "a".repeat(64) }],
+      identitySha256: "b".repeat(64),
+    };
+    const bundle = {
+      redEvidence: {
+        command: "bun test regression.test.ts",
+        observedOutputSnippet: "1 failed",
+        exitCode: 1,
+        sourceTreeSha256: "c".repeat(64),
+        capturedAt: "2026-01-01T00:00:00.000Z",
+        assertionMatched: true,
+        testIdentity,
+      },
+      greenEvidence: {
+        command: "bun test regression.test.ts",
+        exitCode: 0,
+        outputSnippet: "1 passed",
+        passed: true,
+        sourceTreeSha256: "d".repeat(64),
+        capturedAt: "2026-01-01T00:01:00.000Z",
+        treeChangedComparedToRed: true,
+        appliedPatchSha256: "e".repeat(64),
+        validatedPatchArtifactSha256: "f".repeat(64),
+        stressLoopPassed: true,
+        roundsRequested: 1,
+        roundsCompleted: 1,
+        workersPerRound: 1,
+        executionsExpected: 1,
+        executionCount: 1,
+        allTestsPassing: true,
+        testIdentity,
+      },
+      reproductionVerified: true,
+      allTestsPassing: true,
+    };
+    expect(EvidenceBundleV2Schema.safeParse(bundle).success).toBe(false);
+    expect(
+      EvidenceBundleV2Schema.safeParse({
+        ...bundle,
+        greenEvidence: { ...bundle.greenEvidence, passedUnitTestsCount: 1 },
+      }).success,
+    ).toBe(true);
+  });
+
   test("computeSourceTreeHash is a stable, deterministic 64-hex fingerprint", () => {
     const dir = mkdtempSync(join(tmpdir(), "oc-tree-hash-"));
     try {
@@ -219,6 +269,9 @@ describe("Evidence V2 — RED→GREEN trust boundary", () => {
         outputSnippet: "ASSERTFAIL",
         assertionMatched: true,
         capturedAt: new Date().toISOString(),
+        baselineTestedAt: new Date().toISOString(),
+        baselineFlakyTests: [],
+        baselineCheckStatus: "PASS" as const,
         sourceTreeSha256: computeSourceTreeHash(wsDir),
         testIdentity,
       };

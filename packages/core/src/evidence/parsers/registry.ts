@@ -8,6 +8,7 @@ import { CppGTestOutputParser } from './gtest-parser.js';
 import { DotnetTestOutputParser } from './dotnet-parser.js';
 import { RubyRSpecOutputParser } from './rspec-parser.js';
 import { PhpUnitOutputParser } from './phpunit-parser.js';
+import { SwiftTestOutputParser } from './swift-parser.js';
 
 export class TestOutputParserRegistry {
   private parsers: TestOutputParser[] = [];
@@ -23,6 +24,7 @@ export class TestOutputParserRegistry {
     this.register(new DotnetTestOutputParser());
     this.register(new RubyRSpecOutputParser());
     this.register(new PhpUnitOutputParser());
+    this.register(new SwiftTestOutputParser());
   }
 
   register(parser: TestOutputParser): void {

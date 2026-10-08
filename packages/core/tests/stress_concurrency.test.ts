@@ -1,10 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { runStressLoopAsync } from "../src/evidence/evidence-collector.js";
 import { runConcurrentRounds } from "../src/evidence/stress-runner.js";
 import { EvidenceReportSchema } from "../src/contracts/schemas.js";
-import { bunCommand } from "./helpers/bun-command.js";
+import { bunTestCommand } from "./helpers/bun-command.js";
 
-const PASS_CMD = bunCommand('console.log("ok")');
+const passingSuite = bunTestCommand(
+  'import { expect, test } from "bun:test"; test("passes", () => expect(true).toBe(true));',
+  process.cwd(),
+);
+const PASS_CMD = passingSuite.command;
+afterAll(() => passingSuite.cleanup());
 
 describe("runConcurrentRounds — rounds × workers contract", () => {
   test("one round with five workers executes five workers", async () => {

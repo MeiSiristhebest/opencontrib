@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -294,10 +294,20 @@ describe("CLI Commands & Subcommands Test Suite", () => {
     ]);
   });
 
-  it("executes probe subcommands (plan, hotspot, fuzz)", async () => {
-    await probeCommand.parseAsync(["node", "test", "plan", "."]);
-    await probeCommand.parseAsync(["node", "test", "hotspot", "."]);
-    await probeCommand.parseAsync(["node", "test", "fuzz", "."]);
+  it("requires a canonical run before probe plan, hotspot, or fuzz", async () => {
+    const errors: string[] = [];
+    const errorSpy = spyOn(console, "error").mockImplementation((message) => errors.push(String(message)));
+    try {
+      for (const subcommand of ["plan", "hotspot", "fuzz"]) {
+        await expect(
+          probeCommand.parseAsync(["node", "test", subcommand, ".", "--run-id", "missing-probe-test-run"]),
+        ).rejects.toThrow();
+      }
+      expect(errors).toHaveLength(3);
+      expect(errors.every(message => message.includes("An existing contribution run is required before probing"))).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("executes capability & plugin subcommands", async () => {
@@ -417,8 +427,10 @@ describe("CLI Commands & Subcommands Test Suite", () => {
 
   it("registers scout options and accepts both [target] positional and --repo option", () => {
     const repoOption = scoutCommand.options.find((o) => o.attributeName() === "repo");
+    const minStarsOption = scoutCommand.options.find((o) => o.attributeName() === "minStars");
     expect(repoOption).toBeDefined();
     expect(repoOption?.short).toBe("-r");
+    expect(minStarsOption?.defaultValue).toBe(0);
 
     const targetArg = scoutCommand.registeredArguments.find((a) => a.name() === "target");
     expect(targetArg).toBeDefined();

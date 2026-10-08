@@ -248,6 +248,7 @@ export class AgentOrchestrator {
     targetRepo?: string;
     stressLoopRuns?: number;
   }): Promise<OrchestratorRunResult> {
+    this.deps.stateMachine.reset();
     const ctx: PipelineContext = {
       profile: input.profile,
       targetRepo: input.targetRepo,

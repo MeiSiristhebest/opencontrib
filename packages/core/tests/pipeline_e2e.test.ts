@@ -402,9 +402,7 @@ describe("AgentOrchestrator pipeline (injected, offline)", () => {
 
     expect(result.status).toBe("DRY_RUN_COMPLETED");
     expect(result.runId).toBeDefined();
-    expect(result.currentPhase).toBe(deps.stateMachine.getState().currentPhase);
-    expect(result.currentPhase).not.toBe("PR_SUBMITTED");
-    expect(result.currentPhase).not.toBe("COMPLETED");
+    expect(result.currentPhase).toBe("CONTEXT_ASSEMBLED");
     expect(result.stage).toBe("COMPLETED");
     expect(result.selectedOpportunity?.repoFullName).toBe(
       "octocat/hello-world",

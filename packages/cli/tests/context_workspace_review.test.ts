@@ -189,7 +189,7 @@ it("CLI context rejects requests without a canonical run", async () => {
     });
     const result = await runContextCli(manager, "", "example/parser", 1);
     expect(result.status).toBe(1);
-    expect(parseCliResponse(result).message).toContain("run");
+    expect(parseCliResponse(result).message).toContain("A canonical contribution run is required before assembling context");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

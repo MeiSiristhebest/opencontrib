@@ -438,6 +438,7 @@ function seedGovernanceReadyRun(
         allTestsPassing: true,
         assertionMatchedFingerprint: "fp",
         testIdentity,
+        passedUnitTestsCount: 1,
       },
     },
     "EVIDENCE_COLLECTED",
@@ -2268,7 +2269,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         "git config user.name Tester && git config user.email test@example.com",
         { cwd: wsDir, stdio: "ignore" },
       );
-      execSync("git add test.txt regression.test.ts && git commit -m baseline", {
+      execSync("git add -A && git commit -m baseline", {
         cwd: wsDir,
         stdio: "ignore",
       });
@@ -2383,7 +2384,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
         "git config user.name Tester && git config user.email test@example.com",
         { cwd: wsDir, stdio: "ignore" },
       );
-      execSync("git add test.txt regression.test.ts && git commit -m baseline", {
+      execSync("git add -A && git commit -m baseline", {
         cwd: wsDir,
         stdio: "ignore",
       });
@@ -2663,6 +2664,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
             allTestsPassing: true,
             assertionMatchedFingerprint: "fp",
             testIdentity,
+            passedUnitTestsCount: 1,
           },
         },
         "EVIDENCE_COLLECTED",
@@ -2852,6 +2854,7 @@ describe("Trust Boundary: Approval & Submission Services with Provenance Gates",
             allTestsPassing: true,
             assertionMatchedFingerprint: "fp",
             testIdentity,
+            passedUnitTestsCount: 1,
           },
         },
         "EVIDENCE_COLLECTED",

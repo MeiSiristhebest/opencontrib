@@ -550,7 +550,7 @@ export function registerDiscoveryTools(
       minStars: z
         .number()
         .optional()
-        .describe("Minimum repository stars filter (default 50)"),
+        .describe("Minimum repository stars filter (default 0)"),
       runId: z
         .string()
         .optional()
@@ -573,9 +573,10 @@ export function registerDiscoveryTools(
         throw new Error("An existing contribution run is required before scouting; create a run first.");
       }
       runManager.assertRepositoryTarget(runId, args.target);
+      const canonicalTarget = runManager.getRun(runId)!.manifest.repoFullName;
 
       const scoutOpts = {
-        repo: args.target,
+        repo: canonicalTarget,
         limit: args.limit ?? 5,
         minStars: args.minStars ?? 0,
       };
@@ -584,7 +585,7 @@ export function registerDiscoveryTools(
 
       if (opportunities.length > 0) {
         runManager.saveArtifact(runId, "opportunity", {
-          target: args.target,
+          target: canonicalTarget,
           opportunities,
           topOpportunity: opportunities[0],
         });
@@ -597,7 +598,7 @@ export function registerDiscoveryTools(
             text: JSON.stringify(
               {
                 status: "success",
-                target: args.target,
+                target: canonicalTarget,
                 foundCount: opportunities.length,
                 opportunities,
               },

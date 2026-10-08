@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   IstanbulSummaryCoverageAdapter,
   LcovChangedLineCoverageAdapter,
@@ -92,15 +92,16 @@ describe("IstanbulSummaryCoverageAdapter", () => {
 
 describe("LCOV changed-line coverage", () => {
   const executionContext = { startedAt: 0, executionSpec: prepareTestExecutionSpec("bun test --coverage --coverage-reporter=lcov") };
-  function prepare(dir: string) {
+  function prepare(dir: string, reportPath = "coverage/lcov.info") {
     execFileSync("git", ["init", "-q"], { cwd: dir });
     writeFileSync(join(dir, ".gitignore"), "coverage/\n");
     writeFileSync(join(dir, "value.ts"), "export const value = 1;\nexport const other = 1;\nexport const unchanged = 1;\n");
     execFileSync("git", ["add", "."], { cwd: dir });
     execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "baseline"], { cwd: dir });
     writeFileSync(join(dir, "value.ts"), "export const value = 2;\nexport const other = 2;\nexport const unchanged = 1;\n");
-    mkdirSync(join(dir, "coverage"));
-    return join(dir, "coverage", "lcov.info");
+    const file = join(dir, reportPath);
+    mkdirSync(dirname(file), { recursive: true });
+    return file;
   }
 
   test("counts changed executable source lines and includes newly created source files", () => withTmpDir(async dir => {
@@ -112,9 +113,34 @@ describe("LCOV changed-line coverage", () => {
     expect(await new LcovChangedLineCoverageAdapter().resolve(dir)).toBeUndefined();
   }));
 
+  test("reads a custom LCOV path selected by the trusted Bun command", () => withTmpDir(async dir => {
+    const file = prepare(dir, "reports/lcov.info");
+    const executionSpec = prepareTestExecutionSpec(
+      "bun test --coverage --coverage-reporter=lcov --coverage-dir=reports",
+      dir,
+    );
+    writeFileSync(file, "SF:value.ts\nDA:1,1\nDA:2,1\nDA:3,0\nend_of_record\n");
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir, {
+      startedAt: 0,
+      executionSpec,
+    })).toBe(100);
+  }));
+
+  test("does not treat added source text beginning with plus signs as a file header", () => withTmpDir(async dir => {
+    const file = prepare(dir);
+    writeFileSync(join(dir, "value.ts"), 'export const value = 2;\nexport const other = 2;\nexport const unchanged = 1;\nexport const marker = "++ text";\n');
+    writeFileSync(file, "SF:value.ts\nDA:1,1\nDA:2,1\nDA:3,0\nDA:4,1\nend_of_record\n");
+    expect(await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext)).toBe(100);
+  }));
+
   test("rejects missing source records, invalid counts, and incomplete LCOV", () => withTmpDir(async dir => {
     const file = prepare(dir);
-    for (const report of ["SF:other.ts\nDA:1,1\nend_of_record\n", "SF:value.ts\nDA:1,-1\nend_of_record\n", "SF:value.ts\nDA:1,1\n"]) {
+    for (const report of [
+      "SF:other.ts\nDA:1,1\nend_of_record\n",
+      "SF:value.ts\nDA:1,1\nDA:2,-1\nend_of_record\n",
+      "SF:value.ts\nDA:1,1\nDA:2,1\nUNKNOWN:1\nend_of_record\n",
+      "SF:value.ts\nDA:1,1\n",
+    ]) {
       writeFileSync(file, report);
       expect(await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext)).toBeUndefined();
     }
