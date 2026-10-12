@@ -122,6 +122,49 @@ function workspacePathKey(value: string): string {
   return `${prefix}-${digest}`;
 }
 
+export function linkDependenciesIfPresent(sourceRepoPath: string, targetPath: string): void {
+  try {
+    const isWin = process.platform === "win32";
+    const symlinkType = isWin ? "junction" : "dir";
+
+    // 1. Root node_modules
+    const rootNm = join(sourceRepoPath, "node_modules");
+    const targetNm = join(targetPath, "node_modules");
+    if (existsSync(rootNm) && !existsSync(targetNm)) {
+      try {
+        symlinkSync(rootNm, targetNm, symlinkType);
+      } catch {}
+    }
+
+    // 2. Monorepo packages/*/node_modules
+    const sourcePackages = join(sourceRepoPath, "packages");
+    if (existsSync(sourcePackages)) {
+      try {
+        const pkgs = readdirSync(sourcePackages);
+        for (const pkg of pkgs) {
+          const pkgNm = join(sourcePackages, pkg, "node_modules");
+          const targetPkgNm = join(targetPath, "packages", pkg, "node_modules");
+          if (existsSync(pkgNm) && !existsSync(targetPkgNm)) {
+            mkdirSync(join(targetPath, "packages", pkg), { recursive: true });
+            try {
+              symlinkSync(pkgNm, targetPkgNm, symlinkType);
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    // 3. Python virtualenv (.venv) if present
+    const rootVenv = join(sourceRepoPath, ".venv");
+    const targetVenv = join(targetPath, ".venv");
+    if (existsSync(rootVenv) && !existsSync(targetVenv)) {
+      try {
+        symlinkSync(rootVenv, targetVenv, symlinkType);
+      } catch {}
+    }
+  } catch {}
+}
+
 export class WorktreeManager {
   private workspaceRoot: string;
   private cacheRoot: string;
@@ -220,22 +263,34 @@ export class WorktreeManager {
       "-C",
       sourceRepoPath,
       "fetch",
-      "--prune",
       "origin",
-      `${baseBranch}:refs/remotes/origin/${baseBranch}`,
+      `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`,
     ]);
     if (!fetch.success) {
       throw new Error(
         `WorkspaceBaseCommitUnavailableError: failed to fetch origin/${baseBranch}: ${fetch.stderr.trim() || "unknown Git error"}`,
       );
     }
-    const resolved = this.runGit([
+    let resolved = this.runGit([
       "-C",
       sourceRepoPath,
       "rev-parse",
       "--verify",
       `refs/remotes/origin/${baseBranch}^{commit}`,
     ]);
+    if (
+      !resolved.success ||
+      !/^[0-9a-f]{7,64}$/i.test(resolved.stdout.trim())
+    ) {
+      // Fallback for bare repositories where remote branches map directly to refs/heads/
+      resolved = this.runGit([
+        "-C",
+        sourceRepoPath,
+        "rev-parse",
+        "--verify",
+        `refs/heads/${baseBranch}^{commit}`,
+      ]);
+    }
     if (
       !resolved.success ||
       !/^[0-9a-f]{7,64}$/i.test(resolved.stdout.trim())
@@ -300,6 +355,7 @@ export class WorktreeManager {
           `WorkspaceBaseCommitUnavailableError: existing workspace '${workspacePath}' is not checked out at verified upstream base ${baseCommitSha}.`,
         );
       }
+      linkDependenciesIfPresent(sourceRepoPath, workspacePath);
       return {
         workspacePath,
         branchName,
@@ -376,6 +432,8 @@ export class WorktreeManager {
 
       if (!addResult.success) throw new Error(addResult.stderr);
 
+      linkDependenciesIfPresent(sourceRepoPath, workspacePath);
+
       return {
         workspacePath,
         branchName,
@@ -428,6 +486,7 @@ export class WorktreeManager {
             `WorkspaceBaseCommitUnavailableError: failed to check out verified base ${baseCommitSha}.`,
           );
         }
+        linkDependenciesIfPresent(sourceRepoPath, workspacePath);
         return {
           workspacePath,
           branchName,
