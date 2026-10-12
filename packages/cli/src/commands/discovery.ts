@@ -1,6 +1,8 @@
 /** `opencontrib discovery <sub>` — Opportunity scoring, qualification, context assembly. */
 
 import { Command } from "commander";
+import fs from "node:fs";
+import path from "node:path";
 import {
   assessFeasibility,
   detectSystemCapabilities,
@@ -65,13 +67,27 @@ const qualifyCommand = new Command("qualify")
     try {
       const input = (opts as any).input ?? (await readStdin());
       const parsed = parseJSON(input, "stdin") as any;
-      if (!parsed?.issueNumber || !parsed.issueTitle) {
+      const issueNumber = parsed?.issueNumber ?? parsed?.number ?? 1;
+      const issueTitle = parsed?.issueTitle ?? parsed?.title;
+      if (!issueTitle) {
         console.error(
-          '❌ Missing required "issueNumber" and "issueTitle" in input JSON',
+          '❌ Missing required "issueTitle" (or "title") in input JSON',
         );
         throw new CliExitError(1);
       }
-      const qualification = qualifyIssue(parsed);
+      const normalizedInput = {
+        issueNumber,
+        issueTitle,
+        issueBody: parsed.issueBody ?? parsed.body ?? "",
+        labels: parsed.labels ?? [],
+        isOpen: parsed.isOpen ?? (parsed.state !== "closed"),
+        assignees: parsed.assignees ?? (parsed.assignee ? [parsed.assignee] : []),
+        createdAt: parsed.createdAt ?? parsed.created_at ?? new Date().toISOString(),
+        authorLogin: parsed.authorLogin ?? parsed.user?.login,
+        comments: parsed.comments ?? [],
+        existingLinkedPrsCount: parsed.existingLinkedPrsCount ?? parsed.linkedPrsCount ?? 0,
+      };
+      const qualification = qualifyIssue(normalizedInput);
       printJSON(
         {
           status: qualification.isQualified ? "qualified" : "disqualified",
@@ -318,15 +334,69 @@ const manifestsCommand = new Command("manifests")
   .description(
     "Diagnose repo manifests (workflows, package.json, pyproject, etc.) for ≤100-line PR improvements",
   )
+  .argument(
+    "[target]",
+    "Target repository directory to scan (defaults to current dir if no input piped)",
+    ".",
+  )
   .option(
     "--input <json>",
     "JSON with workflows, readmeContent, packageJsonContent, etc. (or pipe via stdin)",
   )
   .option("--pretty", "Pretty-print", false)
-  .action(async (opts: { pretty?: boolean }) => {
+  .action(async (target: string, opts: { input?: string; pretty?: boolean }) => {
     try {
-      const input = (opts as any).input ?? (await readStdin());
-      const parsed = parseJSON(input, "stdin") as any;
+      let parsed: any;
+      if (opts.input) {
+        parsed = parseJSON(opts.input, "--input");
+      } else if (!process.stdin.isTTY) {
+        try {
+          const input = await readStdin();
+          if (input && input.trim()) {
+            parsed = parseJSON(input, "stdin");
+          }
+        } catch {
+          // If stdin read fails or is empty, fall back to directory scan
+        }
+      }
+
+      if (!parsed) {
+        const resolved = path.resolve(target || ".");
+        const workflows: Array<{ path: string; content: string }> = [];
+        const workflowsDir = path.join(resolved, ".github", "workflows");
+        if (fs.existsSync(workflowsDir)) {
+          const files = fs.readdirSync(workflowsDir);
+          for (const f of files) {
+            if (f.endsWith(".yml") || f.endsWith(".yaml")) {
+              const full = path.join(workflowsDir, f);
+              try {
+                workflows.push({
+                  path: path.relative(resolved, full).replace(/\\/g, "/"),
+                  content: fs.readFileSync(full, "utf8"),
+                });
+              } catch {}
+            }
+          }
+        }
+
+        const readIfExists = (rel: string) => {
+          const full = path.join(resolved, rel);
+          return fs.existsSync(full) ? fs.readFileSync(full, "utf8") : undefined;
+        };
+
+        parsed = {
+          workflows,
+          readmeContent: readIfExists("README.md") ?? readIfExists("readme.md"),
+          packageJsonContent: readIfExists("package.json"),
+          pyprojectContent: readIfExists("pyproject.toml"),
+          cargoContent: readIfExists("Cargo.toml"),
+          gitignoreContent: readIfExists(".gitignore"),
+          dependabotContent:
+            readIfExists(".github/dependabot.yml") ??
+            readIfExists(".github/dependabot.yaml"),
+        };
+      }
+
       const result = diagnoseManifests(parsed || {});
       printJSON(result, opts.pretty);
     } catch (err: any) {

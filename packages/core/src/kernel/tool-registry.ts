@@ -285,6 +285,31 @@ export function isBinaryOnPath(bin: string): boolean {
     return true;
   }
 
+  // Windows Git fallback: query Git for Windows registry
+  if (isWindows && bin === 'git') {
+    const regKeys = [
+      'HKLM\\SOFTWARE\\GitForWindows',
+      'HKCU\\Software\\GitForWindows',
+    ];
+    for (const regKey of regKeys) {
+      try {
+        const regRes = spawnSync('reg.exe', ['query', regKey, '/v', 'InstallPath'], {
+          encoding: 'utf-8',
+          timeout: 2000,
+          env: strippedEnv,
+        });
+        const match = (regRes.stdout || '').match(/InstallPath\s+REG_\w+\s+(.+)/i);
+        if (match && match[1]) {
+          const regGit = join(match[1].trim(), 'cmd', 'git.exe');
+          if (existsSync(regGit)) {
+            binaryCache.set(bin, true);
+            return true;
+          }
+        }
+      } catch {}
+    }
+  }
+
   // Fallback: check OPENCONTRIB_DOCKER_BIN_DIR for non-standard install paths
   const customDir = process.env.OPENCONTRIB_DOCKER_BIN_DIR;
   if (customDir) {

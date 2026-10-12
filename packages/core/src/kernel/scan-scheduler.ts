@@ -66,7 +66,7 @@ export class ProbeScanScheduler {
         return execWithSpawn(cmd, {
           cwd,
           timeout: opts.timeout,
-          shell: false,
+          shell: opts.shell ?? (process.platform === "win32"),
           env: SANITIZED_ENV,
         });
       },

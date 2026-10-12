@@ -1,7 +1,7 @@
 import { spawnSync } from "child_process";
 import { existsSync } from "fs";
 import { homedir, platform } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
 import { discoverDocker } from "./docker-discovery.js";
 import { isBinaryOnPath, areBinariesOnPath } from "../kernel/tool-registry.js";
 import { PluginManager } from "../kernel/plugin-manager.js";
@@ -88,12 +88,43 @@ export function runDoctorAudit(forceRefresh = false): DoctorReport {
     if (isBinaryOnPath("git")) {
       gitCmd = "git";
       try {
-        gitVersion = run("git", ["--version"], 1500);
+        gitVersion = run("git", ["--version"], 3000);
       } catch {
         // best-effort: a git that resolves on PATH but fails --version is
         // reported as version-unknown, not a hard diagnostic failure
       }
-    } else {
+    }
+
+    if (!gitVersion) {
+      // 1. Windows Registry: query Git for Windows install location
+      const regKeys = [
+        "HKLM\\SOFTWARE\\GitForWindows",
+        "HKCU\\Software\\GitForWindows",
+        "HKLM\\SOFTWARE\\WOW6432Node\\GitForWindows",
+      ];
+      for (const regKey of regKeys) {
+        try {
+          const regOut = run(
+            "reg.exe",
+            ["query", regKey, "/v", "InstallPath"],
+            2000,
+          );
+          const match = regOut.match(/InstallPath\s+REG_\w+\s+(.+)/i);
+          if (match && match[1]) {
+            const regGit = join(match[1].trim(), "cmd", "git.exe");
+            if (existsSync(regGit)) {
+              gitCmd = regGit;
+              gitVersion = run(regGit, ["--version"], 3000);
+              if (gitVersion) break;
+            }
+          }
+        } catch {
+          // ignore reg query failure
+        }
+      }
+    }
+
+    if (!gitVersion) {
       const sysDrive = process.env["SystemDrive"] || "C:";
       const programFiles =
         process.env["ProgramFiles"] || join(sysDrive, "Program Files");
@@ -113,12 +144,17 @@ export function runDoctorAudit(forceRefresh = false): DoctorReport {
           "cmd",
           "git.exe",
         ),
+        join(homedir(), "scoop", "shims", "git.exe"),
+        join(homedir(), "scoop", "apps", "git", "current", "cmd", "git.exe"),
+        "C:\\ProgramData\\chocolatey\\bin\\git.exe",
+        "D:\\develop\\Git\\cmd\\git.exe",
+        "C:\\develop\\Git\\cmd\\git.exe",
       ];
       for (const p of candidatePaths) {
         if (existsSync(p)) {
           gitCmd = p;
           try {
-            gitVersion = run(p, ["--version"], 1500);
+            gitVersion = run(p, ["--version"], 3000);
             if (gitVersion) break;
           } catch {
             // best-effort candidate probe: move on to the next candidate path
@@ -126,9 +162,18 @@ export function runDoctorAudit(forceRefresh = false): DoctorReport {
         }
       }
     }
+
+    // When git was discovered via an absolute path, prepend its bin directory to PATH
+    // so subsequent steps, child processes, and git commands succeed naturally.
+    if (gitCmd !== "git" && existsSync(gitCmd)) {
+      const gitDir = dirname(gitCmd);
+      if (!process.env.PATH?.includes(gitDir)) {
+        process.env.PATH = `${gitDir};${process.env.PATH || ""}`;
+      }
+    }
   } else {
     try {
-      const out = run("git", ["--version"], 1500);
+      const out = run("git", ["--version"], 3000);
       if (out) gitVersion = out;
     } catch {
       // best-effort: non-Windows git version probe failure is non-fatal
@@ -407,6 +452,11 @@ export function runDoctorAudit(forceRefresh = false): DoctorReport {
     const availableViaDocker =
       !binaryAvailable && dockerAvailable && isDockerSupported;
 
+    const hasUv = tcAvailability["uv"] ?? false;
+    const availableViaUv = !binaryAvailable && hasUv && (tc.id === "semgrep" || tc.id === "ruff");
+    const hasNodeRunner = isBinaryOnPath("bun") || isBinaryOnPath("npx");
+    const availableViaNpx = !binaryAvailable && hasNodeRunner && tc.id === "knip";
+
     if (binaryAvailable) {
       checks.push({
         category: "Tool",
@@ -414,6 +464,22 @@ export function runDoctorAudit(forceRefresh = false): DoctorReport {
         status: "PASSED",
         message: `${tc.name} is available on host PATH (enabled)`,
         impact: `已就绪：本地原生二进制可用，以零启动延迟执行。`,
+      });
+    } else if (availableViaUv) {
+      checks.push({
+        category: "Tool",
+        name: tc.name,
+        status: "PASSED",
+        message: `${tc.name} is available on host (via Astral uv tool run)`,
+        impact: `已就绪：本地 Astral uv 环境可用，以原生 Python 隔离沙箱极速执行。`,
+      });
+    } else if (availableViaNpx) {
+      checks.push({
+        category: "Tool",
+        name: tc.name,
+        status: "PASSED",
+        message: `${tc.name} is available on host (via bunx / npx on-demand runner)`,
+        impact: `已就绪：本地 JS 运行时可用，以即用即走方式执行分析。`,
       });
     } else if (availableViaDocker) {
       checks.push({

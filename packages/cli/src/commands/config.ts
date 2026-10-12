@@ -35,6 +35,7 @@ configCommand
 
 configCommand
   .command("show [workspacePath]")
+  .alias("view")
   .description(
     "Display the active effective OpenContrib capability configuration and policies",
   )
