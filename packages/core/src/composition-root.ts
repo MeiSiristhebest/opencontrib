@@ -13,6 +13,7 @@
  * together; everything else depends on the abstract ports.
  */
 
+import { EnvConfigGhCliCredentialsProvider } from "./github/credentials-provider.js";
 import { GitHubClient } from "./discovery/github-client.js";
 import type { IssueBindingProvider } from "./github/issue-binding-service.js";
 import type { CredentialsProvider } from "./ports/credentials-provider.port.js";
@@ -44,21 +45,20 @@ export function buildProductionGitHubClient(
   return new GitHubClient(options);
 }
 
-/** Build an unauthenticated, read-only issue provider for agent-facing paths. */
+/** Build a read-only issue provider for agent-facing paths (uses ambient read credentials if available). */
 export function buildPublicIssueBindingProvider(options: {
   host?: string;
+  readToken?: string;
 } = {}): IssueBindingProvider {
+  const resolvedToken =
+    options.readToken ?? new EnvConfigGhCliCredentialsProvider().getToken();
   const credentials: CredentialsProvider = {
-    getToken: () => "",
-    getTokenScope: () => "anonymous",
-  };
-  const cache: ResponseCache = {
-    get: (_key) => null,
-    set: (_key, _payload) => undefined,
+    getToken: () => resolvedToken,
+    getTokenScope: () => (resolvedToken ? "read" : "anonymous"),
   };
   const client = new GitHubClient(
-    { host: options.host },
-    { credentials, cache },
+    { host: options.host, token: resolvedToken },
+    { credentials },
   );
 
   return {

@@ -23,6 +23,19 @@ function norm(p: string): string {
   return p.replace(/\\/g, "/");
 }
 
+export const GIT_DEFAULT_TIMEOUT_MS = 25_000;
+export const GIT_NETWORK_TIMEOUT_MS = 180_000;
+
+function tryClearWindowsReadOnly(targetPath: string): void {
+  if (process.platform !== "win32") return;
+  try {
+    spawnSync("attrib", ["-r", targetPath, "/s", "/d"], {
+      stdio: "ignore",
+      timeout: 5000,
+    });
+  } catch {}
+}
+
 export function safeRmSync(
   targetPath: string,
   opts: {
@@ -91,15 +104,39 @@ export function safeRmSync(
     return false;
   }
 
-  try {
-    rmSync(resolved, opts);
-    return true;
-  } catch (err: any) {
-    console.error(
-      `[SAFE_RMSNRC] FAILED: rmSync('${targetPath}'): ${err.message}`,
-    );
-    return false;
+  const maxRetries = opts.maxRetries ?? (process.platform === "win32" ? 5 : 2);
+  const retryDelay = opts.retryDelay ?? 150;
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      rmSync(resolved, {
+        recursive: opts.recursive ?? true,
+        force: opts.force ?? true,
+      });
+      return true;
+    } catch (err: any) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        if (
+          process.platform === "win32" &&
+          (err.code === "EPERM" || err.code === "EACCES")
+        ) {
+          tryClearWindowsReadOnly(resolved);
+        }
+        const start = Date.now();
+        const waitMs = retryDelay * (attempt + 1);
+        while (Date.now() - start < waitMs) {
+          // busy wait short backoff
+        }
+      }
+    }
   }
+
+  console.error(
+    `[SAFE_RMSNRC] FAILED: rmSync('${targetPath}'): ${lastError?.message || "unknown error"}`,
+  );
+  return false;
 }
 
 export const MAX_DISCOVERED_FILES = 250;
@@ -253,19 +290,35 @@ export class WorktreeManager {
     }
   }
 
+  isValidCachedRepo(repoPath: string, repoFullName: string): boolean {
+    if (!existsSync(repoPath)) return false;
+    const rev = this.runGit(["-C", repoPath, "rev-parse", "--git-dir"]);
+    if (!rev.success) return false;
+    try {
+      this.verifyOrigin(repoPath, repoFullName);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private resolveUpstreamBase(
     sourceRepoPath: string,
     baseBranch: string,
     repoFullName: string,
   ): string {
     this.verifyOrigin(sourceRepoPath, repoFullName);
-    const fetch = this.runGit([
-      "-C",
-      sourceRepoPath,
-      "fetch",
-      "origin",
-      `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`,
-    ]);
+    const fetch = this.runGit(
+      [
+        "-C",
+        sourceRepoPath,
+        "fetch",
+        "origin",
+        `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`,
+      ],
+      undefined,
+      GIT_NETWORK_TIMEOUT_MS,
+    );
     if (!fetch.success) {
       throw new Error(
         `WorkspaceBaseCommitUnavailableError: failed to fetch origin/${baseBranch}: ${fetch.stderr.trim() || "unknown Git error"}`,
@@ -324,65 +377,27 @@ export class WorktreeManager {
       join(this.workspaceRoot, `${sanitizedRepoName}__${issueOrTaskKey}${runSuffix}`);
 
     let sourceRepoPath = localRepoPath;
-    if (!sourceRepoPath || !existsSync(sourceRepoPath)) {
-      sourceRepoPath = join(this.cacheRoot, sanitizedRepoName);
-    }
-
-    if (existsSync(workspacePath)) {
-      if (!existsSync(sourceRepoPath)) {
-        throw new Error(
-          `WorkspaceBaseCommitUnavailableError: existing workspace '${workspacePath}' has no verifiable upstream repository.`,
-        );
-      }
-      const baseBranch = this.detectDefaultBranch(sourceRepoPath);
-      const baseCommitSha = this.resolveUpstreamBase(
-        sourceRepoPath,
-        baseBranch,
-        repoFullName,
-      );
-      const head = this.runGit([
-        "-C",
-        workspacePath,
-        "rev-parse",
-        "--verify",
-        "HEAD",
-      ]);
-      if (
-        !head.success ||
-        head.stdout.trim().toLowerCase() !== baseCommitSha.toLowerCase()
-      ) {
-        throw new Error(
-          `WorkspaceBaseCommitUnavailableError: existing workspace '${workspacePath}' is not checked out at verified upstream base ${baseCommitSha}.`,
-        );
-      }
-      linkDependenciesIfPresent(sourceRepoPath, workspacePath);
-      return {
-        workspacePath,
-        branchName,
-        isWorktree: true,
-        baseRepoPath: sourceRepoPath,
-        baseCommitSha,
-        baseBranch,
-      };
-    }
-
-    if (localRepoPath && existsSync(localRepoPath)) {
-      sourceRepoPath = localRepoPath;
-    }
-
-    if (!sourceRepoPath || !existsSync(sourceRepoPath)) {
+    if (sourceRepoPath && existsSync(sourceRepoPath)) {
+      // Use provided local repo path; resolveUpstreamBase will verify origin and base commit
+    } else {
       const cachedRepoPath = join(this.cacheRoot, sanitizedRepoName);
+      if (
+        existsSync(cachedRepoPath) &&
+        !this.isValidCachedRepo(cachedRepoPath, repoFullName)
+      ) {
+        safeRmSync(cachedRepoPath, { recursive: true, force: true });
+      }
       if (!existsSync(cachedRepoPath)) {
         const cloneUrl = `https://github.com/${repoFullName}.git`;
-        const cloneResult = this.runGit([
-          "clone",
-          "--bare",
-          "--depth",
-          "1",
-          cloneUrl,
-          cachedRepoPath,
-        ]);
+        const cloneResult = this.runGit(
+          ["clone", "--bare", "--depth", "1", cloneUrl, cachedRepoPath],
+          undefined,
+          GIT_NETWORK_TIMEOUT_MS,
+        );
         if (!cloneResult.success) {
+          if (existsSync(cachedRepoPath)) {
+            safeRmSync(cachedRepoPath, { recursive: true, force: true });
+          }
           throw new Error(
             `WorkspaceBaseCommitUnavailableError: failed to clone ${repoFullName}: ${cloneResult.stderr.trim() || "Network/Auth failure"}`,
           );
@@ -392,30 +407,70 @@ export class WorktreeManager {
     }
 
     const defaultBranch = this.detectDefaultBranch(sourceRepoPath);
+    const baseCommitSha = this.resolveUpstreamBase(
+      sourceRepoPath,
+      defaultBranch,
+      repoFullName,
+    );
+
+    if (existsSync(workspacePath)) {
+      const head = this.runGit([
+        "-C",
+        workspacePath,
+        "rev-parse",
+        "--verify",
+        "HEAD",
+      ]);
+      if (
+        head.success &&
+        head.stdout.trim().toLowerCase() !== baseCommitSha.toLowerCase()
+      ) {
+        if (input.workspacePath) {
+          throw new Error(
+            `WorkspaceBaseCommitUnavailableError: existing workspace '${workspacePath}' is not checked out at verified upstream base ${baseCommitSha}.`,
+          );
+        }
+        // Stale or aborted workspace from an earlier interrupted run; clean up and recreate
+        this.cleanupWorkspace(workspacePath, sourceRepoPath);
+      } else if (head.success) {
+        linkDependenciesIfPresent(sourceRepoPath, workspacePath);
+        return {
+          workspacePath,
+          branchName,
+          isWorktree: true,
+          baseRepoPath: sourceRepoPath,
+          baseCommitSha,
+          baseBranch: defaultBranch,
+        };
+      } else {
+        if (input.workspacePath) {
+          throw new Error(
+            `WorkspaceBaseCommitUnavailableError: existing workspace '${workspacePath}' has corrupt Git metadata.`,
+          );
+        }
+        this.cleanupWorkspace(workspacePath, sourceRepoPath);
+      }
+    }
 
     try {
-      // Never use the local repository HEAD as the contribution base. Fetch
-      // and resolve the exact upstream remote-tracking commit first.
-      const baseCommitSha = this.resolveUpstreamBase(
+      this.runGit([
+        "-C",
         sourceRepoPath,
-        defaultBranch,
-        repoFullName,
-      );
-
+        "worktree",
+        "remove",
+        "--force",
+        workspacePath,
+      ]);
       this.runGit(["-C", sourceRepoPath, "worktree", "prune"]);
       this.runGit(["-C", sourceRepoPath, "branch", "-D", branchName]);
 
       if (existsSync(workspacePath)) {
-        try {
-          safeRmSync(workspacePath, {
-            recursive: true,
-            force: true,
-            maxRetries: 3,
-            retryDelay: 100,
-          });
-        } catch (cleanupError) {
-          void cleanupError;
-        }
+        safeRmSync(workspacePath, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 200,
+        });
       }
 
       const addResult = this.runGit([
@@ -445,30 +500,29 @@ export class WorktreeManager {
     } catch (createWorktreeError: any) {
       void createWorktreeError;
       if (existsSync(workspacePath)) {
-        try {
-          safeRmSync(workspacePath, {
-            recursive: true,
-            force: true,
-            maxRetries: 3,
-            retryDelay: 100,
-          });
-        } catch (cleanupError) {
-          void cleanupError;
-        }
+        safeRmSync(workspacePath, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 200,
+        });
       }
-      mkdirSync(workspacePath, { recursive: true });
       const cloneUrl = `https://github.com/${repoFullName}.git`;
-      const cloneRes = this.runGit([
-        "clone",
-        "--depth",
-        "1",
-        "-b",
-        defaultBranch,
-        cloneUrl,
-        workspacePath,
-      ]);
+      const cloneRes = this.runGit(
+        [
+          "clone",
+          "--depth",
+          "1",
+          "-b",
+          defaultBranch,
+          cloneUrl,
+          workspacePath,
+        ],
+        undefined,
+        GIT_NETWORK_TIMEOUT_MS,
+      );
       if (cloneRes.success) {
-        const baseCommitSha = this.resolveUpstreamBase(
+        const fallbackBaseCommitSha = this.resolveUpstreamBase(
           workspacePath,
           defaultBranch,
           repoFullName,
@@ -479,11 +533,11 @@ export class WorktreeManager {
           "checkout",
           "-B",
           branchName,
-          baseCommitSha,
+          fallbackBaseCommitSha,
         ]);
         if (!checkoutResult.success) {
           throw new Error(
-            `WorkspaceBaseCommitUnavailableError: failed to check out verified base ${baseCommitSha}.`,
+            `WorkspaceBaseCommitUnavailableError: failed to check out verified base ${fallbackBaseCommitSha}.`,
           );
         }
         linkDependenciesIfPresent(sourceRepoPath, workspacePath);
@@ -492,21 +546,17 @@ export class WorktreeManager {
           branchName,
           isWorktree: false,
           baseRepoPath: workspacePath,
-          baseCommitSha,
+          baseCommitSha: fallbackBaseCommitSha,
           baseBranch: defaultBranch,
         };
       } else {
         if (existsSync(workspacePath)) {
-          try {
-            safeRmSync(workspacePath, {
-              recursive: true,
-              force: true,
-              maxRetries: 3,
-              retryDelay: 100,
-            });
-          } catch (cleanupError) {
-            void cleanupError;
-          }
+          safeRmSync(workspacePath, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: 200,
+          });
         }
         throw new Error(
           `WorkspaceBaseCommitUnavailableError: failed to clone ${repoFullName}: ${cloneRes.stderr.trim() || "Network/Auth failure"}`,
@@ -528,6 +578,7 @@ export class WorktreeManager {
           "--force",
           workspacePath,
         ]);
+        this.runGit(["-C", baseRepoPath, "worktree", "prune"]);
       } catch (removeError) {
         void removeError;
       }
@@ -538,8 +589,8 @@ export class WorktreeManager {
         safeRmSync(workspacePath, {
           recursive: true,
           force: true,
-          maxRetries: 3,
-          retryDelay: 100,
+          maxRetries: 5,
+          retryDelay: 200,
         });
       } catch (cleanupError) {
         void cleanupError;
