@@ -35,6 +35,12 @@ export function resolvePointerStoreLocation(
 
   let ws = opts.workspacePath;
   if (!ws) {
+    const targetCwd = path.resolve(opts.cwd || process.cwd());
+    const localProjectPointers = path.join(targetCwd, ".opencontrib", "pointers");
+    if (fs.existsSync(localProjectPointers)) {
+      return localProjectPointers;
+    }
+
     try {
       const active = ActiveSessionManager.getActiveSession();
       if (active?.workspacePath && fs.existsSync(active.workspacePath)) {

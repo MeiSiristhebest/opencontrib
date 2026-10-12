@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -6,6 +6,22 @@ import { createOpenContribMcpServer } from '../src/server.js';
 import { SmartPointerStore } from '@opencontrib/core';
 
 describe('MCP Tools Comprehensive Handler Coverage', () => {
+  const sandboxHome = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'opencontrib-mcp-cov-sandbox-'),
+  );
+  const origHome = process.env.OPENCONTRIB_HOME;
+  process.env.OPENCONTRIB_HOME = sandboxHome;
+  afterAll(() => {
+    if (origHome !== undefined) {
+      process.env.OPENCONTRIB_HOME = origHome;
+    } else {
+      delete process.env.OPENCONTRIB_HOME;
+    }
+    try {
+      fs.rmSync(sandboxHome, { recursive: true, force: true });
+    } catch {}
+  });
+
   const server = createOpenContribMcpServer();
   const tools = (server as any)._registeredTools;
   const resources = (server as any)._registeredResources;
@@ -62,7 +78,6 @@ describe('MCP Tools Comprehensive Handler Coverage', () => {
     try {
       const writer = new SmartPointerStore({
         storageDir: pointerDir,
-        scope: process.cwd(),
       });
       const pointer = writer.create({
         namespace: 'findings',

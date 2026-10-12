@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -11,6 +11,23 @@ import {
 import { createOpenContribMcpServer } from "../src/server.js";
 
 describe("OpenContrib MCP Server", () => {
+  const sandboxHome = mkdtempSync(
+    join(tmpdir(), "opencontrib-server-mcp-sandbox-"),
+  );
+  const origHome = process.env.OPENCONTRIB_HOME;
+  process.env.OPENCONTRIB_HOME = sandboxHome;
+
+  afterAll(() => {
+    if (origHome !== undefined) {
+      process.env.OPENCONTRIB_HOME = origHome;
+    } else {
+      delete process.env.OPENCONTRIB_HOME;
+    }
+    try {
+      rmSync(sandboxHome, { recursive: true, force: true });
+    } catch {}
+  });
+
   it("initializes and registers all 39 composable contribution domain tools, resources, and workflow prompt", () => {
     const server = createOpenContribMcpServer();
     expect(server).toBeDefined();
