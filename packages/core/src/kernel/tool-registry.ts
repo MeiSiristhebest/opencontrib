@@ -16,7 +16,7 @@
 
 import { existsSync, readdirSync } from 'fs';
 import { spawnSync } from 'child_process';
-import { platform } from 'os';
+import { platform, homedir } from 'os';
 import { join, resolve } from 'path';
 
 /** Credential keys stripped from binary-detection subprocesses. */
@@ -307,6 +307,26 @@ export function isBinaryOnPath(bin: string): boolean {
           }
         }
       } catch {}
+    }
+  }
+
+  // Fallback: check standard user tool directories (~/.local/bin, ~/.cargo/bin)
+  const home = homedir();
+  const userBinDirs = [
+    join(home, '.local', 'bin'),
+    join(home, '.cargo', 'bin'),
+  ];
+  for (const dir of userBinDirs) {
+    if (!existsSync(dir)) continue;
+    const fullPath = resolve(dir, bin);
+    const winPath = resolve(dir, `${bin}.exe`);
+    if (isWindows && existsSync(winPath)) {
+      binaryCache.set(bin, true);
+      return true;
+    }
+    if (existsSync(fullPath)) {
+      binaryCache.set(bin, true);
+      return true;
     }
   }
 
