@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from "fs";
-import { join } from "path";
+import { join, dirname, basename } from "path";
 import { ArtifactBundleManager } from "./artifact-bundle.js";
 
 import type {
@@ -114,8 +114,15 @@ export class ContributionRunManager {
     this.idGenerator = deps.idGenerator ?? new RandomIdGenerator();
     // Resolve the active-session path when this manager is constructed rather
     // than capturing the module-level singleton.  This keeps a CLI `--home`
-    // selection authoritative for every lazily-created manager.
-    this.activeSession = deps.activeSession ?? new ActiveSessionManager();
+    // selection authoritative for every lazily-created manager, and isolates
+    // test instances with a custom baseDir from leaking to the user's host dataDir.
+    const defaultSessionPath = deps.baseDir
+      ? (basename(deps.baseDir).toLowerCase() === "runs"
+          ? join(dirname(deps.baseDir), "active_session.json")
+          : join(deps.baseDir, "active_session.json"))
+      : undefined;
+    this.activeSession =
+      deps.activeSession ?? new ActiveSessionManager(defaultSessionPath);
 
     // Register the service-only capability after construction. The capability
     // is held in a private WeakMap and is not exposed through the public core

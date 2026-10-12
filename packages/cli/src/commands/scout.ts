@@ -58,9 +58,17 @@ export const scoutCommand = new Command("scout")
         }
         const runId = getRunManager().resolveRunId(opts.runId);
         if (!runId || !getRunManager().getRun(runId)) {
-          throw new Error("An existing contribution run is required before scouting; create a run first.");
+          throw new Error(
+            `An existing contribution run is required before scouting; initialize one first with:\n  opencontrib run create --repo ${target} --title "Scout opportunities for ${target}"`,
+          );
         }
-        getRunManager().assertRepositoryTarget(runId, target);
+        try {
+          getRunManager().assertRepositoryTarget(runId, target);
+        } catch (err: any) {
+          throw new Error(
+            `${err.message}\n  Active session points to a different repository. To scout ${target}, start a new run session:\n  opencontrib run create --repo ${target} --title "Scout opportunities for ${target}"`,
+          );
+        }
         const canonicalTarget = getRunManager().getRun(runId)!.manifest.repoFullName;
         const profile = {
           techStack: opts.techStack ?? ["typescript", "javascript"],

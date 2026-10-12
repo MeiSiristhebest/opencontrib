@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import { ActiveSessionManager } from "../src/run/active-session.js";
 import {
@@ -563,5 +563,20 @@ describe("ActiveSessionManager & Pointer Store Persistence", () => {
     expect(runManager.resolveRunId("run_explicit_999")).toBe(
       "run_explicit_999",
     );
+  });
+
+  it("isolates activeSession to baseDir when baseDir is specified without explicit activeSession", async () => {
+    const customBase = join(tmpdir(), `run_base_isolate_${Date.now()}`, "runs");
+    const { ContributionRunManager } = await import("../src/index.js");
+    const runManager = new ContributionRunManager({
+      baseDir: customBase,
+    });
+
+    const manifest = runManager.createRun({ repoFullName: "isolated/repo" });
+    expect(runManager.resolveRunId()).toBe(manifest.runId);
+
+    // The active session file should reside in the isolated base directory's parent, not globally
+    const expectedSessionFile = join(dirname(customBase), "active_session.json");
+    expect(existsSync(expectedSessionFile)).toBe(true);
   });
 });

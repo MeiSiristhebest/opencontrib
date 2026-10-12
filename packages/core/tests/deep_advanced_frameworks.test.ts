@@ -23,7 +23,7 @@ describe('Deep Advanced Frameworks (Alibaba OCR, Qodo PR-Agent, Piolium P12, Git
 
   afterEach(() => {
     if (fs.existsSync(tempRepo)) {
-      fs.rmSync(tempRepo, { recursive: true, force: true });
+      fs.rmSync(tempRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -120,7 +120,12 @@ describe('Deep Advanced Frameworks (Alibaba OCR, Qodo PR-Agent, Piolium P12, Git
       'flow-audit-and-verify',
       tempRepo,
       [
-        { id: 'step-1-probe', name: 'Run Probes', action: 'probe_scan' },
+        {
+          id: 'step-1-probe',
+          name: 'Run Probes',
+          action: 'probe_scan',
+          parameters: { probes: ['ast-grep'] },
+        },
         { id: 'step-2-bundle', name: 'Bundle Context', action: 'context_bundle' },
         { id: 'step-3-hunt', name: 'Hunt Variants', action: 'variant_hunt' },
         { id: 'step-4-tests', name: 'Generate 3D Tests', action: 'generate_3d_tests' },

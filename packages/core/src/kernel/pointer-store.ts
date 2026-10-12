@@ -45,7 +45,14 @@ export function resolvePointerStoreLocation(
     }
   }
 
-  if (ws) return path.join(path.resolve(ws), ".opencontrib", "pointers");
+  if (ws) {
+    const resolvedWs = path.resolve(ws);
+    const baseWs =
+      path.basename(resolvedWs).toLowerCase() === ".opencontrib"
+        ? path.dirname(resolvedWs)
+        : resolvedWs;
+    return path.join(baseWs, ".opencontrib", "pointers");
+  }
 
   const targetCwd = path.resolve(opts.cwd || process.cwd());
   const localProjectOpenContrib = path.join(targetCwd, ".opencontrib");
@@ -73,6 +80,17 @@ function sanitizeNamespace(namespace: string): string {
 
 function sanitizeLegacyId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+export function normalizeScope(scope: string): string {
+  let resolved = path.resolve(scope);
+  if (path.basename(resolved).toLowerCase() === ".opencontrib") {
+    resolved = path.dirname(resolved);
+  }
+  if (process.platform === "win32") {
+    resolved = resolved.toLowerCase();
+  }
+  return resolved;
 }
 
 function normalizeFilePath(file: string, scope: string): string {
@@ -182,7 +200,7 @@ function validateV2Pointer(
   }
   if (
     expectedScope !== undefined &&
-    pointer.scope !== path.resolve(expectedScope)
+    normalizeScope(pointer.scope) !== normalizeScope(expectedScope)
   ) {
     throw pointerIntegrityError(
       `pointer scope '${pointer.scope}' does not match store scope '${path.resolve(expectedScope)}'.`,
@@ -289,9 +307,20 @@ export class SmartPointerStore implements PointerStoreApi {
         ? { storageDir: storageDirOrOpts }
         : storageDirOrOpts || {};
     this.storageDir = resolvePointerStoreLocation(options);
-    this.scope = path.resolve(
-      options.scope || options.workspacePath || path.dirname(this.storageDir),
-    );
+    const rawScope = options.scope || options.workspacePath;
+    if (rawScope) {
+      const resolved = path.resolve(rawScope);
+      this.scope =
+        path.basename(resolved).toLowerCase() === ".opencontrib"
+          ? path.dirname(resolved)
+          : resolved;
+    } else {
+      const parent = path.dirname(this.storageDir);
+      this.scope =
+        path.basename(parent).toLowerCase() === ".opencontrib"
+          ? path.dirname(parent)
+          : parent;
+    }
     if (!fs.existsSync(this.storageDir)) {
       try {
         fs.mkdirSync(this.storageDir, { recursive: true });

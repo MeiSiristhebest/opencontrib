@@ -66,7 +66,7 @@ export const ruffPlugin: OpenContribPlugin = {
           let cmd = isRuffGlobal
             ? `ruff check --select ${RUFF_RULE_SELECTORS} --output-format json --no-fix .`
             : (hasRuff
-                ? `uv run ruff check --select ${RUFF_RULE_SELECTORS} --output-format json --no-fix .`
+                ? `uv tool run ruff check --select ${RUFF_RULE_SELECTORS} --output-format json --no-fix .`
                 : `docker run --rm -v "${targetPath.replace(/\\/g, '/')}:/src" -w /src ghcr.io/astral-sh/ruff check --select ${RUFF_RULE_SELECTORS} --output-format json --no-fix .`);
 
           const { stdout } = await host.exec(cmd, {
