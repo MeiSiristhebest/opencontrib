@@ -318,8 +318,10 @@ export function isBinaryOnPath(bin: string): boolean {
   ];
   for (const dir of userBinDirs) {
     if (!existsSync(dir)) continue;
-    const fullPath = resolve(dir, bin);
-    const winPath = resolve(dir, `${bin}.exe`);
+    const resolvedDir = resolve(dir);
+    const fullPath = resolve(resolvedDir, bin);
+    const winPath = resolve(resolvedDir, `${bin}.exe`);
+    if (!fullPath.startsWith(resolvedDir)) continue;
     if (isWindows && existsSync(winPath)) {
       binaryCache.set(bin, true);
       return true;
@@ -333,15 +335,18 @@ export function isBinaryOnPath(bin: string): boolean {
   // Fallback: check OPENCONTRIB_DOCKER_BIN_DIR for non-standard install paths
   const customDir = process.env.OPENCONTRIB_DOCKER_BIN_DIR;
   if (customDir) {
-    const fullPath = resolve(customDir, bin);
-    const winPath = resolve(customDir, `${bin}.exe`);
-    if (isWindows && existsSync(winPath)) {
-      binaryCache.set(bin, true);
-      return true;
-    }
-    if (existsSync(fullPath)) {
-      binaryCache.set(bin, true);
-      return true;
+    const resolvedCustom = resolve(customDir);
+    const fullPath = resolve(resolvedCustom, bin);
+    const winPath = resolve(resolvedCustom, `${bin}.exe`);
+    if (fullPath.startsWith(resolvedCustom)) {
+      if (isWindows && existsSync(winPath)) {
+        binaryCache.set(bin, true);
+        return true;
+      }
+      if (existsSync(fullPath)) {
+        binaryCache.set(bin, true);
+        return true;
+      }
     }
     // Also scan the directory for any matching name
     try {

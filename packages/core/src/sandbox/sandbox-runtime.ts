@@ -255,15 +255,25 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       let stderr = "";
       let timedOut = false;
 
-      // Launch Windows executables directly, including PATH-resolved and
-      // relative names, so cmd.exe cannot flatten parsed arguments containing spaces.
-      const directWindowsExecutable =
-        process.platform === "win32" && /\.(?:exe|com)$/i.test(finalCommand);
+      // On Windows, only launch batch files or package manager scripts via cmd.exe shell.
+      // Direct executables (.exe, or PATH binaries) must be launched directly so cmd.exe
+      // cannot flatten parsed arguments or expose command injection surface.
+      const exeLower = finalCommand.toLowerCase();
+      const isBatch =
+        process.platform === "win32" &&
+        (exeLower.endsWith(".cmd") ||
+          exeLower.endsWith(".bat") ||
+          exeLower === "npm" ||
+          exeLower === "npx" ||
+          exeLower === "pnpm" ||
+          exeLower === "yarn");
+      // SanitizedLocalSandboxProvider boundary: command and args executed with isolated env and boundary checks.
+      // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
       const child = spawn(finalCommand, finalArgs, {
         cwd: resolvedCwd,
         stdio: ["ignore", "pipe", "pipe"],
         env: sanitizedEnv,
-        shell: process.platform === "win32" && !directWindowsExecutable,
+        shell: isBatch,
       });
 
       const timer = setTimeout(() => {
@@ -426,6 +436,8 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
         shell: isBatch,
       };
 
+      // SanitizedLocalSandboxProvider boundary: command and args executed synchronously with isolated env and boundary checks.
+      // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
       const result = spawnSync(finalCommand, finalArgs, spawnOptions);
 
       const stdout = String(result.stdout || "");
