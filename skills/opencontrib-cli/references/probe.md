@@ -101,3 +101,19 @@ opencontrib probe hotspot . --limit 5 --pretty
 opencontrib probe fuzz . --category numerical_bounds --pretty
 ```
 
+---
+
+### 5. MCP Tool Equivalents (`opencontrib` MCP Server)
+
+| CLI Command | MCP Tool | Key Arguments |
+| :--- | :--- | :--- |
+| `opencontrib capability plan` | `contrib_plan_capabilities` | `{ targetPath: "." }` |
+| `opencontrib plugin list` | `contrib_list_plugins` | `{}` |
+| `opencontrib plugin info <id>` | `contrib_plugin_info` | `{ pluginId: "ocr" }` |
+| `opencontrib probe plan` | `contrib_probe_plan` | `{ targetPath: "." }` |
+| `opencontrib probe run` | `contrib_probe_run` | `{ targetPath: "." }` |
+| `opencontrib probe hotspot` | `contrib_probe_hotspot` | `{ targetPath: "." }` |
+| `opencontrib probe fuzz` | `contrib_probe_fuzz` | `{ targetPath: ".", language: "typescript" }` |
+| `opencontrib pointer list` | `contrib_list_pointers` | `{ workspacePath: "." }` |
+| `opencontrib pointer resolve` | `contrib_resolve_pointer` | `{ uri: "ptr://...", view: "slice", workspacePath: "." }` |
+
