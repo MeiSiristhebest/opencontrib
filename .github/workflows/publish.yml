@@ -103,7 +103,7 @@ jobs:
 
       - name: Setup Bun runtime
         if: steps.core_pkg.outputs.published == 'false' || steps.mcp_pkg.outputs.published == 'false' || steps.cli_pkg.outputs.published == 'false'
-        uses: oven-sh/setup-bun@4bc7feaddf28c5bc86464a95616682337750130f # v2.0.1
+        uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
         with:
           bun-version: latest
 

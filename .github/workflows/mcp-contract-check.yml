@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   validate-mcp:
-    name: Validate 39 MCP Tools Schema Compliance
+    name: Validate 41 MCP Tools Schema Compliance
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Bun Runtime
-        uses: oven-sh/setup-bun@4bc7feaddf28c5bc86464a95616682337750130f # v2.0.1
+        uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
         with:
           bun-version: latest
 
