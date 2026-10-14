@@ -127,10 +127,19 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
           return list.some((item) => ids.includes(item.toLowerCase()));
         };
 
+        const isProbeExplicitlyDisabled = (probe: ProbeDescriptor) => {
+          const ids = [probe.id, ...(probe.aliases || [])];
+          return ids.some(
+            (id) =>
+              pluginManager.getState(id).enabled === false ||
+              pluginManager.getDisabledReason(id) !== undefined,
+          );
+        };
+
         const matchingProbes = host.listAll().filter((probe) => {
           if (args.onlyProbes !== undefined && !matchesFilter(probe, args.onlyProbes)) return false;
           if (args.skipProbes !== undefined && matchesFilter(probe, args.skipProbes)) return false;
-          if (!pluginManager.isEnabled(probe.id)) return false;
+          if (isProbeExplicitlyDisabled(probe)) return false;
           return probe.match(fingerprint);
         });
 

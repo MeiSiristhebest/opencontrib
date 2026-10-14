@@ -91,7 +91,7 @@ describe("6 Deep Architectural Mechanisms & Resilience Verification", () => {
       expect(go?.aliases).toContain("noctx");
     });
 
-    it("allows PluginManager to correctly report isEnabled for canonical names, plugin IDs, and unconfigured probes", () => {
+    it("allows PluginManager to correctly report isEnabled for canonical names and plugin IDs, and false for unknown IDs", () => {
       const pm = new PluginManager();
       // Canonical & aliases enabled by default
       expect(pm.isEnabled("semgrep")).toBe(true);
@@ -100,11 +100,18 @@ describe("6 Deep Architectural Mechanisms & Resilience Verification", () => {
       expect(pm.isEnabled("ruff-python")).toBe(true);
       expect(pm.isEnabled("knip")).toBe(true);
       expect(pm.isEnabled("knip-dead-code")).toBe(true);
+      expect(pm.isEnabled("hotspot")).toBe(true);
+      expect(pm.isEnabled("git-hotspot")).toBe(true);
+      expect(pm.isEnabled("go-analyzers")).toBe(true);
+      expect(pm.isEnabled("nilaway")).toBe(true);
 
-      // Unconfigured built-in probes default to enabled (not dropped)
-      expect(pm.isEnabled("property-fuzz")).toBe(true);
-      expect(pm.isEnabled("piolium")).toBe(true);
-      expect(pm.isEnabled("workflow-linter")).toBe(true);
+      // Unknown IDs return false
+      expect(pm.isEnabled("nonexistent-tool-xyz")).toBe(false);
+
+      // Built-in probes default to enabled in state
+      expect(pm.getState("property-fuzz").enabled).toBe(true);
+      expect(pm.getState("piolium").enabled).toBe(true);
+      expect(pm.getState("workflow-linter").enabled).toBe(true);
     });
 
     it("verifies tool-registry probeIds map both primary and plugin IDs", () => {

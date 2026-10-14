@@ -93,7 +93,7 @@ export class PluginManager {
     return aliasMap[pluginId] || pluginId;
   }
 
-  /** Whether the plugin is currently enabled. Unset plugins default to true unless explicitly disabled directly or via controlling tool. */
+  /** Whether the plugin is currently enabled. Returns false for unknown IDs. */
   isEnabled(pluginId: string): boolean {
     if (this.state[pluginId] !== undefined) {
       return this.state[pluginId].enabled;
@@ -109,11 +109,15 @@ export class PluginManager {
         t.probeIds.includes(pluginId) ||
         t.probeIds.includes(normalized),
     );
-    if (controllingTool && this.state[controllingTool.id] !== undefined) {
-      return this.state[controllingTool.id].enabled;
+    if (controllingTool) {
+      if (this.state[controllingTool.id] !== undefined) {
+        return this.state[controllingTool.id].enabled;
+      }
+      return true;
     }
-    return true;
+    return false;
   }
+
 
   /** Return the reason a plugin was disabled, or undefined. */
   getDisabledReason(pluginId: string): string | undefined {
