@@ -53,6 +53,76 @@ describe('Discovery & Qualification Engine', () => {
     expect(res.disqualifyReason).toContain('announced a fix PR in comments');
   });
 
+  it('disqualifies issue if hasPrLinked is true or linkedPrs are provided', () => {
+    const resBool = qualifyIssue({
+      issueNumber: 103,
+      issueTitle: 'Crashing on nil config',
+      issueBody: 'Steps to reproduce...',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+      hasPrLinked: true,
+    });
+    expect(resBool.isQualified).toBe(false);
+    expect(resBool.hasExistingPr).toBe(true);
+    expect(resBool.disqualifyReason).toContain('active PR(s) associated');
+
+    const resList = qualifyIssue({
+      issueNumber: 104,
+      issueTitle: 'Deadlock on shutdown',
+      issueBody: 'Steps to reproduce...',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+      linkedPrs: [{ number: 1126, state: 'open', title: 'fix(shutdown): avoid deadlock' }],
+    });
+    expect(resList.isQualified).toBe(false);
+    expect(resList.hasExistingPr).toBe(true);
+    expect(resList.disqualifyReason).toContain('#1126');
+
+    const resMerged = qualifyIssue({
+      issueNumber: 105,
+      issueTitle: 'Stale open issue with merged fix',
+      issueBody: 'Steps to reproduce...',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+      linkedPrs: [{ number: 994, state: 'closed', isMerged: true, title: 'fix: already resolved' }],
+    });
+    expect(resMerged.isQualified).toBe(false);
+    expect(resMerged.hasExistingPr).toBe(true);
+    expect(resMerged.disqualifyReason).toContain('merged/closed PR(s)');
+  });
+
+  it('disqualifies issue when a developer claims fix shape is ready or turnaround promise', () => {
+    const res = qualifyIssue({
+      issueNumber: 1717,
+      issueTitle: 'review hangs on stalled LLM request',
+      issueBody: 'Neither the group budget nor per-request HTTP timeout fires...',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [
+        {
+          id: 1,
+          body: "Either way I have the fix shape ready and can turn it around quickly once the dump picks the branch.",
+          user: { login: 'kittimzhe' },
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+    expect(res.isQualified).toBe(false);
+    expect(res.hasClaimant).toBe(true);
+    expect(res.disqualifyReason).toContain('@kittimzhe');
+  });
+
   it('does NOT disqualify issue for conversational or unrelated PR mentions in comments', () => {
     const res = qualifyIssue({
       issueNumber: 1021,

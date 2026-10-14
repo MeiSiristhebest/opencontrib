@@ -77,6 +77,9 @@ export const DEFAULT_INTENT_RULES: IntentRule[] = [
   { category: 'work_claim', pattern: /\bi(?:'ve| have)? prepared (?:a fix|a diff)\b/i, strength: 'strong', description: 'Fix already prepared' },
   { category: 'work_claim', pattern: /\bmy fix and regression tests are ready\b/i, strength: 'strong', description: 'Fix and tests ready' },
   { category: 'work_claim', pattern: /\bmy pr (?:is )?coming shortly\b/i, strength: 'strong', description: 'PR imminent' },
+  { category: 'work_claim', pattern: /\b(?:i have the fix|have the fix (?:shape )?ready|fix is ready)\b/i, strength: 'strong', description: 'Fix shape is ready' },
+  { category: 'work_claim', pattern: /\b(?:turn it around|turn it around quickly)\b/i, strength: 'strong', description: 'Turnaround commitment' },
+  { category: 'work_claim', pattern: /\b(?:i(?:'m| am) preparing a fix|preparing a pr)\b/i, strength: 'strong', description: 'Preparing fix or PR' },
 
   // --- Approval Wait (indicates contributor waiting for maintainer) ---
   { category: 'approval_wait', pattern: /\b(?:waiting on `?lgtm`?|waiting for `?lgtm`?)\b/i, strength: 'strong', description: 'Waiting for LGTM approval' },
@@ -95,6 +98,14 @@ export const DEFAULT_INTENT_RULES: IntentRule[] = [
   { category: 'author_intent', pattern: /\b(?:i'll take care of this|i will take care of this)\b/i, strength: 'strong', description: 'Author taking ownership' },
 ];
 
+export interface LinkedPrItem {
+  number?: number;
+  title?: string;
+  state?: string;
+  url?: string;
+  isMerged?: boolean;
+}
+
 export interface QualifyIssueInput {
   issueNumber: number;
   issueTitle: string;
@@ -107,6 +118,8 @@ export interface QualifyIssueInput {
   comments: IssueCommentItem[];
   commentsApiStatus?: ApiStatus;
   existingLinkedPrsCount?: number;
+  hasPrLinked?: boolean;
+  linkedPrs?: LinkedPrItem[];
   timelineApiStatus?: ApiStatus;
   /** Optional custom rules to extend the default intent detection rules */
   customIntentRules?: IntentRule[];
@@ -140,12 +153,19 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     authorLogin,
     comments,
     commentsApiStatus = "OK",
-    existingLinkedPrsCount = 0,
+    existingLinkedPrsCount,
+    hasPrLinked,
+    linkedPrs,
     timelineApiStatus = "OK",
     customIntentRules,
     customBlockingLabels,
     now,
   } = input;
+
+  const linkedPrsList = linkedPrs || [];
+  const effectiveLinkedPrsCount =
+    existingLinkedPrsCount ??
+    (linkedPrsList.length > 0 ? linkedPrsList.length : hasPrLinked ? 1 : 0);
 
   const normalizedLabels = labels.map((l) =>
     l.toLowerCase().replace(/[-_]+/g, " ").trim(),
@@ -228,10 +248,19 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   }
 
   // 5. Duplicate / Active Linked PR Gate (Authoritative GitHub Timeline)
-  if (existingLinkedPrsCount > 0) {
+  if (effectiveLinkedPrsCount > 0) {
+    const hasMerged = linkedPrsList.some(
+      (p) => p.isMerged || p.state === "merged" || p.state === "closed",
+    );
+    const detail =
+      linkedPrsList.length > 0
+        ? ` (${linkedPrsList.map((p) => `#${p.number ?? "PR"}`).join(", ")})`
+        : "";
     return {
       isQualified: false,
-      disqualifyReason: `Issue already has ${existingLinkedPrsCount} active PR(s) associated with it.`,
+      disqualifyReason: hasMerged
+        ? `Issue already has merged/closed PR(s) addressing it${detail}.`
+        : `Issue already has ${effectiveLinkedPrsCount} active PR(s) associated with it${detail}.`,
       track: "standard_track",
       hasExistingPr: true,
       hasClaimant: false,

@@ -7,6 +7,7 @@ import {
   assessFeasibility,
   detectSystemCapabilities,
   diagnoseManifests,
+  GitHubClient,
   qualifyIssue,
   rankOpportunitySignals,
 } from "@opencontrib/core";
@@ -61,46 +62,148 @@ const qualifyCommand = new Command("qualify")
   .description(
     "Check author-first-right, anti-bandwagoning, and blocking labels",
   )
+  .option(
+    "--repo <owner/repo>",
+    "Target repository full name (e.g. alibaba/open-code-review)",
+  )
+  .option(
+    "--issue <number>",
+    "Target issue number to qualify directly against live GitHub",
+    (v) => parseInt(v, 10),
+  )
   .option("--input <json>", "JSON object with issue data (or pipe via stdin)")
   .option("--pretty", "Pretty-print", false)
-  .action(async (opts: { pretty?: boolean }) => {
-    try {
-      const input = (opts as any).input ?? (await readStdin());
-      const parsed = parseJSON(input, "stdin") as any;
-      const issueNumber = parsed?.issueNumber ?? parsed?.number ?? 1;
-      const issueTitle = parsed?.issueTitle ?? parsed?.title;
-      if (!issueTitle) {
-        console.error(
-          '❌ Missing required "issueTitle" (or "title") in input JSON',
+  .action(
+    async (opts: {
+      repo?: string;
+      issue?: number;
+      input?: string;
+      pretty?: boolean;
+    }) => {
+      try {
+        let normalizedInput: any;
+
+        if (opts.repo && typeof opts.issue === "number") {
+          const parts = opts.repo.trim().split("/");
+          if (parts.length !== 2) {
+            console.error('❌ "--repo" must be in the format "owner/repo"');
+            throw new CliExitError(1);
+          }
+          const [owner, repo] = parts;
+          const client = new GitHubClient();
+          const [issueRes, commentsRes] = await Promise.all([
+            client.getIssue(owner, repo, opts.issue),
+            client.getIssueComments(owner, repo, opts.issue),
+          ]);
+
+          if (issueRes.status !== "OK" || !issueRes.data) {
+            console.error(
+              `❌ Failed to fetch issue #${opts.issue} from ${opts.repo}: ${issueRes.status} ${issueRes.error || ""}`,
+            );
+            throw new CliExitError(1);
+          }
+
+          const issue = issueRes.data;
+          const prsRes = await client.getIssueLinkedPrs(
+            owner,
+            repo,
+            opts.issue,
+            2,
+            issue.title,
+          );
+          const comments = (commentsRes.data || []).map((c: any) => ({
+            id: c.id,
+            body: c.body || "",
+            user: { login: c.user?.login },
+            author_association: c.author_association,
+            created_at: c.created_at,
+          }));
+
+          const linkedPrItems =
+            prsRes.status === "OK" && prsRes.data
+              ? [
+                  ...(prsRes.data.open || []).map((n) => ({
+                    number: n,
+                    state: "open",
+                  })),
+                  ...(prsRes.data.closed || []).map((n) => ({
+                    number: n,
+                    state: "closed",
+                    isMerged: true,
+                  })),
+                ]
+              : [];
+
+          normalizedInput = {
+            issueNumber: issue.number,
+            issueTitle: issue.title,
+            issueBody: issue.body || "",
+            labels: issue.labels || [],
+            isOpen: issue.state === "open",
+            assignees: [],
+            createdAt: new Date().toISOString(),
+            authorLogin: undefined,
+            comments,
+            commentsApiStatus: commentsRes.status,
+            existingLinkedPrsCount: prsRes.data?.open?.length ?? 0,
+            hasPrLinked: (prsRes.data?.all?.length ?? 0) > 0,
+            linkedPrs: linkedPrItems,
+            timelineApiStatus: prsRes.status,
+          };
+        } else {
+          const input = opts.input ?? (await readStdin());
+          const parsed = parseJSON(input, "stdin") as any;
+          const issueNumber = parsed?.issueNumber ?? parsed?.number ?? 1;
+          const issueTitle = parsed?.issueTitle ?? parsed?.title;
+          if (!issueTitle) {
+            console.error(
+              '❌ Missing required "issueTitle" (or "title") in input JSON',
+            );
+            throw new CliExitError(1);
+          }
+          const rawLinkedPrs = parsed.linkedPrs ?? parsed.prs ?? [];
+          const hasPrLinked =
+            parsed.hasPrLinked === true ||
+            rawLinkedPrs.length > 0 ||
+            Boolean(
+              parsed.existingLinkedPrsCount &&
+                parsed.existingLinkedPrsCount > 0,
+            );
+
+          normalizedInput = {
+            issueNumber,
+            issueTitle,
+            issueBody: parsed.issueBody ?? parsed.body ?? "",
+            labels: parsed.labels ?? [],
+            isOpen: parsed.isOpen ?? (parsed.state !== "closed"),
+            assignees:
+              parsed.assignees ?? (parsed.assignee ? [parsed.assignee] : []),
+            createdAt:
+              parsed.createdAt ?? parsed.created_at ?? new Date().toISOString(),
+            authorLogin: parsed.authorLogin ?? parsed.user?.login,
+            comments: parsed.comments ?? [],
+            existingLinkedPrsCount:
+              parsed.existingLinkedPrsCount ?? parsed.linkedPrsCount,
+            hasPrLinked,
+            linkedPrs: rawLinkedPrs,
+          };
+        }
+
+        const qualification = qualifyIssue(normalizedInput);
+        printJSON(
+          {
+            status: qualification.isQualified ? "qualified" : "disqualified",
+            qualification,
+          },
+          opts.pretty,
         );
+      } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
+        printJSON({ status: "error", message: err.message }, opts.pretty);
         throw new CliExitError(1);
       }
-      const normalizedInput = {
-        issueNumber,
-        issueTitle,
-        issueBody: parsed.issueBody ?? parsed.body ?? "",
-        labels: parsed.labels ?? [],
-        isOpen: parsed.isOpen ?? (parsed.state !== "closed"),
-        assignees: parsed.assignees ?? (parsed.assignee ? [parsed.assignee] : []),
-        createdAt: parsed.createdAt ?? parsed.created_at ?? new Date().toISOString(),
-        authorLogin: parsed.authorLogin ?? parsed.user?.login,
-        comments: parsed.comments ?? [],
-        existingLinkedPrsCount: parsed.existingLinkedPrsCount ?? parsed.linkedPrsCount ?? 0,
-      };
-      const qualification = qualifyIssue(normalizedInput);
-      printJSON(
-        {
-          status: qualification.isQualified ? "qualified" : "disqualified",
-          qualification,
-        },
-        opts.pretty,
-      );
-    } catch (err: any) {
-      if (err instanceof CliExitError) throw err;
-      printJSON({ status: "error", message: err.message }, opts.pretty);
-      throw new CliExitError(1);
-    }
-  });
+    },
+  );
 
 const feasibilityCommand = new Command("feasibility")
   .description("Assess OS and toolchain execution feasibility for an issue")

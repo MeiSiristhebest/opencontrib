@@ -171,6 +171,23 @@ export class GitHubClient {
     return this.source.getRepoDetails(owner, repo);
   }
 
+  /** Discovers unique linked PRs via timeline events and PR search. */
+  getIssueLinkedPrs(
+    owner: string,
+    repo: string,
+    issue_number: number,
+    maxPages = 2,
+    issueTitle?: string,
+  ): Promise<ApiResult<{ open: number[]; closed: number[]; all: number[] }>> {
+    return (this.source as any).getIssueLinkedPrs(
+      owner,
+      repo,
+      issue_number,
+      maxPages,
+      issueTitle,
+    );
+  }
+
   /** Checks unique active open linked PRs via timeline events. */
   getIssueLinkedPrsCount(
     owner: string,
