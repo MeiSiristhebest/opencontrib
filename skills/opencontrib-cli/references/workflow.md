@@ -104,9 +104,16 @@ After workspace preparation, run `opencontrib discovery context --input context.
 
 ---
 
-### Phase 5: Construct Minimal Failing Test Case (RED Phase)
+### Phase 5: Construct Multi-Dimensional RED Reproduction Suite (No Single-Test Complacency)
 
-Write a targeted regression test inside the workspace. Execute **ONLY the targeted package or test file** to observe the pre-fix failure:
+Write a comprehensive regression test suite inside the workspace. **Single-test complacency is strictly forbidden** (submitting $\le 1$ test will trip governance gate and cap defensiveCoverage at 60). Test code has **NO line limit**—write full, thorough tests without diff anxiety!
+
+Ensure 3D test dimensions are verified:
+1. **Happy Path**: Standard normal flow reproducing the defect baseline.
+2. **Boundary & Edge Extremes**: Zero-values, empty collections, boundary limits, and optional field handling.
+3. **Failure Injection & Defensive Resilience**: Concurrency collisions, timeout retry exhaustion, error preservation, and resource cleanup.
+
+Optionally use `opencontrib probe matrix` to generate mutation matrices and test templates. Execute **ONLY the targeted package or test file** to observe the pre-fix failure:
 
 ```bash
 # For Go:
@@ -129,7 +136,12 @@ opencontrib evidence capture-red --test-cmd "<targeted_test_command>" --assertio
 
 ### Phase 6: Implement Surgical Fix & Empirical Evidence (GREEN Phase)
 
-Apply the minimal, idiomatic code modification (strictly $\le 100$ lines). Then run targeted evidence verification:
+Apply the surgical, idiomatic code modification:
+- **Core Production Logic**: Strictly $\le 30-50$ lines (absolute ceiling $\le 100$ lines). Laser-focused on the defect; no unrelated refactoring, style churn, or dependency updates.
+- **Supporting Test Code**: **UNLIMITED lines**. Tests, fixtures, and docs do not count against the 30-50 core diff threshold.
+- **Breadth & Depth**: Always check sister call sites, helper functions, and sync/async counterparts across the codebase. Run `opencontrib probe variant-hunt --symbol <name>` to verify no sister defects remain.
+
+Then run targeted evidence verification:
 
 ```bash
 # RED was captured in Phase 5. Save the structured patch artifact, then create

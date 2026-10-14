@@ -269,8 +269,8 @@ describe('buildTurnPrompt (per-turn prompt rebuild with tool feedback)', () => {
     });
 
     expect(result).toContain('Previous Attempt Feedback');
-    const feedbackSection = result.split('Previous Attempt Feedback')[1];
-    expect(feedbackSection.length).toBeLessThan(3000);
+    expect(result).toContain('A'.repeat(1500));
+    expect(result).not.toContain('A'.repeat(1501));
   });
 
   it('shows success marker for passing tools', () => {

@@ -93,19 +93,29 @@ export function buildTurnPrompt(ctx: PromptRebuildContext): string {
       "Based on the feedback above, diagnose the root cause and produce a revised surgical patch.",
     );
     lines.push(
-      "Focus on the specific failure rather than making unrelated changes.",
+      "Focus on the specific failure rather than making unrelated changes. Keep core code surgical (30-50 lines) while expanding 3D test cases (unlimited test lines) to verify fixes.",
     );
     lines.push("");
     lines.push(`- **Test Command**: \`${ctx.testCommand || "N/A"}\``);
   }
 
   lines.push("");
-  lines.push(
-    'Please generate a production-grade patch conforming strictly to PatchDraftSchema JSON with concrete code files in the "files" array. Address the root cause, update docs/comments when behavior changes, check directly related call sites, and add focused regression coverage for important edge cases.',
-  );
+  lines.push(PATCH_GENERATION_GUIDANCE.trim());
 
   return lines.join("\n");
 }
+
+export const PATCH_GENERATION_GUIDANCE = `
+Please generate a production-grade patch conforming strictly to PatchDraftSchema JSON with concrete code files in the "files" array.
+Follow these mandatory engineering quality guidelines:
+1. Laser-Focused Scope: Fix the exact root cause. Production code diff is strictly surgical (target 30-50 lines, absolute ceiling 100 lines). Do NOT include unrelated refactors, formatting sweeps, or dependency upgrades.
+2. Breadth & Depth: Systematically inspect directly related call sites, helpers, and ensure synchronous/asynchronous symmetry across the repository.
+3. Defensive Resilience: Guard against concurrency race conditions, null/empty edge boundaries, retry budget exhaustion, error preservation, and resource leaks.
+4. Comprehensive 3D Testing (Anti-Single-Test Complacency): Supporting test files (*.test.*, fixtures) have NO LINE LIMIT. Submitting only a single test is strictly prohibited. Provide a rich 3D test suite covering:
+   - Happy path: standard valid flow reproducing and resolving the issue.
+   - Boundary & Edge cases: zero-value, empty boundary, limit extremes.
+   - Failure injection & Resilience: timeout/retry exhaustion, concurrent contention, clean failure propagation and resource reclamation.
+Update documentation or comments where behavior changes.`;
 
 export interface TelemetryRecord {
   runId: string;
