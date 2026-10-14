@@ -228,21 +228,35 @@ describe("CLI Commands & Subcommands Test Suite", () => {
   });
 
   it("executes run subcommands (create, get, list, save, resume)", async () => {
-    await runCommand.parseAsync([
-      "node",
-      "test",
-      "create",
-      "--repo",
-      "owner/repo-test-cli",
-      "--issue",
-      "99",
-      "--title",
-      "Test run create CLI",
-    ]);
+    const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "opencontrib-cli-run-test-"));
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = testHome;
+    try {
+      await runCommand.parseAsync([
+        "node",
+        "test",
+        "create",
+        "--repo",
+        "owner/repo-test-cli",
+        "--issue",
+        "99",
+        "--title",
+        "Test run create CLI",
+      ]);
 
-    await runCommand.parseAsync(["node", "test", "list"]);
-    await runCommand.parseAsync(["node", "test", "get"]);
-    await runCommand.parseAsync(["node", "test", "resume"]);
+      await runCommand.parseAsync(["node", "test", "list"]);
+      await runCommand.parseAsync(["node", "test", "get"]);
+      await runCommand.parseAsync(["node", "test", "resume"]);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.OPENCONTRIB_HOME;
+      } else {
+        process.env.OPENCONTRIB_HOME = previousHome;
+      }
+      if (fs.existsSync(testHome)) {
+        fs.rmSync(testHome, { recursive: true, force: true });
+      }
+    }
   });
 
   it("executes discovery subcommands (rank, qualify, feasibility, manifests)", async () => {
