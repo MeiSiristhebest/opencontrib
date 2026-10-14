@@ -281,13 +281,11 @@ export class WorkspaceService {
       }
       if (
         existingWs.workspacePath &&
-        existsSync(existingWs.workspacePath) &&
         existingWs.baseCommitSha &&
         existingWs.baseRepoPath
       ) {
         // Revalidate origin, upstream freshness, and workspace HEAD on every
-        // reuse. A canonical artifact must not turn a stale workspace into a
-        // trusted one merely because it was persisted earlier.
+        // reuse, re-materializing the worktree if the physical directory was cleaned up.
         const verified = this.worktreeManager.createIsolatedWorkspace({
           repoFullName: manifestRepo,
           issueOrTaskId,

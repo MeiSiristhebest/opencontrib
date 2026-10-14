@@ -105,13 +105,14 @@ export const semgrepPlugin: OpenContribPlugin = {
           const configArgs = hasCustomConfig
             ? '--config auto --config .semgrep.yml'
             : MULTI_SOURCE_SEMGREP_PACKS.join(' ');
+          const excludeArgs = '--exclude node_modules --exclude dist --exclude build --exclude .git --exclude coverage --exclude .turbo --exclude .next';
 
           const normalizedTarget = targetPath.replace(/\\/g, '/');
           let cmd = hasSemgrepGlobal
-            ? `semgrep scan --json ${configArgs} --quiet`
+            ? `semgrep scan --json ${configArgs} ${excludeArgs} --quiet`
             : (hasUv
-                ? `uv tool run semgrep scan --json ${configArgs} --quiet`
-                : `docker run --rm -v "${normalizedTarget}:/src" -w /src semgrep/semgrep semgrep scan --json ${configArgs} --quiet`);
+                ? `uv tool run semgrep scan --json ${configArgs} ${excludeArgs} --quiet`
+                : `docker run --rm -v "${normalizedTarget}:/src" -w /src semgrep/semgrep semgrep scan --json ${configArgs} ${excludeArgs} --quiet`);
 
           const { stdout } = await host.exec(cmd, {
             cwd: targetPath,

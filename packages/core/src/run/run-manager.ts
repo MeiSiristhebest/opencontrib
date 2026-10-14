@@ -399,7 +399,23 @@ export class ContributionRunManager {
     // A phase-bound draft cannot be written from an unrelated or later phase.
     // Validate the prospective transition before persisting so a caller cannot
     // smuggle a patch into a run while silently leaving lifecycle state behind.
+    //
+    // Diagnostic / discovery artifacts like 'probe' can be refreshed even after workspace
+    // preparation without regressing lifecycle phase.
+    const isDiagnosticRefresh =
+      type === "probe" &&
+      [
+        "WORKSPACE_PREPARED",
+        "CONTEXT_ASSEMBLED",
+        "POC_GENERATED",
+        "RED_CAPTURED",
+        "PATCH_DRAFTED",
+        "GREEN_VERIFIED",
+        "EVIDENCE_COLLECTED",
+      ].includes(summary.manifest.currentPhase);
+
     if (
+      !isDiagnosticRefresh &&
       expectedPhase &&
       summary.manifest.currentPhase !== expectedPhase &&
       !PHASE_REQUIREMENTS[expectedPhase].fromPhases.includes(
@@ -424,6 +440,7 @@ export class ContributionRunManager {
     // transition.  PR drafts have no lifecycle phase of their own and remain
     // ordinary draft artifacts after EVIDENCE_COLLECTED.
     const derivedPhase =
+      !isDiagnosticRefresh &&
       shouldAdvance &&
       expectedPhase &&
       summary.manifest.currentPhase !== expectedPhase &&

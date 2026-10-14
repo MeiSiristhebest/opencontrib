@@ -123,6 +123,39 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     );
   });
 
+  it("allows diagnostic probe artifact saving after workspace preparation without regressing phase", () => {
+    const customBase = makeTempDir();
+    const manager = new ContributionRunManager({ baseDir: customBase });
+    const manifest = manager.createRun({ repoFullName: "example/parser" });
+
+    saveCanonicalArtifact(
+      manager,
+      manifest.runId,
+      "workspace",
+      {
+        workspacePath: "/tmp/workspaces/parser",
+        branchName: "fixture-branch",
+        isWorktree: false,
+        baseRepoPath: "/tmp/workspaces/parser",
+        baseCommitSha: "a".repeat(40),
+        repoFullName: "example/parser",
+        createdAt: "2026-10-01T00:00:00.000Z",
+      },
+      "WORKSPACE_PREPARED",
+    );
+
+    expect(manager.getRun(manifest.runId)?.manifest.currentPhase).toBe("WORKSPACE_PREPARED");
+
+    // Saving probe results in prepared workspace succeeds and does not regress phase
+    manager.saveArtifact(manifest.runId, "probe", {
+      executedProbes: ["ast-grep", "ocr-npe"],
+      totalPointersCount: 5,
+    });
+
+    expect(manager.getRun(manifest.runId)?.manifest.currentPhase).toBe("WORKSPACE_PREPARED");
+    expect(manager.getRun(manifest.runId)?.artifacts.probe?.totalPointersCount).toBe(5);
+  });
+
   it("allows optional PoC after context assembly with a canonical workspace", () => {
     const customBase = makeTempDir();
     const repository = new ContributionRunManager({ baseDir: customBase });
