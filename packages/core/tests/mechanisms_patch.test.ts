@@ -2,32 +2,65 @@ import { describe, it, expect } from "bun:test";
 import {
   scoreCandidateIssue,
   resolveLcovReportPath,
-  LcovChangedLineCoverageAdapter,
   RunTransferBundleSchema,
   buildKernelIsolationCommand,
   createDefaultPluginHost,
   PluginManager,
   TOOL_REGISTRY,
-  type ProbeDescriptor,
+  mergeReproductionFilesIntoPatch,
+  type PatchDraft,
+  type CodeChangeFile,
 } from "../src/index.js";
 
 describe("6 Deep Architectural Mechanisms & Resilience Verification", () => {
   describe("Patch 1: Reproduction Test Merge and CREATE Conflict Prevention", () => {
     it("ensures mergeReproductionFiles preserves both regression tests and patch implementation without duplication", async () => {
-      // Tested directly in pipeline steps behavior
-      const testFile = {
-        path: "tests/regression.test.ts",
-        operation: "CREATE" as const,
-        content: "test('repro', () => {})",
+      const initialPatch: PatchDraft = {
+        title: "fix: sample bug",
+        summary: "fixing bug",
+        rationale: "reproducible failure",
+        targetFiles: [{ path: "src/index.ts", reason: "Implementation" }],
+        files: [
+          {
+            path: "src/index.ts",
+            operation: "MODIFY",
+            content: "export const x = 1;",
+            mode: "100644",
+            explanation: "fix defect",
+          },
+        ],
+        implementationSteps: ["step 1"],
+        regressionTestPlan: ["test 1"],
+        estimatedDiffLines: 10,
       };
-      const implFile = {
-        path: "src/index.ts",
-        operation: "UPDATE" as const,
-        content: "export const x = 1;",
-      };
-      // Verify schemas validate the structures cleanly
-      expect(testFile.operation).toBe("CREATE");
-      expect(implFile.operation).toBe("UPDATE");
+
+      const reproFiles: CodeChangeFile[] = [
+        {
+          path: "tests/regression.test.ts",
+          operation: "CREATE",
+          content: "test('repro', () => {})",
+          mode: "100644",
+          explanation: "reproduction test",
+        },
+        // Duplicate path in reproFiles that is already in patch.files
+        {
+          path: "src/index.ts",
+          operation: "MODIFY",
+          content: "export const x = 2;",
+          mode: "100644",
+          explanation: "duplicate in repro",
+        },
+      ];
+
+      const merged = mergeReproductionFilesIntoPatch(initialPatch, reproFiles);
+
+      // Verify regression test was added
+      expect(merged.files.some((f) => f.path === "tests/regression.test.ts")).toBe(true);
+      // Verify no duplicates
+      const indexFiles = merged.files.filter((f) => f.path === "src/index.ts");
+      expect(indexFiles.length).toBe(1);
+      expect(merged.files.length).toBe(2);
+      expect(merged.targetFiles.some((tf) => tf.path === "tests/regression.test.ts")).toBe(true);
     });
   });
 
@@ -58,14 +91,20 @@ describe("6 Deep Architectural Mechanisms & Resilience Verification", () => {
       expect(go?.aliases).toContain("noctx");
     });
 
-    it("allows PluginManager to correctly report isEnabled for both canonical names and plugin IDs", () => {
+    it("allows PluginManager to correctly report isEnabled for canonical names, plugin IDs, and unconfigured probes", () => {
       const pm = new PluginManager();
+      // Canonical & aliases enabled by default
       expect(pm.isEnabled("semgrep")).toBe(true);
       expect(pm.isEnabled("semgrep-sast")).toBe(true);
       expect(pm.isEnabled("ruff")).toBe(true);
       expect(pm.isEnabled("ruff-python")).toBe(true);
       expect(pm.isEnabled("knip")).toBe(true);
       expect(pm.isEnabled("knip-dead-code")).toBe(true);
+
+      // Unconfigured built-in probes default to enabled (not dropped)
+      expect(pm.isEnabled("property-fuzz")).toBe(true);
+      expect(pm.isEnabled("piolium")).toBe(true);
+      expect(pm.isEnabled("workflow-linter")).toBe(true);
     });
 
     it("verifies tool-registry probeIds map both primary and plugin IDs", () => {
@@ -86,15 +125,45 @@ describe("6 Deep Architectural Mechanisms & Resilience Verification", () => {
       ).toBe("coverage/lcov.info");
 
       expect(
+        resolveLcovReportPath({
+          executable: "vitest",
+          args: ["run", "--coverage", "--reportsDirectory=custom-cov"],
+        }),
+      ).toBe("custom-cov/lcov.info");
+
+      expect(
         resolveLcovReportPath({ executable: "jest", args: ["--coverage"] }),
       ).toBe("coverage/lcov.info");
 
+      expect(
+        resolveLcovReportPath({
+          executable: "jest",
+          args: ["--coverage", "--coverageDirectory=jest-cov"],
+        }),
+      ).toBe("jest-cov/lcov.info");
+
+      // Pytest with explicit LCOV report
       expect(
         resolveLcovReportPath({
           executable: "pytest",
           args: ["-v", "--cov=src", "--cov-report=lcov"],
         }),
       ).toBe("coverage/lcov.info");
+
+      expect(
+        resolveLcovReportPath({
+          executable: "pytest",
+          args: ["-v", "--cov=src", "--cov-report=lcov:cov/my.info"],
+        }),
+      ).toBe("cov/my.info");
+
+      // Pytest with XML report should return undefined (not LCOV)
+      expect(
+        resolveLcovReportPath({
+          executable: "pytest",
+          args: ["-v", "--cov=src", "--cov-report=xml"],
+        }),
+      ).toBeUndefined();
 
       expect(
         resolveLcovReportPath({ executable: "cargo", args: ["llvm-cov", "--lcov"] }),
@@ -145,7 +214,7 @@ describe("6 Deep Architectural Mechanisms & Resilience Verification", () => {
   });
 
   describe("Patch 6: Feasibility Multiplicative Gating & Native OS Sandbox Isolation", () => {
-    it("strictly gates candidate score to 0 when an issue is hard blocked or impossible", () => {
+    it("strictly gates candidate score to 0 when an issue is hard blocked", () => {
       const now = Date.now();
       const blockedScoring = scoreCandidateIssue({
         profile: {
@@ -175,16 +244,21 @@ describe("6 Deep Architectural Mechanisms & Resilience Verification", () => {
       expect(blockedScoring.adjustedScore).toBe(0);
     });
 
-    it("buildKernelIsolationCommand provides safe fallback on unsupported or standard environments", () => {
+    it("buildKernelIsolationCommand provides safe fallback on Windows/unsupported environments", () => {
       const command = buildKernelIsolationCommand(
         "node",
         ["index.js"],
         process.cwd(),
         ["/root/.ssh"],
       );
-      expect(command.executable).toBeDefined();
-      expect(command.args).toBeDefined();
-      expect(typeof command.isKernelIsolated).toBe("boolean");
+      if (process.platform === "win32") {
+        expect(command.executable).toBe("node");
+        expect(command.args).toEqual(["index.js"]);
+        expect(command.isKernelIsolated).toBe(false);
+      } else {
+        expect(command.executable).toBeDefined();
+        expect(command.args).toBeDefined();
+      }
     });
   });
 });

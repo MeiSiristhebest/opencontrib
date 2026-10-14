@@ -309,8 +309,7 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
   // If the issue is hard blocked, impossible, or has >= 100 penalty,
   // score is strictly gated to 0 to prevent high-score false positives.
   const isHardBlocked =
-    (feasibility.level as string) === "hard_blocked" ||
-    (feasibility.level as string) === "impossible" ||
+    feasibility.level === "hard_blocked" ||
     (feasibility.scorePenalty !== undefined && feasibility.scorePenalty >= 100);
 
   const rawScore = isHardBlocked

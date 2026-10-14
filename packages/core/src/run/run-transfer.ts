@@ -127,12 +127,20 @@ export function buildRunTransferBundle(
   }
 
   const evalArtifact = (run.artifacts as any).evaluation;
-  const subagentScore =
+  const govArtifact = (run.artifacts as any).governance;
+  const rawScore =
     typeof evalArtifact?.subagentQualityScore === "number"
       ? evalArtifact.subagentQualityScore
       : typeof (run.artifacts as any)?.subagentScore === "number"
         ? (run.artifacts as any).subagentScore
-        : undefined;
+        : typeof govArtifact?.auditResult?.qualityRubric?.overallScore === "number"
+          ? govArtifact.auditResult.qualityRubric.overallScore
+          : undefined;
+  const subagentScore =
+    typeof rawScore === "number"
+      ? Math.max(0, Math.min(100, rawScore))
+      : undefined;
+
 
   const bundle: RunTransferBundle = {
     protocolVersion: "1.0",

@@ -84,11 +84,16 @@ export class PluginManager {
       "ruff-python": "ruff",
       "knip-dead-code": "knip",
       "git-hotspot": "hotspot",
+      "go-analyzers": "go",
+      "nilaway": "go",
+      "noctx": "go",
+      "bodyclose": "go",
+      "goleak": "go",
     };
     return aliasMap[pluginId] || pluginId;
   }
 
-  /** Whether the plugin is currently enabled. Returns false for unknown IDs. */
+  /** Whether the plugin is currently enabled. Unset plugins default to true unless explicitly disabled directly or via controlling tool. */
   isEnabled(pluginId: string): boolean {
     if (this.state[pluginId] !== undefined) {
       return this.state[pluginId].enabled;
@@ -97,14 +102,17 @@ export class PluginManager {
     if (this.state[normalized] !== undefined) {
       return this.state[normalized].enabled;
     }
-    const isKnown = TOOL_REGISTRY.some(
+    const controllingTool = TOOL_REGISTRY.find(
       (t) =>
         t.id === pluginId ||
         t.id === normalized ||
         t.probeIds.includes(pluginId) ||
         t.probeIds.includes(normalized),
     );
-    return isKnown;
+    if (controllingTool && this.state[controllingTool.id] !== undefined) {
+      return this.state[controllingTool.id].enabled;
+    }
+    return true;
   }
 
   /** Return the reason a plugin was disabled, or undefined. */

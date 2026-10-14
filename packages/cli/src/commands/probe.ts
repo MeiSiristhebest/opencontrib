@@ -185,16 +185,15 @@ probeCommand
         : undefined;
 
       const pluginManager = new PluginManager();
-      const matchesFilter = (probe: ProbeDescriptor, list?: string[]) => {
-        if (!list || list.length === 0) return true;
+      const matchesFilter = (probe: ProbeDescriptor, list: string[]) => {
         const ids = [probe.id, ...(probe.aliases || [])].map((s) => s.toLowerCase());
         return list.some((item) => ids.includes(item.toLowerCase()));
       };
 
       // Negotiate active probes from both Microkernel Plugins and Probe Registry
       const matchingProbes = host.listAll().filter((probe) => {
-        if (only && !matchesFilter(probe, only)) return false;
-        if (skip && matchesFilter(probe, skip)) return false;
+        if (only !== undefined && !matchesFilter(probe, only)) return false;
+        if (skip !== undefined && matchesFilter(probe, skip)) return false;
         if (!pluginManager.isEnabled(probe.id)) return false;
         return probe.match(fingerprint);
       });

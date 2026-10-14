@@ -3,7 +3,7 @@ import {
   spawnSync,
   type SpawnSyncOptionsWithStringEncoding,
 } from "node:child_process";
-import { mkdtempSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync, lstatSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { parseCommandSpec, type CommandSpec } from "./command-spec.js";
@@ -59,22 +59,44 @@ export function buildKernelIsolationCommand(
   args: string[],
   cwd: string,
   deniedPaths: string[],
+  scratchDir?: string,
 ): { executable: string; args: string[]; isKernelIsolated: boolean } {
+  const resolvedCwd = resolve(cwd);
   if (process.platform === "linux") {
     try {
       const check = spawnSync("bwrap", ["--version"], { stdio: "ignore" });
       if (check.status === 0) {
         const bwrapArgs: string[] = [
+          "--unshare-user",
+          "--unshare-ipc",
+          "--unshare-pid",
+          "--unshare-uts",
           "--ro-bind", "/", "/",
           "--dev", "/dev",
           "--proc", "/proc",
-          "--bind", cwd, cwd,
         ];
-        for (const denied of deniedPaths) {
-          if (existsSync(denied)) {
-            bwrapArgs.push("--tmpfs", denied);
-          }
+        if (scratchDir && existsSync(scratchDir)) {
+          bwrapArgs.push("--bind", scratchDir, scratchDir);
         }
+        for (const denied of deniedPaths) {
+          if (!existsSync(denied)) continue;
+          const resolvedDenied = resolve(denied);
+          if (
+            resolvedCwd === resolvedDenied ||
+            resolvedCwd.startsWith(resolvedDenied + sep)
+          ) {
+            continue;
+          }
+          try {
+            const stat = lstatSync(resolvedDenied);
+            if (stat.isDirectory()) {
+              bwrapArgs.push("--tmpfs", resolvedDenied);
+            } else if (stat.isFile() || stat.isSymbolicLink()) {
+              bwrapArgs.push("--ro-bind", "/dev/null", resolvedDenied);
+            }
+          } catch {}
+        }
+        bwrapArgs.push("--bind", resolvedCwd, resolvedCwd);
         bwrapArgs.push("--", executable, ...args);
         return { executable: "bwrap", args: bwrapArgs, isKernelIsolated: true };
       }
@@ -85,8 +107,22 @@ export function buildKernelIsolationCommand(
     try {
       if (existsSync("/usr/bin/sandbox-exec")) {
         const denyRules = deniedPaths
-          .filter((p) => existsSync(p))
-          .map((p) => `(deny file-read* (subpath "${p}"))`)
+          .filter((p) => {
+            if (!existsSync(p)) return false;
+            const res = resolve(p);
+            return res !== resolvedCwd && !resolvedCwd.startsWith(res + sep);
+          })
+          .map((p) => {
+            try {
+              const stat = lstatSync(p);
+              if (stat.isDirectory()) {
+                return `(deny file-read* (subpath "${p}"))`;
+              }
+              return `(deny file-read* (literal "${p}"))`;
+            } catch {
+              return `(deny file-read* (subpath "${p}"))`;
+            }
+          })
           .join(" ");
         const profile = `(version 1) (allow default) ${denyRules}`;
         return {
@@ -101,6 +137,7 @@ export function buildKernelIsolationCommand(
   }
   return { executable, args, isKernelIsolated: false };
 }
+
 
 export class SanitizedLocalSandboxProvider implements SandboxProvider {
   public readonly name = "sanitized_local";
@@ -310,6 +347,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       finalArgs,
       resolvedCwd,
       this.getDeniedPaths(),
+      sandboxTempDir,
     );
     const spawnExec = kernelIsolation.executable;
     const spawnArgs = kernelIsolation.args;
@@ -486,6 +524,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       finalArgs,
       resolvedCwd,
       this.getDeniedPaths(),
+      sandboxTempDir,
     );
     const spawnExec = kernelIsolation.executable;
     const spawnArgs = kernelIsolation.args;

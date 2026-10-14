@@ -90,7 +90,7 @@ export class LcovChangedLineCoverageAdapter implements TestCoverageAdapter {
     if (context.startedAt === undefined) return undefined;
     let reportPath = this.fileName;
     if (!reportPath && context.executionSpec) {
-      reportPath = resolveLcovReportPath(context.executionSpec);
+      reportPath = resolveLcovReportPath(context.executionSpec, cwd);
     }
     if (!reportPath || (this.fileName !== undefined && resolve(cwd, reportPath) !== resolve(cwd, this.fileName))) return undefined;
     const report = readReport(cwd, reportPath, context.startedAt);

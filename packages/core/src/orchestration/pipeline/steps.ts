@@ -828,7 +828,7 @@ export class ReproductionDesignStep implements PipelineStep {
   }
 }
 
-function mergeReproductionFilesIntoPatch(
+export function mergeReproductionFilesIntoPatch(
   patch: PatchDraft,
   reproductionFiles?: CodeChangeFile[],
 ): PatchDraft {

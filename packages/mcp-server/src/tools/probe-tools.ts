@@ -121,9 +121,16 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
         const fingerprint = await extractRepoFingerprint(resolved);
         const host = await createDefaultPluginHost({ workspacePath: resolved });
 
+        const pluginManager = new PluginManager();
+        const matchesFilter = (probe: ProbeDescriptor, list: string[]) => {
+          const ids = [probe.id, ...(probe.aliases || [])].map((s) => s.toLowerCase());
+          return list.some((item) => ids.includes(item.toLowerCase()));
+        };
+
         const matchingProbes = host.listAll().filter((probe) => {
-          if (args.onlyProbes && !args.onlyProbes.includes(probe.id)) return false;
-          if (args.skipProbes && args.skipProbes.includes(probe.id)) return false;
+          if (args.onlyProbes !== undefined && !matchesFilter(probe, args.onlyProbes)) return false;
+          if (args.skipProbes !== undefined && matchesFilter(probe, args.skipProbes)) return false;
+          if (!pluginManager.isEnabled(probe.id)) return false;
           return probe.match(fingerprint);
         });
 
