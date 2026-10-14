@@ -14,7 +14,7 @@ graph TD
 
     subgraph "OpenContrib 接入层"
         CLI[OpenContrib CLI - 16 大工业级命令域]
-        MCP[MCP 服务端 - 39 个 JSON-RPC 协议工具]
+        MCP[MCP 服务端 - 41 个 JSON-RPC 协议工具]
     end
 
     subgraph "确定性领域引擎核心"
@@ -24,6 +24,7 @@ graph TD
         Sandbox[干净 Worktree 沙盒隔离]
         Evidence[并发抢占风暴与经验性物证校验]
         Gov[RFC-100 与反 AI 噪音治理门禁]
+        PromptEng[统一动态提示词引擎与 3D 测试套件]
         Flywheel[持久化贡献飞轮]
     end
 
@@ -40,7 +41,8 @@ graph TD
     Pointer --> Sandbox
     Sandbox --> Evidence
     Evidence --> Gov
-    Gov --> Flywheel
+    Gov --> PromptEng
+    PromptEng --> Flywheel
     Sandbox <--> Repo
 ```
 
@@ -82,9 +84,10 @@ graph TD
 
 坚决捍卫开源社区维护者的信任：
 
-- **100 行 Diff 上限**：自动拦截大范围重构与无关格式化。
+- **核心生产代码严格限制在 30–50 行**（绝对上限 100 行）：自动拦截大范围无关重构、格式化漂移与依赖变更。
+- **支持性测试代码行数完全无限制**：鼓励写满多用例、组合矩阵断言，杜绝测试代码行数焦虑。
+- **反单测敷衍熔断**：单一测试用例在治理审计中硬阻断（`defensiveCoverage` 上限锁死 60）。
 - **反 AI 行话过滤**：自动剥除机械式空话、Emoji 堆砌和无依据的主观推断。
-- **排他性认领协议**：发 PR 前严格校验 Issue 是否已被其他开发者锁定。
 - **Exit Code 2 刚性阻断**：未达质量标杆（总分 $<90\%$ 或单项 $<80\%$）时直接退出并阻断提 PR 通道。
 
 ---
@@ -96,6 +99,32 @@ graph TD
 - **全局活跃会话总线 (`~/.opencontrib/active_session.json`)**：实时同步记录当前 `runId`、关联仓库、沙盒路径与生命周期阶段。
 - **上下文自动继承**：后续所有 CLI 命令免传参数自动寻址工作区与活跃会话，追加写入只增事件流（`events.jsonl`）与物证快照（`evidence.json`）。
 - **保姆级自驱指令推荐**：终端每步输出确切的 `▶ NEXT RECOMMENDED COMMAND`，驱动智能体精准流转。
+
+---
+
+## 🧠 6. 统一动态提示词工程引擎 (Dynamic Prompt Engine)
+
+采用现代语义化 XML 结构与严格槽位填充架构，彻底解决 Agent 提示词格式混乱与提示注入隐患：
+
+- **语义标签边界隔离**：`<system_identity>`, `<quality_mandates>`, `<dynamic_guidance>`, `<untrusted_task_input>`, `<repair_diagnostics>`, `<negative_constraints>`, `<output_format_contract>`。
+- **技术栈生态自适应**：动态注入 Go（表驱动、-race、defer 清理）、Python（pytest 参数化、上下文管理器）、TypeScript/JavaScript（异步 Await、未捕获异常防御）等定制规范。
+- **7 维缺陷分类防御**：针对并发竞态、异步对称性、内存句柄泄漏、协议规范化动态激活专属防御策略。
+- **跨轮次故障差异化自诊断**：重试轮次自动提取编译器语法报错、断言不匹配、超时挂起特征并提供靶向修复建议。
+
+---
+
+## 🔒 7. 遥测与隐私保护 (Telemetry & Privacy)
+
+OpenContrib 内置极简且匿名的统计机制以了解开源环境的运行时采纳情况：
+
+- **严格非敏感**：仅采集操作系统类型、运行时环境（`node`/`bun`）与 CLI 版本号。
+- **完全支持退出 (Opt-Out)**：开发者可随时完全关闭遥测：
+
+  ```bash
+  export OPENCONTRIB_TELEMETRY=0
+  # 或
+  export DO_NOT_TRACK=1
+  ```
 
 ---
 

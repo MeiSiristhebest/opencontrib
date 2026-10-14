@@ -221,7 +221,7 @@ export class WorktreeManager {
     cwd?: string,
     timeoutMs = 25000,
   ): { success: boolean; stdout: string; stderr: string } {
-    const result = spawnSync("git", args, {
+    const result = spawnSync("git", ["-c", "credential.helper=", ...args], {
       cwd,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -230,6 +230,7 @@ export class WorktreeManager {
         ...process.env,
         GIT_TERMINAL_PROMPT: "0",
         GIT_ASKPASS: "echo",
+        GCM_INTERACTIVE: "never",
       },
     });
     return {

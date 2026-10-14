@@ -92,6 +92,10 @@ If OpenContrib MCP server is active (`npx -y @opencontrib/mcp`), invoke native M
 - **Canonical Submission Route**: Public work requires a provider-verified IssueBindingArtifact; private vulnerability work requires provider-verified SecurityDisclosureArtifact lifecycle authorization and no public Issue.
 - **Fail-First Verification**: Prove bug reproduction with failing test before fixing.
 - **Anti-AI Governance**: Never introduce generic boilerplate or non-reproducible changes.
+- **Core Production Logic (30–50 Lines)**: Keep production code diffs strictly surgical ($\le 30-50$ lines, hard ceiling 100). Never introduce unrequested refactors or formatting churn.
+- **Supporting Test Code Unrestricted**: Supporting test suites are completely exempt from line count limits. Write full 3D combinatorial test suites without diff anxiety.
+- **Anti-Tokenism Gate**: Single-test complacency is strictly forbidden (`defensiveCoverage` capped at 60). Test happy paths, boundary limits, and error/cleanup paths.
+- **Sister-Module Variant Hunting**: Check sibling call sites and helper functions across the codebase before submitting.
 
 <!-- OPENCONTRIB:GENERATED protocol:start -->
 ## Canonical OpenContrib Protocol (generated)

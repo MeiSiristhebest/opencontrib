@@ -149,6 +149,12 @@ Replaces superficial single-run test loops with multi-worker parallel execution:
 
 When a defect is remediated in one module (e.g. `mongodb-adapter.ts`), the governance auditor evaluates whether sister components (`sqlite-adapter.ts`, `pg-adapter.ts`) were swept for identical anti-patterns.
 
+### 8. Dynamic Prompt Engineering Engine & 3D Test Matrix
+
+- **Structured XML Schemas**: Enforces `<system_identity>`, `<quality_mandates>`, `<untrusted_task_input>`, and `<repair_diagnostics>` boundaries to eliminate injection attacks and hallucinated formats.
+- **Ecosystem-Specific Guidance**: Automatically adapts to Go, Python, TypeScript, Rust, and Java conventions.
+- **3D Test Multi-Dimensional Verification**: Mandates (1) happy path, (2) edge & boundary stress, and (3) error & resource cleanup injection. Rejects single-case tokenism in governance audit.
+
 ---
 
 ## ⚙️ Requirements
@@ -351,7 +357,7 @@ Or add to client configuration:
 }
 ```
 
-**MCP Capabilities**: 39 Composable Tools across 9 domains (`contrib_scout`, `contrib_prepare_workspace`, `contrib_capture_red`, `contrib_audit_governance`, `contrib_run_pipeline`, etc.), 3 Resources (`opencontrib://doctor`, `opencontrib://memory`, `opencontrib://runs`), and 1 Prompt (`opencontrib_workflow_guide`).
+**MCP Capabilities**: 41 Composable Tools across 9 domains (`contrib_scout`, `contrib_prepare_workspace`, `contrib_capture_red`, `contrib_audit_governance`, `contrib_run_pipeline`, etc.), 3 Resources (`opencontrib://doctor`, `opencontrib://memory`, `opencontrib://runs`), and 1 Prompt (`opencontrib_workflow_guide`).
 
 ---
 
@@ -372,7 +378,7 @@ Or add to client configuration:
 ## 🛡️ The 6 Absolute Engineering Invariants
 
 1. **CLI-First Execution Priority (Dual-Ingress Ready)**:
-   Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 39 composable tools of `@opencontrib/mcp` remain first-class supported for MCP-native agents.
+   Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 41 composable tools of `@opencontrib/mcp` remain first-class supported for MCP-native agents.
 2. **Anti-Drift Circuit Breaker (Max 3 `view_file` calls)**:
    Avoid blind sequential file reads (> 3 views). Pinpoint symbols strictly via Smart Pointer slices (`ptr://...`) or `grep_search`.
 3. **Canonical Submission Route (No Blind PRs)**:

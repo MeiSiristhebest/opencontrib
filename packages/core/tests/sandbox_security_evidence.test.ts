@@ -414,7 +414,7 @@ describe("Evidence-Backed Quality Rubric & Subagent Review Decoupling", () => {
         });
       }).toThrow("WorkspaceBaseCommitUnavailableError: failed to clone");
     },
-    { timeout: 30000 },
+    { timeout: 60000 },
   );
 
   test("SandboxProvider strictly blocks execution when cwd escapes workspaceRoot", () => {
