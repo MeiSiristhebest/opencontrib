@@ -359,10 +359,18 @@ export class TrustedRunMaterializer {
             timeoutMs,
           }),
       );
+      if (bundle.probe) {
+        this.runManager.saveArtifact(
+          bundle.manifest.runId,
+          "probe",
+          bundle.probe,
+        );
+      }
       new GovernanceService(this.runManager).audit(bundle.manifest.runId, {
         prTitle: title,
         prBody: bundle.prDraft,
         preflightLintResult,
+        subagentScore: bundle.subagentScore,
       });
 
       return await this.finalizeGovernanceReadyRun(bundle.manifest.runId);

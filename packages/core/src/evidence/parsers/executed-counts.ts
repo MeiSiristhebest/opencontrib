@@ -166,3 +166,36 @@ export function bunLcovReportPath(spec: CommandSpec): string | undefined {
   const directory = option("--coverage-dir");
   return directory ? join(directory, "lcov.info") : undefined;
 }
+
+/**
+ * Resolves the relative LCOV report path for multi-ecosystem test runners
+ * (Bun, Vitest, Jest, Pytest, Cargo llvm-cov).
+ */
+export function resolveLcovReportPath(spec: CommandSpec): string | undefined {
+  const bunPath = bunLcovReportPath(spec);
+  if (bunPath) return bunPath.replace(/\\/g, "/");
+
+  const name = executableName(spec);
+  if (["vitest", "jest"].includes(name ?? "")) {
+    return "coverage/lcov.info";
+  }
+
+  if (["pytest", "python", "python3"].includes(name ?? "")) {
+    if (spec.args.some(arg => arg.includes("--cov"))) {
+      return "coverage/lcov.info";
+    }
+  }
+
+  if (name === "cargo" && spec.args.includes("llvm-cov")) {
+    return "lcov.info";
+  }
+
+  if (
+    spec.args.includes("--coverage") ||
+    spec.args.some(arg => arg.startsWith("--coverage") || arg.startsWith("--cov"))
+  ) {
+    return "coverage/lcov.info";
+  }
+
+  return undefined;
+}

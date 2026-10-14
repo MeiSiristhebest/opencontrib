@@ -24,6 +24,7 @@ export const goAnalyzersPlugin: OpenContribPlugin = {
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'go-analyzers',
+      aliases: ['nilaway', 'goleak', 'bodyclose', 'noctx'],
       name: 'Go Concurrency, Leak & Context Analyzers',
       category: 'lifecycle_leak',
       description: 'Finds nil pointer dereferences (nilaway), unclosed HTTP bodies (bodyclose), missing context propagation (noctx), and goroutine leaks',

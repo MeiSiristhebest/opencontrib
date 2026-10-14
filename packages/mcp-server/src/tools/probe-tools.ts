@@ -13,6 +13,8 @@ import {
   triagePointerFindings,
   buildContributionRunManager,
   getLocalRepositoryFullName,
+  PluginManager,
+  type ProbeDescriptor,
   type ContributionRunManager,
   type ProbeCost,
   type DefectCategory,

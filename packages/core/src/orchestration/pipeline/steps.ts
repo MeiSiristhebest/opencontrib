@@ -22,6 +22,7 @@ import {
   PatchDraftSchema,
   ReproductionDesignSchema,
   SubagentReviewEvaluationSchema,
+  type CodeChangeFile,
   type PatchDraft,
   type ReproductionDesign,
 } from "../../contracts/llm-schemas.js";
@@ -827,6 +828,33 @@ export class ReproductionDesignStep implements PipelineStep {
   }
 }
 
+function mergeReproductionFilesIntoPatch(
+  patch: PatchDraft,
+  reproductionFiles?: CodeChangeFile[],
+): PatchDraft {
+  if (!reproductionFiles || reproductionFiles.length === 0) {
+    return patch;
+  }
+  const existingPaths = new Set(patch.files.map((f) => f.path));
+  const testFilesToInclude = reproductionFiles.filter(
+    (tf) => !existingPaths.has(tf.path),
+  );
+  if (testFilesToInclude.length === 0) {
+    return patch;
+  }
+  return {
+    ...patch,
+    files: [...testFilesToInclude, ...patch.files],
+    targetFiles: [
+      ...testFilesToInclude.map((tf) => ({
+        path: tf.path,
+        reason: "Regression reproduction test",
+      })),
+      ...(patch.targetFiles || []),
+    ],
+  };
+}
+
 // ── Phase (initial): Schema-First LLM Patch Generation ──────────────────────
 
 export class PatchGenerationStep implements PipelineStep {
@@ -878,30 +906,10 @@ export class PatchGenerationStep implements PipelineStep {
     ctx.patchDraft = patchDraft;
     // If reproduction design introduced regression test files, merge them into the patch draft
     // so the final canonical PatchArtifact and exact delta include BOTH test + implementation.
-    let fullPatchDraft: PatchDraft = patchDraft;
-    if (
-      ctx.reproductionDesign?.reproductionFiles &&
-      ctx.reproductionDesign.reproductionFiles.length > 0
-    ) {
-      const existingPaths = new Set(patchDraft.files.map((f) => f.path));
-      const testFilesToInclude =
-        ctx.reproductionDesign.reproductionFiles.filter(
-          (tf) => !existingPaths.has(tf.path),
-        );
-      if (testFilesToInclude.length > 0) {
-        fullPatchDraft = {
-          ...patchDraft,
-          files: [...testFilesToInclude, ...patchDraft.files],
-          targetFiles: [
-            ...testFilesToInclude.map((tf) => ({
-              path: tf.path,
-              reason: "Regression reproduction test",
-            })),
-            ...patchDraft.targetFiles,
-          ],
-        };
-      }
-    }
+    const fullPatchDraft = mergeReproductionFilesIntoPatch(
+      patchDraft,
+      ctx.reproductionDesign?.reproductionFiles,
+    );
 
     ctx.activePatch = fullPatchDraft;
     if (ctx.runId) {
@@ -934,6 +942,10 @@ export class ImplementValidateLoopStep implements PipelineStep {
     deps.stateMachine.transition(
       "SANDBOX_VALIDATION",
       "Executing empirical baseline assertion checks in sandbox",
+    );
+
+    const reproAppliedPaths = new Set(
+      (ctx.reproductionDesign?.reproductionFiles ?? []).map((f) => f.path),
     );
 
     let implementationAttempts = 0;
@@ -1077,7 +1089,11 @@ export class ImplementValidateLoopStep implements PipelineStep {
               // SAFETY: PatchDraftSchema (Zod) validated repairResult.data at
               // runtime; the schema's output type is structurally identical to
               // PatchDraft. Guard above already checked `.files.length > 0`.
-              activePatchRef.patch = repairResult.data as unknown as PatchDraft;
+              activePatchRef.patch = mergeReproductionFilesIntoPatch(
+                repairResult.data as unknown as PatchDraft,
+                ctx.reproductionDesign?.reproductionFiles,
+              );
+              ctx.activePatch = activePatchRef.patch;
               runManager.saveArtifact(
                 ctx.runId!,
                 "patch",
@@ -1092,10 +1108,15 @@ export class ImplementValidateLoopStep implements PipelineStep {
         }
       }
 
-      // 1. Physically apply file edits to worktree with strict boundary checking
+      // 1. Physically apply file edits to worktree with strict boundary checking.
+      // Deduplicate: files already safely written to disk by ReproductionDesignStep or replay
+      // must not be applied a second time, avoiding PatchSemanticViolationError: CREATE target already exists.
+      const filesToApply = activePatchRef.patch.files.filter(
+        (f) => !reproAppliedPaths.has(f.path),
+      );
       const safeApplyResult = deps.worktreeManager.applySurgicalFilesSafely(
         workspacePath,
-        activePatchRef.patch.files.map((f) => ({
+        filesToApply.map((f) => ({
           path: f.path,
           operation: f.operation,
           content: f.content,

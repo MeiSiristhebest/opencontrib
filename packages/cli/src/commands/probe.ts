@@ -15,6 +15,8 @@ import {
   ActiveSessionManager,
   buildContributionRunManager,
   getLocalRepositoryFullName,
+  PluginManager,
+  type ProbeDescriptor,
   type ContributionRunManager,
   type ProbeCost,
   type DefectCategory,
@@ -182,10 +184,18 @@ probeCommand
         ? opts.skip.split(",").map((s: string) => s.trim())
         : undefined;
 
+      const pluginManager = new PluginManager();
+      const matchesFilter = (probe: ProbeDescriptor, list?: string[]) => {
+        if (!list || list.length === 0) return true;
+        const ids = [probe.id, ...(probe.aliases || [])].map((s) => s.toLowerCase());
+        return list.some((item) => ids.includes(item.toLowerCase()));
+      };
+
       // Negotiate active probes from both Microkernel Plugins and Probe Registry
       const matchingProbes = host.listAll().filter((probe) => {
-        if (only && !only.includes(probe.id)) return false;
-        if (skip && skip.includes(probe.id)) return false;
+        if (only && !matchesFilter(probe, only)) return false;
+        if (skip && matchesFilter(probe, skip)) return false;
+        if (!pluginManager.isEnabled(probe.id)) return false;
         return probe.match(fingerprint);
       });
 

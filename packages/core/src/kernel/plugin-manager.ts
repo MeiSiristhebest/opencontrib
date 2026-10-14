@@ -77,12 +77,33 @@ export class PluginManager {
     return s;
   }
 
+  /** Normalize plugin / probe alias for lookups. */
+  private normalizePluginId(pluginId: string): string {
+    const aliasMap: Record<string, string> = {
+      "semgrep-sast": "semgrep",
+      "ruff-python": "ruff",
+      "knip-dead-code": "knip",
+      "git-hotspot": "hotspot",
+    };
+    return aliasMap[pluginId] || pluginId;
+  }
+
   /** Whether the plugin is currently enabled. Returns false for unknown IDs. */
   isEnabled(pluginId: string): boolean {
     if (this.state[pluginId] !== undefined) {
       return this.state[pluginId].enabled;
     }
-    const isKnown = TOOL_REGISTRY.some((t) => t.id === pluginId);
+    const normalized = this.normalizePluginId(pluginId);
+    if (this.state[normalized] !== undefined) {
+      return this.state[normalized].enabled;
+    }
+    const isKnown = TOOL_REGISTRY.some(
+      (t) =>
+        t.id === pluginId ||
+        t.id === normalized ||
+        t.probeIds.includes(pluginId) ||
+        t.probeIds.includes(normalized),
+    );
     return isKnown;
   }
 
