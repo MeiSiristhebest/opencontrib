@@ -22,14 +22,7 @@ export type EcosystemType =
   | "java"
   | "generic";
 
-export interface ToolFeedbackEntry {
-  turn: number;
-  toolName: string;
-  command?: string;
-  exitCode?: number;
-  output: string;
-  success: boolean;
-}
+import type { ToolFeedbackEntry } from "../orchestration/agent-orchestrator.js";
 
 export interface PatchPromptOptions {
   basePrompt: string;

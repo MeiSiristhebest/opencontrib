@@ -117,6 +117,10 @@ export class VariantHunter {
   ): Promise<DiscoveredVariant[]> {
     const finding: PointerStub = {
       id: `hunt-${Date.now()}`,
+      title: `Hunt variant for ${symbol}`,
+      category: 'protocol_drift',
+      severity: 'medium',
+      confidence: 85,
       file: options.file || '',
       line: options.line || 0,
       affectedSymbol: symbol,

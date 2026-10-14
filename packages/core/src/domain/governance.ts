@@ -535,6 +535,7 @@ export interface AuditGovernanceInput {
   subagentQualityScore?: number;
   isAutonomousPrSubmission?: boolean;
   variantHuntConducted?: boolean;
+  combinatorialScenariosCovered?: number;
   impactAnalysisConducted?: boolean;
   modifiedFiles?: string[];
   repoContextFiles?: string[];

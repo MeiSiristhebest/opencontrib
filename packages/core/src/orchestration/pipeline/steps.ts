@@ -841,9 +841,9 @@ export class PatchGenerationStep implements PipelineStep {
       try {
         const patchPrompt = buildDynamicPatchPrompt({
           basePrompt: ctx.prompt || "",
-          repoFullName: ctx.workspace?.repoFullName,
+          repoFullName: ctx.targetRepo || ctx.selectedOpp?.repoFullName,
           testCommand: ctx.testCmd,
-          defectDomain: ctx.selectedOpp?.category,
+          defectDomain: (ctx.selectedOpp as any)?.category || (ctx.selectedOpp as any)?.defectCategory,
           attemptNumber: 1,
         });
         const llmResult = await deps.llmService.generateStructured({
@@ -966,9 +966,9 @@ export class ImplementValidateLoopStep implements PipelineStep {
             })
           : buildDynamicPatchPrompt({
               basePrompt: prompt,
-              repoFullName: ctx.workspace?.repoFullName,
+              repoFullName: ctx.targetRepo || ctx.selectedOpp?.repoFullName,
               testCommand: testCmd,
-              defectDomain: ctx.selectedOpp?.category,
+              defectDomain: (ctx.selectedOpp as any)?.category || (ctx.selectedOpp as any)?.defectCategory,
               attemptNumber: 1,
             });
 
