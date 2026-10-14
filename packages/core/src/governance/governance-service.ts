@@ -37,6 +37,8 @@ export interface GovernanceAuditRunOptions {
   resourceLeakPolicy?: import("../domain/governance.js").ResourceLeakPolicy;
   isAutonomous?: boolean;
   subagentScore?: number;
+  variantHuntConducted?: boolean;
+  combinatorialScenariosCovered?: number;
   /** Result from the caller's pre-flight lint check; omission fails closed. */
   preflightLintResult?: PreflightLintResult;
 }
@@ -391,6 +393,16 @@ export class GovernanceService {
       coreDiffLines = undefined;
     }
 
+    const probeArtifact = run.artifacts.probe as Record<string, unknown> | undefined;
+    const variantHuntConducted =
+      options.variantHuntConducted ??
+      Boolean(probeArtifact?.variantHunt || probeArtifact?.variants);
+    const combinatorialScenariosCovered =
+      options.combinatorialScenariosCovered ??
+      (typeof (probeArtifact?.matrix as any)?.scenarios?.length === "number"
+        ? (probeArtifact?.matrix as any).scenarios.length
+        : undefined);
+
     const auditResult = auditGovernance({
       diffText: governanceDiffText,
       patchContent,
@@ -401,6 +413,8 @@ export class GovernanceService {
       evidence: evidenceArtifact as any,
       lineCount: validatedPatch.changedLines,
       coreDiffLines,
+      variantHuntConducted,
+      combinatorialScenariosCovered,
       // Governance is deliberately technical-only. Approval is minted later
       // by an external trusted authority and is not inferred from this audit.
       coveragePolicy: effectiveCoveragePolicy,

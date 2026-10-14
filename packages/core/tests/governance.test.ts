@@ -910,4 +910,51 @@ diff --git a/model.py b/model.py
     expect(audit.impactAnalysisIssues && audit.impactAnalysisIssues.length > 0).toBe(true);
     expect(audit.remediationSuggestions.join(" ")).toContain("Impact Gate");
   });
+
+  it("enforces single-test complacency gate: fails when only 1 unit test passes without 3D/matrix coverage", () => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/src/index.ts b/src/index.ts\n+const x = 1;",
+      prTitle: "fix: handle boundary condition",
+      prBody: "Fixes #123.\n\n### Problem\nSingle bug.\n\n### Fix\nSimple check.",
+      evidence: {
+        reproductionVerified: true,
+        allTestsPassing: true,
+        failedUnitTestsCount: 0,
+        passedUnitTestsCount: 1, // Single test complacency!
+        testCoveragePercent: 90,
+      },
+      lineCount: 5,
+      coreDiffLines: 5,
+    });
+
+    expect(audit.technicalGate?.status).toBe("FAIL");
+    expect(audit.isGatedPassed).toBe(false);
+    expect(audit.weakestDimension.dimension).toBe("Defensive Coverage Confidence");
+    expect(audit.weakestDimension.score).toBe(60);
+    expect(audit.remediationSuggestions.some((s) => s.includes("Single-test complacency detected"))).toBe(true);
+  });
+
+  it("passes quality gate when >= 3 unit tests pass with multi-scenario coverage", () => {
+    const audit = auditGovernance({
+      patchContent: "diff --git a/src/index.ts b/src/index.ts\n+const x = 1;",
+      prTitle: "fix: handle boundary condition",
+      prBody: "Fixes #123.\n\n### Problem\nSingle bug.\n\n### Fix\nSimple check.",
+      evidence: {
+        reproductionVerified: true,
+        allTestsPassing: true,
+        failedUnitTestsCount: 0,
+        passedUnitTestsCount: 4, // Adequate 3D suite
+        testCoveragePercent: 90,
+      },
+      lineCount: 5,
+      coreDiffLines: 5,
+      subagentQualityScore: 95,
+      variantHuntConducted: true,
+    });
+
+    expect(audit.technicalGate?.status).toBe("PASS");
+    expect(audit.isGatedPassed).toBe(true);
+    expect(audit.weakestDimension.score).toBeGreaterThanOrEqual(90);
+    expect(audit.remediationSuggestions.some((s) => s.includes("Single-test complacency detected"))).toBe(false);
+  });
 });

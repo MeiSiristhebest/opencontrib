@@ -84,13 +84,21 @@ git checkout -b feat/mcp-domain-primitives
 
 ---
 
-### Phase 2: 规范驱动编码与单测先行 (Implementation & Tests)
+### Phase 2: 规范驱动编码与 3D 测试先行 (Implementation & 3D Tests)
 
-- **Bug 修复标准（Fail-First）**：
-  1. 先编写一个针对该 Bug 的单元测试，运行确认其**失败（Fail）**。
-  2. 编写修复代码，再次运行确认该测试**通过（Pass）**。
+- **Bug 修复标准（Fail-First with 3D Test Suite）**：
+  1. **严禁单一测试敷衍（Ban Single-Test Complacency）**：绝不能只写 1 个简单单测糊弄过关。必须构建涵盖 3D 维度的复现与质量测试套件：
+     - **正常核心流 (Happy Path)**：重现并验证缺陷的标准运行路径。
+     - **边界与极值场景 (Boundary & Edge Cases)**：空集合、单元素、极值尺寸、分隔符、空/未定义字段等边界保护。
+     - **故障注入与弹性 (Failure Injection & Defensive Resilience)**：并发冲突、超时重试预算耗尽、错误保留与资源释放防范。
+  2. 先运行测试确认所有复现用例在修复前可信**失败（Fail，authoritative RED）**。
+  3. **专注于缺陷本身的极简防御性修复（Surgical, Defensive Fix）**：
+     - **生产核心代码严格控制在 30–50 行**（绝对不超过 100 行），严禁夹带无关重构、格式漂移或依赖升级。
+     - **测试代码行数完全不设限**！写满充沛断言，不留盲区。
+     - **通盘排查全仓关联调用点**：检查辅助 helper、同类模块、同步/异步对称性（广度与深度）。
+  4. 再次运行确认测试套件 **100% 变绿通过（GREEN）**，且不破坏既有任何功能。
 - **特性开发标准**：
-  1. 接口与核心逻辑必须有对应的单元测试覆盖（边界值、空值、异常处理）。
+  1. 接口与核心逻辑必须有对应的单元与集成测试覆盖（边界值、空值、异常处理、并发保护）。
   2. 纯函数测试严禁依赖不稳定的外部网络与未打桩的第三方接口。
 
 ---
@@ -115,7 +123,7 @@ git checkout -b feat/mcp-domain-primitives
 git add <target-files>
 
 # 格式：<type>(<scope>): <short description>
-git commit -m "feat(mcp): implement 18 atomic domain primitives for agent workflows"
+git commit -m "feat(mcp): implement 41 atomic domain primitives for agent workflows"
 # 或
 git commit -m "fix(diff): resolve CRLF line ending corruption in unified patch parser"
 ```
@@ -144,7 +152,7 @@ PR 草稿必须先通过 OpenContrib 治理审计、受信任审批与 Submissio
 ````markdown
 ## 🎯 Description / Summary
 
-- 在 `packages/mcp` 中实现了 18 个原子领域工具与 3 个运行时资源。
+- 在 `packages/mcp` 中实现了 41 个原子领域工具与 3 个运行时资源。
 - 完善了基于 stdio 与 SSE 协议的握手及参数强类型校验。
 
 ## 🔍 Root Cause / Architecture Rationale
@@ -154,7 +162,7 @@ PR 草稿必须先通过 OpenContrib 治理审计、受信任审批与 Submissio
 
 ## 🧪 Verification & Empirical Evidence
 
-- [x] 新增单测覆盖 18 个 Primitives 调用链路
+- [x] 新增单测覆盖 41 个 Primitives 调用链路并采用 3D 多场景覆盖
 - [x] 本地全量质量门禁验证通过：
 
 ```bash
@@ -251,6 +259,6 @@ Agent 在进行开源问题挖掘或自身架构审计时，优先识别并锁�
 - **工作区与证据**：`opencontrib workspace prepare --repo <owner/repo> --issue <issue-or-task-id>` / `contrib_prepare_workspace`；PoC（contrib_verify_poc）是可选复现步骤，不能替代 contrib_capture_red 的权威 RED。
 - **RED → PATCH → GREEN**：必须先执行 contrib_capture_red，再通过 contrib_save_artifact 保存补丁，最后执行 contrib_verify_green 验证 GREEN；没有 RED 不得进入 PATCH_DRAFTED。
 - **路由与治理**：公开漏洞必须先绑定提供方校验的 IssueBindingArtifact；私有漏洞必须绑定提供方校验的 SecurityDisclosureArtifact 并获得公开修复授权，不能创建公开 Issue；准备私有漏洞工作区时使用非公开任务标识。
-- **PR 草稿**：仍处于 EVIDENCE_COLLECTED 时，通过 CLI opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>" 或 MCP contrib_render_pr_template 首次创建并保存不可变的 pr_draft；私有安全路由不得包含公开 Issue 引用。随后执行 opencontrib governance audit --run-id <run_id> --pr-title "<title>" / contrib_audit_governance，请求受信任审批（opencontrib governance request-approval --run-id <run_id> / contrib_request_approval），最终只通过 contrib_submit_pr / SubmissionPort 提交。
+- **PR 草稿**：仍处于 EVIDENCE_COLLECTED 时，通过 CLI `opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>"` 或 MCP `contrib_render_pr_template` 首次创建并保存不可变的 pr_draft；私有安全路由不得包含公开 Issue 引用。随后执行 `opencontrib governance audit --run-id <run_id> --pr-title "<title>"` / `contrib_audit_governance`，请求受信任审批（`opencontrib governance request-approval --run-id <run_id>` / `contrib_request_approval`），最终只通过 `contrib_submit_pr` / SubmissionPort 提交。
 - 禁止使用原始 GitHub CLI、GitHub MCP 或 GitHub API 写入 Pull Request；它们会绕过 SubmissionIntent、ApprovalArtifact、SubmissionPermit 与提供方校验。
 <!-- OPENCONTRIB:GENERATED protocol:end -->

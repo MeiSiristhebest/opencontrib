@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
 import { saveCanonicalArtifact } from "../src/run/canonical-writer.js";
 import { ActiveSessionManager } from "../src/run/active-session.js";
 import {
@@ -121,6 +121,39 @@ describe("Contribution Run & Artifact Bundle Primitives", () => {
     expect(manager.getRun(manifest.runId)?.manifest.currentPhase).toBe(
       "CONTEXT_ASSEMBLED",
     );
+  });
+
+  it("allows diagnostic probe artifact saving after workspace preparation without regressing phase", () => {
+    const customBase = makeTempDir();
+    const manager = new ContributionRunManager({ baseDir: customBase });
+    const manifest = manager.createRun({ repoFullName: "example/parser" });
+
+    saveCanonicalArtifact(
+      manager,
+      manifest.runId,
+      "workspace",
+      {
+        workspacePath: "/tmp/workspaces/parser",
+        branchName: "fixture-branch",
+        isWorktree: false,
+        baseRepoPath: "/tmp/workspaces/parser",
+        baseCommitSha: "a".repeat(40),
+        repoFullName: "example/parser",
+        createdAt: "2026-10-01T00:00:00.000Z",
+      },
+      "WORKSPACE_PREPARED",
+    );
+
+    expect(manager.getRun(manifest.runId)?.manifest.currentPhase).toBe("WORKSPACE_PREPARED");
+
+    // Saving probe results in prepared workspace succeeds and does not regress phase
+    manager.saveArtifact(manifest.runId, "probe", {
+      executedProbes: ["ast-grep", "ocr-npe"],
+      totalPointersCount: 5,
+    });
+
+    expect(manager.getRun(manifest.runId)?.manifest.currentPhase).toBe("WORKSPACE_PREPARED");
+    expect(manager.getRun(manifest.runId)?.artifacts.probe?.totalPointersCount).toBe(5);
   });
 
   it("allows optional PoC after context assembly with a canonical workspace", () => {
@@ -563,5 +596,20 @@ describe("ActiveSessionManager & Pointer Store Persistence", () => {
     expect(runManager.resolveRunId("run_explicit_999")).toBe(
       "run_explicit_999",
     );
+  });
+
+  it("isolates activeSession to baseDir when baseDir is specified without explicit activeSession", async () => {
+    const customBase = join(tmpdir(), `run_base_isolate_${Date.now()}`, "runs");
+    const { ContributionRunManager } = await import("../src/index.js");
+    const runManager = new ContributionRunManager({
+      baseDir: customBase,
+    });
+
+    const manifest = runManager.createRun({ repoFullName: "isolated/repo" });
+    expect(runManager.resolveRunId()).toBe(manifest.runId);
+
+    // The active session file should reside in the isolated base directory's parent, not globally
+    const expectedSessionFile = join(dirname(customBase), "active_session.json");
+    expect(existsSync(expectedSessionFile)).toBe(true);
   });
 });

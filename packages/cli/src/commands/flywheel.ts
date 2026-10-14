@@ -50,10 +50,14 @@ const flywheelSync = new Command("sync")
             ) as typeof parsed) || {};
         } else if (opts.input) {
           parsed = (parseJSON(opts.input, "--input") as typeof parsed) || {};
-        } else if (!opts.runId) {
-          const stdin = await readStdin();
-          if (stdin.trim())
-            parsed = (parseJSON(stdin, "stdin") as typeof parsed) || {};
+        } else if (!opts.runId && !process.stdin.isTTY) {
+          try {
+            const stdin = await readStdin();
+            if (stdin.trim())
+              parsed = (parseJSON(stdin, "stdin") as typeof parsed) || {};
+          } catch {
+            // best-effort: stdin is optional when active session exists
+          }
         }
 
         const runManager = getRunManager();

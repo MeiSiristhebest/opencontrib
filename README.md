@@ -149,6 +149,12 @@ Replaces superficial single-run test loops with multi-worker parallel execution:
 
 When a defect is remediated in one module (e.g. `mongodb-adapter.ts`), the governance auditor evaluates whether sister components (`sqlite-adapter.ts`, `pg-adapter.ts`) were swept for identical anti-patterns.
 
+### 8. Dynamic Prompt Engineering Engine & 3D Test Matrix
+
+- **Structured XML Schemas**: Enforces `<system_identity>`, `<quality_mandates>`, `<untrusted_task_input>`, and `<repair_diagnostics>` boundaries to eliminate injection attacks and hallucinated formats.
+- **Ecosystem-Specific Guidance**: Automatically adapts to Go, Python, TypeScript, Rust, and Java conventions.
+- **3D Test Multi-Dimensional Verification**: Mandates (1) happy path, (2) edge & boundary stress, and (3) error & resource cleanup injection. Rejects single-case tokenism in governance audit.
+
 ---
 
 ## ⚙️ Requirements
@@ -351,7 +357,7 @@ Or add to client configuration:
 }
 ```
 
-**MCP Capabilities**: 39 Composable Tools across 9 domains (`contrib_scout`, `contrib_prepare_workspace`, `contrib_capture_red`, `contrib_audit_governance`, `contrib_run_pipeline`, etc.), 3 Resources (`opencontrib://doctor`, `opencontrib://memory`, `opencontrib://runs`), and 1 Prompt (`opencontrib_workflow_guide`).
+**MCP Capabilities**: 41 Composable Tools across 9 domains (`contrib_scout`, `contrib_prepare_workspace`, `contrib_capture_red`, `contrib_audit_governance`, `contrib_run_pipeline`, etc.), 3 Resources (`opencontrib://doctor`, `opencontrib://memory`, `opencontrib://runs`), and 1 Prompt (`opencontrib_workflow_guide`).
 
 ---
 
@@ -365,14 +371,14 @@ Or add to client configuration:
 - **Setup and deployment**: @opencontrib/mcp setup --all configures MCP clients; @opencontrib/cli setup checks the development toolchain. Provider-write credentials and approval keys belong only to the trusted broker. Physical isolation requires a separate worker with no host credentials or metadata access; unrestricted host shell access can bypass an in-process protocol gate.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
 - **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route. Use a non-public task identifier when preparing a private-work workspace.
-- **PR draft**: while still in EVIDENCE_COLLECTED, create and persist immutable pr_draft with opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>" / contrib_render_pr_template; private security drafts must omit public Issue references. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP order is contrib_render_pr_template → contrib_audit_governance → contrib_request_approval → contrib_submit_pr / SubmissionPort.
+- **PR draft**: while still in EVIDENCE_COLLECTED, create and persist immutable pr_draft with `opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>"` / `contrib_render_pr_template`; private security drafts must omit public Issue references. Then run `opencontrib governance audit --run-id <run_id> --pr-title "<title>"` → `opencontrib governance request-approval --run-id <run_id>` → opencontrib submission submit; MCP order is `contrib_render_pr_template` → `contrib_audit_governance` → `contrib_request_approval` → `contrib_submit_pr` / SubmissionPort.
 - Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
 <!-- OPENCONTRIB:GENERATED protocol:end -->
 
 ## 🛡️ The 6 Absolute Engineering Invariants
 
 1. **CLI-First Execution Priority (Dual-Ingress Ready)**:
-   Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 39 composable tools of `@opencontrib/mcp` remain first-class supported for MCP-native agents.
+   Prioritize executing commands directly via terminal (`opencontrib <command>`) to leverage active session auto-inheritance and self-guiding state machine prompts. The 41 composable tools of `@opencontrib/mcp` remain first-class supported for MCP-native agents.
 2. **Anti-Drift Circuit Breaker (Max 3 `view_file` calls)**:
    Avoid blind sequential file reads (> 3 views). Pinpoint symbols strictly via Smart Pointer slices (`ptr://...`) or `grep_search`.
 3. **Canonical Submission Route (No Blind PRs)**:

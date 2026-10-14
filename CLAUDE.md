@@ -92,6 +92,10 @@ If OpenContrib MCP server is active (`npx -y @opencontrib/mcp`), invoke native M
 - **Canonical Submission Route**: Public work requires a provider-verified IssueBindingArtifact; private vulnerability work requires provider-verified SecurityDisclosureArtifact lifecycle authorization and no public Issue.
 - **Fail-First Verification**: Prove bug reproduction with failing test before fixing.
 - **Anti-AI Governance**: Never introduce generic boilerplate or non-reproducible changes.
+- **Core Production Logic (30–50 Lines)**: Keep production code diffs strictly surgical ($\le 30-50$ lines, hard ceiling 100). Never introduce unrequested refactors or formatting churn.
+- **Supporting Test Code Unrestricted**: Supporting test suites are completely exempt from line count limits. Write full 3D combinatorial test suites without diff anxiety.
+- **Anti-Tokenism Gate**: Single-test complacency is strictly forbidden (`defensiveCoverage` capped at 60). Test happy paths, boundary limits, and error/cleanup paths.
+- **Sister-Module Variant Hunting**: Check sibling call sites and helper functions across the codebase before submitting.
 
 <!-- OPENCONTRIB:GENERATED protocol:start -->
 ## Canonical OpenContrib Protocol (generated)
@@ -103,6 +107,6 @@ If OpenContrib MCP server is active (`npx -y @opencontrib/mcp`), invoke native M
 - **Setup and deployment**: @opencontrib/mcp setup --all configures MCP clients; @opencontrib/cli setup checks the development toolchain. Provider-write credentials and approval keys belong only to the trusted broker. Physical isolation requires a separate worker with no host credentials or metadata access; unrestricted host shell access can bypass an in-process protocol gate.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
 - **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route. Use a non-public task identifier when preparing a private-work workspace.
-- **PR draft**: while still in EVIDENCE_COLLECTED, create and persist immutable pr_draft with opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>" / contrib_render_pr_template; private security drafts must omit public Issue references. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP order is contrib_render_pr_template → contrib_audit_governance → contrib_request_approval → contrib_submit_pr / SubmissionPort.
+- **PR draft**: while still in EVIDENCE_COLLECTED, create and persist immutable pr_draft with `opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>"` / `contrib_render_pr_template`; private security drafts must omit public Issue references. Then run `opencontrib governance audit --run-id <run_id> --pr-title "<title>"` → `opencontrib governance request-approval --run-id <run_id>` → opencontrib submission submit; MCP order is `contrib_render_pr_template` → `contrib_audit_governance` → `contrib_request_approval` → `contrib_submit_pr` / SubmissionPort.
 - Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
 <!-- OPENCONTRIB:GENERATED protocol:end -->

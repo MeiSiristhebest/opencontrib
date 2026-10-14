@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from "fs";
-import { join } from "path";
+import { join, dirname, basename } from "path";
 import { ArtifactBundleManager } from "./artifact-bundle.js";
 
 import type {
@@ -114,8 +114,15 @@ export class ContributionRunManager {
     this.idGenerator = deps.idGenerator ?? new RandomIdGenerator();
     // Resolve the active-session path when this manager is constructed rather
     // than capturing the module-level singleton.  This keeps a CLI `--home`
-    // selection authoritative for every lazily-created manager.
-    this.activeSession = deps.activeSession ?? new ActiveSessionManager();
+    // selection authoritative for every lazily-created manager, and isolates
+    // test instances with a custom baseDir from leaking to the user's host dataDir.
+    const defaultSessionPath = deps.baseDir
+      ? (basename(deps.baseDir).toLowerCase() === "runs"
+          ? join(dirname(deps.baseDir), "active_session.json")
+          : join(deps.baseDir, "active_session.json"))
+      : undefined;
+    this.activeSession =
+      deps.activeSession ?? new ActiveSessionManager(defaultSessionPath);
 
     // Register the service-only capability after construction. The capability
     // is held in a private WeakMap and is not exposed through the public core
@@ -392,7 +399,23 @@ export class ContributionRunManager {
     // A phase-bound draft cannot be written from an unrelated or later phase.
     // Validate the prospective transition before persisting so a caller cannot
     // smuggle a patch into a run while silently leaving lifecycle state behind.
+    //
+    // Diagnostic / discovery artifacts like 'probe' can be refreshed even after workspace
+    // preparation without regressing lifecycle phase.
+    const isDiagnosticRefresh =
+      type === "probe" &&
+      [
+        "WORKSPACE_PREPARED",
+        "CONTEXT_ASSEMBLED",
+        "POC_GENERATED",
+        "RED_CAPTURED",
+        "PATCH_DRAFTED",
+        "GREEN_VERIFIED",
+        "EVIDENCE_COLLECTED",
+      ].includes(summary.manifest.currentPhase);
+
     if (
+      !isDiagnosticRefresh &&
       expectedPhase &&
       summary.manifest.currentPhase !== expectedPhase &&
       !PHASE_REQUIREMENTS[expectedPhase].fromPhases.includes(
@@ -417,6 +440,7 @@ export class ContributionRunManager {
     // transition.  PR drafts have no lifecycle phase of their own and remain
     // ordinary draft artifacts after EVIDENCE_COLLECTED.
     const derivedPhase =
+      !isDiagnosticRefresh &&
       shouldAdvance &&
       expectedPhase &&
       summary.manifest.currentPhase !== expectedPhase &&

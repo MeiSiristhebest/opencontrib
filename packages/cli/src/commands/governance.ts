@@ -311,10 +311,13 @@ const impactCommand = new Command("impact")
   .description(
     "Analyze patch for cross-platform anti-patterns and overlooked sibling files",
   )
-  .requiredOption("--patch <file-or-text>", "Git unified diff content")
-  .requiredOption(
+  .option(
+    "--patch <file-or-text>",
+    "Git unified diff content or path to .diff/.patch file (or pipe via stdin)",
+  )
+  .option(
     "--modified-files <list>",
-    "Comma-separated list of modified files",
+    "Comma-separated list of modified files (auto-derived from patch if omitted)",
     (v) => v.split(","),
   )
   .option(
@@ -325,15 +328,37 @@ const impactCommand = new Command("impact")
   .option("--pretty", "Pretty-print", false)
   .action(
     async (opts: {
-      patch: string;
-      modifiedFiles: string[];
+      patch?: string;
+      modifiedFiles?: string[];
       repoContext?: string[];
       pretty?: boolean;
     }) => {
       try {
+        let patchContent = opts.patch;
+        if (!patchContent) {
+          patchContent = await readStdin();
+        }
+        if (patchContent && fs.existsSync(patchContent)) {
+          patchContent = fs.readFileSync(patchContent, "utf-8");
+        }
+        if (!patchContent || !patchContent.trim()) {
+          console.error("❌ No patch input. Use --patch <file-or-text> or pipe via stdin");
+          throw new CliExitError(1);
+        }
+
+        let modifiedFiles = opts.modifiedFiles;
+        if (!modifiedFiles || modifiedFiles.length === 0) {
+          const matched = Array.from(patchContent.matchAll(/^diff --git a\/(.+?) b\/(.+?)$/gm));
+          const files = new Set<string>();
+          for (const m of matched) {
+            if (m[2]) files.add(m[2].trim());
+          }
+          modifiedFiles = Array.from(files);
+        }
+
         const analysis = analyzePatchImpactAndConsistency({
-          modifiedFiles: opts.modifiedFiles,
-          patchContent: opts.patch,
+          modifiedFiles,
+          patchContent,
           repoContextFiles: opts.repoContext,
         });
         printJSON(
@@ -443,7 +468,7 @@ const prTemplateCommand = new Command("pr-template")
       pretty?: boolean;
     }) => {
       try {
-        const runId = opts.runId ? getRunManager().resolveRunId(opts.runId) : undefined;
+        const runId = getRunManager().resolveRunId(opts.runId);
         const canonicalRun = runId ? getRunManager().getRun(runId) : undefined;
         if (opts.runId && !canonicalRun) {
           throw new Error(`Contribution run "${runId}" not found.`);

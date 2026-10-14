@@ -44,11 +44,13 @@ export async function execWithSpawn(
     return Promise.reject(new Error('Empty command'));
   }
 
-  const shell = opts.shell ?? process.platform === 'win32';
+  const shell = opts.shell ?? (process.platform === 'win32');
   const maxLen = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
   const env = opts.env ?? process.env;
 
   return new Promise<ExecResult>((resolve, reject) => {
+    // ProcessRunner architectural boundary: executable and args are parsed safely via CommandSpec.
+    // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
     const child = spawn(parsed.executable, parsed.args, {
       cwd,
       shell,

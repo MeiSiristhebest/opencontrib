@@ -73,10 +73,16 @@ For example, `--stress-loop 3 --concurrency 5` requests 15 executions in three r
 
 ---
 
-## ⚡ Adaptive Verification Principles
+## ⚡ Adaptive Verification & Multi-Dimensional Test Suite Principles
 
-- **Deterministic Bug (Logic/Types/Bounds/Null)**: A single targeted regression test run (`--stress-loop 1`) is standard and sufficient. Do NOT run unnecessary 20x loops for simple bug fixes.
-- **Concurrency & Race Conditions**: For mutex, goroutine leak, or cache stampede fixes, pass `--concurrency 5` and `--stress-loop 5` to prove stability under contention.
+- **Anti-Single-Test Complacency**: A single test is STRICTLY INSUFFICIENT. Submitting only 1 test trips the governance gate (`defensiveCoverage` capped at 60, failing the $\ge 80$ threshold).
+- **Comprehensive 3D Test Coverage**: Every PR test suite must verify:
+  1. *Happy Path*: Standard valid inputs and expected operational paths.
+  2. *Boundary & Extreme Scale*: Empty collections, single-item collections, extreme sizes, boundary delimiters, and null/undefined optional fields.
+  3. *Failure Injection & Defensive Resilience*: Error preservation, timeout budget exhaustion, retry loops, and clean resource/handle reclamation.
+- **Combinatorial Mutation Matrix**: Execute `opencontrib probe matrix` to generate language-specific test templates and risk assertions across input dimensions.
+- **Sister-Module Variant Hunting**: Execute `opencontrib probe variant-hunt --symbol <name>` to ensure all parallel call sites, helpers, and sync/async mirrors across the codebase are aligned and protected.
+- **Concurrency & Contention Stress**: For mutex, locks, streams, worker pools, or race conditions, pass `--concurrency 5` and `--stress-loop 5` to verify stability under multi-worker contention.
 - **Dual-Stage Anchoring**: Use `--assertion` to mathematically prove pre-fix failure (RED) $\rightarrow$ post-fix pass (GREEN).
 
 <!-- OPENCONTRIB:GENERATED protocol:start -->
@@ -89,6 +95,6 @@ For example, `--stress-loop 3 --concurrency 5` requests 15 executions in three r
 - **Setup and deployment**: @opencontrib/mcp setup --all configures MCP clients; @opencontrib/cli setup checks the development toolchain. Provider-write credentials and approval keys belong only to the trusted broker. Physical isolation requires a separate worker with no host credentials or metadata access; unrestricted host shell access can bypass an in-process protocol gate.
 - **RED → PATCH → GREEN**: run contrib_capture_red first, then save the patch through contrib_save_artifact, and verify GREEN through contrib_verify_green; PATCH_DRAFTED is invalid without RED.
 - **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route. Use a non-public task identifier when preparing a private-work workspace.
-- **PR draft**: while still in EVIDENCE_COLLECTED, create and persist immutable pr_draft with opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>" / contrib_render_pr_template; private security drafts must omit public Issue references. Then run opencontrib governance audit --run-id <run_id> --pr-title "<title>" → opencontrib governance request-approval --run-id <run_id> → opencontrib submission submit; MCP order is contrib_render_pr_template → contrib_audit_governance → contrib_request_approval → contrib_submit_pr / SubmissionPort.
+- **PR draft**: while still in EVIDENCE_COLLECTED, create and persist immutable pr_draft with `opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>"` / `contrib_render_pr_template`; private security drafts must omit public Issue references. Then run `opencontrib governance audit --run-id <run_id> --pr-title "<title>"` → `opencontrib governance request-approval --run-id <run_id>` → opencontrib submission submit; MCP order is `contrib_render_pr_template` → `contrib_audit_governance` → `contrib_request_approval` → `contrib_submit_pr` / SubmissionPort.
 - Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.
 <!-- OPENCONTRIB:GENERATED protocol:end -->

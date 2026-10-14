@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { spawnSync } from "child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
@@ -50,6 +50,22 @@ const testIssueBindingProvider = {
 };
 
 describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
+  const sandboxHome = mkdtempSync(
+    join(tmpdir(), "opencontrib-contract-mcp-sandbox-"),
+  );
+  const origHome = process.env.OPENCONTRIB_HOME;
+  process.env.OPENCONTRIB_HOME = sandboxHome;
+  afterAll(() => {
+    if (origHome !== undefined) {
+      process.env.OPENCONTRIB_HOME = origHome;
+    } else {
+      delete process.env.OPENCONTRIB_HOME;
+    }
+    try {
+      rmSync(sandboxHome, { recursive: true, force: true });
+    } catch {}
+  });
+
   const server = createOpenContribMcpServer();
   const tools = (server as any)._registeredTools;
   const resources = (server as any)._registeredResources;
@@ -97,6 +113,8 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
       "contrib_probe_run",
       "contrib_probe_hotspot",
       "contrib_probe_fuzz",
+      "contrib_probe_variant_hunt",
+      "contrib_probe_matrix",
       "contrib_request_approval",
       "contrib_submit_pr",
       "contrib_plan_capabilities",

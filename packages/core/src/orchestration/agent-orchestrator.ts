@@ -4,6 +4,7 @@ import { ProfileFlywheel } from "../flywheel/profile-sync.js";
 import { WorktreeManager } from "../workspace/worktree-manager.js";
 import { ContributionRunManager } from "../run/run-manager.js";
 import { LLMService } from "../llm/llm-service.js";
+import { buildDynamicPatchPrompt } from "../llm/prompt-engine.js";
 import { ContextAssembler } from "../discovery/context-assembler.js";
 import { ContributionStateMachine } from "./state-machine.js";
 import { SystemClock } from "../ports/clock.port.js";
@@ -47,65 +48,27 @@ export interface PromptRebuildContext {
  * giving the model the full context of what was tried and what worked/failed.
  */
 export function buildTurnPrompt(ctx: PromptRebuildContext): string {
-  const lines: string[] = [];
-  lines.push(ctx.basePrompt);
-  lines.push("");
-
-  if (ctx.feedback.length > 0) {
-    lines.push(
-      `## Previous Attempt Feedback (Attempts 1-${ctx.attemptNumber - 1})`,
-    );
-    lines.push("");
-    for (const entry of ctx.feedback) {
-      const status = entry.success
-        ? "✅ PASS"
-        : `❌ FAIL (exit ${entry.exitCode ?? "N/A"})`;
-      const cmd = entry.command
-        ? `\`${entry.command.slice(0, 200)}\``
-        : entry.toolName;
-      lines.push(`### ${status} — ${entry.toolName}`);
-      if (entry.command) lines.push(`Command: ${cmd}`);
-      lines.push("```");
-      lines.push(entry.output.slice(-1500));
-      lines.push("```");
-      lines.push("");
-    }
-  }
-
-  if (ctx.appliedFiles.length > 0) {
-    lines.push(`## Previously Applied Changes`);
-    lines.push("");
-    for (const f of ctx.appliedFiles) {
-      lines.push(`- ${f.operation} ${f.path}`);
-    }
-    lines.push("");
-  }
-
-  if (ctx.attemptNumber > 1) {
-    lines.push(
-      `## Repair Instructions (Attempt ${ctx.attemptNumber}/${ctx.maxAttempts})`,
-    );
-    lines.push("");
-    lines.push(
-      `You have ${ctx.maxAttempts - ctx.attemptNumber} attempt(s) remaining.`,
-    );
-    lines.push(
-      "Based on the feedback above, diagnose the root cause and produce a revised surgical patch.",
-    );
-    lines.push(
-      "Focus on the specific failure rather than making unrelated changes.",
-    );
-    lines.push("");
-    lines.push(`- **Test Command**: \`${ctx.testCommand || "N/A"}\``);
-  }
-
-  lines.push("");
-  lines.push(
-    'Please generate a production-grade patch conforming strictly to PatchDraftSchema JSON with concrete code files in the "files" array. Address the root cause, update docs/comments when behavior changes, check directly related call sites, and add focused regression coverage for important edge cases.',
-  );
-
-  return lines.join("\n");
+  return buildDynamicPatchPrompt({
+    basePrompt: ctx.basePrompt,
+    testCommand: ctx.testCommand,
+    feedback: ctx.feedback,
+    appliedFiles: ctx.appliedFiles,
+    attemptNumber: ctx.attemptNumber,
+    maxAttempts: ctx.maxAttempts,
+  });
 }
+
+export const PATCH_GENERATION_GUIDANCE = `
+Please generate a production-grade patch conforming strictly to PatchDraftSchema JSON with concrete code files in the "files" array.
+Follow these mandatory engineering quality guidelines:
+1. Laser-Focused Scope: Fix the exact root cause. Production code diff is strictly surgical (target 30-50 lines, absolute ceiling 100 lines). Do NOT include unrelated refactors, formatting sweeps, or dependency upgrades.
+2. Breadth & Depth: Systematically inspect directly related call sites, helpers, and ensure synchronous/asynchronous symmetry across the repository.
+3. Defensive Resilience: Guard against concurrency race conditions, null/empty edge boundaries, retry budget exhaustion, error preservation, and resource leaks.
+4. Comprehensive 3D Testing (Anti-Single-Test Complacency): Supporting test files (*.test.*, fixtures) have NO LINE LIMIT. Submitting only a single test is strictly prohibited. Provide a rich 3D test suite covering:
+   - Happy path: standard valid flow reproducing and resolving the issue.
+   - Boundary & Edge cases: zero-value, empty boundary, limit extremes.
+   - Failure injection & Resilience: timeout/retry exhaustion, concurrent contention, clean failure propagation and resource reclamation.
+Update documentation or comments where behavior changes.`;
 
 export interface TelemetryRecord {
   runId: string;

@@ -228,21 +228,35 @@ describe("CLI Commands & Subcommands Test Suite", () => {
   });
 
   it("executes run subcommands (create, get, list, save, resume)", async () => {
-    await runCommand.parseAsync([
-      "node",
-      "test",
-      "create",
-      "--repo",
-      "owner/repo-test-cli",
-      "--issue",
-      "99",
-      "--title",
-      "Test run create CLI",
-    ]);
+    const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "opencontrib-cli-run-test-"));
+    const previousHome = process.env.OPENCONTRIB_HOME;
+    process.env.OPENCONTRIB_HOME = testHome;
+    try {
+      await runCommand.parseAsync([
+        "node",
+        "test",
+        "create",
+        "--repo",
+        "owner/repo-test-cli",
+        "--issue",
+        "99",
+        "--title",
+        "Test run create CLI",
+      ]);
 
-    await runCommand.parseAsync(["node", "test", "list"]);
-    await runCommand.parseAsync(["node", "test", "get"]);
-    await runCommand.parseAsync(["node", "test", "resume"]);
+      await runCommand.parseAsync(["node", "test", "list"]);
+      await runCommand.parseAsync(["node", "test", "get"]);
+      await runCommand.parseAsync(["node", "test", "resume"]);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.OPENCONTRIB_HOME;
+      } else {
+        process.env.OPENCONTRIB_HOME = previousHome;
+      }
+      if (fs.existsSync(testHome)) {
+        fs.rmSync(testHome, { recursive: true, force: true });
+      }
+    }
   });
 
   it("executes discovery subcommands (rank, qualify, feasibility, manifests)", async () => {
@@ -310,6 +324,45 @@ describe("CLI Commands & Subcommands Test Suite", () => {
     }
   });
 
+  it("executes probe variant-hunt and matrix subcommands within a canonical run", async () => {
+    const { buildContributionRunManager, getLocalRepositoryFullName } = await import("@opencontrib/core");
+    const runManager = buildContributionRunManager();
+    const run = runManager.createRun({ repoFullName: getLocalRepositoryFullName(".") });
+
+    await probeCommand.parseAsync([
+      "node",
+      "test",
+      "variant-hunt",
+      ".",
+      "--run-id",
+      run.runId,
+      "--symbol",
+      "probeCommand",
+    ]);
+
+    await probeCommand.parseAsync([
+      "node",
+      "test",
+      "matrix",
+      ".",
+      "--run-id",
+      run.runId,
+      "--title",
+      "Fix concurrency deadlock in stream handler",
+      "--diff",
+      "diff --git a/stream.ts b/stream.ts\n+const lock = new Mutex();",
+    ]);
+
+    const updatedRun = runManager.getRun(run.runId);
+    expect(updatedRun?.artifacts.probe).toBeDefined();
+    const probeArtifact = updatedRun!.artifacts.probe as any;
+    expect(probeArtifact.variantHunt).toBeDefined();
+    expect(probeArtifact.variantHunt.symbol).toBe("probeCommand");
+    expect(probeArtifact.matrix).toBeDefined();
+    expect(probeArtifact.matrix.domain).toBe("concurrency_stream");
+    expect(probeArtifact.matrix.scenarios.length).toBeGreaterThan(0);
+  });
+
   it("executes capability & plugin subcommands", async () => {
     const previousCwd = process.cwd();
     const isolatedCwd = fs.mkdtempSync(
@@ -370,11 +423,17 @@ describe("CLI Commands & Subcommands Test Suite", () => {
       } as any,
     });
 
+    const { buildContributionRunManager } = await import("@opencontrib/core");
+    const runManager = buildContributionRunManager();
+    const run = runManager.createRun({ repoFullName: "owner/repo-test-cli" });
+
     try {
       await flywheelCommand.parseAsync([
         "node",
         "test",
         "sync",
+        "--run-id",
+        run.runId,
         "--repo",
         "owner/repo-test-cli",
         "--input",

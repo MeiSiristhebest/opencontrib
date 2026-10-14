@@ -123,6 +123,9 @@ const REGRESSION_TEST_SOURCE = [
   "import { expect, test } from 'bun:test';",
   "import { mul } from './math.js';",
   "test('multiplication regression', () => expect(mul(3, 4), 'ASSERTION_MUL_FAIL').toBe(12));",
+  "test('multiplication by zero', () => expect(mul(0, 5)).toBe(0));",
+  "test('multiplication negative', () => expect(mul(-2, 3)).toBe(-6));",
+  "test('multiplication identity', () => expect(mul(1, 42)).toBe(42));",
   "",
 ].join("\n");
 

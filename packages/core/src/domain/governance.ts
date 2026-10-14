@@ -340,9 +340,17 @@ export function deriveEvidenceBackedQualityRubric(input: {
   securityScore?: number;
   subagentReviewAvailable?: boolean;
   coverageMinimumPercent?: number;
+  variantHuntConducted?: boolean;
+  combinatorialScenariosCovered?: number;
+  testSuiteDimensions?: {
+    happyPath?: boolean;
+    edgeCases?: boolean;
+    failureInjection?: boolean;
+  };
 }): {
   breakdown: ConfidenceBreakdown;
   rubricResult: ReturnType<typeof calculate7DQualityRubric>;
+  isSingleTestComplacent: boolean;
 } {
   const passedUnitTests =
     input.passedUnitTestsCount ?? input.passedTestsCount ?? 0;
@@ -354,13 +362,16 @@ export function deriveEvidenceBackedQualityRubric(input: {
     styleScore,
     securityScore,
     subagentReviewAvailable = true,
+    variantHuntConducted = false,
+    combinatorialScenariosCovered = 0,
+    testSuiteDimensions,
   } = input;
 
   const coverageThreshold = input.coverageMinimumPercent ?? 85;
 
   // Root cause confidence: 95 only if empirical failure reproduction was confirmed, 90 if standard tests passed, 65 if untested
   const rootCause = hasReproductionAssertion ? 95 : testsPassed ? 90 : 65;
-  // Implementation confidence: based on core logic diff size
+  // Implementation confidence: based on core logic diff size (surgical <= 100 lines)
   const effectiveCoreLines = input.coreDiffLines !== undefined ? input.coreDiffLines : diffLines;
   const implementation =
     effectiveCoreLines <= 100
@@ -368,12 +379,51 @@ export function deriveEvidenceBackedQualityRubric(input: {
       : Math.max(60, 94 - Math.round((effectiveCoreLines - 100) * 0.25));
   // Regression confidence: based on actual test passes
   const regression = testsPassed ? 93 : 50;
-  // Defensive coverage comes from executed tests. Changed-code coverage is a
-  // separate mandatory policy gate when a trusted policy enables it.
-  const defensiveCoverage =
-    passedUnitTests > 0 ? 91 : subagentReviewAvailable ? 86 : 75;
-  let testCoverage =
-    passedUnitTests > 0 ? 92 : subagentReviewAvailable ? 85 : 70;
+
+  // Defensive coverage comes from executed tests and multidimensional scenario defense.
+  // Single-test complacency: having <= 1 unit test without verified 3D coverage or combinatorial matrix
+  // fails the quality gate by capping defensiveCoverage at 60 and testCoverage at 65 (weakest dimension < 80).
+  const hasFull3DDimensions = Boolean(
+    testSuiteDimensions?.happyPath &&
+    testSuiteDimensions?.edgeCases &&
+    testSuiteDimensions?.failureInjection
+  );
+  const isSingleTestComplacent =
+    passedUnitTests <= 1 &&
+    !hasFull3DDimensions &&
+    combinatorialScenariosCovered < 3;
+
+  let defensiveCoverage: number;
+  let testCoverage: number;
+
+  if (passedUnitTests === 0) {
+    defensiveCoverage = 60;
+    testCoverage = 50;
+  } else if (isSingleTestComplacent) {
+    // Single-test complacency: fails weakest dimension gate (< 80)
+    defensiveCoverage = 60;
+    testCoverage = 65;
+  } else if (passedUnitTests === 2 && !testSuiteDimensions?.edgeCases && combinatorialScenariosCovered < 2) {
+    // Partial 2-test suite: defensive coverage remains cautious (< 80)
+    defensiveCoverage = 75;
+    testCoverage = 80;
+  } else {
+    // Robust testing: >= 3 tests or explicit combinatorial / 3D dimensions
+    defensiveCoverage =
+      passedUnitTests >= 5 || combinatorialScenariosCovered >= 3
+        ? 94
+        : 91;
+    testCoverage =
+      passedUnitTests >= 5 || combinatorialScenariosCovered >= 3
+        ? 95
+        : 92;
+  }
+
+  // Reward deep defense when variant hunting across sister modules was verified
+  if (variantHuntConducted && !isSingleTestComplacent) {
+    defensiveCoverage = Math.max(defensiveCoverage, 96);
+  }
+
   if (
     typeof testCoveragePercent === "number" &&
     input.coverageMinimumPercent !== undefined
@@ -413,7 +463,7 @@ export function deriveEvidenceBackedQualityRubric(input: {
   };
 
   const rubricResult = calculate7DQualityRubric(breakdown);
-  return { breakdown, rubricResult };
+  return { breakdown, rubricResult, isSingleTestComplacent };
 }
 
 export function lintMarkdownIntegrity(text: string): {
@@ -485,6 +535,7 @@ export interface AuditGovernanceInput {
   subagentQualityScore?: number;
   isAutonomousPrSubmission?: boolean;
   variantHuntConducted?: boolean;
+  combinatorialScenariosCovered?: number;
   impactAnalysisConducted?: boolean;
   modifiedFiles?: string[];
   repoContextFiles?: string[];
@@ -720,6 +771,7 @@ export function auditGovernance(
     : 101;
 
   let breakdown = input.confidenceBreakdown;
+  let isSingleTestComplacent = false;
   if (!breakdown) {
     const passedUnitTestsCount =
       input.evidence?.passedUnitTestsCount ??
@@ -741,10 +793,13 @@ export function auditGovernance(
       styleScore: input.subagentQualityScore,
       securityScore: input.subagentQualityScore,
       subagentReviewAvailable: typeof input.subagentQualityScore === "number",
+      variantHuntConducted: input.variantHuntConducted,
+      combinatorialScenariosCovered: input.combinatorialScenariosCovered,
     });
     breakdown = calibrated.breakdown;
+    isSingleTestComplacent = calibrated.isSingleTestComplacent;
     // Reward in-domain deep defense if variant hunt was conducted
-    if (input.variantHuntConducted) {
+    if (input.variantHuntConducted && !isSingleTestComplacent) {
       breakdown.defensiveCoverage = Math.max(breakdown.defensiveCoverage, 96);
     }
   }
@@ -951,6 +1006,12 @@ export function auditGovernance(
     }
   }
 
+  if (isSingleTestComplacent) {
+    remediationSuggestions.push(
+      "Single-test complacency detected (only 1 test passed). OpenContrib quality assurance requires comprehensive 3D coverage: happy path, edge/boundary cases, and failure injection / timeout retries. Core diff is capped at 30-50 lines, but test suites (*.test.*) have UNLIMITED line allowance.",
+    );
+  }
+
   if (!commentHyperbolePassed) {
     remediationSuggestions.push(
       ...flaggedCommentHyperboles.map(
@@ -1038,8 +1099,11 @@ export function auditGovernance(
       invariants: isGatedPassed
         ? [
             "Present the patch diff and audit report to the user at Checkpoint 3 before pushing.",
+            "Test suite covers happy path, boundary edge cases, and failure injection without single-test complacency.",
           ]
         : [
+            "Avoid single-test complacency: write at least 3 distinct scenarios (happy path, boundary conditions, failure injection) using 3D test generation or combinatorial matrices.",
+            "Supporting test files have NO line limit; only production core logic is restricted to 30-50 lines.",
             "Improve test coverage or add negative assertion cases to increase confidence.",
             "Run variant hunting across sister modules to verify no parallel defects.",
             "Do not bypass a failed technical gate; request any exception through a trusted host authority.",

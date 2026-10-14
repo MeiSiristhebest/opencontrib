@@ -60,7 +60,11 @@ import {
   requiresPrivateVulnerabilityDisclosure,
   resolveCanonicalSubmissionRoute,
 } from "../../submission/submission-route.js";
-import { buildTurnPrompt } from "../agent-orchestrator.js";
+import {
+  buildTurnPrompt,
+  PATCH_GENERATION_GUIDANCE,
+} from "../agent-orchestrator.js";
+import { buildDynamicPatchPrompt } from "../../llm/prompt-engine.js";
 import type {
   PipelineContext,
   PipelineDeps,
@@ -835,8 +839,15 @@ export class PatchGenerationStep implements PipelineStep {
 
     if (deps.llmService) {
       try {
+        const patchPrompt = buildDynamicPatchPrompt({
+          basePrompt: ctx.prompt || "",
+          repoFullName: ctx.targetRepo || ctx.selectedOpp?.repoFullName,
+          testCommand: ctx.testCmd,
+          defectDomain: (ctx.selectedOpp as any)?.category || (ctx.selectedOpp as any)?.defectCategory,
+          attemptNumber: 1,
+        });
         const llmResult = await deps.llmService.generateStructured({
-          prompt: `${ctx.prompt}\n\nPlease generate a production-grade patch conforming strictly to PatchDraftSchema JSON with concrete code files in the 'files' array. Address the root cause, update docs/comments when behavior changes, check directly related call sites, and add focused regression coverage for important edge cases.`,
+          prompt: patchPrompt,
           schema: PatchDraftSchema,
         });
         // SAFETY: PatchDraftSchema (Zod) validated llmResult.data at runtime;
@@ -953,7 +964,13 @@ export class ImplementValidateLoopStep implements PipelineStep {
               attemptNumber: implementationAttempts,
               maxAttempts,
             })
-          : `${prompt}\n\nPlease generate a production-grade patch conforming strictly to PatchDraftSchema JSON with concrete code files in the 'files' array. Address the root cause, update docs/comments when behavior changes, check directly related call sites, and add focused regression coverage for important edge cases.`;
+          : buildDynamicPatchPrompt({
+              basePrompt: prompt,
+              repoFullName: ctx.targetRepo || ctx.selectedOpp?.repoFullName,
+              testCommand: testCmd,
+              defectDomain: (ctx.selectedOpp as any)?.category || (ctx.selectedOpp as any)?.defectCategory,
+              attemptNumber: 1,
+            });
 
       // Generate (or re-generate on repair turn) the patch draft from the per-turn prompt
       if (implementationAttempts > 1) {

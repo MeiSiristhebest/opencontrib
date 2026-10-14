@@ -80,12 +80,14 @@ export const semgrepPlugin: OpenContribPlugin = {
         );
       },
       scan: async (targetPath, pointers, host) => {
-        const hasSemgrep = host.isBinaryAvailable('semgrep');
-        const dockerDiscovery = !hasSemgrep ? discoverDocker() : { found: false };
+        const hasSemgrepGlobal = host.isBinaryAvailable('semgrep');
+        const hasUv = host.isBinaryAvailable('uv');
+        const hasLocalSemgrep = hasSemgrepGlobal || hasUv;
+        const dockerDiscovery = !hasLocalSemgrep ? discoverDocker() : { found: false };
         const hasDockerDaemon = dockerDiscovery.found;
 
-        if (!hasSemgrep && !hasDockerDaemon) {
-          host.log('[Semgrep Probe] Neither semgrep binary nor active docker daemon found. Install via: pip install semgrep or start Docker Desktop.', 'info');
+        if (!hasLocalSemgrep && !hasDockerDaemon) {
+          host.log('[Semgrep Probe] Neither semgrep/uv nor active docker daemon found. Install via: pip install semgrep or curl -LsSf https://astral.sh/uv/install.sh or start Docker Desktop.', 'info');
           return;
         }
 
@@ -103,12 +105,14 @@ export const semgrepPlugin: OpenContribPlugin = {
           const configArgs = hasCustomConfig
             ? '--config auto --config .semgrep.yml'
             : MULTI_SOURCE_SEMGREP_PACKS.join(' ');
+          const excludeArgs = '--exclude node_modules --exclude dist --exclude build --exclude .git --exclude coverage --exclude .turbo --exclude .next';
 
-          let cmd = `semgrep scan --json ${configArgs} --quiet`;
-          if (!hasSemgrep && hasDockerDaemon) {
-            const normalizedTarget = targetPath.replace(/\\/g, '/');
-            cmd = `docker run --rm -v "${normalizedTarget}:/src" -w /src returntocorp/semgrep semgrep scan --json ${configArgs} --quiet`;
-          }
+          const normalizedTarget = targetPath.replace(/\\/g, '/');
+          let cmd = hasSemgrepGlobal
+            ? `semgrep scan --json ${configArgs} ${excludeArgs} --quiet`
+            : (hasUv
+                ? `uv tool run semgrep scan --json ${configArgs} ${excludeArgs} --quiet`
+                : `docker run --rm -v "${normalizedTarget}:/src" -w /src semgrep/semgrep semgrep scan --json ${configArgs} ${excludeArgs} --quiet`);
 
           const { stdout } = await host.exec(cmd, {
             cwd: targetPath,

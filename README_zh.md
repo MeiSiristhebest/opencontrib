@@ -149,6 +149,12 @@ opencontrib pointer resolve ptr://findings/ast-ts-unhandled-promise-catch-foo-10
 
 当修复了某一适配器（如 `mongodb-adapter.ts`）的并发缺陷时，治理审计会自动审查同目录下的姊妹组件（`sqlite-adapter.ts`、`pg-adapter.ts`）是否同步完成同类反模式排查。
 
+### 8. 统一动态提示词工程引擎与 3D 多维测试矩阵
+
+- **语义化 XML 结构**：采用 `<system_identity>`、`<quality_mandates>`、`<untrusted_task_input>`、`<repair_diagnostics>` 严格槽位隔离，杜绝提示注入与格式漂移；
+- **生态规范动态自适应**：原生适配 Go、Python、TypeScript、Rust、Java 等技术栈测试与编码规范；
+- **3D 测试维度覆盖**：强制覆盖 (1) 正常运行路径、(2) 边界极限、(3) 异常注入与资源清理释放。杜绝敷衍单测（反单测敷衍熔断）。
+
 ---
 
 ## ⚙️ 环境依赖
@@ -350,7 +356,7 @@ npx -y @opencontrib/mcp setup --all
 }
 ```
 
-**MCP 能力清单**：39 个可组合领域工具（`contrib_scout`、`contrib_prepare_workspace`、`contrib_capture_red`、`contrib_audit_governance`、`contrib_run_pipeline` 等）、3 个资源（`opencontrib://doctor`、`opencontrib://memory`、`opencontrib://runs`）以及 1 个工作流指导 Prompt（`opencontrib_workflow_guide`）。
+**MCP 能力清单**：41 个可组合领域工具（`contrib_scout`、`contrib_prepare_workspace`、`contrib_capture_red`、`contrib_audit_governance`、`contrib_run_pipeline` 等）、3 个资源（`opencontrib://doctor`、`opencontrib://memory`、`opencontrib://runs`）以及 1 个工作流指导 Prompt（`opencontrib_workflow_guide`）。
 
 ---
 
@@ -364,14 +370,14 @@ npx -y @opencontrib/mcp setup --all
 - **工作区与证据**：`opencontrib workspace prepare --repo <owner/repo> --issue <issue-or-task-id>` / `contrib_prepare_workspace`；PoC（contrib_verify_poc）是可选复现步骤，不能替代 contrib_capture_red 的权威 RED。
 - **RED → PATCH → GREEN**：必须先执行 contrib_capture_red，再通过 contrib_save_artifact 保存补丁，最后执行 contrib_verify_green 验证 GREEN；没有 RED 不得进入 PATCH_DRAFTED。
 - **路由与治理**：公开漏洞必须先绑定提供方校验的 IssueBindingArtifact；私有漏洞必须绑定提供方校验的 SecurityDisclosureArtifact 并获得公开修复授权，不能创建公开 Issue；准备私有漏洞工作区时使用非公开任务标识。
-- **PR 草稿**：仍处于 EVIDENCE_COLLECTED 时，通过 CLI opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>" 或 MCP contrib_render_pr_template 首次创建并保存不可变的 pr_draft；私有安全路由不得包含公开 Issue 引用。随后执行 opencontrib governance audit --run-id <run_id> --pr-title "<title>" / contrib_audit_governance，请求受信任审批（opencontrib governance request-approval --run-id <run_id> / contrib_request_approval），最终只通过 contrib_submit_pr / SubmissionPort 提交。
+- **PR 草稿**：仍处于 EVIDENCE_COLLECTED 时，通过 CLI `opencontrib governance pr-template --run-id <run_id> --issue-title "<title>" --summary "<summary>"` 或 MCP `contrib_render_pr_template` 首次创建并保存不可变的 pr_draft；私有安全路由不得包含公开 Issue 引用。随后执行 `opencontrib governance audit --run-id <run_id> --pr-title "<title>"` / `contrib_audit_governance`，请求受信任审批（`opencontrib governance request-approval --run-id <run_id>` / `contrib_request_approval`），最终只通过 `contrib_submit_pr` / SubmissionPort 提交。
 - 禁止使用原始 GitHub CLI、GitHub MCP 或 GitHub API 写入 Pull Request；它们会绕过 SubmissionIntent、ApprovalArtifact、SubmissionPermit 与提供方校验。
 <!-- OPENCONTRIB:GENERATED protocol:end -->
 
 ## 🛡️ 6 大绝对工程防线（零容忍红线）
 
 1. **CLI 优先与双通道就绪原则（CLI-First & Dual-Ingress）**：
-   在智能体协作流程中，优先推荐调用终端 CLI 命令（`opencontrib <command>`），以享受活跃会话继承与自驱状态机流转。同时 OpenContrib MCP 39 大工具集全面作为一等公民受支持，兼容 MCP 客户端。
+   在智能体协作流程中，优先推荐调用终端 CLI 命令（`opencontrib <command>`），以享受活跃会话继承与自驱状态机流转。同时 OpenContrib MCP 41 大工具集全面作为一等公民受支持，兼容 MCP 客户端。
 2. **防脱轨熔断机制（严禁超过 3 次盲目 view_file）**：
    杜绝连续盲读文件。定位代码必须通过 Smart Pointer 切片（`ptr://...`）或 `grep_search` 精准查找。
 3. **提交路由铁律（严禁裸提 PR）**：

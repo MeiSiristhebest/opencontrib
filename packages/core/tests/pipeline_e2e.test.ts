@@ -9,7 +9,7 @@
  */
 import { EvidenceService } from "../src/evidence/evidence-service.js";
 import { describe, expect, it, spyOn } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { FixedClock } from "../src/ports/clock.port.js";
@@ -280,7 +280,13 @@ describe("Pipeline RED command selection", () => {
 });
 
 function buildDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
-  const workspacePath = mkdtempSync(join(tmpdir(), "oc-e2e-"));
+  const root = mkdtempSync(join(tmpdir(), "oc-e2e-"));
+  const workspacePath = join(root, "workspace");
+  mkdirSync(workspacePath, { recursive: true });
+  const runManager = new ContributionRunManager({
+    baseDir: join(root, "runs"),
+    activeSession: new ActiveSessionManager(join(root, "active_session.json")),
+  });
   const llmService = new LLMService(new MockLLMProvider());
   const stateMachine = new ContributionStateMachine({
     mode: "dry_run",
@@ -289,6 +295,7 @@ function buildDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
   });
 
   const base: PipelineDeps = {
+    runManager,
     client: {
       searchIssues: async () => ({
         items: [

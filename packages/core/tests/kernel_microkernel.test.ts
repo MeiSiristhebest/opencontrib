@@ -297,4 +297,29 @@ describe("OpenContrib Microkernel & Smart Pointer Architecture", () => {
     expect(result.pointersCreated[0].id).toMatch(/^v2-[0-9a-f]{64}$/);
     expect(result.pointersCreated[0].legacyId).toContain("ci-deprecated");
   });
+
+  it("normalizes repository scope and tolerates .opencontrib metadata suffix during hydration", () => {
+    const projectDir = path.join(tempDir, "scope-normalization-project");
+    const dotOpenContrib = path.join(projectDir, ".opencontrib");
+    const storageDir = path.join(dotOpenContrib, "pointers");
+    fs.mkdirSync(storageDir, { recursive: true });
+
+    // Writer created with storageDir pointing inside .opencontrib
+    const writer = new SmartPointerStore({ storageDir, scope: dotOpenContrib });
+    const pointer = writer.create({
+      namespace: "findings",
+      id: "scope-norm-finding",
+      title: "Scope Normalization Finding",
+      category: "security_cwe",
+      severity: "medium",
+      file: "src/main.ts",
+      line: 10,
+    });
+
+    // Hydrator opened with root projectDir (as PluginHost does)
+    const hydrator = new SmartPointerStore({ storageDir, scope: projectDir });
+    const resolved = hydrator.get(pointer.uri);
+    expect(resolved).toBeDefined();
+    expect(resolved?.id).toBe(pointer.id);
+  });
 });

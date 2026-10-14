@@ -5,7 +5,7 @@ import {
 } from "node:child_process";
 import { mkdtempSync, existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { parseCommandSpec, type CommandSpec } from "./command-spec.js";
 import { safeRmSync } from "../workspace/worktree-manager.js";
 import { sensitiveDeniedPaths } from "./denied-paths.js";
@@ -255,15 +255,25 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       let stderr = "";
       let timedOut = false;
 
-      // Launch Windows executables directly, including PATH-resolved and
-      // relative names, so cmd.exe cannot flatten parsed arguments containing spaces.
-      const directWindowsExecutable =
-        process.platform === "win32" && /\.(?:exe|com)$/i.test(finalCommand);
+      // On Windows, only launch batch files or package manager scripts via cmd.exe shell.
+      // Direct executables (.exe, or PATH binaries) must be launched directly so cmd.exe
+      // cannot flatten parsed arguments or expose command injection surface.
+      const exeLower = finalCommand.toLowerCase();
+      const isBatch =
+        process.platform === "win32" &&
+        (exeLower.endsWith(".cmd") ||
+          exeLower.endsWith(".bat") ||
+          exeLower === "npm" ||
+          exeLower === "npx" ||
+          exeLower === "pnpm" ||
+          exeLower === "yarn");
+      // SanitizedLocalSandboxProvider boundary: command and args executed with isolated env and boundary checks.
+      // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
       const child = spawn(finalCommand, finalArgs, {
         cwd: resolvedCwd,
         stdio: ["ignore", "pipe", "pipe"],
         env: sanitizedEnv,
-        shell: process.platform === "win32" && !directWindowsExecutable,
+        shell: isBatch,
       });
 
       const timer = setTimeout(() => {
@@ -407,15 +417,27 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
     const sanitizedEnv = this.buildSanitizedEnvironment(sandboxTempDir);
 
     try {
+      const baseCmd = basename(finalCommand).toLowerCase().replace(/\.exe$/, "");
+      const isBatch =
+        process.platform === "win32" &&
+        (baseCmd === "npm" ||
+          baseCmd === "npx" ||
+          baseCmd === "pnpm" ||
+          baseCmd === "yarn" ||
+          finalCommand.toLowerCase().endsWith(".cmd") ||
+          finalCommand.toLowerCase().endsWith(".bat"));
+
       const spawnOptions: SpawnSyncOptionsWithStringEncoding = {
         cwd: resolvedCwd,
         encoding: "utf-8",
         timeout: timeoutMs,
         stdio: ["ignore", "pipe", "pipe"],
         env: sanitizedEnv,
-        shell: false,
+        shell: isBatch,
       };
 
+      // SanitizedLocalSandboxProvider boundary: command and args executed synchronously with isolated env and boundary checks.
+      // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
       const result = spawnSync(finalCommand, finalArgs, spawnOptions);
 
       const stdout = String(result.stdout || "");

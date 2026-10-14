@@ -6,6 +6,8 @@ import {
   negotiateProbes,
   analyzeGitHotspots,
   generatePropertyTest,
+  generateCombinatorialMatrix,
+  VariantHunter,
   ProbeRegistry,
   createDefaultPluginHost,
   triagePointerFindings,
@@ -265,6 +267,142 @@ export function registerProbeTools(server: McpServer, suppliedRunManager?: Contr
                   target: resolved,
                   language: lang,
                   spec,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ status: 'error', message: err.message }, null, 2) }],
+        };
+      }
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool: contrib_probe_variant_hunt (变体猎杀与同类调用点排查)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_probe_variant_hunt',
+    'Hunt for parallel structural defect variants across the repository using ast-grep and ripgrep',
+    {
+      runId: z.string().optional().describe('Contribution run ID (defaults to active run)'),
+      targetPath: z.string().optional().default('.').describe('Target repository workspace path'),
+      symbol: z.string().describe('Symbol or function name to search for across sister modules'),
+      file: z.string().optional().describe('Source file where the primary defect was located'),
+      line: z.number().optional().describe('Line number of primary defect'),
+    },
+    async (args) => {
+      try {
+        const runId = requireRun(args.runId);
+        const resolved = path.resolve(args.targetPath || '.');
+        runManager.assertRepositoryTarget(runId, getLocalRepositoryFullName(resolved));
+
+        const variants = await VariantHunter.huntSymbol(resolved, args.symbol, {
+          file: args.file,
+          line: args.line,
+        });
+
+        saveProbe(runId, {
+          target: resolved,
+          variantHunt: {
+            symbol: args.symbol,
+            count: variants.length,
+            variants,
+            executedAt: new Date().toISOString(),
+          },
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  status: 'success',
+                  runId,
+                  currentPhase: runManager.getRun(runId)!.manifest.currentPhase,
+                  target: resolved,
+                  symbol: args.symbol,
+                  variantsCount: variants.length,
+                  variants,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: JSON.stringify({ status: 'error', message: err.message }, null, 2) }],
+        };
+      }
+    },
+  );
+
+  // -------------------------------------------------------------
+  // Tool: contrib_probe_matrix (组合变体矩阵与 3D 测试生成)
+  // -------------------------------------------------------------
+  server.tool(
+    'contrib_probe_matrix',
+    'Generate combinatorial mutation matrix and 3D parameterized test scenarios (normal, boundary, failure injection)',
+    {
+      runId: z.string().optional().describe('Contribution run ID (defaults to active run)'),
+      targetPath: z.string().optional().default('.').describe('Target repository workspace path'),
+      title: z.string().optional().describe('Issue or PR title'),
+      body: z.string().optional().describe('Issue or PR body description'),
+      diff: z.string().optional().describe('Unified diff or patch text'),
+      language: z.string().optional().describe('Target language (defaults to repository fingerprint)'),
+    },
+    async (args) => {
+      try {
+        const runId = requireRun(args.runId);
+        const resolved = path.resolve(args.targetPath || '.');
+        runManager.assertRepositoryTarget(runId, getLocalRepositoryFullName(resolved));
+
+        let lang = args.language;
+        if (!lang) {
+          try {
+            const fingerprint = await extractRepoFingerprint(resolved);
+            lang = fingerprint.primaryLanguage;
+          } catch {
+            lang = undefined;
+          }
+        }
+
+        const report = generateCombinatorialMatrix({
+          diffText: args.diff,
+          issueTitle: args.title,
+          issueBody: args.body,
+          primaryLanguage: lang,
+        });
+
+        saveProbe(runId, {
+          target: resolved,
+          matrix: report,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  status: 'success',
+                  runId,
+                  currentPhase: runManager.getRun(runId)!.manifest.currentPhase,
+                  target: resolved,
+                  domain: report.domain,
+                  rationale: report.domainRationale,
+                  dimensions: report.dimensions,
+                  scenarios: report.scenarios,
+                  recommendedAssertions: report.recommendedAssertions,
                 },
                 null,
                 2,

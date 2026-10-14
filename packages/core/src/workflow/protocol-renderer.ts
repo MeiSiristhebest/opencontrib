@@ -137,7 +137,7 @@ export function renderProtocolDocumentationBlock(
       `- **工作区与证据**：${docCommand("WORKSPACE_PREPARED")}；PoC（${poc.mcp.tool}）是可选复现步骤，不能替代 ${red.mcp.tool} 的权威 RED。`,
       `- **RED → PATCH → GREEN**：必须先执行 ${red.mcp.tool}，再通过 ${patch.mcp.tool} 保存补丁，最后执行 ${evidence.mcp.tool} 验证 GREEN；没有 RED 不得进入 PATCH_DRAFTED。`,
       `- **路由与治理**：公开漏洞必须先绑定提供方校验的 IssueBindingArtifact；私有漏洞必须绑定提供方校验的 SecurityDisclosureArtifact 并获得公开修复授权，不能创建公开 Issue；准备私有漏洞工作区时使用非公开任务标识。`,
-      `- **PR 草稿**：仍处于 ${evidence.phase} 时，通过 CLI ${prDraftGuidance.cliExample} 或 MCP ${prDraftGuidance.mcpTool} 首次创建并保存不可变的 pr_draft；私有安全路由不得包含公开 Issue 引用。随后执行 ${governance.cli.example} / ${governance.mcp.tool}，请求受信任审批（${approvalGuidance.cliExample} / ${approvalGuidance.mcpTool}），最终只通过 ${submission.mcp.tool} / SubmissionPort 提交。`,
+      `- **PR 草稿**：仍处于 ${evidence.phase} 时，通过 CLI \`${prDraftGuidance.cliExample}\` 或 MCP \`${prDraftGuidance.mcpTool}\` 首次创建并保存不可变的 pr_draft；私有安全路由不得包含公开 Issue 引用。随后执行 \`${governance.cli.example}\` / \`${governance.mcp.tool}\`，请求受信任审批（\`${approvalGuidance.cliExample}\` / \`${approvalGuidance.mcpTool}\`），最终只通过 \`${submission.mcp.tool}\` / SubmissionPort 提交。`,
       "- 禁止使用原始 GitHub CLI、GitHub MCP 或 GitHub API 写入 Pull Request；它们会绕过 SubmissionIntent、ApprovalArtifact、SubmissionPermit 与提供方校验。",
     ].join("\n");
   }
@@ -152,7 +152,7 @@ export function renderProtocolDocumentationBlock(
     "- **Setup and deployment**: @opencontrib/mcp setup --all configures MCP clients; @opencontrib/cli setup checks the development toolchain. Provider-write credentials and approval keys belong only to the trusted broker. Physical isolation requires a separate worker with no host credentials or metadata access; unrestricted host shell access can bypass an in-process protocol gate.",
     `- **RED → PATCH → GREEN**: run ${red.mcp.tool} first, then save the patch through ${patch.mcp.tool}, and verify GREEN through ${evidence.mcp.tool}; PATCH_DRAFTED is invalid without RED.`,
     `- **Routing and governance**: public vulnerabilities require a provider-verified IssueBindingArtifact; private vulnerability policy requires a provider-verified SecurityDisclosureArtifact and public-fix authorization, with no public Issue route. Use a non-public task identifier when preparing a private-work workspace.`,
-    `- **PR draft**: while still in ${evidence.phase}, create and persist immutable pr_draft with ${prDraftGuidance.cliExample} / ${prDraftGuidance.mcpTool}; private security drafts must omit public Issue references. Then run ${governance.cli.example} → ${approvalGuidance.cliExample} → opencontrib submission submit; MCP order is ${prDraftGuidance.mcpTool} → ${governance.mcp.tool} → ${approvalGuidance.mcpTool} → ${submission.mcp.tool} / SubmissionPort.`,
+    `- **PR draft**: while still in ${evidence.phase}, create and persist immutable pr_draft with \`${prDraftGuidance.cliExample}\` / \`${prDraftGuidance.mcpTool}\`; private security drafts must omit public Issue references. Then run \`${governance.cli.example}\` → \`${approvalGuidance.cliExample}\` → opencontrib submission submit; MCP order is \`${prDraftGuidance.mcpTool}\` → \`${governance.mcp.tool}\` → \`${approvalGuidance.mcpTool}\` → \`${submission.mcp.tool}\` / SubmissionPort.`,
     "- Do not write Pull Requests through raw GitHub CLI, GitHub MCP, or GitHub API operations; they bypass SubmissionIntent, ApprovalArtifact, SubmissionPermit, and provider verification.",
   ].join("\n");
 }

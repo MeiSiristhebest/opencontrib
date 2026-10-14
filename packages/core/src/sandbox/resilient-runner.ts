@@ -210,12 +210,22 @@ export function runResilientCommand(
     sanitizedEnv.CI = "true";
     sanitizedEnv.FORCE_COLOR = "0";
 
+    const baseCmd = path.basename(sanitizedCommand).toLowerCase().replace(/\.exe$/, '');
+    const isBatch =
+      platform() === "win32" &&
+      (baseCmd === "npm" ||
+        baseCmd === "npx" ||
+        baseCmd === "pnpm" ||
+        baseCmd === "yarn" ||
+        sanitizedCommand.toLowerCase().endsWith(".cmd") ||
+        sanitizedCommand.toLowerCase().endsWith(".bat"));
+
     const res = spawnSync(sanitizedCommand, sanitizedArgs, {
       cwd,
       timeout: timeoutMs,
       encoding: "utf-8",
       env: sanitizedEnv,
-      shell: false,
+      shell: isBatch,
     });
 
     const MAX_OUTPUT = 256 * 1024;

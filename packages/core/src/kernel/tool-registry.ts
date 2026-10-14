@@ -16,7 +16,7 @@
 
 import { existsSync, readdirSync } from 'fs';
 import { spawnSync } from 'child_process';
-import { platform } from 'os';
+import { platform, homedir } from 'os';
 import { join, resolve } from 'path';
 
 /** Credential keys stripped from binary-detection subprocesses. */
@@ -285,11 +285,43 @@ export function isBinaryOnPath(bin: string): boolean {
     return true;
   }
 
-  // Fallback: check OPENCONTRIB_DOCKER_BIN_DIR for non-standard install paths
-  const customDir = process.env.OPENCONTRIB_DOCKER_BIN_DIR;
-  if (customDir) {
-    const fullPath = resolve(customDir, bin);
-    const winPath = resolve(customDir, `${bin}.exe`);
+  // Windows Git fallback: query Git for Windows registry
+  if (isWindows && bin === 'git') {
+    const regKeys = [
+      'HKLM\\SOFTWARE\\GitForWindows',
+      'HKCU\\Software\\GitForWindows',
+    ];
+    for (const regKey of regKeys) {
+      try {
+        const regRes = spawnSync('reg.exe', ['query', regKey, '/v', 'InstallPath'], {
+          encoding: 'utf-8',
+          timeout: 2000,
+          env: strippedEnv,
+        });
+        const match = (regRes.stdout || '').match(/InstallPath\s+REG_\w+\s+(.+)/i);
+        if (match && match[1]) {
+          const regGit = join(match[1].trim(), 'cmd', 'git.exe');
+          if (existsSync(regGit)) {
+            binaryCache.set(bin, true);
+            return true;
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // Fallback: check standard user tool directories (~/.local/bin, ~/.cargo/bin)
+  const home = homedir();
+  const userBinDirs = [
+    join(home, '.local', 'bin'),
+    join(home, '.cargo', 'bin'),
+  ];
+  for (const dir of userBinDirs) {
+    if (!existsSync(dir)) continue;
+    const resolvedDir = resolve(dir);
+    const fullPath = resolve(resolvedDir, bin);
+    const winPath = resolve(resolvedDir, `${bin}.exe`);
+    if (!fullPath.startsWith(resolvedDir)) continue;
     if (isWindows && existsSync(winPath)) {
       binaryCache.set(bin, true);
       return true;
@@ -297,6 +329,24 @@ export function isBinaryOnPath(bin: string): boolean {
     if (existsSync(fullPath)) {
       binaryCache.set(bin, true);
       return true;
+    }
+  }
+
+  // Fallback: check OPENCONTRIB_DOCKER_BIN_DIR for non-standard install paths
+  const customDir = process.env.OPENCONTRIB_DOCKER_BIN_DIR;
+  if (customDir) {
+    const resolvedCustom = resolve(customDir);
+    const fullPath = resolve(resolvedCustom, bin);
+    const winPath = resolve(resolvedCustom, `${bin}.exe`);
+    if (fullPath.startsWith(resolvedCustom)) {
+      if (isWindows && existsSync(winPath)) {
+        binaryCache.set(bin, true);
+        return true;
+      }
+      if (existsSync(fullPath)) {
+        binaryCache.set(bin, true);
+        return true;
+      }
     }
     // Also scan the directory for any matching name
     try {

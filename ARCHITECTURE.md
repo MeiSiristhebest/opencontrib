@@ -14,7 +14,7 @@ graph TD
 
     subgraph "OpenContrib Ingress Layer"
         CLI[OpenContrib CLI - 16 Command Domains]
-        MCP[MCP Server - 39 JSON-RPC Tools]
+        MCP[MCP Server - 41 JSON-RPC Tools]
     end
 
     subgraph "Deterministic Domain Engine"
@@ -24,6 +24,7 @@ graph TD
         Sandbox[Clean-Room Git Worktrees]
         Evidence[Concurrency Stampede & Evidence Verifier]
         Gov[RFC-100 & Anti-AI Governance Gate]
+        PromptEng[Dynamic Prompt Engine & 3D Test Suite]
         Flywheel[Persistence & Contribution Flywheel]
     end
 
@@ -40,7 +41,8 @@ graph TD
     Pointer --> Sandbox
     Sandbox --> Evidence
     Evidence --> Gov
-    Gov --> Flywheel
+    Gov --> PromptEng
+    PromptEng --> Flywheel
     Sandbox <--> Repo
 ```
 
@@ -86,10 +88,11 @@ A patch is never submitted based on LLM "confidence". It must pass two determini
 
 To defend maintainer trust:
 
-- **100-Line Patch Ceiling**: Automatically rejects massive refactors or unrequested reformatting.
+- **Core Production Logic Capped at 30–50 Lines** (hard ceiling 100 lines): Automatically rejects broad refactors, formatting drift, and dependency churn.
+- **Supporting Test Code Fully Uncapped**: Encourages robust multi-case, combinatorial test matrices with zero line-count penalty.
+- **Anti-Tokenism Gate**: Rejects superficial single-case unit tests (`defensiveCoverage` capped at 60).
 - **Anti-AI Jargon Sanitizer**: Strips robotic explanations, emojis, and unverified speculative claims from PR drafts.
-- **Exclusive Claim Protocol**: Verifies whether an issue is already claimed or actively worked on before drafting.
-- **Exit Code 2 Hard Gate**: Failing quality checks physically terminate the CLI process, blocking non-compliant PRs.
+- **Exit Code 2 Hard Gate**: Failing quality checks (overall $<90\%$ or any dimension $<80\%$) physically terminate the CLI process, blocking non-compliant PRs.
 
 ---
 
@@ -103,7 +106,18 @@ To guarantee unbroken traceability across multi-turn agent lifecycles:
 
 ---
 
-## 🔒 6. Telemetry & Privacy
+## 🧠 6. Dynamic Prompt Engineering Engine
+
+Adopts a modern semantic XML structured schema and strict slot-filling architecture to eliminate hallucinated prompt structure and prompt injection vulnerabilities:
+
+- **Semantic Boundary Isolation**: `<system_identity>`, `<quality_mandates>`, `<dynamic_guidance>`, `<untrusted_task_input>`, `<repair_diagnostics>`, `<negative_constraints>`, `<output_format_contract>`.
+- **Tech-Stack Ecosystem Adaptation**: Dynamically injects tailored guidelines for Go (table-driven, -race, defer cleanup), Python (pytest parametrization, context managers), TypeScript/JavaScript (async/await error isolation), etc.
+- **7-Dimension Defect Class Defense**: Dynamically activates defenses for concurrency races, async symmetry, resource leaks, and protocol conformances.
+- **Cross-Iteration Differential Diagnostics**: Automatically categorizes compilation errors, assertion mismatches, and timeouts on retries to supply targeted repair directives.
+
+---
+
+## 🔒 7. Telemetry & Privacy
 
 OpenContrib includes a minimal, anonymous ping mechanism to understand runtime adoption.
 

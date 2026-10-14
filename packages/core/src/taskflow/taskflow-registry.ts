@@ -44,9 +44,13 @@ export class TaskActionRegistry {
     this.register('probe_scan', {
       execute: async (ctx) => {
         try {
+          const specifiedProbes = ctx.parameters?.probes;
           const allProbes = typeof (ctx.host as any).listAll === 'function' ? (ctx.host as any).listAll() : [];
+          const probesToRun = Array.isArray(specifiedProbes)
+            ? allProbes.filter((p: any) => specifiedProbes.includes(p.name || p.id))
+            : allProbes;
           const scanRes = typeof (ctx.host as any).executeScan === 'function'
-            ? await (ctx.host as any).executeScan(ctx.repoPath, allProbes)
+            ? await (ctx.host as any).executeScan(ctx.repoPath, probesToRun)
             : { pointersCreated: [] };
 
           const firstFinding = scanRes.pointersCreated && scanRes.pointersCreated.length > 0 ? scanRes.pointersCreated[0] : undefined;

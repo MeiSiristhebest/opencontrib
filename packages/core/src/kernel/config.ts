@@ -25,7 +25,7 @@ export interface OpenContribPolicy {
  */
 export const DEFAULT_TOOL_TIMEOUTS = {
   AST_GREP: 20_000,
-  SEMGREP: 60_000,
+  SEMGREP: 120_000,
   KNIP: 60_000,
   RUFF: 20_000,
   CARGO_DENY: 30_000,

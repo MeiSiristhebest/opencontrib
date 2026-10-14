@@ -96,6 +96,18 @@ export function registerGovernanceTools(
         .describe(
           "Trusted repository-sensitive resource/handle leak policy; required policies fail closed",
         ),
+      variantHuntConducted: z
+        .boolean()
+        .optional()
+        .describe(
+          "Whether variant hunting was conducted across sister modules to verify absence of parallel defects",
+        ),
+      combinatorialScenariosCovered: z
+        .number()
+        .optional()
+        .describe(
+          "Number of combinatorial mutation / 3D scenarios covered in test suite",
+        ),
     },
     wrapHandler(async (args) => {
       const run = args.runId ? runManager.getRun(args.runId) : undefined;
@@ -121,6 +133,8 @@ export function registerGovernanceTools(
           isAutonomous: args.isAutonomousPrSubmission,
           coveragePolicy: args.coveragePolicy,
           resourceLeakPolicy: args.resourceLeakPolicy,
+          variantHuntConducted: args.variantHuntConducted,
+          combinatorialScenariosCovered: args.combinatorialScenariosCovered,
           preflightLintResult,
         });
 
@@ -152,6 +166,8 @@ export function registerGovernanceTools(
         confidenceBreakdown: args.confidenceBreakdown,
         coveragePolicy: args.coveragePolicy,
         resourceLeakPolicy: args.resourceLeakPolicy,
+        variantHuntConducted: args.variantHuntConducted,
+        combinatorialScenariosCovered: args.combinatorialScenariosCovered,
         preflightLintResult,
       });
 

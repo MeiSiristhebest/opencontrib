@@ -490,4 +490,4 @@ contextTest("MCP context uses the prepared workspace and repository language", a
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 30000);

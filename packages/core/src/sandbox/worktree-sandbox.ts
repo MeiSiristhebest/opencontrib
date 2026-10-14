@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { safeRmSync } from '../workspace/worktree-manager.js';
+import { safeRmSync, linkDependenciesIfPresent } from '../workspace/worktree-manager.js';
 
 const SANDBOX_CREDENTIAL_KEYS = new Set([
   'GH_TOKEN', 'GITHUB_TOKEN', 'GITLAB_TOKEN', 'NPM_TOKEN', 'NPM_AUTH_TOKEN',
@@ -94,10 +94,12 @@ export class WorktreeSandbox {
         stdio: 'pipe',
         encoding: 'utf8',
       });
+      linkDependenciesIfPresent(this.repoPath, this.sandboxPath);
     } catch {
       if (!fs.existsSync(this.sandboxPath)) {
         fs.mkdirSync(this.sandboxPath, { recursive: true });
         this.copyDirRecursive(this.repoPath, this.sandboxPath);
+        linkDependenciesIfPresent(this.repoPath, this.sandboxPath);
       }
     }
   }
@@ -123,11 +125,28 @@ export class WorktreeSandbox {
       }
     }
 
+    const baseProg = path.basename(program).toLowerCase().replace(/\.exe$/, '');
+    const isBatch =
+      process.platform === 'win32' &&
+      (baseProg === 'npm' ||
+        baseProg === 'npx' ||
+        baseProg === 'pnpm' ||
+        baseProg === 'yarn' ||
+        program.toLowerCase().endsWith('.cmd') ||
+        program.toLowerCase().endsWith('.bat'));
+
+    const hostNodeModules = path.join(this.repoPath, 'node_modules');
+    if (fs.existsSync(hostNodeModules)) {
+      strippedEnv.NODE_PATH = strippedEnv.NODE_PATH
+        ? `${hostNodeModules}${path.delimiter}${strippedEnv.NODE_PATH}`
+        : hostNodeModules;
+    }
+
     const res = spawnSync(program, args, {
       cwd: this.sandboxPath,
       encoding: 'utf8',
       timeout: timeoutMs,
-      shell: false,
+      shell: isBatch,
       env: strippedEnv,
     });
 
@@ -186,6 +205,13 @@ export class WorktreeSandbox {
   public cleanup(): void {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
+
+    try {
+      const nm = path.join(this.sandboxPath, 'node_modules');
+      if (fs.existsSync(nm)) {
+        try { fs.unlinkSync(nm); } catch { try { fs.rmSync(nm, { recursive: false, force: true }); } catch {} }
+      }
+    } catch {}
 
     try {
       if (fs.existsSync(this.sandboxPath)) {

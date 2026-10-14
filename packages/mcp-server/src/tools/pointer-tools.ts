@@ -32,15 +32,26 @@ export function registerPointerTools(server: McpServer): void {
         .describe(
           "Optional custom pointers directory path (defaults to the canonical OpenContrib pointer store)",
         ),
+      workspacePath: z
+        .string()
+        .optional()
+        .describe("Optional workspace path to resolve pointers from"),
+      scope: z
+        .string()
+        .optional()
+        .describe("Optional scope path to validate pointers against"),
     },
     async (args) => {
+      const targetScope = args.scope || args.workspacePath;
       const pointerDir = resolvePointerStoreLocation({
         storageDir: args.storageDir,
-        cwd: process.cwd(),
+        workspacePath: targetScope,
+        cwd: targetScope,
       });
       const store = new SmartPointerStore({
         storageDir: pointerDir,
-        scope: process.cwd(),
+        workspacePath: targetScope,
+        scope: targetScope,
       });
 
       try {
@@ -102,15 +113,26 @@ export function registerPointerTools(server: McpServer): void {
         .string()
         .optional()
         .describe("Optional custom pointers directory path"),
+      workspacePath: z
+        .string()
+        .optional()
+        .describe("Optional workspace path to resolve pointers from"),
+      scope: z
+        .string()
+        .optional()
+        .describe("Optional scope path to validate pointers against"),
     },
     async (args) => {
+      const targetScope = args.scope || args.workspacePath;
       const pointerDir = resolvePointerStoreLocation({
         storageDir: args.storageDir,
-        cwd: process.cwd(),
+        workspacePath: targetScope,
+        cwd: targetScope,
       });
       const store = new SmartPointerStore({
         storageDir: pointerDir,
-        scope: process.cwd(),
+        workspacePath: targetScope,
+        scope: targetScope,
       });
 
       try {

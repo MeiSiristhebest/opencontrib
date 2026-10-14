@@ -166,7 +166,7 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         path: "math.test.js",
         operation: "CREATE" as const,
         content:
-          "import { expect, test } from 'bun:test'; import { mul } from './math.js'; test('multiplication regression', () => expect(mul(3, 4), 'ASSERTION_MUL_FAIL').toBe(12));\n",
+          "import { expect, test } from 'bun:test'; import { mul } from './math.js'; test('multiplication regression', () => expect(mul(3, 4), 'ASSERTION_MUL_FAIL').toBe(12)); test('multiplication by zero', () => expect(mul(0, 5)).toBe(0)); test('multiplication negative', () => expect(mul(-2, 3)).toBe(-6)); test('multiplication identity', () => expect(mul(1, 42)).toBe(42));\n",
         explanation: "regression test for multiplication",
       };
       writeFileSync(
@@ -220,7 +220,7 @@ describe("Autonomous Regression-Test Generation & Transfer Host Integration", ()
         concurrencyWorkers: 1,
       });
       expect(agentGreen.reproductionVerified).toBe(true);
-      expect(agentGreen.passedUnitTestsCount).toBe(1);
+      expect(agentGreen.passedUnitTestsCount).toBe(4);
       agentRunManager.saveArtifact(
         manifest.runId,
         "pr_draft",

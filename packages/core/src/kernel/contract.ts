@@ -208,7 +208,7 @@ export interface HostServices {
   workspacePath: string;
   exec(
     cmd: string,
-    opts?: { cwd?: string; timeout?: number },
+    opts?: { cwd?: string; timeout?: number; shell?: boolean },
   ): Promise<{ stdout: string; stderr: string }>;
   log(message: string, level?: "info" | "warn" | "error" | "debug"): void;
   isBinaryAvailable(bin: string): boolean;
