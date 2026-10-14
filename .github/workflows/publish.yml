@@ -36,6 +36,7 @@ jobs:
         with:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
+          scope: "@opencontrib"
 
       - name: Check core package version
         id: core_pkg
@@ -121,26 +122,43 @@ jobs:
         if: steps.core_pkg.outputs.published == 'false' || steps.mcp_pkg.outputs.published == 'false' || steps.cli_pkg.outputs.published == 'false'
         run: bun run build
 
+      - name: Configure NPM credentials and verify auth
+        if: steps.core_pkg.outputs.published == 'false' || steps.mcp_pkg.outputs.published == 'false' || steps.cli_pkg.outputs.published == 'false'
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          echo "@opencontrib:registry=https://registry.npmjs.org" >> ~/.npmrc
+          echo "NPM authentication verification:"
+          npm whoami --registry https://registry.npmjs.org || true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish Core to NPM
         if: steps.core_pkg.outputs.published == 'false'
         working-directory: packages/core
-        run: npm publish --access public
+        run: |
+          cp ~/.npmrc .npmrc || true
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish MCP Server to NPM
         if: steps.mcp_pkg.outputs.published == 'false'
         working-directory: packages/mcp-server
-        run: npm publish --access public
+        run: |
+          cp ~/.npmrc .npmrc || true
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish CLI to NPM
         if: steps.cli_pkg.outputs.published == 'false'
         working-directory: packages/cli
-        run: npm publish --access public
+        run: |
+          cp ~/.npmrc .npmrc || true
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
 
       - name: Publish summary
         run: |
