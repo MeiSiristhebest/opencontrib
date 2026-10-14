@@ -4,6 +4,7 @@ import { ProfileFlywheel } from "../flywheel/profile-sync.js";
 import { WorktreeManager } from "../workspace/worktree-manager.js";
 import { ContributionRunManager } from "../run/run-manager.js";
 import { LLMService } from "../llm/llm-service.js";
+import { buildDynamicPatchPrompt } from "../llm/prompt-engine.js";
 import { ContextAssembler } from "../discovery/context-assembler.js";
 import { ContributionStateMachine } from "./state-machine.js";
 import { SystemClock } from "../ports/clock.port.js";
@@ -47,62 +48,14 @@ export interface PromptRebuildContext {
  * giving the model the full context of what was tried and what worked/failed.
  */
 export function buildTurnPrompt(ctx: PromptRebuildContext): string {
-  const lines: string[] = [];
-  lines.push(ctx.basePrompt);
-  lines.push("");
-
-  if (ctx.feedback.length > 0) {
-    lines.push(
-      `## Previous Attempt Feedback (Attempts 1-${ctx.attemptNumber - 1})`,
-    );
-    lines.push("");
-    for (const entry of ctx.feedback) {
-      const status = entry.success
-        ? "✅ PASS"
-        : `❌ FAIL (exit ${entry.exitCode ?? "N/A"})`;
-      const cmd = entry.command
-        ? `\`${entry.command.slice(0, 200)}\``
-        : entry.toolName;
-      lines.push(`### ${status} — ${entry.toolName}`);
-      if (entry.command) lines.push(`Command: ${cmd}`);
-      lines.push("```");
-      lines.push(entry.output.slice(-1500));
-      lines.push("```");
-      lines.push("");
-    }
-  }
-
-  if (ctx.appliedFiles.length > 0) {
-    lines.push(`## Previously Applied Changes`);
-    lines.push("");
-    for (const f of ctx.appliedFiles) {
-      lines.push(`- ${f.operation} ${f.path}`);
-    }
-    lines.push("");
-  }
-
-  if (ctx.attemptNumber > 1) {
-    lines.push(
-      `## Repair Instructions (Attempt ${ctx.attemptNumber}/${ctx.maxAttempts})`,
-    );
-    lines.push("");
-    lines.push(
-      `You have ${ctx.maxAttempts - ctx.attemptNumber} attempt(s) remaining.`,
-    );
-    lines.push(
-      "Based on the feedback above, diagnose the root cause and produce a revised surgical patch.",
-    );
-    lines.push(
-      "Focus on the specific failure rather than making unrelated changes. Keep core code surgical (30-50 lines) while expanding 3D test cases (unlimited test lines) to verify fixes.",
-    );
-    lines.push("");
-    lines.push(`- **Test Command**: \`${ctx.testCommand || "N/A"}\``);
-  }
-
-  lines.push("");
-  lines.push(PATCH_GENERATION_GUIDANCE.trim());
-
-  return lines.join("\n");
+  return buildDynamicPatchPrompt({
+    basePrompt: ctx.basePrompt,
+    testCommand: ctx.testCommand,
+    feedback: ctx.feedback,
+    appliedFiles: ctx.appliedFiles,
+    attemptNumber: ctx.attemptNumber,
+    maxAttempts: ctx.maxAttempts,
+  });
 }
 
 export const PATCH_GENERATION_GUIDANCE = `

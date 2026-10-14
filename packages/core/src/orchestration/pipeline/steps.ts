@@ -64,6 +64,7 @@ import {
   buildTurnPrompt,
   PATCH_GENERATION_GUIDANCE,
 } from "../agent-orchestrator.js";
+import { buildDynamicPatchPrompt } from "../../llm/prompt-engine.js";
 import type {
   PipelineContext,
   PipelineDeps,
@@ -838,8 +839,15 @@ export class PatchGenerationStep implements PipelineStep {
 
     if (deps.llmService) {
       try {
+        const patchPrompt = buildDynamicPatchPrompt({
+          basePrompt: ctx.prompt || "",
+          repoFullName: ctx.workspace?.repoFullName,
+          testCommand: ctx.testCmd,
+          defectDomain: ctx.selectedOpp?.category,
+          attemptNumber: 1,
+        });
         const llmResult = await deps.llmService.generateStructured({
-          prompt: `${ctx.prompt}\n\n${PATCH_GENERATION_GUIDANCE.trim()}`,
+          prompt: patchPrompt,
           schema: PatchDraftSchema,
         });
         // SAFETY: PatchDraftSchema (Zod) validated llmResult.data at runtime;
@@ -956,7 +964,13 @@ export class ImplementValidateLoopStep implements PipelineStep {
               attemptNumber: implementationAttempts,
               maxAttempts,
             })
-          : `${prompt}\n\n${PATCH_GENERATION_GUIDANCE.trim()}`;
+          : buildDynamicPatchPrompt({
+              basePrompt: prompt,
+              repoFullName: ctx.workspace?.repoFullName,
+              testCommand: testCmd,
+              defectDomain: ctx.selectedOpp?.category,
+              attemptNumber: 1,
+            });
 
       // Generate (or re-generate on repair turn) the patch draft from the per-turn prompt
       if (implementationAttempts > 1) {
