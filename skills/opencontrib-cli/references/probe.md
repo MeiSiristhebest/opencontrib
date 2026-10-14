@@ -99,6 +99,12 @@ opencontrib probe hotspot . --limit 5 --pretty
 
 # Generate property-based boundary fuzzing test harness
 opencontrib probe fuzz . --category numerical_bounds --pretty
+
+# Hunt for sister-module structural defect variants across the repository (ast-grep & ripgrep)
+opencontrib probe variant-hunt . --symbol <functionOrSymbolName> [-f <primaryFile>] [-l <primaryLine>] --pretty
+
+# Generate combinatorial mutation matrix and 3D test scenarios (normal, boundary, failure injection)
+opencontrib probe matrix . [--title <title>] [--diff <diff>] [--lang <language>] --pretty
 ```
 
 ---
@@ -114,6 +120,7 @@ opencontrib probe fuzz . --category numerical_bounds --pretty
 | `opencontrib probe run` | `contrib_probe_run` | `{ targetPath: "." }` |
 | `opencontrib probe hotspot` | `contrib_probe_hotspot` | `{ targetPath: "." }` |
 | `opencontrib probe fuzz` | `contrib_probe_fuzz` | `{ targetPath: ".", language: "typescript" }` |
+| `opencontrib probe variant-hunt` | `contrib_probe_variant_hunt` | `{ targetPath: ".", symbol: "fetchData" }` |
+| `opencontrib probe matrix` | `contrib_probe_matrix` | `{ targetPath: ".", title: "fix: retry", diff: "..." }` |
 | `opencontrib pointer list` | `contrib_list_pointers` | `{ workspacePath: "." }` |
 | `opencontrib pointer resolve` | `contrib_resolve_pointer` | `{ uri: "ptr://...", view: "slice", workspacePath: "." }` |
-

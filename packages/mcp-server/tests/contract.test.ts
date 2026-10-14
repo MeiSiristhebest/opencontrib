@@ -113,6 +113,8 @@ describe("OpenContrib MCP Contract Tests & Schema Invariants", () => {
       "contrib_probe_run",
       "contrib_probe_hotspot",
       "contrib_probe_fuzz",
+      "contrib_probe_variant_hunt",
+      "contrib_probe_matrix",
       "contrib_request_approval",
       "contrib_submit_pr",
       "contrib_plan_capabilities",

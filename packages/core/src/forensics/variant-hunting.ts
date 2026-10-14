@@ -103,11 +103,44 @@ export class VariantHunter {
   }
 
   /**
+   * Hunts for parallel structural defects of a symbol across the entire repository.
+   * Useful during CLI/MCP workflows when no Smart Pointer stub is available.
+   */
+  public static async huntSymbol(
+    repoPath: string,
+    symbol: string,
+    options: {
+      file?: string;
+      line?: number;
+      host?: PluginHostContract;
+    } = {},
+  ): Promise<DiscoveredVariant[]> {
+    const finding: PointerStub = {
+      id: `hunt-${Date.now()}`,
+      file: options.file || '',
+      line: options.line || 0,
+      affectedSymbol: symbol,
+      callSite: symbol,
+    };
+    if (options.host) {
+      return this.huntVariants(repoPath, finding, options.host);
+    }
+    const matches = this.searchWithRipgrep(repoPath, symbol, options.file || '', options.line);
+    return matches.map((m) => ({
+      sourceFindingId: finding.id,
+      variantFile: m.file,
+      variantLine: m.line,
+      snippet: m.snippet,
+      confidence: 85,
+    }));
+  }
+
+  /**
    * Searches the repository using ripgrep with --fixed-strings for exact
    * symbol matching.  This eliminates false positives from substrings, comments,
    * and string literals that the old line.includes() approach produced.
    */
-  private static searchWithRipgrep(
+  public static searchWithRipgrep(
     repoPath: string,
     symbol: string,
     excludeFile: string,

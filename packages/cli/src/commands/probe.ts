@@ -7,6 +7,8 @@ import {
   runProbes,
   analyzeGitHotspots,
   generatePropertyTest,
+  generateCombinatorialMatrix,
+  VariantHunter,
   ProbeRegistry,
   createDefaultPluginHost,
   triagePointerFindings,
@@ -316,6 +318,108 @@ probeCommand
       );
     } catch (err: any) {
       console.error(`❌ Fuzz harness generation failed: ${err.message}`);
+      throw new CliExitError(1);
+    }
+  });
+
+probeCommand
+  .command("variant-hunt [target]")
+  .description(
+    "Hunt for parallel structural defect variants across the repository using ast-grep and ripgrep",
+  )
+  .requiredOption("-s, --symbol <name>", "Symbol or function name to search for across sister modules")
+  .option("-f, --file <path>", "Source file where the primary defect was located")
+  .option("-l, --line <number>", "Line number of primary defect", (v) => parseInt(v, 10))
+  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
+  .option("--pretty", "Pretty-print JSON output", false)
+  .action(async (target, opts) => {
+    try {
+      const { manager, runId, resolved } = resolveTrackedTarget(opts.runId, target);
+      const variants = await VariantHunter.huntSymbol(resolved, opts.symbol, {
+        file: opts.file,
+        line: opts.line,
+      });
+
+      saveProbeArtifact(manager, runId, {
+        target: resolved,
+        variantHunt: {
+          symbol: opts.symbol,
+          count: variants.length,
+          variants,
+          executedAt: new Date().toISOString(),
+        },
+      });
+
+      printJSON(
+        {
+          status: "success",
+          runId,
+          currentPhase: manager.getRun(runId)!.manifest.currentPhase,
+          target: resolved,
+          symbol: opts.symbol,
+          variantsCount: variants.length,
+          variants,
+        },
+        opts.pretty,
+      );
+    } catch (err: any) {
+      console.error(`❌ Variant hunting failed: ${err.message}`);
+      throw new CliExitError(1);
+    }
+  });
+
+probeCommand
+  .command("matrix [target]")
+  .description(
+    "Generate combinatorial mutation matrix and 3D parameterized test scenarios (normal, boundary, failure injection)",
+  )
+  .option("--title <title>", "Issue or PR title")
+  .option("--body <body>", "Issue or PR body description")
+  .option("--diff <diff>", "Unified diff or patch text")
+  .option("--lang <lang>", "Target language (defaults to repository fingerprint)")
+  .option("--run-id <id>", "Contribution run ID (defaults to active session)")
+  .option("--pretty", "Pretty-print JSON output", false)
+  .action(async (target, opts) => {
+    try {
+      const { manager, runId, resolved } = resolveTrackedTarget(opts.runId, target);
+      let lang = opts.lang;
+      if (!lang) {
+        try {
+          const fingerprint = await extractRepoFingerprint(resolved);
+          lang = fingerprint.primaryLanguage;
+        } catch {
+          lang = undefined;
+        }
+      }
+
+      const report = generateCombinatorialMatrix({
+        diffText: opts.diff,
+        issueTitle: opts.title,
+        issueBody: opts.body,
+        primaryLanguage: lang,
+      });
+
+      saveProbeArtifact(manager, runId, {
+        target: resolved,
+        matrix: report,
+      });
+
+      printJSON(
+        {
+          status: "success",
+          runId,
+          currentPhase: manager.getRun(runId)!.manifest.currentPhase,
+          target: resolved,
+          domain: report.domain,
+          rationale: report.domainRationale,
+          dimensions: report.dimensions,
+          scenarios: report.scenarios,
+          recommendedAssertions: report.recommendedAssertions,
+        },
+        opts.pretty,
+      );
+    } catch (err: any) {
+      console.error(`❌ Combinatorial matrix generation failed: ${err.message}`);
       throw new CliExitError(1);
     }
   });

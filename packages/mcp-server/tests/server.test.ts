@@ -28,14 +28,16 @@ describe("OpenContrib MCP Server", () => {
     } catch {}
   });
 
-  it("initializes and registers all 39 composable contribution domain tools, resources, and workflow prompt", () => {
+  it("initializes and registers all 41 composable contribution domain tools, resources, and workflow prompt", () => {
     const server = createOpenContribMcpServer();
     expect(server).toBeDefined();
     expect(server["server"]).toBeDefined();
 
     // Verify underlying tools registration
     const tools = (server as any)._registeredTools;
-    expect(Object.keys(tools).length).toBe(39);
+    expect(Object.keys(tools).length).toBe(41);
+    expect(tools["contrib_probe_variant_hunt"]).toBeDefined();
+    expect(tools["contrib_probe_matrix"]).toBeDefined();
     expect(tools["contrib_scout"]).toBeDefined();
     expect(tools["contrib_rank_opportunity"]).toBeDefined();
     expect(tools["contrib_create_run"]).toBeDefined();

@@ -53,42 +53,44 @@ Load these modular references into context **only when entering that specific ph
 
 1. **CLI-First Execution Priority (Dual-Ingress Architecture)**:
    - **CLI-First Priority**: Always create the tracked run with `opencontrib run create` before executing any other lifecycle command, then prioritize executing `opencontrib <subcommand>` via terminal commands (`run_command`). The CLI provides automated active session inheritance, immediate log streaming, and deterministic `▶ NEXT RECOMMENDED COMMAND` prompts.
-   - **MCP First-Class Support**: The OpenContrib MCP Server (`@opencontrib/mcp`) provides 39 composable JSON-RPC tools and resources when operating in MCP-only client environments.
+   - **MCP First-Class Support**: The OpenContrib MCP Server (`@opencontrib/mcp`) provides 41 composable JSON-RPC tools and resources when operating in MCP-only client environments.
 
 2. **File-First Markdown Protocol (No Inline String Markdown)**:
    - **NEVER** pass Markdown, multi-line text, or quotes as inline string arguments in CLI/PowerShell (e.g. `-f body="..."` or `--body "..."`).
    - **ALWAYS** write content to a temporary UTF-8 file (`comment.json`, `pr_body.md`, `issue_body.md`) and pass `--body-file <file>` or `--input-file <file>`. This 100% eliminates quote stripping, encoding damage, and shell escaping traps.
 
-3. **Single-Defect Atomic Focus (RFC-100 Surgical Constraint)**:
+3. **Single-Defect Laser Focus & Core Diff Accounting (RFC-100)**:
    - Every contribution run MUST address strictly **ONE single atomic defect**.
-   - NEVER bundle multiple unrelated bugs or refactorings into one PR.
-   - Diff size MUST be kept minimal and targeted ($\le 30-50$ lines). If multiple defects are discovered, triage them into separate distinct runs.
+   - NEVER bundle unrelated refactors, formatting sweeps, or dependency upgrades into the fix.
+   - **Production Code Diff is Strictly Surgical ($\le 30-50$ lines)**: Keep core implementation changes minimal and laser-focused.
+   - **Supporting Test Code is UNLIMITED**: Test suites (`*.test.*`, `*.spec.*`, `test_*`, `*_test.*`, fixtures, docs) are Supporting Files and are **EXEMPT from line limits**. Write full, thorough tests without diff anxiety!
 
-4. **Community Gate Ingestion & Hard Pause Protocol**:
+4. **Comprehensive 3D Testing & Anti-Single-Test Complacency (P0 Quality Requirement)**:
+   - **Single-test complacency is STRICTLY FORBIDDEN**: Submitting only 1 test trips the governance gate (`defensiveCoverage` capped at 60, failing the $\ge 80$ weakest-dimension rule).
+   - Test suites MUST cover 3D dimensions: (1) Happy path normal operation, (2) Boundary limits & extreme scale, and (3) Failure injection, timeout retries & resource cleanup.
+   - Use `opencontrib probe matrix` to generate combinatorial mutation matrices and test templates.
+
+5. **Breadth & Depth: Sister-Module Variant Hunting & Protocol Symmetry**:
+   - Never fix an issue in isolation without checking sibling call sites and helper functions across the repository.
+   - If modifying an asynchronous routine, always verify and align its synchronous counterpart (and vice-versa).
+   - Run `opencontrib probe variant-hunt --symbol <name>` across the codebase to ensure zero parallel structural defects remain before governance audit.
+
+6. **Community Gate Ingestion & Hard Pause Protocol**:
    - Always run `opencontrib governance gate` to inspect repository guidelines (`CONTRIBUTING.md`).
    - If the community enforces an auto-close gate or requires maintainer approval (`lgtmi` / reopen) before PR submission, **PAUSE the pipeline immediately at Phase 8 after opening the Issue**. Do NOT open a PR until maintainer expresses explicit interest.
 
-5. **Deterministic Guidance & Next-Command Obedience**:
+7. **Deterministic Guidance & Next-Command Obedience**:
    - Every `opencontrib` command prints a structured terminal guidance block containing `📍 PHASE`, `🚦 STATUS`, and `▶ NEXT RECOMMENDED COMMAND`.
    - **ALWAYS execute the `NEXT RECOMMENDED COMMAND` indicated in the CLI output.** Do NOT skip phases or jump ahead.
    - If `governance audit` exits with code `2` (GATED_BLOCKED), you are **HARD-BLOCKED** from creating a PR until the code quality rubric reaches $\ge 90\%$.
 
-6. **Anti-Drift Circuit Breaker (Max 3 `view_file` calls)**:
+8. **Anti-Drift Circuit Breaker (Max 3 `view_file` calls)**:
    - **NEVER** perform blind sequential file reads (> 3 views).
    - Pinpoint symbols strictly via Smart Pointer slices (`ptr://...`) or `grep_search`. If you find yourself viewing files more than 3 times without progress, **execute `opencontrib probe run` immediately**.
 
-7. **Canonical Submission Route (No Blind PRs)**:
-   - Public 0-day fixes require a provider-created or provider-re-read `IssueBindingArtifact` sealed to the run.
-   - Private vulnerability fixes require a provider-verified `SecurityDisclosureArtifact` and lifecycle authorization; they must not create a public Issue.
-   - Public PR descriptions may reference only the canonical Issue ID from the binding. Caller-supplied Issue numbers are not authoritative.
-
-8. **Targeted Subsystem Test Isolation (No Global Flaky Runs)**:
-   - **NEVER** run broad root tests (`go test ./...` or `npm test` at repo root) without isolation.
-   - Always scope test commands strictly to the modified sub-package (e.g. `bun test ./packages/ai/test/...`).
-
-9. **Repository Coverage Policy**:
-   - Every submitted PR **MUST include comprehensive regression/unit tests** covering the modified target code.
-   - The trusted repository policy controls `coverage.required` and `minimumChangedLineCoverage`. GREEN measures changed source lines with native `bun test --coverage --coverage-reporter=lcov`. CLI `--coverage-report` / MCP `coverageReport` must select the LCOV produced at that invocation's `--coverage-dir`. Required coverage blocks unsupported instrumenters and missing, incomplete, malformed, stale, or below-threshold reports. The default policy makes coverage advisory; it does not promise statement or branch coverage for every language.
+9. **Canonical Submission Route & Repository Coverage Policy**:
+   - Public fixes require a provider-verified `IssueBindingArtifact`; private vulnerability fixes require a provider-verified `SecurityDisclosureArtifact`.
+   - Every PR **MUST include comprehensive regression/unit tests** covering modified target code. GREEN measures changed source lines with native runner coverage. Single-line fixes with 0 or 1 test fail governance audit closed.
 
 ---
 

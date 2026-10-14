@@ -281,6 +281,7 @@ export class WorkspaceService {
       }
       if (
         existingWs.workspacePath &&
+        existsSync(existingWs.workspacePath) &&
         existingWs.baseCommitSha &&
         existingWs.baseRepoPath
       ) {
