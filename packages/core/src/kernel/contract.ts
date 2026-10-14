@@ -145,6 +145,7 @@ export interface PointerCreateOptions {
  */
 export interface ProbeDescriptor {
   id: string;
+  aliases?: string[];
   name: string;
   category: DefectCategory;
   description: string;

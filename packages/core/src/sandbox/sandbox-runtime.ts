@@ -3,7 +3,7 @@ import {
   spawnSync,
   type SpawnSyncOptionsWithStringEncoding,
 } from "node:child_process";
-import { mkdtempSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync, lstatSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { parseCommandSpec, type CommandSpec } from "./command-spec.js";
@@ -54,6 +54,91 @@ export interface SandboxProvider {
   isPathWithinBoundary(targetPath: string, rootBoundary: string): boolean;
 }
 
+export function buildKernelIsolationCommand(
+  executable: string,
+  args: string[],
+  cwd: string,
+  deniedPaths: string[],
+  scratchDir?: string,
+): { executable: string; args: string[]; isKernelIsolated: boolean } {
+  const resolvedCwd = resolve(cwd);
+  if (process.platform === "linux") {
+    try {
+      const check = spawnSync("bwrap", ["--version"], { stdio: "ignore" });
+      if (check.status === 0) {
+        const bwrapArgs: string[] = [
+          "--unshare-user",
+          "--unshare-ipc",
+          "--unshare-pid",
+          "--unshare-uts",
+          "--ro-bind", "/", "/",
+          "--dev", "/dev",
+          "--proc", "/proc",
+        ];
+        if (scratchDir && existsSync(scratchDir)) {
+          bwrapArgs.push("--bind", scratchDir, scratchDir);
+        }
+        for (const denied of deniedPaths) {
+          if (!existsSync(denied)) continue;
+          const resolvedDenied = resolve(denied);
+          if (
+            resolvedCwd === resolvedDenied ||
+            resolvedCwd.startsWith(resolvedDenied + sep)
+          ) {
+            continue;
+          }
+          try {
+            const stat = lstatSync(resolvedDenied);
+            if (stat.isDirectory()) {
+              bwrapArgs.push("--tmpfs", resolvedDenied);
+            } else if (stat.isFile() || stat.isSymbolicLink()) {
+              bwrapArgs.push("--ro-bind", "/dev/null", resolvedDenied);
+            }
+          } catch {}
+        }
+        bwrapArgs.push("--bind", resolvedCwd, resolvedCwd);
+        bwrapArgs.push("--", executable, ...args);
+        return { executable: "bwrap", args: bwrapArgs, isKernelIsolated: true };
+      }
+    } catch {
+      // bwrap unavailable
+    }
+  } else if (process.platform === "darwin") {
+    try {
+      if (existsSync("/usr/bin/sandbox-exec")) {
+        const denyRules = deniedPaths
+          .filter((p) => {
+            if (!existsSync(p)) return false;
+            const res = resolve(p);
+            return res !== resolvedCwd && !resolvedCwd.startsWith(res + sep);
+          })
+          .map((p) => {
+            try {
+              const stat = lstatSync(p);
+              if (stat.isDirectory()) {
+                return `(deny file-read* (subpath "${p}"))`;
+              }
+              return `(deny file-read* (literal "${p}"))`;
+            } catch {
+              return `(deny file-read* (subpath "${p}"))`;
+            }
+          })
+          .join(" ");
+        const profile = `(version 1) (allow default) ${denyRules}`;
+        return {
+          executable: "/usr/bin/sandbox-exec",
+          args: ["-p", profile, executable, ...args],
+          isKernelIsolated: true,
+        };
+      }
+    } catch {
+      // sandbox-exec unavailable
+    }
+  }
+  return { executable, args, isKernelIsolated: false };
+}
+
+
 export class SanitizedLocalSandboxProvider implements SandboxProvider {
   public readonly name = "sanitized_local";
   private readonly home: string;
@@ -75,10 +160,19 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
    */
   getAvailability(): SandboxAvailability {
     const warnings: string[] = [];
+    let isNative = false;
+    if (process.platform === "linux") {
+      try {
+        const check = spawnSync("bwrap", ["--version"], { stdio: "ignore" });
+        if (check.status === 0) isNative = true;
+      } catch {}
+    } else if (process.platform === "darwin") {
+      if (existsSync("/usr/bin/sandbox-exec")) isNative = true;
+    }
 
     return {
       available: true,
-      isolationMode: "SANITIZED_ENVIRONMENT",
+      isolationMode: isNative ? "NATIVE_ISOLATION" : "SANITIZED_ENVIRONMENT",
       warnings,
     };
   }
@@ -248,6 +342,15 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       sandboxTempDir = tmpdir();
     }
 
+    const kernelIsolation = buildKernelIsolationCommand(
+      finalCommand,
+      finalArgs,
+      resolvedCwd,
+      this.getDeniedPaths(),
+      sandboxTempDir,
+    );
+    const spawnExec = kernelIsolation.executable;
+    const spawnArgs = kernelIsolation.args;
     const sanitizedEnv = this.buildSanitizedEnvironment(sandboxTempDir);
 
     return new Promise<SandboxExecutionResult>((resolvePromise) => {
@@ -258,7 +361,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
       // On Windows, only launch batch files or package manager scripts via cmd.exe shell.
       // Direct executables (.exe, or PATH binaries) must be launched directly so cmd.exe
       // cannot flatten parsed arguments or expose command injection surface.
-      const exeLower = finalCommand.toLowerCase();
+      const exeLower = spawnExec.toLowerCase();
       const isBatch =
         process.platform === "win32" &&
         (exeLower.endsWith(".cmd") ||
@@ -269,7 +372,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
           exeLower === "yarn");
       // SanitizedLocalSandboxProvider boundary: command and args executed with isolated env and boundary checks.
       // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
-      const child = spawn(finalCommand, finalArgs, {
+      const child = spawn(spawnExec, spawnArgs, {
         cwd: resolvedCwd,
         stdio: ["ignore", "pipe", "pipe"],
         env: sanitizedEnv,
@@ -416,16 +519,26 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
 
     const sanitizedEnv = this.buildSanitizedEnvironment(sandboxTempDir);
 
+    const kernelIsolation = buildKernelIsolationCommand(
+      finalCommand,
+      finalArgs,
+      resolvedCwd,
+      this.getDeniedPaths(),
+      sandboxTempDir,
+    );
+    const spawnExec = kernelIsolation.executable;
+    const spawnArgs = kernelIsolation.args;
+
     try {
-      const baseCmd = basename(finalCommand).toLowerCase().replace(/\.exe$/, "");
+      const baseCmd = basename(spawnExec).toLowerCase().replace(/\.exe$/, "");
       const isBatch =
         process.platform === "win32" &&
         (baseCmd === "npm" ||
           baseCmd === "npx" ||
           baseCmd === "pnpm" ||
           baseCmd === "yarn" ||
-          finalCommand.toLowerCase().endsWith(".cmd") ||
-          finalCommand.toLowerCase().endsWith(".bat"));
+          spawnExec.toLowerCase().endsWith(".cmd") ||
+          spawnExec.toLowerCase().endsWith(".bat"));
 
       const spawnOptions: SpawnSyncOptionsWithStringEncoding = {
         cwd: resolvedCwd,
@@ -438,7 +551,7 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
 
       // SanitizedLocalSandboxProvider boundary: command and args executed synchronously with isolated env and boundary checks.
       // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
-      const result = spawnSync(finalCommand, finalArgs, spawnOptions);
+      const result = spawnSync(spawnExec, spawnArgs, spawnOptions);
 
       const stdout = String(result.stdout || "");
       const stderr = String(result.stderr || "");

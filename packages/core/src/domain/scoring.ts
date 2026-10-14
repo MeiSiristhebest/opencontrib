@@ -305,7 +305,16 @@ export function scoreCandidateIssue(input: ScoreCandidateInput): IssueScoringRes
     0.30 * (domainMatchScore + repoPopularityBonus + deepWaterBonus - lowSnrPenalty) +
     0.20 * feasibilityScore;
 
-  const rawScore = Math.max(0, Math.min(100, Math.round(baseWeightedScore + freshnessModifier + actionabilityModifier)));
+  // Feasibility Gating:
+  // If the issue is hard blocked, impossible, or has >= 100 penalty,
+  // score is strictly gated to 0 to prevent high-score false positives.
+  const isHardBlocked =
+    feasibility.level === "hard_blocked" ||
+    (feasibility.scorePenalty !== undefined && feasibility.scorePenalty >= 100);
+
+  const rawScore = isHardBlocked
+    ? 0
+    : Math.max(0, Math.min(100, Math.round(baseWeightedScore + freshnessModifier + actionabilityModifier)));
   const adjustedScore = rawScore;
 
   return {

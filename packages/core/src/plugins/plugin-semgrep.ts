@@ -63,6 +63,7 @@ export const semgrepPlugin: OpenContribPlugin = {
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'semgrep-sast',
+      aliases: ['semgrep'],
       name: 'Semgrep Multi-Source SAST Scanner',
       category: 'security_cwe',
       description: 'Discovers CWE security vulnerabilities, injection flaws, and taint flows from multiple authoritative sources',
@@ -114,10 +115,20 @@ export const semgrepPlugin: OpenContribPlugin = {
                 ? `uv tool run semgrep scan --json ${configArgs} ${excludeArgs} --quiet`
                 : `docker run --rm -v "${normalizedTarget}:/src" -w /src semgrep/semgrep semgrep scan --json ${configArgs} ${excludeArgs} --quiet`);
 
-          const { stdout } = await host.exec(cmd, {
-            cwd: targetPath,
-            timeout: getToolTimeout('SEMGREP'),
-          });
+          let stdout = '';
+          try {
+            const res = await host.exec(cmd, {
+              cwd: targetPath,
+              timeout: getToolTimeout('SEMGREP'),
+            });
+            stdout = res.stdout;
+          } catch (err: any) {
+            if (err?.stdout && typeof err.stdout === 'string' && err.stdout.trim().startsWith('{')) {
+              stdout = err.stdout;
+            } else {
+              return;
+            }
+          }
 
           if (!stdout || !stdout.trim().startsWith('{')) return;
 

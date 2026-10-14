@@ -10,7 +10,7 @@ import { execFileSync } from "node:child_process";
 import { isSupportingFile } from "../domain/governance.js";
 import { isEligibleSourceCodeFile } from "../probe/forensics.js";
 import type { CommandSpec } from "../sandbox/command-spec.js";
-import { bunLcovReportPath } from "./parsers/executed-counts.js";
+import { bunLcovReportPath, resolveLcovReportPath } from "./parsers/executed-counts.js";
 
 export interface CoverageMeasurementContext {
   baselineCommitSha?: string;
@@ -87,8 +87,11 @@ export class LcovChangedLineCoverageAdapter implements TestCoverageAdapter {
   constructor(private readonly fileName?: string) {}
 
   async resolve(cwd: string, context: CoverageMeasurementContext = {}): Promise<number | undefined> {
-    if (!context.executionSpec || context.startedAt === undefined) return undefined;
-    const reportPath = bunLcovReportPath(context.executionSpec);
+    if (context.startedAt === undefined) return undefined;
+    let reportPath = this.fileName;
+    if (!reportPath && context.executionSpec) {
+      reportPath = resolveLcovReportPath(context.executionSpec, cwd);
+    }
     if (!reportPath || (this.fileName !== undefined && resolve(cwd, reportPath) !== resolve(cwd, this.fileName))) return undefined;
     const report = readReport(cwd, reportPath, context.startedAt);
     if (!report) return undefined;

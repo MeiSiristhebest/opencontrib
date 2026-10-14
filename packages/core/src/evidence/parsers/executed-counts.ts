@@ -166,3 +166,58 @@ export function bunLcovReportPath(spec: CommandSpec): string | undefined {
   const directory = option("--coverage-dir");
   return directory ? join(directory, "lcov.info") : undefined;
 }
+
+/**
+ * Resolves the relative LCOV report path for multi-ecosystem test runners
+ * (Bun, Vitest, Jest, Pytest, Cargo llvm-cov).
+ * Supports optional `cwd` to unwrap package scripts (e.g. npm test).
+ */
+export function resolveLcovReportPath(spec: CommandSpec, cwd?: string): string | undefined {
+  const targetSpec = cwd ? (resolveTestRunnerCommand(`${spec.executable} ${spec.args.join(" ")}`, cwd) ?? spec) : spec;
+
+  const bunPath = bunLcovReportPath(targetSpec);
+  if (bunPath) return bunPath.replace(/\\/g, "/");
+
+  const name = executableName(targetSpec);
+
+  const getOptionVal = (names: string[]): string | undefined => {
+    for (const n of names) {
+      const inline = targetSpec.args.filter((arg) => arg.startsWith(`${n}=`)).at(-1);
+      if (inline) return inline.slice(n.length + 1);
+      const index = targetSpec.args.lastIndexOf(n);
+      if (index >= 0 && index + 1 < targetSpec.args.length) return targetSpec.args[index + 1];
+    }
+    return undefined;
+  };
+
+  if (["vitest", "jest"].includes(name ?? "")) {
+    if (targetSpec.args.includes("--coverage") || targetSpec.args.some(arg => arg.startsWith("--coverage"))) {
+      const dir = getOptionVal(["--coverageDirectory", "--coverage-dir", "--reportsDirectory"]) ?? "coverage";
+      return join(dir, "lcov.info").replace(/\\/g, "/");
+    }
+    return undefined;
+  }
+
+  if (["pytest", "python", "python3"].includes(name ?? "")) {
+    const lcovArg = targetSpec.args.find(arg => arg.startsWith("--cov-report=lcov") || arg === "lcov");
+    const hasCovReportFlag = targetSpec.args.some((arg, idx) => arg === "--cov-report" && targetSpec.args[idx + 1] === "lcov");
+    if (lcovArg || hasCovReportFlag) {
+      if (lcovArg?.startsWith("--cov-report=lcov:")) {
+        const dest = lcovArg.slice("--cov-report=lcov:".length);
+        return dest.endsWith(".info") ? dest.replace(/\\/g, "/") : join(dest, "lcov.info").replace(/\\/g, "/");
+      }
+      return "coverage/lcov.info";
+    }
+    return undefined;
+  }
+
+  if (name === "cargo" && targetSpec.args.includes("llvm-cov")) {
+    if (targetSpec.args.includes("--lcov")) {
+      const lcovPath = getOptionVal(["--lcov-path"]);
+      return (lcovPath ?? "lcov.info").replace(/\\/g, "/");
+    }
+    return undefined;
+  }
+
+  return undefined;
+}

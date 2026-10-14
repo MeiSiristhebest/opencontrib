@@ -40,6 +40,8 @@ export const RunTransferBundleSchema = z.object({
     expectedAssertion: z.string().min(1).max(2_000),
     testFiles: z.array(z.string()).min(1).max(500),
   }),
+  probe: z.record(z.string(), z.unknown()).optional(),
+  subagentScore: z.number().min(0).max(100).optional(),
 });
 
 export type RunTransferBundle = z.infer<typeof RunTransferBundleSchema>;
@@ -102,6 +104,44 @@ export function buildRunTransferBundle(
     }
   }
 
+  let probeArtifact: Record<string, unknown> | undefined;
+  if (run.artifacts.probe) {
+    if (
+      typeof run.artifacts.probe === "object" &&
+      run.artifacts.probe !== null &&
+      !Array.isArray(run.artifacts.probe)
+    ) {
+      probeArtifact = run.artifacts.probe as Record<string, unknown>;
+    } else if (typeof run.artifacts.probe === "string") {
+      try {
+        const parsed = JSON.parse(run.artifacts.probe);
+        if (
+          typeof parsed === "object" &&
+          parsed !== null &&
+          !Array.isArray(parsed)
+        ) {
+          probeArtifact = parsed;
+        }
+      } catch {}
+    }
+  }
+
+  const evalArtifact = (run.artifacts as any).evaluation;
+  const govArtifact = (run.artifacts as any).governance;
+  const rawScore =
+    typeof evalArtifact?.subagentQualityScore === "number"
+      ? evalArtifact.subagentQualityScore
+      : typeof (run.artifacts as any)?.subagentScore === "number"
+        ? (run.artifacts as any).subagentScore
+        : typeof govArtifact?.auditResult?.qualityRubric?.overallScore === "number"
+          ? govArtifact.auditResult.qualityRubric.overallScore
+          : undefined;
+  const subagentScore =
+    typeof rawScore === "number"
+      ? Math.max(0, Math.min(100, rawScore))
+      : undefined;
+
+
   const bundle: RunTransferBundle = {
     protocolVersion: "1.0",
     manifest: {
@@ -122,6 +162,8 @@ export function buildRunTransferBundle(
       expectedAssertion: red.expectedAssertion,
       testFiles: red.testIdentity.testFiles.map((file) => file.path),
     },
+    probe: probeArtifact,
+    subagentScore,
   };
   return RunTransferBundleSchema.parse(bundle);
 }

@@ -160,12 +160,14 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       "--pids-limit",
       "256",
       "-v",
-      `${cwd}:/workspace`,
+      `${cwd}:/source:ro`,
       "-w",
       "/workspace",
       this.image,
       "sh",
       "-c",
+      'mkdir -p /workspace && cp -R -P /source/. /workspace/ && exec sh -c "$1"',
+      "opencontrib-red-execution",
       executionCommand(job.testCommand, job.workspace.workspacePath),
     ];
 
@@ -288,12 +290,14 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         "--pids-limit",
         "256",
         "-v",
-        `${cwd}:/workspace`,
+        `${cwd}:/source:ro`,
         "-w",
         "/workspace",
         this.image,
         "sh",
         "-c",
+        'mkdir -p /workspace && cp -R -P /source/. /workspace/ && exec sh -c "$1"',
+        "opencontrib-green-execution",
         executionCommand(job.testCommand, job.workspace.workspacePath),
       ];
 

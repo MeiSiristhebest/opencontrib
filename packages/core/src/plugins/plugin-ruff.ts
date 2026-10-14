@@ -44,6 +44,7 @@ export const ruffPlugin: OpenContribPlugin = {
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'ruff-python',
+      aliases: ['ruff'],
       name: 'Ruff Python Multi-Suite Linter',
       category: 'protocol_drift',
       description: 'Finds syntax bugs, dead code, mutable defaults, async concurrency traps, and Bandit security flaws',

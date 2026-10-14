@@ -9,6 +9,7 @@ export const hotspotPlugin: OpenContribPlugin = {
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'git-hotspot',
+      aliases: ['hotspot'],
       name: 'Git Hotspot Forensics',
       category: 'lifecycle_leak',
       description: 'Pinpoints the top vulnerable files using Churn × Complexity ranking',

@@ -77,7 +77,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     id: 'semgrep',
     name: 'Semgrep SAST',
     bin: ['semgrep'],
-    probeIds: ['semgrep'],
+    probeIds: ['semgrep', 'semgrep-sast'],
     install: {
       win32: [{ cmd: 'pip install semgrep', desc: 'Install semgrep via pip' }],
       darwin: [{ cmd: 'pip install semgrep', desc: 'Install semgrep via pip' }],
@@ -90,7 +90,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     id: 'ruff',
     name: 'Ruff Python Linter',
     bin: ['ruff'],
-    probeIds: ['ruff'],
+    probeIds: ['ruff', 'ruff-python'],
     install: {
       win32: [{ cmd: 'pip install ruff', desc: 'Install ruff via pip' }],
       darwin: [
@@ -106,7 +106,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     id: 'knip',
     name: 'Knip Dead Code Detector',
     bin: ['knip'],
-    probeIds: ['knip'],
+    probeIds: ['knip', 'knip-dead-code'],
     install: {
       win32: [{ cmd: 'npm install -g knip', desc: 'Install knip globally via npm' }],
       darwin: [{ cmd: 'npm install -g knip', desc: 'Install knip globally via npm' }],
@@ -145,7 +145,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     id: 'go',
     name: 'Go Toolchain + vet/analyzers',
     bin: ['go'],
-    probeIds: ['go-analyzers'],
+    probeIds: ['go-analyzers', 'nilaway', 'goleak', 'bodyclose', 'noctx'],
     install: {
       win32: [{ cmd: 'choco install golang', desc: 'Install Go via Chocolatey' }],
       darwin: [{ cmd: 'brew install go', desc: 'Install Go via Homebrew' }],
@@ -158,7 +158,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     id: 'git',
     name: 'Git Version Control',
     bin: ['git'],
-    probeIds: ['hotspot'],
+    probeIds: ['hotspot', 'git-hotspot'],
     install: {
       win32: [{ cmd: 'choco install git', desc: 'Install Git via Chocolatey' }],
       darwin: [{ cmd: 'xcode-select --install', desc: 'Install Xcode CLT' }],
@@ -171,7 +171,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     id: 'uv',
     name: 'UV Python Package Manager',
     bin: ['uv'],
-    probeIds: ['ruff'],
+    probeIds: ['ruff', 'ruff-python'],
     install: {
       win32: [{ cmd: 'pip install uv', desc: 'Install uv via pip' }],
       darwin: [{ cmd: 'pip install uv', desc: 'Install uv via pip' }],
@@ -184,7 +184,7 @@ export const TOOL_REGISTRY: ToolRegistryEntry[] = [
     id: 'pip',
     name: 'pip Python Package Manager',
     bin: ['pip', 'pip3'],
-    probeIds: ['ruff', 'semgrep', 'uv'],
+    probeIds: ['ruff', 'ruff-python', 'semgrep', 'semgrep-sast', 'uv'],
     install: {
       win32: [{ cmd: 'python -m ensurepip --upgrade', desc: 'Bootstrap pip' }],
       darwin: [{ cmd: 'python3 -m ensurepip --upgrade', desc: 'Bootstrap pip' }],

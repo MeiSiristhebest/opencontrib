@@ -39,6 +39,7 @@ export const knipPlugin: OpenContribPlugin = {
   activate: (ctx: PluginContext) => {
     ctx.probes.register({
       id: 'knip-dead-code',
+      aliases: ['knip'],
       name: 'Knip Dead Code Scanner',
       category: 'dead_code',
       description: 'Detects unused exports, dead files, and dangling dependencies in JS/TS workspaces',

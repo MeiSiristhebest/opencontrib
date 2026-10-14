@@ -103,7 +103,15 @@ export async function execWithSpawn(
       clearTimeout(timer);
       if (killed) return;
       if (code !== 0) {
-        reject(new Error(stderr || `Command exited with code ${code}: ${cmd}`));
+        const err = new Error(stderr || `Command exited with code ${code}: ${cmd}`) as Error & {
+          stdout?: string;
+          stderr?: string;
+          code?: number | null;
+        };
+        err.stdout = stdout;
+        err.stderr = stderr;
+        err.code = code;
+        reject(err);
       } else {
         resolve({ stdout, stderr });
       }

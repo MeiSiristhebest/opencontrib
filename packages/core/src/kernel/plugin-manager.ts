@@ -77,14 +77,47 @@ export class PluginManager {
     return s;
   }
 
+  /** Normalize plugin / probe alias for lookups. */
+  private normalizePluginId(pluginId: string): string {
+    const aliasMap: Record<string, string> = {
+      "semgrep-sast": "semgrep",
+      "ruff-python": "ruff",
+      "knip-dead-code": "knip",
+      "git-hotspot": "hotspot",
+      "go-analyzers": "go",
+      "nilaway": "go",
+      "noctx": "go",
+      "bodyclose": "go",
+      "goleak": "go",
+    };
+    return aliasMap[pluginId] || pluginId;
+  }
+
   /** Whether the plugin is currently enabled. Returns false for unknown IDs. */
   isEnabled(pluginId: string): boolean {
     if (this.state[pluginId] !== undefined) {
       return this.state[pluginId].enabled;
     }
-    const isKnown = TOOL_REGISTRY.some((t) => t.id === pluginId);
-    return isKnown;
+    const normalized = this.normalizePluginId(pluginId);
+    if (this.state[normalized] !== undefined) {
+      return this.state[normalized].enabled;
+    }
+    const controllingTool = TOOL_REGISTRY.find(
+      (t) =>
+        t.id === pluginId ||
+        t.id === normalized ||
+        t.probeIds.includes(pluginId) ||
+        t.probeIds.includes(normalized),
+    );
+    if (controllingTool) {
+      if (this.state[controllingTool.id] !== undefined) {
+        return this.state[controllingTool.id].enabled;
+      }
+      return true;
+    }
+    return false;
   }
+
 
   /** Return the reason a plugin was disabled, or undefined. */
   getDisabledReason(pluginId: string): string | undefined {

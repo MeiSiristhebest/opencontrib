@@ -16,3 +16,4 @@ export * from "./validated-patch.js";
 export * from "./coverage-adapter.js";
 export * from "./expected-failure-matcher.js";
 export * from "./stress-runner.js";
+export * from "./parsers/executed-counts.js";
