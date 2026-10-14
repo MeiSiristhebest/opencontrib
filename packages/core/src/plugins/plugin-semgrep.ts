@@ -140,7 +140,8 @@ export const semgrepPlugin: OpenContribPlugin = {
           }
           if (Array.isArray(report.results)) {
             for (const r of report.results) {
-              const relFile = path.relative(targetPath, r.path);
+              const absPath = path.isAbsolute(r.path) ? r.path : path.resolve(targetPath, r.path);
+              const relFile = path.relative(targetPath, absPath);
               const cweInfo = Array.isArray(r.extra.metadata?.cwe)
                 ? r.extra.metadata?.cwe.join(', ')
                 : r.extra.metadata?.cwe || 'CWE';

@@ -15,7 +15,11 @@ import { homedir as osHomedir, tmpdir } from "os";
 import { dirname, join, resolve, sep } from "path";
 import { sanitizeRunId } from "../run/artifact-bundle.js";
 import { runBranchName } from "../run/run-branch.js";
-import { isProtectedWorkspace } from "./workspace-guard.js";
+import {
+  ensureWorkspaceGuard,
+  isProtectedWorkspace,
+  releaseWorkspaceGuard,
+} from "./workspace-guard.js";
 import { getOpenContribDataDir, getOpenContribHome } from "../kernel/home.js";
 
 /** Normalize path separators to forward slashes for consistent comparison on all platforms. */
@@ -435,6 +439,7 @@ export class WorktreeManager {
         this.cleanupWorkspace(workspacePath, sourceRepoPath);
       } else if (head.success) {
         linkDependenciesIfPresent(sourceRepoPath, workspacePath);
+        ensureWorkspaceGuard(workspacePath);
         return {
           workspacePath,
           branchName,
@@ -489,6 +494,7 @@ export class WorktreeManager {
       if (!addResult.success) throw new Error(addResult.stderr);
 
       linkDependenciesIfPresent(sourceRepoPath, workspacePath);
+      ensureWorkspaceGuard(workspacePath);
 
       return {
         workspacePath,
@@ -542,6 +548,7 @@ export class WorktreeManager {
           );
         }
         linkDependenciesIfPresent(sourceRepoPath, workspacePath);
+        ensureWorkspaceGuard(workspacePath);
         return {
           workspacePath,
           branchName,
@@ -568,6 +575,7 @@ export class WorktreeManager {
 
   cleanupWorkspace(workspacePath: string, baseRepoPath?: string): void {
     if (!existsSync(workspacePath)) return;
+    releaseWorkspaceGuard(workspacePath);
 
     if (baseRepoPath && existsSync(baseRepoPath)) {
       try {
@@ -621,13 +629,17 @@ export class WorktreeManager {
   }
 
   purgeAllWorkspaces(
-    options: { cleanRepos?: boolean; cleanScratchDir?: string } = {},
+    options: {
+      cleanRepos?: boolean;
+      cleanScratchDir?: string;
+      force?: boolean;
+    } = {},
   ): {
     purgedWorkspaces: string[];
     purgedScratchFiles: string[];
     cleanedRepos: boolean;
   } {
-    const { cleanRepos = false, cleanScratchDir } = options;
+    const { cleanRepos = false, cleanScratchDir, force = false } = options;
     const purgedWorkspaces: string[] = [];
     const purgedScratchFiles: string[] = [];
 
@@ -636,6 +648,10 @@ export class WorktreeManager {
       for (const item of items) {
         const itemPath = join(this.workspaceRoot, item);
         try {
+          if (!force && isProtectedWorkspace(itemPath)) {
+            continue;
+          }
+          releaseWorkspaceGuard(itemPath);
           if (safeRmSync(itemPath, { recursive: true, force: true })) {
             purgedWorkspaces.push(item);
           }

@@ -143,7 +143,7 @@ export class SystemBinaryProbe implements BinaryProbe {
       const isWindows = process.platform === 'win32';
       const cmd = isWindows ? 'where.exe' : 'command';
       const args = isWindows ? ['-q', bin] : ['-v', bin];
-      const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 3000, env: this.env });
+      const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 10000, env: this.env });
       this.cache.set(bin, result.status === 0);
       return result.status === 0;
     } catch {

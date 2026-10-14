@@ -6,6 +6,9 @@ import { tmpdir } from 'os';
 
 describe('Workspace Cleanup & Purge Engine', () => {
   it('purges scratch test scripts and ephemeral workspaces cleanly', () => {
+    const prevHome = process.env.OPENCONTRIB_HOME;
+    const testHome = mkdtempSync(join(tmpdir(), 'oc-cleanup-test-'));
+    process.env.OPENCONTRIB_HOME = testHome;
     const testScratchDir = join(tmpdir(), 'test-opencontrib-scratch-' + Date.now());
     mkdirSync(testScratchDir, { recursive: true });
     writeFileSync(join(testScratchDir, 'temp_test.ts'), '// scratch test code');
@@ -13,15 +16,21 @@ describe('Workspace Cleanup & Purge Engine', () => {
 
     expect(existsSync(join(testScratchDir, 'temp_test.ts'))).toBe(true);
 
-    const manager = new WorktreeManager();
-    const result = manager.purgeAllWorkspaces({
-      cleanScratchDir: testScratchDir,
-      cleanRepos: false,
-    });
+    try {
+      const manager = new WorktreeManager();
+      const result = manager.purgeAllWorkspaces({
+        cleanScratchDir: testScratchDir,
+        cleanRepos: false,
+      });
 
-    expect(result.purgedScratchFiles).toContain('temp_test.ts');
-    expect(result.purgedScratchFiles).toContain('temp_evidence.log');
-    expect(existsSync(join(testScratchDir, 'temp_test.ts'))).toBe(false);
+      expect(result.purgedScratchFiles).toContain('temp_test.ts');
+      expect(result.purgedScratchFiles).toContain('temp_evidence.log');
+      expect(existsSync(join(testScratchDir, 'temp_test.ts'))).toBe(false);
+    } finally {
+      if (prevHome === undefined) delete process.env.OPENCONTRIB_HOME;
+      else process.env.OPENCONTRIB_HOME = prevHome;
+      rmSync(testHome, { recursive: true, force: true });
+    }
   }, { timeout: 30000 });
 
   it('keeps long run workspace names within filesystem component limits', () => {
