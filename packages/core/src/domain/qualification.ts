@@ -92,16 +92,15 @@ export const DEFAULT_INTENT_RULES: IntentRule[] = [
   { category: 'approval_wait', pattern: /\b(?:waiting on `?lgtm`?|waiting for `?lgtm`?)\b/i, strength: 'strong', description: 'Waiting for LGTM approval' },
   { category: 'approval_wait', pattern: /\b(?:could a maintainer approve|could you approve)\b/i, strength: 'moderate', description: 'Requesting maintainer approval' },
 
-  // --- Author Intent (7-day grace period) ---
-  { category: 'author_intent', pattern: /\bi(?:'m| am) happy to open a pr\b/i, strength: 'strong', description: 'Author offers PR' },
-  { category: 'author_intent', pattern: /\b(?:i'll submit a fix|i will submit a fix)\b/i, strength: 'strong', description: 'Author will submit fix' },
-  { category: 'author_intent', pattern: /\bi(?:'m| am) working on a pr\b/i, strength: 'strong', description: 'Author working on PR' },
+  // --- Author Intent (7-day grace period to prevent issue hijacking/poaching) ---
+  { category: 'author_intent', pattern: /\bi(?:'m| am) happy to (?:open|submit|send|create|provide|work on) (?:a |the )?(?:pr|pull\s*request|patch|fix)\b/i, strength: 'strong', description: 'Author offers PR/fix' },
+  { category: 'author_intent', pattern: /\bi(?:'m| am) happy to submit a pr for that\b/i, strength: 'strong', description: 'Author offers PR for that' },
+  { category: 'author_intent', pattern: /\bi(?:'ll| will| can) (?:submit|open|send|create) a (?:pr|fix|patch)\b/i, strength: 'strong', description: 'Author will submit fix' },
+  { category: 'author_intent', pattern: /\bi(?:'m| am) (?:working on|preparing|drafting) a (?:pr|fix|patch)\b/i, strength: 'strong', description: 'Author working on PR' },
   { category: 'author_intent', pattern: /\bi can fix this\b/i, strength: 'strong', description: 'Author can fix' },
-  { category: 'author_intent', pattern: /\bi(?:'m| am) submitting a pr\b/i, strength: 'strong', description: 'Author submitting PR' },
-  { category: 'author_intent', pattern: /\bi(?:'m| am) opening a pr\b/i, strength: 'strong', description: 'Author opening PR' },
-  { category: 'author_intent', pattern: /\bi(?:'ll| will) open a pr\b/i, strength: 'strong', description: 'Author will open PR' },
-  { category: 'author_intent', pattern: /\b(?:i'll create a pr|i will create a pr)\b/i, strength: 'strong', description: 'Author will create PR' },
-  { category: 'author_intent', pattern: /\bi can submit a pr\b/i, strength: 'moderate', description: 'Author can submit PR' },
+  { category: 'author_intent', pattern: /\bi(?:'d| would) like to (?:implement|work on|fix) this\b/i, strength: 'strong', description: 'Author would like to implement' },
+  { category: 'author_intent', pattern: /\bi(?:'m| am) willing to (?:send|open|submit) a pr\b/i, strength: 'strong', description: 'Author willing to submit PR' },
+  { category: 'author_intent', pattern: /\bi plan to (?:submit|open) a pr\b/i, strength: 'strong', description: 'Author plans PR' },
   { category: 'author_intent', pattern: /\b(?:i'll take care of this|i will take care of this)\b/i, strength: 'strong', description: 'Author taking ownership' },
 ];
 
@@ -424,7 +423,7 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
       (now - latestAuthorIntentTime) / (1000 * 60 * 60 * 24);
     if (daysSinceIntent < 7) {
       authorFirstRightActive = true;
-      authorFirstRightDetails = `Author-first-right active: expressed intent to fix ${Math.floor(daysSinceIntent)} days ago (< 7 days grace period).`;
+      authorFirstRightDetails = `Author-first-right active: author expressed intent to fix ${Math.floor(daysSinceIntent)} days ago (< 7 days grace period). Anti-poaching protection active; prefer supportive co-authoring or waiting for author approval.`;
     }
   }
 
