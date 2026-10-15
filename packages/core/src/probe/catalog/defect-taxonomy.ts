@@ -291,20 +291,22 @@ export const DEFECT_TAXONOMY_CATALOG: DefectTaxonomyPattern[] = [
   // Domain 6: Language-Specific Traps & Panic Surface
   // =========================================================================
   {
-    id: 'rust-unwrap-in-library-code',
+    id: 'rust-unhandled-public-unwrap',
     domain: 'LANGUAGE_TRAPS',
     language: 'rust',
     severity: 'warning',
-    categoryMultiplier: 1.3,
-    name: 'Rust .unwrap() in Production Library Code',
-    description: 'Calling .unwrap() on Result/Option can trigger sudden panic in production.',
+    categoryMultiplier: 1.1,
+    name: 'Rust .unwrap() on Public API Input Boundary',
+    description: 'Calling .unwrap() directly on untrusted inputs at public API boundaries can trigger unexpected panics.',
     cwe: 'CWE-754',
     impact: 'Unrecoverable thread panic bringing down entire service instance',
     rule: {
       pattern: '$EXPR.unwrap()',
+      inside: {
+        pattern: 'pub fn $FN($$$) { $$$ }',
+      },
     },
-    fixTemplate: '$EXPR.unwrap_or_default()',
-    remediationGuide: 'Use ? operator, unwrap_or, or match statement to return Result<T, E> gracefully.',
+    remediationGuide: 'On public library API boundaries, return Result<T, E> using the ? operator or handle errors explicitly. Never mask errors with unwrap_or_default().',
   },
   {
     id: 'py-mutable-default-argument',
