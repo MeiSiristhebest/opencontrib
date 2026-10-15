@@ -285,12 +285,14 @@ export async function execProbeCommand(
   cmd: string,
   cwd: string,
   timeoutMs: number,
+  env?: Record<string, string>,
 ): Promise<CommandOutcome> {
   try {
     const res = await execWithSpawn(cmd, {
       cwd,
       timeout: timeoutMs,
       maxBuffer: 10 * 1024 * 1024,
+      env: env ? { ...process.env, ...env } : undefined,
     });
     return { stdout: res.stdout };
   } catch (err: any) {

@@ -23,6 +23,7 @@ export interface RunOptions {
   timeoutMs?: number;
   concurrency?: number;
   minScore?: number;
+  env?: Record<string, string>;
 }
 
 export async function runProbes(
@@ -62,14 +63,14 @@ export async function runProbes(
         // Each stage is an attempt thunk; `withFallback` stops at the first that
         // yields output. Adding a new fallback stage = extend this list.
         const outcome = await withFallback([
-          () => execProbeCommand(formattedCmd, targetPath, baseTimeout),
+          () => execProbeCommand(formattedCmd, targetPath, baseTimeout, options.env),
           async () => {
             const fb = getEphemeralFallbackCommand(probe.name, normalizedTarget);
-            return fb ? execProbeCommand(fb, targetPath, baseTimeout * 2) : { error: undefined };
+            return fb ? execProbeCommand(fb, targetPath, baseTimeout * 2, options.env) : { error: undefined };
           },
           async () => {
             const dc = getDockerFallbackCommand(probe.name, targetPath);
-            return dc ? execProbeCommand(dc, targetPath, baseTimeout * 2) : { error: undefined };
+            return dc ? execProbeCommand(dc, targetPath, baseTimeout * 2, options.env) : { error: undefined };
           },
         ]);
 
