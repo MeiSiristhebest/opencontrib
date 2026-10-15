@@ -3,6 +3,7 @@ import type { NormalizedFinding } from '../probe/types.js';
 import { VariantHunter } from '../forensics/variant-hunting.js';
 import { ThreeDimensionalTestGenerator } from '../testing/three-dim-test-gen.js';
 import { verifyFindingAdversarially } from '../probe/adapters/piolium.js';
+import { AutonomousPoCVerifier } from '../sandbox/poc-verifier.js';
 
 export interface TaskflowExecutionContext {
   flowId: string;
@@ -143,6 +144,19 @@ export class TaskActionRegistry {
           const steps = ctx.currentFinding.evidence?.verificationSteps ||
             (ctx.currentFinding.verificationStep ? [ctx.currentFinding.verificationStep] : []);
 
+          let pocReport: any = undefined;
+          if (steps.length > 0 && ctx.repoPath) {
+            try {
+              pocReport = await AutonomousPoCVerifier.verifyFinding(
+                ctx.repoPath,
+                ctx.currentFinding,
+                { testCommand: ctx.currentFinding.evidence?.executionCommand },
+              );
+            } catch (pocErr: any) {
+              pocReport = { status: 'FAILED', error: pocErr.message };
+            }
+          }
+
           let executionResult: { output?: string; error?: string; passed?: boolean } | undefined;
 
           if (ctx.currentFinding.evidence?.executionCommand && typeof (ctx.host as any).exec === 'function') {
@@ -178,13 +192,22 @@ export class TaskActionRegistry {
           };
           const adversarialVerdict = verifyFindingAdversarially(normalized);
 
+          // Base verified status on actual PoC execution and command result
+          let isVerified = !adversarialVerdict.isFalsePositive;
+          if (pocReport) {
+            isVerified = isVerified && pocReport.status === 'VERIFIED';
+          } else if (executionResult) {
+            isVerified = isVerified && executionResult.passed === true;
+          }
+
           return {
             output: {
-              verified: !adversarialVerdict.isFalsePositive,
+              verified: isVerified,
               verdict: adversarialVerdict.verdict,
               confidenceScore: adversarialVerdict.confidenceScore,
               counterArguments: adversarialVerdict.counterArguments,
               stepsCount: steps.length,
+              pocReport,
               executionResult,
             },
           };

@@ -25,6 +25,13 @@ describe('Phase 3 Hardening: SOTA Patch Generation & Search/Replace Hunks', () =
       explanation: 'Update config value',
     };
     expect(CodeChangeFileSchema.safeParse(validFileWithHunks).success).toBe(true);
+
+    const invalidEmptyModify = {
+      path: 'src/config.ts',
+      operation: 'MODIFY' as const,
+      explanation: 'No content and no hunks',
+    };
+    expect(CodeChangeFileSchema.safeParse(invalidEmptyModify).success).toBe(false);
   });
 
   describe('applySearchReplaceHunks algorithm', () => {

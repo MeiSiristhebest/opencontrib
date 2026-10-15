@@ -250,4 +250,16 @@ describe("computeNonExecutableLines and isIndependentlyNonExecutableSourceLine",
     const nonExec = computeNonExecutableLines(["def placeholder():", "    pass"]);
     expect(nonExec.has(2)).toBe(false);
   });
+
+  test("does NOT treat lines with executable code after block comment as non-executable", () => {
+    const lines = [
+      "/* note */ runTask();",
+      "/* multiline comment start",
+      "   end of comment */ const a = 1;",
+    ];
+    const nonExec = computeNonExecutableLines(lines);
+    expect(nonExec.has(1)).toBe(false);
+    expect(nonExec.has(2)).toBe(true);
+    expect(nonExec.has(3)).toBe(false);
+  });
 });

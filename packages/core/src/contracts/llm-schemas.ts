@@ -19,14 +19,27 @@ export const SearchReplaceHunkSchema = z.object({
 
 export type SearchReplaceHunk = z.infer<typeof SearchReplaceHunkSchema>;
 
-export const CodeChangeFileSchema = z.object({
-  path: z.string(),
-  operation: z.enum(["CREATE", "MODIFY", "DELETE"]),
-  content: z.string().default(""),
-  hunks: z.array(SearchReplaceHunkSchema).optional(),
-  mode: z.enum(["100644", "100755", "120000"]).default("100644"),
-  explanation: z.string().default(""),
-});
+export const CodeChangeFileSchema = z
+  .object({
+    path: z.string(),
+    operation: z.enum(["CREATE", "MODIFY", "DELETE"]),
+    content: z.string().default(""),
+    hunks: z.array(SearchReplaceHunkSchema).optional(),
+    mode: z.enum(["100644", "100755", "120000"]).default("100644"),
+    explanation: z.string().default(""),
+  })
+  .superRefine((val, ctx) => {
+    if (
+      val.operation === "MODIFY" &&
+      (!val.content || val.content === "") &&
+      (!val.hunks || val.hunks.length === 0)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "MODIFY operation requires either non-empty content or at least one hunk",
+      });
+    }
+  });
 
 export type CodeChangeFile = z.infer<typeof CodeChangeFileSchema>;
 

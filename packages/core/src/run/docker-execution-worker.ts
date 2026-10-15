@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, appendFileSync, statSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type {
   TrustedExecutionPort,
@@ -269,7 +269,6 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
 
   async verifyGreen(job: GreenExecutionJob): Promise<RawGreenExecutionResult> {
     const cwd = job.workspace.workspacePath;
-    const greenTree = computeSourceTreeHash(cwd);
     const hostCoverageDir = join(cwd, "coverage");
     if (!existsSync(hostCoverageDir)) {
       try {
@@ -278,6 +277,31 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         // best-effort
       }
     }
+
+    // Exclude coverage/ from untracked files in git status so computeSourceTreeHash remains clean and deterministic
+    try {
+      let excludeFile = join(cwd, ".git", "info", "exclude");
+      if (existsSync(join(cwd, ".git"))) {
+        const stat = statSync(join(cwd, ".git"));
+        if (!stat.isDirectory()) {
+          const gitContent = readFileSync(join(cwd, ".git"), "utf8");
+          if (gitContent.startsWith("gitdir:")) {
+            const gitDir = resolve(cwd, gitContent.slice(7).trim());
+            excludeFile = join(gitDir, "info", "exclude");
+          }
+        }
+      }
+      if (existsSync(dirname(excludeFile))) {
+        const currentExclude = existsSync(excludeFile) ? readFileSync(excludeFile, "utf8") : "";
+        if (!currentExclude.includes("coverage/")) {
+          appendFileSync(excludeFile, "\ncoverage/\n", "utf8");
+        }
+      }
+    } catch {
+      // best-effort git exclude
+    }
+
+    const greenTree = computeSourceTreeHash(cwd);
     const executeOne = async () => {
       const start = Date.now();
       const cidDir = mkdtempSync(join(tmpdir(), "docker-cid-"));
@@ -390,7 +414,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       exitCode: testsPassed ? 0 : 1,
       outputSnippet: lastOutput.slice(0, 500),
       passed: testsPassed,
-      sourceTreeSha256: greenTree,
+      sourceTreeSha256: computeSourceTreeHash(cwd) || greenTree,
       capturedAt: new Date().toISOString(),
       roundsRequested: scheduled.roundsRequested,
       roundsCompleted: scheduled.roundsCompleted,

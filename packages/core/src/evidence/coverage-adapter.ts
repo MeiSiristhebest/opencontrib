@@ -121,9 +121,14 @@ export function computeNonExecutableLines(lines: string[]): Set<number> {
     }
 
     if (inBlockComment) {
-      nonExec.add(lineNum);
       if (line.includes("*/")) {
         inBlockComment = false;
+        const afterComment = line.slice(line.indexOf("*/") + 2).trim();
+        if (afterComment === "" || isIndependentlyNonExecutableSourceLine(afterComment)) {
+          nonExec.add(lineNum);
+        }
+      } else {
+        nonExec.add(lineNum);
       }
       continue;
     }
@@ -150,9 +155,15 @@ export function computeNonExecutableLines(lines: string[]): Set<number> {
     }
 
     if (line.startsWith("/*")) {
-      nonExec.add(lineNum);
       if (!line.includes("*/")) {
+        nonExec.add(lineNum);
         inBlockComment = true;
+      } else {
+        // Strip block comment pairs and only exclude if remaining text is non-executable
+        const stripped = line.replace(/\/\*[\s\S]*?\*\//g, "").trim();
+        if (stripped === "" || isIndependentlyNonExecutableSourceLine(stripped)) {
+          nonExec.add(lineNum);
+        }
       }
       continue;
     }

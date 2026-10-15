@@ -818,6 +818,7 @@ export class ReproductionDesignStep implements PipelineStep {
           path: f.path,
           operation: f.operation,
           content: f.content,
+          hunks: (f as any).hunks,
         })),
       );
       if (applyResult.errors.length > 0) {
@@ -1080,6 +1081,7 @@ export class ImplementValidateLoopStep implements PipelineStep {
                       path: file.path,
                       operation: file.operation,
                       content: file.content,
+                      hunks: (file as any).hunks,
                     })),
                   );
                   if (replay.errors.length > 0) {
@@ -1169,6 +1171,7 @@ export class ImplementValidateLoopStep implements PipelineStep {
           path: f.path,
           operation: f.operation,
           content: f.content,
+          hunks: (f as any).hunks,
         })),
       );
 
