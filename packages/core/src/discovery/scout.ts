@@ -386,9 +386,15 @@ export async function scoutOpportunities(
       }
 
       // Paged comments and timeline with rich ApiStatus
-      const commentsResult = await resolvedClient.getIssueComments(owner, repo, item.number);
+      const commentsResult = await resolvedClient.getIssueComments(
+        owner,
+        repo,
+        item.number,
+        2,
+        typeof item.comments === "number" ? item.comments : undefined,
+      );
       const prsDetails = (resolvedClient as any).getIssueLinkedPrs
-        ? await (resolvedClient as any).getIssueLinkedPrs(owner, repo, item.number, 2, item.title)
+        ? await (resolvedClient as any).getIssueLinkedPrs(owner, repo, item.number, 3, item.title)
         : null;
       const timelineResult = prsDetails ?? (await resolvedClient.getIssueLinkedPrsCount(owner, repo, item.number));
 

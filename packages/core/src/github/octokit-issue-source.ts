@@ -184,19 +184,22 @@ export class OctokitIssueSource {
   }
 
   /**
-   * Paged comments retrieval with central retry wrapper and rich error status.
+   * Paged comments retrieval with central retry wrapper, rich error status,
+   * and tail-page retrieval for long threads to ensure recent claims and PRs are inspected.
    */
   async getIssueComments(
     owner: string,
     repo: string,
     issue_number: number,
     maxPages = 2,
+    knownTotalComments?: number,
   ): Promise<ApiResult<any[]>> {
-    const cacheKey = `comments_${owner}_${repo}_${issue_number}_${maxPages}`;
+    const cacheKey = `comments_${owner}_${repo}_${issue_number}_${maxPages}_${knownTotalComments ?? 0}`;
     const cached = this.cache.get<any[]>(cacheKey);
     if (cached) return { status: 'OK', data: cached };
 
     const allComments: any[] = [];
+    const seenIds = new Set<any>();
 
     for (let page = 1; page <= maxPages; page++) {
       const res = await this.request(async () => {
@@ -218,8 +221,37 @@ export class OctokitIssueSource {
         };
       }
 
-      allComments.push(...res.data.data);
+      for (const comment of res.data.data) {
+        if (!seenIds.has(comment.id)) {
+          seenIds.add(comment.id);
+          allComments.push(comment);
+        }
+      }
       if (res.data.data.length < 50) break;
+    }
+
+    // If there are many comments beyond maxPages, fetch the tail page to capture recent claims / PR postings
+    if (knownTotalComments && knownTotalComments > maxPages * 50) {
+      const lastPage = Math.ceil(knownTotalComments / 50);
+      if (lastPage > maxPages) {
+        const tailRes = await this.request(async () => {
+          return await this.octokit.rest.issues.listComments({
+            owner,
+            repo,
+            issue_number,
+            per_page: 50,
+            page: lastPage,
+          });
+        });
+        if (tailRes.status === 'OK' && Array.isArray(tailRes.data?.data)) {
+          for (const comment of tailRes.data.data) {
+            if (!seenIds.has(comment.id)) {
+              seenIds.add(comment.id);
+              allComments.push(comment);
+            }
+          }
+        }
+      }
     }
 
     this.cache.set(cacheKey, allComments);
@@ -461,7 +493,7 @@ export class OctokitIssueSource {
     owner: string,
     repo: string,
     issue_number: number,
-    maxPages = 2,
+    maxPages = 3,
     issueTitle?: string,
   ): Promise<ApiResult<{ open: number[]; closed: number[]; all: number[] }>> {
     const titleSlug = issueTitle ? `_${issueTitle.toLowerCase().replace(/[^\w]/g, '').slice(0, 16)}` : '';
@@ -519,12 +551,12 @@ export class OctokitIssueSource {
       if (res.data.data.length < 50) break;
     }
 
-    // Double-check fallback: if no open PRs found on timeline, check search API for open PRs referencing this issue
-    if (openPrs.size === 0) {
+    // Double-check fallback: check search API for both open and closed PRs referencing this issue
+    if (openPrs.size === 0 && closedPrs.size === 0) {
       try {
         const searchRes = await this.request(async () => {
           return await this.octokit.rest.search.issuesAndPullRequests({
-            q: `repo:${owner}/${repo} is:pr is:open ${issue_number}`,
+            q: `repo:${owner}/${repo} is:pr ${issue_number}`,
             per_page: 5,
           });
         }, 1);
@@ -535,7 +567,11 @@ export class OctokitIssueSource {
             const text = `${item.title} ${item.body || ''}`;
             const regex = new RegExp(`(?:#|issues/|pull/)${issueNumStr}\\b`, 'i');
             if (regex.test(text) && typeof item.number === 'number' && item.number !== issue_number) {
-              openPrs.add(item.number);
+              if (item.state === 'open') {
+                openPrs.add(item.number);
+              } else {
+                closedPrs.add(item.number);
+              }
             }
           }
         }

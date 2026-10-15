@@ -114,8 +114,9 @@ export class GitHubClient {
     repo: string,
     issue_number: number,
     maxPages = 2,
+    knownTotalComments?: number,
   ): Promise<ApiResult<any[]>> {
-    return this.source.getIssueComments(owner, repo, issue_number, maxPages);
+    return this.source.getIssueComments(owner, repo, issue_number, maxPages, knownTotalComments);
   }
 
   getIssue(

@@ -57,11 +57,18 @@ export interface IntentRule {
  * External callers can extend this set via `qualifyIssue(input, { customRules })`.
  */
 export const DEFAULT_INTENT_RULES: IntentRule[] = [
-  { category: 'pr_announcement', pattern: /i(?:\s*have|'ve|\s*just)?\s*(?:opened|submitted|created|pushed)\s*(?:a\s*)?(?:pr|pull\s*request)/i, strength: 'strong', description: 'Developer announces opened PR' },
-  { category: 'pr_announcement', pattern: /fix(?:es)?\s*(?:in|via|at)\s*(?:pr|#\d+|pull)/i, strength: 'strong', description: 'Developer references fix in PR' },
+  // --- PR Announcement (immediate disqualification) ---
+  { category: 'pr_announcement', pattern: /(?:\bi(?:\s*have|'ve|\s*just)?\s*|\b)(?:opened|submitted|created|pushed)\s*(?:a\s*)?(?:pr|pull\s*request)/i, strength: 'strong', description: 'Developer announces opened PR' },
+  { category: 'pr_announcement', pattern: /fix(?:es)?\s*(?:in|via|at|by)\s*(?:pr|#\d+|pull)/i, strength: 'strong', description: 'Developer references fix in PR' },
+  { category: 'pr_announcement', pattern: /(?:fixed|resolved|addressed|closed)\s*(?:by|in|via)\s*(?:pr|pull\s*request|#\d+|https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+)/i, strength: 'strong', description: 'Referenced fix in PR' },
   { category: 'pr_announcement', pattern: /(?:here(?:'s| is)|check out|submitted)\s*(?:the\s*)?(?:pr|fix)?:?\s*https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/i, strength: 'strong', description: 'Developer links to fix PR' },
+  { category: 'pr_announcement', pattern: /\b(?:pr|pull\s*request)\s+(?:is\s+)?(?:up|open|opened|ready|submitted)\b/i, strength: 'strong', description: 'Developer notes PR is up' },
+  { category: 'pr_announcement', pattern: /(?:已提|已创建|已提交|提了|提交了|开了)\s*(?:一个\s*)?(?:pr|pull\s*request|合并请求)/i, strength: 'strong', description: 'Chinese: Developer announces PR' },
+  { category: 'pr_announcement', pattern: /(?:修复|解决)\s*(?:在|见|于|对应)\s*(?:pr|pull\s*request|#\d+)/i, strength: 'strong', description: 'Chinese: References fix in PR' },
+  { category: 'pr_announcement', pattern: /(?:pr|pull\s*request)\s*(?:已提|已提交|已开|已创建)/i, strength: 'strong', description: 'Chinese: PR already created' },
 
   // --- Work Claim (30-day activity window) ---
+  { category: 'work_claim', pattern: /(?:我来解决|我来修复|我来处理|我来提pr|我来认领|认领这个|我想解决|我想修复)/i, strength: 'strong', description: 'Chinese: Contributor claims issue' },
   { category: 'work_claim', pattern: /\b(?:i am working on this|i'm working on this)\b/i, strength: 'strong', description: 'Explicit "working on this"' },
   { category: 'work_claim', pattern: /\b(?:can i work on this|please assign)\b/i, strength: 'strong', description: 'Request for assignment' },
   { category: 'work_claim', pattern: /\bi(?:'m| am) working on a fix\b/i, strength: 'strong', description: 'Working on a fix' },
@@ -289,6 +296,22 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   const prAnnouncementRules = activeIntentRules.filter((r) => r.category === 'pr_announcement');
   const claimRules = activeIntentRules.filter((r) => r.category === 'work_claim' || r.category === 'approval_wait');
   const authorIntentRules = activeIntentRules.filter((r) => r.category === 'author_intent');
+
+  // 5.5 Active Fix PR Announcement in Issue Description
+  const matchingBodyPrRule = prAnnouncementRules.find((rule) =>
+    matchesIntentRule(rule, issueBody),
+  );
+  if (matchingBodyPrRule) {
+    return {
+      isQualified: false,
+      disqualifyReason: "Issue description already announces or links an existing PR.",
+      track: "standard_track",
+      hasExistingPr: true,
+      hasClaimant: false,
+      authorFirstRightActive: false,
+      inspectedCommentsCount: comments.length,
+    };
+  }
 
   // Track latest activity per claimant
   const claimantLatestActivity = new Map<string, number>();

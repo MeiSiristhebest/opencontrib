@@ -53,6 +53,65 @@ describe('Discovery & Qualification Engine', () => {
     expect(res.disqualifyReason).toContain('announced a fix PR in comments');
   });
 
+  it('disqualifies issue if issue body announces an existing PR', () => {
+    const res = qualifyIssue({
+      issueNumber: 1020,
+      issueTitle: 'Memory leak in worker loop',
+      issueBody: 'Worker process leaks 10MB per minute. Fixed in PR #204.',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+    });
+
+    expect(res.isQualified).toBe(false);
+    expect(res.hasExistingPr).toBe(true);
+    expect(res.disqualifyReason).toContain('Issue description already announces or links an existing PR');
+  });
+
+  it('disqualifies issue on Chinese PR announcement and work claims', () => {
+    const resPr = qualifyIssue({
+      issueNumber: 1021,
+      issueTitle: '修复并发死锁',
+      issueBody: '高并发场景下发生死锁。',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [
+        {
+          id: 1,
+          body: '针对这个问题已提 PR #987，请 review',
+          user: { login: 'devZh' },
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+    expect(resPr.isQualified).toBe(false);
+    expect(resPr.hasExistingPr).toBe(true);
+
+    const resClaim = qualifyIssue({
+      issueNumber: 1022,
+      issueTitle: '补充缺失文档',
+      issueBody: '缺少配置说明。',
+      labels: ['documentation'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [
+        {
+          id: 2,
+          body: '我来修复这个问题！',
+          user: { login: 'claimantZh' },
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+    expect(resClaim.isQualified).toBe(false);
+    expect(resClaim.hasClaimant).toBe(true);
+  });
+
   it('disqualifies issue if hasPrLinked is true or linkedPrs are provided', () => {
     const resBool = qualifyIssue({
       issueNumber: 103,
