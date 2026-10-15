@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -269,6 +270,79 @@ export function linkDependenciesIfPresent(sourceRepoPath: string, targetPath: st
       } catch {}
     }
   } catch {}
+}
+
+export function applySearchReplaceHunks(
+  originalContent: string,
+  hunks: Array<{ search: string; replace: string }>,
+  filePath: string,
+): { content: string; error?: string } {
+  let content = originalContent;
+
+  for (let i = 0; i < hunks.length; i++) {
+    const hunk = hunks[i];
+    const search = hunk.search;
+    const replace = hunk.replace;
+
+    // 1. Direct exact match
+    const exactIndex = content.indexOf(search);
+    if (exactIndex !== -1) {
+      content = content.slice(0, exactIndex) + replace + content.slice(exactIndex + search.length);
+      continue;
+    }
+
+    // 2. Line-ending normalized match (\r\n vs \n)
+    const normContent = content.replace(/\r\n/g, "\n");
+    const normSearch = search.replace(/\r\n/g, "\n");
+    const normIndex = normContent.indexOf(normSearch);
+    if (normIndex !== -1) {
+      const normReplace = replace.replace(/\r\n/g, "\n");
+      const updatedNorm =
+        normContent.slice(0, normIndex) +
+        normReplace +
+        normContent.slice(normIndex + normSearch.length);
+      content = originalContent.includes("\r\n")
+        ? updatedNorm.replace(/\n/g, "\r\n")
+        : updatedNorm;
+      continue;
+    }
+
+    // 3. Trimmed line-by-line fuzzy match (tolerance for leading/trailing whitespace differences)
+    const searchLines = normSearch.split("\n");
+    const contentLines = normContent.split("\n");
+    let matchLineIdx = -1;
+
+    for (let c = 0; c <= contentLines.length - searchLines.length; c++) {
+      let matches = true;
+      for (let s = 0; s < searchLines.length; s++) {
+        if (contentLines[c + s].trim() !== searchLines[s].trim()) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        matchLineIdx = c;
+        break;
+      }
+    }
+
+    if (matchLineIdx !== -1) {
+      const replaceLines = replace.replace(/\r\n/g, "\n").split("\n");
+      contentLines.splice(matchLineIdx, searchLines.length, ...replaceLines);
+      const joined = contentLines.join("\n");
+      content = originalContent.includes("\r\n")
+        ? joined.replace(/\n/g, "\r\n")
+        : joined;
+      continue;
+    }
+
+    return {
+      content: originalContent,
+      error: `SearchReplaceMismatchError: search block #${i + 1} for '${filePath}' was not found in existing content.`,
+    };
+  }
+
+  return { content };
 }
 
 export class WorktreeManager {
@@ -874,6 +948,7 @@ export class WorktreeManager {
       path: string;
       operation: string;
       content?: string;
+      hunks?: Array<{ search: string; replace: string }>;
       mode?: "100644" | "100755" | "120000" | string;
     }>,
   ): {
@@ -891,7 +966,12 @@ export class WorktreeManager {
     }
 
     let totalChars = 0;
-    for (const f of files) totalChars += f.content ? f.content.length : 0;
+    for (const f of files) {
+      if (f.content) totalChars += f.content.length;
+      if (f.hunks) {
+        for (const h of f.hunks) totalChars += (h.search.length + h.replace.length);
+      }
+    }
     if (totalChars > MAX_GENERATED_FILE_CHARS) {
       errors.push(
         `Generated content size (${totalChars} chars) exceeds safety limit (${MAX_GENERATED_FILE_CHARS})`,
@@ -1052,6 +1132,15 @@ export class WorktreeManager {
         if (f.mode === "120000") {
           if (targetLstat !== undefined) rmSync(fullPath, { force: true });
           symlinkSync(f.content || "", fullPath);
+        } else if (f.operation === "MODIFY" && f.hunks && f.hunks.length > 0) {
+          const currentDiskContent = readFileSync(fullPath, "utf8");
+          const hunkResult = applySearchReplaceHunks(currentDiskContent, f.hunks, f.path);
+          if (hunkResult.error) {
+            errors.push(hunkResult.error);
+            continue;
+          }
+          if (targetLstat?.isSymbolicLink()) rmSync(fullPath, { force: true });
+          writeFileSync(fullPath, hunkResult.content, "utf8");
         } else {
           // Never write through an existing symlink: unlink it FIRST, then
           // create a fresh regular file at the same path.

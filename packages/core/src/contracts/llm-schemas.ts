@@ -12,12 +12,20 @@ export const IssueEvaluationSchema = z.object({
 
 export type IssueEvaluation = z.infer<typeof IssueEvaluationSchema>;
 
+export const SearchReplaceHunkSchema = z.object({
+  search: z.string().describe("Exact lines in target file to match and replace"),
+  replace: z.string().describe("Replacement lines"),
+});
+
+export type SearchReplaceHunk = z.infer<typeof SearchReplaceHunkSchema>;
+
 export const CodeChangeFileSchema = z.object({
   path: z.string(),
   operation: z.enum(["CREATE", "MODIFY", "DELETE"]),
-  content: z.string(),
+  content: z.string().default(""),
+  hunks: z.array(SearchReplaceHunkSchema).optional(),
   mode: z.enum(["100644", "100755", "120000"]).default("100644"),
-  explanation: z.string(),
+  explanation: z.string().default(""),
 });
 
 export type CodeChangeFile = z.infer<typeof CodeChangeFileSchema>;

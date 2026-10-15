@@ -65,7 +65,8 @@ import {
   buildTurnPrompt,
   PATCH_GENERATION_GUIDANCE,
 } from "../agent-orchestrator.js";
-import { buildDynamicPatchPrompt } from "../../llm/prompt-engine.js";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { buildDynamicPatchPrompt, type TargetFileContext } from "../../llm/prompt-engine.js";
 import type {
   PipelineContext,
   PipelineDeps,
@@ -78,6 +79,40 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { posix as posixPath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+
+function extractWorkspaceFileContexts(
+  workspacePath: string | undefined,
+  targetFiles?: unknown[],
+): TargetFileContext[] {
+  if (!workspacePath || !targetFiles || targetFiles.length === 0) return [];
+  const fileContexts: TargetFileContext[] = [];
+  const candidatePaths: string[] = [];
+
+  for (const tf of targetFiles) {
+    if (typeof tf === "string") candidatePaths.push(tf);
+    else if (tf && typeof (tf as any).path === "string") candidatePaths.push((tf as any).path);
+  }
+
+  for (const relPath of candidatePaths.slice(0, 5)) {
+    try {
+      const fullPath = posixPath.resolve(workspacePath, relPath.replace(/\\/g, "/"));
+      if (existsSync(fullPath)) {
+        const stat = statSync(fullPath);
+        if (stat.isFile() && stat.size < 50000) {
+          const content = readFileSync(fullPath, "utf8");
+          fileContexts.push({
+            path: relPath.replace(/\\/g, "/"),
+            content,
+          });
+        }
+      }
+    } catch {
+      // Ignore unreadable files
+    }
+  }
+
+  return fileContexts;
+}
 
 function normalizeSafeNodeTestFiles(files: readonly string[]): string[] | undefined {
   const paths = files.map(file => file.replace(/\\/g, "/").replace(/^\.\//, ""));
@@ -867,12 +902,20 @@ export class PatchGenerationStep implements PipelineStep {
 
     if (deps.llmService) {
       try {
+        const candidateFiles = (ctx.assembledContext as any)?.targetFiles ||
+          (ctx.selectedOpp as any)?.targetFiles ||
+          ctx.reproductionDesign?.testFiles;
+        const fileContexts = extractWorkspaceFileContexts(
+          ctx.workspace?.workspacePath,
+          candidateFiles,
+        );
         const patchPrompt = buildDynamicPatchPrompt({
           basePrompt: ctx.prompt || "",
           repoFullName: ctx.targetRepo || ctx.selectedOpp?.repoFullName,
           testCommand: ctx.testCmd,
           defectDomain: (ctx.selectedOpp as any)?.category || (ctx.selectedOpp as any)?.defectCategory,
           attemptNumber: 1,
+          fileContexts,
         });
         const llmResult = await deps.llmService.generateStructured({
           prompt: patchPrompt,
@@ -982,6 +1025,12 @@ export class ImplementValidateLoopStep implements PipelineStep {
               testCommand: testCmd,
               defectDomain: (ctx.selectedOpp as any)?.category || (ctx.selectedOpp as any)?.defectCategory,
               attemptNumber: 1,
+              fileContexts: extractWorkspaceFileContexts(
+                ctx.workspace?.workspacePath,
+                (ctx.assembledContext as any)?.targetFiles ||
+                  (ctx.selectedOpp as any)?.targetFiles ||
+                  ctx.reproductionDesign?.testFiles,
+              ),
             });
 
       // Generate (or re-generate on repair turn) the patch draft from the per-turn prompt
