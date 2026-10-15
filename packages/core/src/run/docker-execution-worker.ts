@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, appendFileSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, appendFileSync, statSync, lstatSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type {
@@ -269,13 +269,19 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
 
   async verifyGreen(job: GreenExecutionJob): Promise<RawGreenExecutionResult> {
     const cwd = job.workspace.workspacePath;
-    const hostCoverageDir = join(cwd, "coverage");
-    if (!existsSync(hostCoverageDir)) {
-      try {
-        mkdirSync(hostCoverageDir, { recursive: true });
-      } catch {
-        // best-effort
+    // Safe coverage sink directory: ensure it is a real directory inside cwd and not a symlink to outside
+    let safeHostCoverageDir = join(cwd, "coverage");
+    try {
+      if (existsSync(safeHostCoverageDir)) {
+        const lst = lstatSync(safeHostCoverageDir);
+        if (lst.isSymbolicLink()) {
+          safeHostCoverageDir = mkdtempSync(join(tmpdir(), "oc-coverage-sink-"));
+        }
+      } else {
+        mkdirSync(safeHostCoverageDir, { recursive: true });
       }
+    } catch {
+      safeHostCoverageDir = mkdtempSync(join(tmpdir(), "oc-coverage-sink-"));
     }
 
     // Exclude coverage/ from untracked files in git status so computeSourceTreeHash remains clean and deterministic
@@ -327,7 +333,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         "-v",
         `${cwd}:/source:ro`,
         "-v",
-        `${hostCoverageDir}:/coverage-sink:rw`,
+        `${safeHostCoverageDir}:/coverage-sink:rw`,
         "-w",
         "/workspace",
         this.image,
@@ -336,7 +342,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         'mkdir -p /workspace && cp -R -P /source/. /workspace/ && ' +
         'if [ -f /workspace/.git ] || ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then ' +
         '  rm -rf /workspace/.git && git init -q /workspace && (cd /workspace && git config user.name "OpenContrib" && git config user.email "bot@opencontrib.local" && git add -A && git commit -qm "baseline" --allow-empty 2>/dev/null || true); ' +
-        'fi && sh -c "$1"; STATUS=$?; if [ -d /workspace/coverage ]; then cp -R -P /workspace/coverage/. /coverage-sink/ 2>/dev/null || true; fi; exit $STATUS',
+        'fi && rm -rf /workspace/coverage && sh -c "$1"; STATUS=$?; if [ -d /workspace/coverage ]; then cp -R -P -p /workspace/coverage/. /coverage-sink/ 2>/dev/null || true; fi; exit $STATUS',
         "opencontrib-green-execution",
         executionCommand(job.testCommand, job.workspace.workspacePath),
       ];

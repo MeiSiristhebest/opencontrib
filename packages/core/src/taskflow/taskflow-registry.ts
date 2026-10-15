@@ -147,6 +147,7 @@ export class TaskActionRegistry {
           let pocReport: any = undefined;
           if (steps.length > 0 && ctx.repoPath) {
             try {
+              await new Promise((r) => setImmediate(r));
               pocReport = await AutonomousPoCVerifier.verifyFinding(
                 ctx.repoPath,
                 ctx.currentFinding,

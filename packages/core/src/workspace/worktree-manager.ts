@@ -191,7 +191,7 @@ export async function safeRmAsync(
       return true;
     } catch (err: any) {
       lastError = err;
-      if (err?.code === "ENOENT") return true;
+      if (err?.code === "ENOENT" && (opts.force ?? true)) return true;
       if (attempt < maxRetries) {
         if (
           process.platform === "win32" &&

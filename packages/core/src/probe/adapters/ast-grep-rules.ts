@@ -228,6 +228,7 @@ export function getAllAstGrepRules(): ASTGrepYamlRule[] {
   }
 
   for (const pattern of DEFECT_TAXONOMY_CATALOG) {
+    if (pattern.id === 'go-mutex-unlock-leak') continue;
     if (!rulesMap.has(pattern.id)) {
       const converted = taxonomyPatternToYamlRule(pattern);
       if (converted) {

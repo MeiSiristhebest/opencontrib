@@ -155,8 +155,6 @@ export function createProbeDescriptorFromManifest(manifest: ProbeManifest): Prob
     category: manifest.category,
     description: manifest.description,
     match: (fingerprint: RepoFingerprint) => {
-      if (!canExecuteProbe(manifest)) return false;
-
       const languages = manifest.activation.languages;
       const langMatch =
         languages.includes('*') ||
@@ -171,6 +169,8 @@ export function createProbeDescriptorFromManifest(manifest: ProbeManifest): Prob
         if (!hasManifest) return false;
       }
 
+      if (!canExecuteProbe(manifest)) return false;
+
       return true;
     },
     scan: async (targetPath: string, pointers: PointerStoreApi) => {
@@ -182,7 +182,15 @@ export function createProbeDescriptorFromManifest(manifest: ProbeManifest): Prob
         skippedProbes: [],
         estimatedDurationMs: manifest.execution.timeoutMs || 30000,
       };
-      const runResult = await runProbes(plan, { timeoutMs: manifest.execution.timeoutMs });
+      const sanitizedEnv: Record<string, string> = {
+        PATH: process.env.PATH || '',
+        HOME: process.env.HOME || '',
+        USERPROFILE: process.env.USERPROFILE || '',
+        TMPDIR: process.env.TMPDIR || '',
+        TEMP: process.env.TEMP || '',
+        TMP: process.env.TMP || '',
+      };
+      const runResult = await runProbes(plan, { timeoutMs: manifest.execution.timeoutMs, env: sanitizedEnv });
       for (const finding of runResult.findings) {
         pointers.create({
           namespace: 'findings',
