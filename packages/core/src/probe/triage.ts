@@ -104,7 +104,7 @@ export function triagePointerFindings(
     };
   });
 
-  const validPointers = filterAntiPatterns
+  const validPointers = (filterAntiPatterns && !includeAll)
     ? scored.filter((p) => p.significance?.isAccepted !== false)
     : scored;
 

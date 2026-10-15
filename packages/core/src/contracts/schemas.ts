@@ -94,6 +94,10 @@ export const CollaborationPlaybookSchema = z.object({
     })
     .optional(),
   commentDraft: z.string().optional(),
+  /** Language detected or selected for the playbook draft */
+  language: z.enum(['en', 'zh', 'other']).optional(),
+  /** AI policy alert or warning for human contributor if automated comments are forbidden */
+  aiPolicyNotice: z.string().optional(),
 });
 export type CollaborationPlaybook = z.infer<typeof CollaborationPlaybookSchema>;
 
@@ -1149,6 +1153,22 @@ export const CommunityGatePolicySchema = z.object({
   reasons: z.array(z.string()),
   suggestedContributorAction: z.string(),
   matchedKeywords: z.array(z.string()),
+  /** Dynamically extracted community philosophy */
+  philosophy: z.enum(['minimal_core', 'discussion_first', 'standard', 'enterprise']).optional(),
+  /** Dynamically extracted AI contribution policy */
+  aiPolicy: z.enum(['prohibited', 'disclosure_required', 'allowed']).optional(),
+  /** Dynamically extracted blocking labels from templates and config */
+  dynamicBlockingLabels: z.array(z.string()).optional(),
+  /** Test rigor and quality requirements detected from repo guidelines */
+  testRigor: z.object({
+    variantsRequired: z.boolean().optional(),
+    redTestMandatory: z.boolean().optional(),
+  }).optional(),
+  /** Anti-poaching time windows detected or configured for the community */
+  antiPoachingConfig: z.object({
+    authorGracePeriodDays: z.number().positive().optional(),
+    claimExpiryDays: z.number().positive().optional(),
+  }).optional(),
 });
 export type CommunityGatePolicy = z.infer<typeof CommunityGatePolicySchema>;
 

@@ -8,7 +8,12 @@ import {
   type CommunityGateSnapshot,
 } from "../contracts/schemas.js";
 
-export type { CommunityGatePolicy, CommunityGateSnapshot };
+import {
+  extractDynamicCommunityProfile,
+  type DynamicExtractedPolicy,
+} from "./dynamic-policy-extractor.js";
+
+export type { CommunityGatePolicy, CommunityGateSnapshot, DynamicExtractedPolicy };
 
 /** Contribution-policy files read from the verified repository baseline. */
 export const COMMUNITY_GATE_POLICY_PATHS = [
@@ -19,6 +24,10 @@ export const COMMUNITY_GATE_POLICY_PATHS = [
   ".github/contributing.md",
   "AGENTS.md",
   ".github/AGENTS.md",
+  "AI_POLICY.md",
+  ".github/AI_POLICY.md",
+  "REVIEW.md",
+  ".github/REVIEW.md",
   "SECURITY.md",
   ".github/SECURITY.md",
   ".github/ISSUE_TEMPLATE/bug.yml",
@@ -292,7 +301,7 @@ export function detectCommunityGateFromContents(
     );
   }
 
-  const hasGatingRules =
+  let hasGatingRules =
     requiresIssueApprovalBeforePr ||
     autoClosesNewIssues ||
     hasLgtmApprovalProtocol;
@@ -315,6 +324,24 @@ export function detectCommunityGateFromContents(
       `Follow the pinned ${requirements.join(" and ")} requirements before requesting approval.`;
   }
 
+  // Extract dynamic community profile (philosophy, AI policy, dynamic labels, test rigor)
+  const dynamic = extractDynamicCommunityProfile(files);
+  if (dynamic.aiPolicy === 'prohibited') {
+    hasGatingRules = true;
+    reasons.push("Repository policy strictly prohibits AI-generated PRs or comments (AI_POLICY.md).");
+    suggestedContributorAction = "Repository prohibits automated AI-generated contributions. Human craftsmanship and local verification are strictly required.";
+  }
+  if (dynamic.testRigor?.variantsRequired) {
+    reasons.push("Repository requires cross-platform and negative test variant coverage (REVIEW.md).");
+  }
+  if (dynamic.philosophy === 'minimal_core') {
+    reasons.push("Repository adheres to a Minimal Core philosophy; reject speculative abstractions and keep changes minimal.");
+  } else if (dynamic.philosophy === 'discussion_first') {
+    requiresIssueApprovalBeforePr = true;
+    hasGatingRules = true;
+    reasons.push("Repository strictly adheres to Discussion First philosophy; discuss and align before opening PR.");
+  }
+
   return CommunityGatePolicySchema.parse({
     hasGatingRules,
     requiresIssueApprovalBeforePr,
@@ -328,7 +355,12 @@ export function detectCommunityGateFromContents(
     maxDiffCeiling,
     reasons,
     suggestedContributorAction,
-    matchedKeywords: Array.from(new Set(matchedKeywords)),
+    matchedKeywords: Array.from(new Set([...matchedKeywords, ...dynamic.extractedKeywords])),
+    philosophy: dynamic.philosophy,
+    aiPolicy: dynamic.aiPolicy,
+    dynamicBlockingLabels: dynamic.dynamicBlockingLabels.length > 0 ? dynamic.dynamicBlockingLabels : undefined,
+    testRigor: dynamic.testRigor,
+    antiPoachingConfig: dynamic.antiPoachingConfig,
   });
 }
 

@@ -42,13 +42,14 @@ export interface DefectSignificanceResult {
 }
 
 const TIER1_KEYWORDS = [
+  /\b(?:npe|null\s*pointer(?:[\s_-]*dereference)?|nil\s*dereference|sigsegv|segmentation\s*fault|panic|abort|fatal\s*error|crash)\b/i,
   /\b(?:cwe-\d+|ssrf|rce|remote code execution|prototype pollution|sql injection|path traversal|arbitrary file read)\b/i,
   /\b(?:data corruption|memory corruption|heap buffer overflow|use-after-free|double-free)\b/i,
   /\b(?:auth bypass|authentication bypass|privilege escalation)\b/i,
 ];
 
 const TIER2_KEYWORDS = [
-  /\b(?:deadlock|data race|race condition|goroutine leak|memory leak|fd leak|socket leak|handle leak)\b/i,
+  /\b(?:deadlock|data race|race condition|goroutine leak|memory leak|fd leak|socket leak|handle leak|resource leak|lifecycle leak|leak)\b/i,
   /\b(?:infinite loop|infinite spin|busy-wait|100% cpu|hang forever|process freeze)\b/i,
   /\b(?:unhandled promise rejection|crash on start|panic on launch)\b/i,
 ];
@@ -76,7 +77,7 @@ const TIER5_KEYWORDS = [
 export function evaluateDefectSignificance(
   input: DefectEvaluationInput,
 ): DefectSignificanceResult {
-  const fullText = `${input.title} ${input.description} ${input.proposedFix || ''}`.toLowerCase();
+  const fullText = `${input.title} ${input.description || ''} ${input.category || ''} ${input.proposedFix || ''}`.toLowerCase();
   const detectedAntiPatterns: DefectAntiPattern[] = [];
   const rejectionReasons: string[] = [];
 
@@ -162,19 +163,29 @@ export function evaluateDefectSignificance(
   let tier: DefectTier = 'tier5_internal_hygiene';
   let baseScore = 20;
 
-  if (TIER1_KEYWORDS.some((kw) => kw.test(fullText))) {
+  if (TIER1_KEYWORDS.some((kw) => kw.test(fullText)) || input.category === 'security_cwe') {
     tier = 'tier1_critical';
     baseScore = 95;
-  } else if (TIER2_KEYWORDS.some((kw) => kw.test(fullText))) {
+  } else if (
+    TIER2_KEYWORDS.some((kw) => kw.test(fullText)) ||
+    input.category === 'concurrency_race' ||
+    input.category === 'lifecycle_leak'
+  ) {
     tier = 'tier2_concurrency';
     baseScore = 85;
-  } else if (TIER3_KEYWORDS.some((kw) => kw.test(fullText))) {
+  } else if (
+    TIER3_KEYWORDS.some((kw) => kw.test(fullText)) ||
+    input.category === 'protocol_drift'
+  ) {
     tier = 'tier3_contract_drift';
     baseScore = 75;
-  } else if (TIER4_KEYWORDS.some((kw) => kw.test(fullText))) {
+  } else if (
+    TIER4_KEYWORDS.some((kw) => kw.test(fullText)) ||
+    input.category === 'numerical_bounds'
+  ) {
     tier = 'tier4_environment';
     baseScore = 60;
-  } else if (TIER5_KEYWORDS.some((kw) => kw.test(fullText))) {
+  } else if (TIER5_KEYWORDS.some((kw) => kw.test(fullText)) || input.category === 'dead_code') {
     tier = 'tier5_internal_hygiene';
     baseScore = 15;
   }

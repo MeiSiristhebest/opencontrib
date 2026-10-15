@@ -9,6 +9,7 @@ export * from "./ci-diagnostics.js";
 export * from "./claim-helper.js";
 export * from "./markdown-validator.js";
 export * from "./community-gate.js";
+export * from "./dynamic-policy-extractor.js";
 export * from "./approval-service.js";
 export * from "./governance-service.js";
 export type {

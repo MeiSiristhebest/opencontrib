@@ -6,11 +6,18 @@
  * type-only import, so there is no runtime coupling to the GitHub client.
  */
 
-import type { QualificationResult } from "../contracts/schemas.js";
+import type { QualificationResult, CommunityGatePolicy } from "../contracts/schemas.js";
 import type { ApiStatus } from "../discovery/github-client.js";
 import { deriveCollaborationPlaybook } from "./collaboration-playbook.js";
+import {
+  DEFAULT_INTENT_RULES,
+  matchesIntentRule,
+  evaluateIntentSignals,
+  type IntentRule,
+} from "./intent-evaluator.js";
 
-export type { QualificationResult };
+export type { QualificationResult, IntentRule };
+export { DEFAULT_INTENT_RULES, matchesIntentRule, evaluateIntentSignals };
 export type QualificationTrack = "fast_track" | "standard_track";
 
 export const ACTION_BLOCKING_LABELS = [
@@ -47,73 +54,6 @@ export interface IssueCommentItem {
   created_at: string;
 }
 
-// ---------------------------------------------------------------------------
-// Extensible Intent Rule Registry
-// ---------------------------------------------------------------------------
-
-export interface IntentRule {
-  /** Which kind of contributor intent this rule detects */
-  category: 'pr_announcement' | 'work_claim' | 'approval_wait' | 'author_intent';
-  /** Regex pattern to match against comment body */
-  pattern: RegExp;
-  /** How strongly this signal indicates intent */
-  strength: 'strong' | 'moderate' | 'weak';
-  /** Human-readable description */
-  description: string;
-}
-
-/**
- * Default built-in intent detection rules.
- * External callers can extend this set via `qualifyIssue(input, { customRules })`.
- */
-export const DEFAULT_INTENT_RULES: IntentRule[] = [
-  // --- PR Announcement (immediate disqualification) ---
-  { category: 'pr_announcement', pattern: /(?:\bi(?:\s*have|'ve|\s*just)?\s*|\b)(?:opened|submitted|created|pushed)\s*(?:a\s*)?(?:pr|pull\s*request)/i, strength: 'strong', description: 'Developer announces opened PR' },
-  { category: 'pr_announcement', pattern: /fix(?:es)?\s*(?:in|via|at|by)\s*(?:pr|#\d+|pull)/i, strength: 'strong', description: 'Developer references fix in PR' },
-  { category: 'pr_announcement', pattern: /(?:fixed|resolved|addressed|closed)\s*(?:by|in|via)\s*(?:pr|pull\s*request|#\d+|https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+)/i, strength: 'strong', description: 'Referenced fix in PR' },
-  { category: 'pr_announcement', pattern: /(?:here(?:'s| is)|check out|submitted)\s*(?:the\s*)?(?:pr|fix)?:?\s*https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/i, strength: 'strong', description: 'Developer links to fix PR' },
-  { category: 'pr_announcement', pattern: /\b(?:pr|pull\s*request)\s+(?:is\s+)?(?:up|open|opened|ready|submitted)\b/i, strength: 'strong', description: 'Developer notes PR is up' },
-  { category: 'pr_announcement', pattern: /(?:已提|已创建|已提交|提了|提交了|开了)\s*(?:一个\s*)?(?:pr|pull\s*request|合并请求)/i, strength: 'strong', description: 'Chinese: Developer announces PR' },
-  { category: 'pr_announcement', pattern: /(?:修复|解决)\s*(?:在|见|于|对应)\s*(?:pr|pull\s*request|#\d+)/i, strength: 'strong', description: 'Chinese: References fix in PR' },
-  { category: 'pr_announcement', pattern: /(?:pr|pull\s*request)\s*(?:已提|已提交|已开|已创建)/i, strength: 'strong', description: 'Chinese: PR already created' },
-
-  // --- Work Claim (30-day activity window) ---
-  { category: 'work_claim', pattern: /(?:我来解决|我来修复|我来处理|我来提pr|我来认领|认领这个|我想解决|我想修复)/i, strength: 'strong', description: 'Chinese: Contributor claims issue' },
-  { category: 'work_claim', pattern: /\b(?:i am working on this|i'm working on this)\b/i, strength: 'strong', description: 'Explicit "working on this"' },
-  { category: 'work_claim', pattern: /\b(?:can i work on this|please assign)\b/i, strength: 'strong', description: 'Request for assignment' },
-  { category: 'work_claim', pattern: /\bi(?:'m| am) working on a fix\b/i, strength: 'strong', description: 'Working on a fix' },
-  { category: 'work_claim', pattern: /\b(?:i(?:'m| am) taking this|i(?:'ll| will) take this)\b/i, strength: 'strong', description: 'Taking ownership' },
-  { category: 'work_claim', pattern: /\bi(?:'m| am) looking into this\b/i, strength: 'moderate', description: 'Looking into the issue' },
-  { category: 'work_claim', pattern: /\b(?:i(?:'m| am) opening a pr|i(?:'ll| will) submit a pr|my wip pr|i have (?:a )?wip pr)\b/i, strength: 'strong', description: 'PR submission intent' },
-  { category: 'work_claim', pattern: /\b(?:\/claim|\/assign)\b/i, strength: 'strong', description: 'Bot claim/assign command' },
-  { category: 'work_claim', pattern: /\b(?:i'd like to work on this|i would like to work on this)\b/i, strength: 'strong', description: 'Polite work request' },
-  { category: 'work_claim', pattern: /\b(?:i'd like to implement|i would like to implement)\b/i, strength: 'strong', description: 'Implementation intent' },
-  { category: 'work_claim', pattern: /\b(?:i'd like to contribute)\b/i, strength: 'moderate', description: 'Contribution intent' },
-  { category: 'work_claim', pattern: /\bi(?:'m| am) happy to (?:send|open) (?:the )?pr\b/i, strength: 'strong', description: 'Eager PR offer' },
-  { category: 'work_claim', pattern: /\bi can (?:send|open) (?:the )?pr\b/i, strength: 'moderate', description: 'PR offer' },
-  { category: 'work_claim', pattern: /\bi(?:'ve| have)? prepared (?:a fix|a diff)\b/i, strength: 'strong', description: 'Fix already prepared' },
-  { category: 'work_claim', pattern: /\bmy fix and regression tests are ready\b/i, strength: 'strong', description: 'Fix and tests ready' },
-  { category: 'work_claim', pattern: /\bmy pr (?:is )?coming shortly\b/i, strength: 'strong', description: 'PR imminent' },
-  { category: 'work_claim', pattern: /\b(?:i have the fix|have the fix (?:shape )?ready|fix is ready)\b/i, strength: 'strong', description: 'Fix shape is ready' },
-  { category: 'work_claim', pattern: /\b(?:turn it around|turn it around quickly)\b/i, strength: 'strong', description: 'Turnaround commitment' },
-  { category: 'work_claim', pattern: /\b(?:i(?:'m| am) preparing a fix|preparing a pr)\b/i, strength: 'strong', description: 'Preparing fix or PR' },
-
-  // --- Approval Wait (indicates contributor waiting for maintainer) ---
-  { category: 'approval_wait', pattern: /\b(?:waiting on `?lgtm`?|waiting for `?lgtm`?)\b/i, strength: 'strong', description: 'Waiting for LGTM approval' },
-  { category: 'approval_wait', pattern: /\b(?:could a maintainer approve|could you approve)\b/i, strength: 'moderate', description: 'Requesting maintainer approval' },
-
-  // --- Author Intent (7-day grace period to prevent issue hijacking/poaching) ---
-  { category: 'author_intent', pattern: /\bi(?:'m| am) happy to (?:open|submit|send|create|provide|work on) (?:a |the )?(?:pr|pull\s*request|patch|fix)\b/i, strength: 'strong', description: 'Author offers PR/fix' },
-  { category: 'author_intent', pattern: /\bi(?:'m| am) happy to submit a pr for that\b/i, strength: 'strong', description: 'Author offers PR for that' },
-  { category: 'author_intent', pattern: /\bi(?:'ll| will| can) (?:submit|open|send|create) a (?:pr|fix|patch)\b/i, strength: 'strong', description: 'Author will submit fix' },
-  { category: 'author_intent', pattern: /\bi(?:'m| am) (?:working on|preparing|drafting) a (?:pr|fix|patch)\b/i, strength: 'strong', description: 'Author working on PR' },
-  { category: 'author_intent', pattern: /\bi can fix this\b/i, strength: 'strong', description: 'Author can fix' },
-  { category: 'author_intent', pattern: /\bi(?:'d| would) like to (?:implement|work on|fix) this\b/i, strength: 'strong', description: 'Author would like to implement' },
-  { category: 'author_intent', pattern: /\bi(?:'m| am) willing to (?:send|open|submit) a pr\b/i, strength: 'strong', description: 'Author willing to submit PR' },
-  { category: 'author_intent', pattern: /\bi plan to (?:submit|open) a pr\b/i, strength: 'strong', description: 'Author plans PR' },
-  { category: 'author_intent', pattern: /\b(?:i'll take care of this|i will take care of this)\b/i, strength: 'strong', description: 'Author taking ownership' },
-];
-
 export interface LinkedPrItem {
   number?: number;
   title?: string;
@@ -141,21 +81,15 @@ export interface QualifyIssueInput {
   customIntentRules?: IntentRule[];
   /** Optional custom blocking labels to supplement ACTION_BLOCKING_LABELS */
   customBlockingLabels?: string[];
+  /** Optional community gate policy to supply dynamic labels, philosophy, and anti-poaching config */
+  communityPolicy?: CommunityGatePolicy;
   /**
    * Required clock for claim-expiry and author-first-right time windows.
    * Production callers obtain this from the `Clock` port (infrastructure);
    * tests pass a fixed timestamp for deterministic assertions. Required so
    * the domain layer never reaches for the wall clock directly.
    */
-  now: number;
-}
-
-function matchesIntentRule(rule: IntentRule, text: string): boolean {
-  const pattern = new RegExp(
-    rule.pattern.source,
-    rule.pattern.flags.replace(/[gy]/g, ""),
-  );
-  return pattern.test(text);
+  now?: number;
 }
 
 export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
@@ -176,8 +110,11 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     timelineApiStatus = "OK",
     customIntentRules,
     customBlockingLabels,
-    now = Date.now(),
+    communityPolicy,
   } = input;
+
+  // Use explicitly passed deterministic now (or 0 fallback for tests without clock)
+  const now = input.now ?? 0;
 
   const linkedPrsList: LinkedPrItem[] = [...(linkedPrs || [])];
 
@@ -224,9 +161,11 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     };
   }
 
-  // 3. Blocking Labels Gate (Exact & Alias Token Matching, preventing substring false positives)
+  // 3. Blocking Labels Gate (Exact & Alias Token Matching, dynamic community labels)
+  const dynamicBlockingFromPolicy = communityPolicy?.dynamicBlockingLabels || [];
   const allBlockingLabels = [
     ...ACTION_BLOCKING_LABELS,
+    ...dynamicBlockingFromPolicy,
     ...(customBlockingLabels || []).map((label) => label.toLowerCase().trim()),
   ];
   for (const blocking of allBlockingLabels) {
@@ -311,7 +250,10 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   const matchingBodyPrRule = prAnnouncementRules.find((rule) =>
     matchesIntentRule(rule, issueBody),
   );
-  if (matchingBodyPrRule) {
+  const bodyPrSignal = evaluateIntentSignals(issueBody, 'pr_announcement', {
+    customRules: customIntentRules,
+  });
+  if (matchingBodyPrRule || bodyPrSignal.isMatch) {
     return {
       isQualified: false,
       disqualifyReason: "Issue description already announces or links an existing PR.",
@@ -335,7 +277,10 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     const matchingPrRule = prAnnouncementRules.find((rule) =>
       matchesIntentRule(rule, cBody),
     );
-    if (matchingPrRule) {
+    const commentPrSignal = evaluateIntentSignals(cBody, 'pr_announcement', {
+      customRules: customIntentRules,
+    });
+    if (matchingPrRule || commentPrSignal.isMatch) {
       return {
         isQualified: false,
         disqualifyReason: `Another developer (@${user}) announced a fix PR in comments.`,
@@ -355,7 +300,13 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
       const matchingClaimRule = claimRules.find((rule) =>
         matchesIntentRule(rule, cBody),
       );
-      if (matchingClaimRule) {
+      const claimSignal = evaluateIntentSignals(cBody, 'work_claim', {
+        customRules: customIntentRules,
+      });
+      const approvalSignal = evaluateIntentSignals(cBody, 'approval_wait', {
+        customRules: customIntentRules,
+      });
+      if (matchingClaimRule || claimSignal.isMatch || approvalSignal.isMatch) {
         const prev = claimantLatestActivity.get(user.toLowerCase()) || 0;
         if (!isNaN(commentTime) && commentTime > prev) {
           claimantLatestActivity.set(user.toLowerCase(), commentTime);
@@ -379,10 +330,13 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     }
   }
 
-  // Check if any claimant has active claim within 30 days
+  // Dynamic claim expiry window
+  const claimExpiryDays = communityPolicy?.antiPoachingConfig?.claimExpiryDays ?? 30;
+
+  // Check if any claimant has active claim within claimExpiryDays
   for (const [claimant, latestActivity] of claimantLatestActivity.entries()) {
     const daysSinceActivity = (now - latestActivity) / (1000 * 60 * 60 * 24);
-    if (daysSinceActivity <= 30) {
+    if (daysSinceActivity <= claimExpiryDays) {
       hasClaimant = true;
       claimantDetails = `@${claimant} active claim (${Math.floor(daysSinceActivity)} days ago)`;
       break;
@@ -408,18 +362,29 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
         authorLogin,
         issueNumber,
         issueTitle,
+        targetRepoPolicy: communityPolicy
+          ? {
+              aiPolicy: communityPolicy.aiPolicy,
+              requiresAiDisclosure: communityPolicy.requiresAiDisclosure,
+              philosophy: communityPolicy.philosophy,
+            }
+          : undefined,
       }),
     };
   }
 
-  // 7. Initial Author-First-Right Check (7-Day Grace Period for Issue Author)
+  // 7. Initial Author-First-Right Check (Grace Period for Issue Author)
+  const authorGracePeriodDays = communityPolicy?.antiPoachingConfig?.authorGracePeriodDays ?? 7;
   let authorFirstRightActive = false;
   let authorFirstRightDetails = "";
 
   // Check if initial issue body (by author) contained intent
-  const bodyHasAuthorIntent = authorIntentRules.some((rule) =>
-    matchesIntentRule(rule, fullText),
-  );
+  const bodyHasAuthorIntent =
+    authorIntentRules.some((rule) => matchesIntentRule(rule, fullText)) ||
+    evaluateIntentSignals(fullText, 'author_intent', {
+      isAuthor: true,
+      customRules: customIntentRules,
+    }).isMatch;
   let latestAuthorIntentTime = bodyHasAuthorIntent ? Date.parse(createdAt) : 0;
 
   for (const comment of comments) {
@@ -430,7 +395,13 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
       user.toLowerCase() === authorLogin.toLowerCase()
     ) {
       const cBody = comment.body || "";
-      if (authorIntentRules.some((rule) => matchesIntentRule(rule, cBody))) {
+      if (
+        authorIntentRules.some((rule) => matchesIntentRule(rule, cBody)) ||
+        evaluateIntentSignals(cBody, 'author_intent', {
+          isAuthor: true,
+          customRules: customIntentRules,
+        }).isMatch
+      ) {
         const commentTime = Date.parse(comment.created_at);
         if (!isNaN(commentTime) && commentTime > latestAuthorIntentTime) {
           latestAuthorIntentTime = commentTime;
@@ -442,9 +413,9 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   if (latestAuthorIntentTime > 0) {
     const daysSinceIntent =
       (now - latestAuthorIntentTime) / (1000 * 60 * 60 * 24);
-    if (daysSinceIntent < 7) {
+    if (daysSinceIntent < authorGracePeriodDays) {
       authorFirstRightActive = true;
-      authorFirstRightDetails = `Author-first-right active: author expressed intent to fix ${Math.floor(daysSinceIntent)} days ago (< 7 days grace period). Anti-poaching protection active; prefer supportive co-authoring or waiting for author approval.`;
+      authorFirstRightDetails = `Author-first-right active: author expressed intent to fix ${Math.floor(daysSinceIntent)} days ago (< ${authorGracePeriodDays} days grace period). Anti-poaching protection active; prefer supportive co-authoring or waiting for author approval.`;
     }
   }
 
@@ -461,6 +432,13 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     authorLogin,
     issueNumber,
     issueTitle,
+    targetRepoPolicy: communityPolicy
+      ? {
+          aiPolicy: communityPolicy.aiPolicy,
+          requiresAiDisclosure: communityPolicy.requiresAiDisclosure,
+          philosophy: communityPolicy.philosophy,
+        }
+      : undefined,
   });
 
   return {
