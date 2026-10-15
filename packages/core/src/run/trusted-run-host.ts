@@ -259,6 +259,7 @@ export class TrustedRunMaterializer {
             operation: file.operation,
             content: file.content,
             mode: file.mode,
+            hunks: (file as any).hunks,
           })),
         );
         if (reproApply.errors.length > 0) {
@@ -311,6 +312,7 @@ export class TrustedRunMaterializer {
             operation: file.operation,
             content: file.content,
             mode: file.mode,
+            hunks: (file as any).hunks,
           })),
       );
       if (applied.errors.length > 0) {

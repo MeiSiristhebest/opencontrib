@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, appendFileSync, statSync, lstatSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type {
   TrustedExecutionPort,
@@ -166,7 +166,10 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       this.image,
       "sh",
       "-c",
-      'mkdir -p /workspace && cp -R -P /source/. /workspace/ && exec sh -c "$1"',
+      'mkdir -p /workspace && cp -R -P /source/. /workspace/ && ' +
+      'if [ -f /workspace/.git ] || ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then ' +
+      '  rm -rf /workspace/.git && git init -q /workspace && (cd /workspace && git config user.name "OpenContrib" && git config user.email "bot@opencontrib.local" && git add -A && git commit -qm "baseline" --allow-empty 2>/dev/null || true); ' +
+      'fi && exec sh -c "$1"',
       "opencontrib-red-execution",
       executionCommand(job.testCommand, job.workspace.workspacePath),
     ];
@@ -266,6 +269,44 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
 
   async verifyGreen(job: GreenExecutionJob): Promise<RawGreenExecutionResult> {
     const cwd = job.workspace.workspacePath;
+    // Safe coverage sink directory: ensure it is a real directory inside cwd and not a symlink to outside
+    let safeHostCoverageDir = join(cwd, "coverage");
+    try {
+      if (existsSync(safeHostCoverageDir)) {
+        const lst = lstatSync(safeHostCoverageDir);
+        if (lst.isSymbolicLink()) {
+          safeHostCoverageDir = mkdtempSync(join(tmpdir(), "oc-coverage-sink-"));
+        }
+      } else {
+        mkdirSync(safeHostCoverageDir, { recursive: true });
+      }
+    } catch {
+      safeHostCoverageDir = mkdtempSync(join(tmpdir(), "oc-coverage-sink-"));
+    }
+
+    // Exclude coverage/ from untracked files in git status so computeSourceTreeHash remains clean and deterministic
+    try {
+      let excludeFile = join(cwd, ".git", "info", "exclude");
+      if (existsSync(join(cwd, ".git"))) {
+        const stat = statSync(join(cwd, ".git"));
+        if (!stat.isDirectory()) {
+          const gitContent = readFileSync(join(cwd, ".git"), "utf8");
+          if (gitContent.startsWith("gitdir:")) {
+            const gitDir = resolve(cwd, gitContent.slice(7).trim());
+            excludeFile = join(gitDir, "info", "exclude");
+          }
+        }
+      }
+      if (existsSync(dirname(excludeFile))) {
+        const currentExclude = existsSync(excludeFile) ? readFileSync(excludeFile, "utf8") : "";
+        if (!currentExclude.includes("coverage/")) {
+          appendFileSync(excludeFile, "\ncoverage/\n", "utf8");
+        }
+      }
+    } catch {
+      // best-effort git exclude
+    }
+
     const greenTree = computeSourceTreeHash(cwd);
     const executeOne = async () => {
       const start = Date.now();
@@ -291,12 +332,17 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         "256",
         "-v",
         `${cwd}:/source:ro`,
+        "-v",
+        `${safeHostCoverageDir}:/coverage-sink:rw`,
         "-w",
         "/workspace",
         this.image,
         "sh",
         "-c",
-        'mkdir -p /workspace && cp -R -P /source/. /workspace/ && exec sh -c "$1"',
+        'mkdir -p /workspace && cp -R -P /source/. /workspace/ && ' +
+        'if [ -f /workspace/.git ] || ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then ' +
+        '  rm -rf /workspace/.git && git init -q /workspace && (cd /workspace && git config user.name "OpenContrib" && git config user.email "bot@opencontrib.local" && git add -A && git commit -qm "baseline" --allow-empty 2>/dev/null || true); ' +
+        'fi && rm -rf /workspace/coverage && sh -c "$1"; STATUS=$?; if [ -d /workspace/coverage ]; then cp -R -P -p /workspace/coverage/. /coverage-sink/ 2>/dev/null || true; fi; exit $STATUS',
         "opencontrib-green-execution",
         executionCommand(job.testCommand, job.workspace.workspacePath),
       ];
@@ -374,7 +420,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       exitCode: testsPassed ? 0 : 1,
       outputSnippet: lastOutput.slice(0, 500),
       passed: testsPassed,
-      sourceTreeSha256: greenTree,
+      sourceTreeSha256: computeSourceTreeHash(cwd) || greenTree,
       capturedAt: new Date().toISOString(),
       roundsRequested: scheduled.roundsRequested,
       roundsCompleted: scheduled.roundsCompleted,

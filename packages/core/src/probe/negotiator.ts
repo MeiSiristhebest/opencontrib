@@ -38,7 +38,7 @@ function isBinaryAvailable(binary: string): boolean {
 
 import { FALLBACK_COMMANDS } from './strategies.js';
 
-function canExecuteProbe(probe: ProbeManifest): boolean {
+export function canExecuteProbe(probe: ProbeManifest): boolean {
   if (!probe.activation.requiresBinaries || probe.activation.requiresBinaries.length === 0) {
     return true;
   }

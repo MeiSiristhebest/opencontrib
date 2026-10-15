@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import { getToolTimeout } from '../kernel/config.js';
-import { STANDARD_AST_RELATIONAL_RULES, serializeRuleToYaml } from '../probe/adapters/ast-grep-rules.js';
+import { getAllAstGrepRules, serializeRuleToYaml } from '../probe/adapters/ast-grep-rules.js';
 
 export interface ASTGrepMatch {
   text: string;
@@ -145,7 +145,7 @@ export const astGrepPlugin: OpenContribPlugin = {
         }
 
         // 2. Deep Relational Rules Execution — filter by languages actually present in the repo
-        for (const rule of STANDARD_AST_RELATIONAL_RULES.filter((r) => repoLanguages.includes(r.language))) {
+        for (const rule of getAllAstGrepRules().filter((r) => repoLanguages.includes(r.language))) {
           try {
             const ruleDef = rule.rule;
             const needsYaml = ruleDef.kind || ruleDef.inside || ruleDef.has || ruleDef.not || ruleDef.any || ruleDef.all;
@@ -163,8 +163,10 @@ export const astGrepPlugin: OpenContribPlugin = {
               stdout = execResult.stdout;
               fs.unlinkSync(yamlPath);
             } else {
+              if (!ruleDef.pattern) continue;
               const langFlag = LANG_FLAG[rule.language] || rule.language;
-              const cmd = `${bin} run -p "${ruleDef.pattern}" --lang ${langFlag} --json=compact`;
+              const escapedPattern = ruleDef.pattern.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+              const cmd = `${bin} run -p "${escapedPattern}" --lang ${langFlag} --json=compact`;
               const execResult = await host.exec(cmd, {
                 cwd: targetPath,
                 timeout: getToolTimeout('AST_GREP'),

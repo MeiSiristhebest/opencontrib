@@ -5,12 +5,14 @@ import {
   lstatSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
   type Stats,
 } from "fs";
+import { rm as rmAsync } from "fs/promises";
 import { homedir as osHomedir, tmpdir } from "os";
 import { dirname, join, resolve, sep } from "path";
 import { sanitizeRunId } from "../run/artifact-bundle.js";
@@ -40,16 +42,10 @@ function tryClearWindowsReadOnly(targetPath: string): void {
   } catch {}
 }
 
-export function safeRmSync(
+function verifyDeletionAllowed(
   targetPath: string,
-  opts: {
-    recursive?: boolean;
-    force?: boolean;
-    maxRetries?: number;
-    retryDelay?: number;
-  } = {},
   allowedParents?: string[],
-): boolean {
+): { allowed: boolean; resolved: string } {
   const resolved = norm(resolve(targetPath));
   const homedirPath = norm(resolve(osHomedir()));
   const tempDir = norm(resolve(tmpdir()));
@@ -82,7 +78,7 @@ export function safeRmSync(
     );
     console.error(`  Allowed: ${defaultAllowed.join(", ")}`);
     console.error(`  Target:  ${resolved}`);
-    return false;
+    return { allowed: false, resolved };
   }
 
   // Never delete root directories themselves (only their children)
@@ -97,7 +93,7 @@ export function safeRmSync(
     console.error(
       `[SAFE_RMSNRC] BLOCKED: Refusing to delete root directory '${targetPath}'`,
     );
-    return false;
+    return { allowed: false, resolved };
   }
 
   // Never delete a protected workspace (guardfile enforcement)
@@ -105,8 +101,25 @@ export function safeRmSync(
     console.error(
       `[SAFE_RMSNRC] BLOCKED: '${targetPath}' contains .opencontrib-guard, refusing to delete protected workspace`,
     );
-    return false;
+    return { allowed: false, resolved };
   }
+
+  return { allowed: true, resolved };
+}
+
+export function safeRmSync(
+  targetPath: string,
+  opts: {
+    recursive?: boolean;
+    force?: boolean;
+    maxRetries?: number;
+    retryDelay?: number;
+  } = {},
+  allowedParents?: string[],
+): boolean {
+  const check = verifyDeletionAllowed(targetPath, allowedParents);
+  if (!check.allowed) return false;
+  const resolved = check.resolved;
 
   const maxRetries = opts.maxRetries ?? (process.platform === "win32" ? 5 : 2);
   const retryDelay = opts.retryDelay ?? 150;
@@ -128,10 +141,14 @@ export function safeRmSync(
         ) {
           tryClearWindowsReadOnly(resolved);
         }
-        const start = Date.now();
         const waitMs = retryDelay * (attempt + 1);
-        while (Date.now() - start < waitMs) {
-          // busy wait short backoff
+        try {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+        } catch {
+          const start = Date.now();
+          while (Date.now() - start < waitMs) {
+            // fallback busy wait if SharedArrayBuffer not permitted
+          }
         }
       }
     }
@@ -139,6 +156,57 @@ export function safeRmSync(
 
   console.error(
     `[SAFE_RMSNRC] FAILED: rmSync('${targetPath}'): ${lastError?.message || "unknown error"}`,
+  );
+  return false;
+}
+
+/**
+ * Asynchronous, non-blocking variant of safeRmSync.
+ * Uses native async timer backoff to release the event loop during file lock retries.
+ */
+export async function safeRmAsync(
+  targetPath: string,
+  opts: {
+    recursive?: boolean;
+    force?: boolean;
+    maxRetries?: number;
+    retryDelay?: number;
+  } = {},
+  allowedParents?: string[],
+): Promise<boolean> {
+  const check = verifyDeletionAllowed(targetPath, allowedParents);
+  if (!check.allowed) return false;
+  const resolved = check.resolved;
+
+  const maxRetries = opts.maxRetries ?? (process.platform === "win32" ? 5 : 2);
+  const retryDelay = opts.retryDelay ?? 150;
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await rmAsync(resolved, {
+        recursive: opts.recursive ?? true,
+        force: opts.force ?? true,
+      });
+      return true;
+    } catch (err: any) {
+      lastError = err;
+      if (err?.code === "ENOENT" && (opts.force ?? true)) return true;
+      if (attempt < maxRetries) {
+        if (
+          process.platform === "win32" &&
+          (err.code === "EPERM" || err.code === "EACCES")
+        ) {
+          tryClearWindowsReadOnly(resolved);
+        }
+        const waitMs = retryDelay * (attempt + 1);
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+    }
+  }
+
+  console.error(
+    `[SAFE_RMASYNC] FAILED: rmSync('${targetPath}'): ${lastError?.message || "unknown error"}`,
   );
   return false;
 }
@@ -204,6 +272,96 @@ export function linkDependenciesIfPresent(sourceRepoPath: string, targetPath: st
       } catch {}
     }
   } catch {}
+}
+
+function mapNormOffsetToOriginal(content: string, normOffset: number): number {
+  let normCount = 0;
+  let origIdx = 0;
+  while (origIdx < content.length && normCount < normOffset) {
+    if (content[origIdx] === "\r" && content[origIdx + 1] === "\n") {
+      origIdx += 2;
+      normCount += 1;
+    } else {
+      origIdx += 1;
+      normCount += 1;
+    }
+  }
+  return origIdx;
+}
+
+export function applySearchReplaceHunks(
+  originalContent: string,
+  hunks: Array<{ search: string; replace: string }>,
+  filePath: string,
+): { content: string; error?: string } {
+  let content = originalContent;
+
+  for (let i = 0; i < hunks.length; i++) {
+    const hunk = hunks[i];
+    const search = hunk.search;
+    const replace = hunk.replace;
+
+    // 1. Direct exact match
+    const exactIndex = content.indexOf(search);
+    if (exactIndex !== -1) {
+      content = content.slice(0, exactIndex) + replace + content.slice(exactIndex + search.length);
+      continue;
+    }
+
+    // 2. Line-ending normalized match (\r\n vs \n)
+    const normContent = content.replace(/\r\n/g, "\n");
+    const normSearch = search.replace(/\r\n/g, "\n");
+    const normIndex = normContent.indexOf(normSearch);
+    if (normIndex !== -1) {
+      const origStartIndex = mapNormOffsetToOriginal(content, normIndex);
+      const origEndIndex = mapNormOffsetToOriginal(content, normIndex + normSearch.length);
+      const matchedSlice = content.slice(origStartIndex, origEndIndex);
+      const useCrlfInHunk = matchedSlice.includes("\r\n");
+      const normReplace = replace.replace(/\r\n/g, "\n");
+      const adaptedReplace = useCrlfInHunk ? normReplace.replace(/\n/g, "\r\n") : normReplace;
+      content = content.slice(0, origStartIndex) + adaptedReplace + content.slice(origEndIndex);
+      continue;
+    }
+
+    // 3. Trimmed line-by-line fuzzy match (tolerance for leading/trailing whitespace differences)
+    const searchLines = normSearch.split("\n");
+    const contentLines = normContent.split("\n");
+    let matchLineIdx = -1;
+
+    for (let c = 0; c <= contentLines.length - searchLines.length; c++) {
+      let matches = true;
+      for (let s = 0; s < searchLines.length; s++) {
+        if (contentLines[c + s].trim() !== searchLines[s].trim()) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        matchLineIdx = c;
+        break;
+      }
+    }
+
+    if (matchLineIdx !== -1) {
+      const matchNormStart = contentLines.slice(0, matchLineIdx).join("\n").length + (matchLineIdx > 0 ? 1 : 0);
+      const matchNormMatchedLen = contentLines.slice(matchLineIdx, matchLineIdx + searchLines.length).join("\n").length;
+      const origStartIndex = mapNormOffsetToOriginal(content, matchNormStart);
+      const origEndIndex = mapNormOffsetToOriginal(content, matchNormStart + matchNormMatchedLen);
+      const matchedSlice = content.slice(origStartIndex, origEndIndex);
+      const useCrlfInHunk = matchedSlice.includes("\r\n");
+      const normReplace = replace.replace(/\r\n/g, "\n");
+      const adaptedReplace = useCrlfInHunk ? normReplace.replace(/\n/g, "\r\n") : normReplace;
+      content = content.slice(0, origStartIndex) + adaptedReplace + content.slice(origEndIndex);
+      continue;
+    }
+
+    return {
+      content: originalContent,
+      error: `SearchReplaceMismatchError: search block #${i + 1} for '${filePath}' was not found in existing content.`,
+    };
+  }
+
+  return { content };
 }
 
 export class WorktreeManager {
@@ -394,11 +552,31 @@ export class WorktreeManager {
       }
       if (!existsSync(cachedRepoPath)) {
         const cloneUrl = `https://github.com/${repoFullName}.git`;
-        const cloneResult = this.runGit(
-          ["clone", "--bare", "--depth", "1", cloneUrl, cachedRepoPath],
+        let cloneResult = this.runGit(
+          ["clone", "--bare", "--filter=blob:none", cloneUrl, cachedRepoPath],
           undefined,
           GIT_NETWORK_TIMEOUT_MS,
         );
+        if (!cloneResult.success) {
+          if (existsSync(cachedRepoPath)) {
+            safeRmSync(cachedRepoPath, { recursive: true, force: true });
+          }
+          cloneResult = this.runGit(
+            ["clone", "--bare", "--depth", "50", cloneUrl, cachedRepoPath],
+            undefined,
+            GIT_NETWORK_TIMEOUT_MS,
+          );
+        }
+        if (!cloneResult.success) {
+          if (existsSync(cachedRepoPath)) {
+            safeRmSync(cachedRepoPath, { recursive: true, force: true });
+          }
+          cloneResult = this.runGit(
+            ["clone", "--bare", "--depth", "1", cloneUrl, cachedRepoPath],
+            undefined,
+            GIT_NETWORK_TIMEOUT_MS,
+          );
+        }
         if (!cloneResult.success) {
           if (existsSync(cachedRepoPath)) {
             safeRmSync(cachedRepoPath, { recursive: true, force: true });
@@ -515,11 +693,10 @@ export class WorktreeManager {
         });
       }
       const cloneUrl = `https://github.com/${repoFullName}.git`;
-      const cloneRes = this.runGit(
+      let cloneRes = this.runGit(
         [
           "clone",
-          "--depth",
-          "1",
+          "--filter=blob:none",
           "-b",
           defaultBranch,
           cloneUrl,
@@ -528,6 +705,52 @@ export class WorktreeManager {
         undefined,
         GIT_NETWORK_TIMEOUT_MS,
       );
+      if (!cloneRes.success) {
+        if (existsSync(workspacePath)) {
+          safeRmSync(workspacePath, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: 200,
+          });
+        }
+        cloneRes = this.runGit(
+          [
+            "clone",
+            "--depth",
+            "50",
+            "-b",
+            defaultBranch,
+            cloneUrl,
+            workspacePath,
+          ],
+          undefined,
+          GIT_NETWORK_TIMEOUT_MS,
+        );
+      }
+      if (!cloneRes.success) {
+        if (existsSync(workspacePath)) {
+          safeRmSync(workspacePath, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: 200,
+          });
+        }
+        cloneRes = this.runGit(
+          [
+            "clone",
+            "--depth",
+            "1",
+            "-b",
+            defaultBranch,
+            cloneUrl,
+            workspacePath,
+          ],
+          undefined,
+          GIT_NETWORK_TIMEOUT_MS,
+        );
+      }
       if (cloneRes.success) {
         const fallbackBaseCommitSha = this.resolveUpstreamBase(
           workspacePath,
@@ -744,6 +967,7 @@ export class WorktreeManager {
       path: string;
       operation: string;
       content?: string;
+      hunks?: Array<{ search: string; replace: string }>;
       mode?: "100644" | "100755" | "120000" | string;
     }>,
   ): {
@@ -761,7 +985,12 @@ export class WorktreeManager {
     }
 
     let totalChars = 0;
-    for (const f of files) totalChars += f.content ? f.content.length : 0;
+    for (const f of files) {
+      if (f.content) totalChars += f.content.length;
+      if (f.hunks) {
+        for (const h of f.hunks) totalChars += (h.search.length + h.replace.length);
+      }
+    }
     if (totalChars > MAX_GENERATED_FILE_CHARS) {
       errors.push(
         `Generated content size (${totalChars} chars) exceeds safety limit (${MAX_GENERATED_FILE_CHARS})`,
@@ -922,6 +1151,15 @@ export class WorktreeManager {
         if (f.mode === "120000") {
           if (targetLstat !== undefined) rmSync(fullPath, { force: true });
           symlinkSync(f.content || "", fullPath);
+        } else if (f.operation === "MODIFY" && f.hunks && f.hunks.length > 0) {
+          const currentDiskContent = readFileSync(fullPath, "utf8");
+          const hunkResult = applySearchReplaceHunks(currentDiskContent, f.hunks, f.path);
+          if (hunkResult.error) {
+            errors.push(hunkResult.error);
+            continue;
+          }
+          if (targetLstat?.isSymbolicLink()) rmSync(fullPath, { force: true });
+          writeFileSync(fullPath, hunkResult.content, "utf8");
         } else {
           // Never write through an existing symlink: unlink it FIRST, then
           // create a fresh regular file at the same path.

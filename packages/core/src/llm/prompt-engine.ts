@@ -24,6 +24,13 @@ export type EcosystemType =
 
 import type { ToolFeedbackEntry } from "../orchestration/agent-orchestrator.js";
 
+export interface TargetFileContext {
+  path: string;
+  content: string;
+  slice?: string;
+  startLine?: number;
+}
+
 export interface PatchPromptOptions {
   basePrompt: string;
   repoFullName?: string;
@@ -35,6 +42,7 @@ export interface PatchPromptOptions {
   feedback?: ToolFeedbackEntry[];
   appliedFiles?: Array<{ path: string; operation: string }>;
   targetFiles?: Array<{ path: string; reason?: string }>;
+  fileContexts?: TargetFileContext[];
 }
 
 export interface ReviewPromptOptions {
@@ -212,6 +220,7 @@ export function buildDynamicPatchPrompt(options: PatchPromptOptions): string {
     feedback = [],
     appliedFiles = [],
     targetFiles = [],
+    fileContexts = [],
   } = options;
 
   const isRepairTurn = attemptNumber > 1;
@@ -272,6 +281,19 @@ export function buildDynamicPatchPrompt(options: PatchPromptOptions): string {
   }
   lines.push("</task_context>");
   lines.push("");
+
+  if (fileContexts.length > 0) {
+    lines.push("<source_code_context>");
+    lines.push("Below is the genuine, current source code of the relevant target file(s):");
+    for (const fc of fileContexts) {
+      lines.push(`\n[File: ${fc.path}${fc.startLine ? ` (starting at line ${fc.startLine})` : ""}]`);
+      lines.push("```");
+      lines.push(fc.content);
+      lines.push("```");
+    }
+    lines.push("</source_code_context>");
+    lines.push("");
+  }
 
   // 5. Differential Repair Diagnostics (Turn > 1)
   if (isRepairTurn) {
@@ -334,7 +356,8 @@ export function buildDynamicPatchPrompt(options: PatchPromptOptions): string {
   // 8. Output Schema Contract
   lines.push("<output_format_contract>");
   lines.push("Respond strictly with a valid JSON object matching the PatchDraftSchema. No markdown fences, no conversational preamble.");
-  lines.push("Ensure the 'files' array contains concrete code files with repository-relative paths, operations (CREATE/MODIFY/DELETE), and complete post-fix content.");
+  lines.push("Ensure the 'files' array contains concrete code files with repository-relative paths and operations (CREATE/MODIFY/DELETE).");
+  lines.push("For MODIFY operations, you may provide surgical 'hunks' (array of { search, replace } blocks) matching exact lines from <source_code_context>, or 'content' for full post-fix file replacement.");
   lines.push("</output_format_contract>");
 
   return lines.join("\n");

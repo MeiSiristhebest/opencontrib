@@ -7,6 +7,8 @@ import {
   IstanbulSummaryCoverageAdapter,
   LcovChangedLineCoverageAdapter,
   NoopCoverageAdapter,
+  computeNonExecutableLines,
+  isIndependentlyNonExecutableSourceLine,
   type TestCoverageAdapter,
 } from "../src/evidence/coverage-adapter.js";
 import { getCoverageMeasurementStatus } from "../src/evidence/evidence-collector.js";
@@ -169,6 +171,25 @@ describe("LCOV changed-line coverage", () => {
     writeFileSync(file, "SF:../value.ts\nDA:1,1\nend_of_record\n");
     expect(await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext)).toBeUndefined();
   }));
+
+  test("excludes non-executable comments, type imports, interfaces, and brackets from false UNAVAILABLE verdict", () => withTmpDir(async dir => {
+    const file = prepare(dir);
+    writeFileSync(
+      join(dir, "value.ts"),
+      "// Single line comment\n" +
+      "import type { Config } from './config.js';\n" +
+      "export const value = 2;\n" +
+      "interface ExtraConfig {\n" +
+      "  flag?: boolean;\n" +
+      "}\n" +
+      "export const other = 2;\n" +
+      "export const unchanged = 1;\n",
+    );
+    // Standard coverage engines only instrument executable lines (value = 2 and other = 2)
+    writeFileSync(file, "SF:value.ts\nDA:3,1\nDA:7,1\nend_of_record\n");
+    const result = await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext);
+    expect(result).toBe(100);
+  }));
 });
 
 describe("Evidence coverage measurement status", () => {
@@ -184,5 +205,61 @@ describe("NoopCoverageAdapter", () => {
     const adapter: TestCoverageAdapter = new NoopCoverageAdapter();
     expect(await adapter.resolve("/does/not/matter")).toBeUndefined();
     expect(adapter.name).toBe("noop");
+  });
+});
+
+describe("computeNonExecutableLines and isIndependentlyNonExecutableSourceLine", () => {
+  test("statefully excludes Python triple-quote multiline docstrings", () => {
+    const lines = [
+      'def foo():',
+      '    """',
+      '    This is a multiline',
+      '    docstring line',
+      '    """',
+      '    return 42',
+    ];
+    const nonExec = computeNonExecutableLines(lines);
+    // line 2, 3, 4, 5 are inside docstring
+    expect(nonExec.has(2)).toBe(true);
+    expect(nonExec.has(3)).toBe(true);
+    expect(nonExec.has(4)).toBe(true);
+    expect(nonExec.has(5)).toBe(true);
+    // line 1 (def foo()) and line 6 (return 42) are executable
+    expect(nonExec.has(1)).toBe(false);
+    expect(nonExec.has(6)).toBe(false);
+  });
+
+  test("statefully excludes multiline TypeScript type aliases without braces", () => {
+    const lines = [
+      'export type Status =',
+      '  | "pending"',
+      '  | "running"',
+      '  | "completed";',
+      'const a = 1;',
+    ];
+    const nonExec = computeNonExecutableLines(lines);
+    expect(nonExec.has(1)).toBe(true);
+    expect(nonExec.has(2)).toBe(true);
+    expect(nonExec.has(3)).toBe(true);
+    expect(nonExec.has(4)).toBe(true);
+    expect(nonExec.has(5)).toBe(false);
+  });
+
+  test("does NOT exclude pass statements as non-executable", () => {
+    expect(isIndependentlyNonExecutableSourceLine("pass")).toBe(false);
+    const nonExec = computeNonExecutableLines(["def placeholder():", "    pass"]);
+    expect(nonExec.has(2)).toBe(false);
+  });
+
+  test("does NOT treat lines with executable code after block comment as non-executable", () => {
+    const lines = [
+      "/* note */ runTask();",
+      "/* multiline comment start",
+      "   end of comment */ const a = 1;",
+    ];
+    const nonExec = computeNonExecutableLines(lines);
+    expect(nonExec.has(1)).toBe(false);
+    expect(nonExec.has(2)).toBe(true);
+    expect(nonExec.has(3)).toBe(false);
   });
 });

@@ -5,6 +5,8 @@ export {
   type IssueEvaluation,
   CodeChangeFileSchema,
   type CodeChangeFile,
+  SearchReplaceHunkSchema,
+  type SearchReplaceHunk,
   PatchDraftSchema,
   type PatchDraft,
   ReproductionDesignSchema,

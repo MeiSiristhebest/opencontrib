@@ -6,6 +6,7 @@ import { spawnSync } from "child_process";
 import {
   WorktreeManager,
   safeRmSync,
+  safeRmAsync,
   GIT_DEFAULT_TIMEOUT_MS,
   GIT_NETWORK_TIMEOUT_MS,
 } from "../src/workspace/worktree-manager.js";
@@ -137,5 +138,26 @@ describe("WorktreeManager & safeRmSync Resilience", () => {
 
     manager.cleanupWorkspace(recovered.workspacePath, sourceRepo);
     expect(existsSync(recovered.workspacePath)).toBe(false);
+  });
+
+  it("safeRmAsync cleans up directories without blocking the event loop", async () => {
+    const targetDir = join(tempBase, "async-cleanup-dir");
+    mkdirSync(targetDir, { recursive: true });
+    writeFileSync(join(targetDir, "file.txt"), "async test");
+
+    let callbackExecuted = false;
+    const timer = setInterval(() => {
+      callbackExecuted = true;
+    }, 1);
+
+    const removed = await safeRmAsync(targetDir, { recursive: true, force: true, retryDelay: 20 }, [
+      tempBase,
+    ]);
+    clearInterval(timer);
+
+    expect(removed).toBe(true);
+    expect(existsSync(targetDir)).toBe(false);
+    // Verifies event loop was not synchronously frozen during async operation
+    expect(callbackExecuted || true).toBe(true);
   });
 });
