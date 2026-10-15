@@ -128,5 +128,21 @@ describe('Phase 3 Hardening: SOTA Patch Generation & Search/Replace Hunks', () =
       expect(prompt).toContain('</source_code_context>');
       expect(prompt).toContain("For MODIFY operations, you may provide surgical 'hunks'");
     });
+
+    it('preserves line endings outside the matched hunk range without global CRLF pollution', () => {
+      // Mixed file: header uses LF, target hunk uses CRLF, footer uses LF
+      const original = "line1\nline2\nfoo = 1\r\nbar = 2\r\nline5\nline6";
+      const res = applySearchReplaceHunks(
+        original,
+        [{ search: "foo = 1\nbar = 2", replace: "foo = 100\nbar = 200" }],
+        "test.py",
+      );
+      expect(res.error).toBeUndefined();
+      // Leading and trailing LF lines should remain pure LF
+      expect(res.content.startsWith("line1\nline2\n")).toBe(true);
+      expect(res.content.endsWith("\nline5\nline6")).toBe(true);
+      // Replaced hunk adopted CRLF matching original hunk
+      expect(res.content).toContain("foo = 100\r\nbar = 200");
+    });
   });
 });

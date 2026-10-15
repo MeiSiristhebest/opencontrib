@@ -191,6 +191,7 @@ ${fixLine}
 }
 
 import { DEFECT_TAXONOMY_CATALOG, type DefectTaxonomyPattern } from '../catalog/defect-taxonomy.js';
+import { mapToDefectCategory } from '../defect-category.js';
 
 export function taxonomyPatternToYamlRule(pattern: DefectTaxonomyPattern): ASTGrepYamlRule | null {
   if (pattern.language === 'polyglot') {
@@ -213,7 +214,7 @@ export function taxonomyPatternToYamlRule(pattern: DefectTaxonomyPattern): ASTGr
     fix: pattern.fixTemplate,
     metadata: {
       cwe: pattern.cwe,
-      category: pattern.domain.toLowerCase(),
+      category: mapToDefectCategory(pattern.domain),
       impact: pattern.impact,
     },
   };

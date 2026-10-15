@@ -88,6 +88,9 @@ export function computeNonExecutableLines(lines: string[]): Set<number> {
   let inBlockComment = false;
   let inTypeBlock = false;
   let typeBlockBraceDepth = 0;
+  let inTypeAlias = false;
+  let inTripleDoubleQuote = false;
+  let inTripleSingleQuote = false;
 
   for (let idx = 0; idx < lines.length; idx++) {
     const lineNum = idx + 1;
@@ -99,11 +102,50 @@ export function computeNonExecutableLines(lines: string[]): Set<number> {
       continue;
     }
 
+    // Python multiline triple-double-quote docstrings
+    if (inTripleDoubleQuote) {
+      nonExec.add(lineNum);
+      if (line.includes('"""')) {
+        inTripleDoubleQuote = false;
+      }
+      continue;
+    }
+
+    // Python multiline triple-single-quote docstrings
+    if (inTripleSingleQuote) {
+      nonExec.add(lineNum);
+      if (line.includes("'''")) {
+        inTripleSingleQuote = false;
+      }
+      continue;
+    }
+
     if (inBlockComment) {
       nonExec.add(lineNum);
       if (line.includes("*/")) {
         inBlockComment = false;
       }
+      continue;
+    }
+
+    // Check for start of Python triple-quote docstrings
+    const tripleDoubleCount = (line.match(/"""/g) || []).length;
+    if (tripleDoubleCount % 2 === 1) {
+      nonExec.add(lineNum);
+      inTripleDoubleQuote = true;
+      continue;
+    } else if (tripleDoubleCount >= 2 && line.startsWith('"""') && line.endsWith('"""')) {
+      nonExec.add(lineNum);
+      continue;
+    }
+
+    const tripleSingleCount = (line.match(/'''/g) || []).length;
+    if (tripleSingleCount % 2 === 1) {
+      nonExec.add(lineNum);
+      inTripleSingleQuote = true;
+      continue;
+    } else if (tripleSingleCount >= 2 && line.startsWith("'''") && line.endsWith("'''")) {
+      nonExec.add(lineNum);
       continue;
     }
 
@@ -141,7 +183,15 @@ export function computeNonExecutableLines(lines: string[]): Set<number> {
       continue;
     }
 
-    if (/^(?:export\s+)?(?:interface|type)\s+/.test(line)) {
+    if (inTypeAlias) {
+      nonExec.add(lineNum);
+      if (line.includes(";")) {
+        inTypeAlias = false;
+      }
+      continue;
+    }
+
+    if (/^(?:export\s+)?interface\s+/.test(line)) {
       nonExec.add(lineNum);
       if (line.includes("{")) {
         typeBlockBraceDepth = 0;
@@ -156,6 +206,23 @@ export function computeNonExecutableLines(lines: string[]): Set<number> {
       continue;
     }
 
+    if (/^(?:export\s+)?type\s+/.test(line)) {
+      nonExec.add(lineNum);
+      if (line.includes("{")) {
+        typeBlockBraceDepth = 0;
+        for (const char of line) {
+          if (char === "{") typeBlockBraceDepth++;
+          if (char === "}") typeBlockBraceDepth--;
+        }
+        if (typeBlockBraceDepth > 0) {
+          inTypeBlock = true;
+        }
+      } else if (!line.includes(";")) {
+        inTypeAlias = true;
+      }
+      continue;
+    }
+
     if (/^[{}()[\];,]+$/.test(line)) {
       nonExec.add(lineNum);
       continue;
@@ -165,9 +232,6 @@ export function computeNonExecutableLines(lines: string[]): Set<number> {
       line.startsWith("import type ") ||
       line.startsWith("export type ") ||
       line.startsWith("declare ") ||
-      line === '"""' ||
-      line === "'''" ||
-      line === "pass" ||
       line === "..."
     ) {
       nonExec.add(lineNum);
@@ -222,12 +286,12 @@ export function isIndependentlyNonExecutableSourceLine(rawLine: string): boolean
     return true;
   }
 
-  // Python docstrings or placeholders
+  // Python docstrings or placeholders (pass is excluded as it is an executable statement)
   if (
     line === '"""' ||
     line === "'''" ||
     (line.startsWith('"""') && line.endsWith('"""') && line.length > 3) ||
-    line === "pass" ||
+    (line.startsWith("'''") && line.endsWith("'''") && line.length > 3) ||
     line === "..."
   ) {
     return true;

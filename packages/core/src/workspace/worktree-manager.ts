@@ -272,6 +272,21 @@ export function linkDependenciesIfPresent(sourceRepoPath: string, targetPath: st
   } catch {}
 }
 
+function mapNormOffsetToOriginal(content: string, normOffset: number): number {
+  let normCount = 0;
+  let origIdx = 0;
+  while (origIdx < content.length && normCount < normOffset) {
+    if (content[origIdx] === "\r" && content[origIdx + 1] === "\n") {
+      origIdx += 2;
+      normCount += 1;
+    } else {
+      origIdx += 1;
+      normCount += 1;
+    }
+  }
+  return origIdx;
+}
+
 export function applySearchReplaceHunks(
   originalContent: string,
   hunks: Array<{ search: string; replace: string }>,
@@ -296,14 +311,13 @@ export function applySearchReplaceHunks(
     const normSearch = search.replace(/\r\n/g, "\n");
     const normIndex = normContent.indexOf(normSearch);
     if (normIndex !== -1) {
+      const origStartIndex = mapNormOffsetToOriginal(content, normIndex);
+      const origEndIndex = mapNormOffsetToOriginal(content, normIndex + normSearch.length);
+      const matchedSlice = content.slice(origStartIndex, origEndIndex);
+      const useCrlfInHunk = matchedSlice.includes("\r\n");
       const normReplace = replace.replace(/\r\n/g, "\n");
-      const updatedNorm =
-        normContent.slice(0, normIndex) +
-        normReplace +
-        normContent.slice(normIndex + normSearch.length);
-      content = originalContent.includes("\r\n")
-        ? updatedNorm.replace(/\n/g, "\r\n")
-        : updatedNorm;
+      const adaptedReplace = useCrlfInHunk ? normReplace.replace(/\n/g, "\r\n") : normReplace;
+      content = content.slice(0, origStartIndex) + adaptedReplace + content.slice(origEndIndex);
       continue;
     }
 
@@ -327,12 +341,15 @@ export function applySearchReplaceHunks(
     }
 
     if (matchLineIdx !== -1) {
-      const replaceLines = replace.replace(/\r\n/g, "\n").split("\n");
-      contentLines.splice(matchLineIdx, searchLines.length, ...replaceLines);
-      const joined = contentLines.join("\n");
-      content = originalContent.includes("\r\n")
-        ? joined.replace(/\n/g, "\r\n")
-        : joined;
+      const matchNormStart = contentLines.slice(0, matchLineIdx).join("\n").length + (matchLineIdx > 0 ? 1 : 0);
+      const matchNormMatchedLen = contentLines.slice(matchLineIdx, matchLineIdx + searchLines.length).join("\n").length;
+      const origStartIndex = mapNormOffsetToOriginal(content, matchNormStart);
+      const origEndIndex = mapNormOffsetToOriginal(content, matchNormStart + matchNormMatchedLen);
+      const matchedSlice = content.slice(origStartIndex, origEndIndex);
+      const useCrlfInHunk = matchedSlice.includes("\r\n");
+      const normReplace = replace.replace(/\r\n/g, "\n");
+      const adaptedReplace = useCrlfInHunk ? normReplace.replace(/\n/g, "\r\n") : normReplace;
+      content = content.slice(0, origStartIndex) + adaptedReplace + content.slice(origEndIndex);
       continue;
     }
 

@@ -77,7 +77,7 @@ import type {
 import { halt, continuePipeline } from "./types.js";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { posix as posixPath } from "node:path";
+import { resolve as pathResolve, posix as posixPath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 function extractWorkspaceFileContexts(
@@ -95,7 +95,7 @@ function extractWorkspaceFileContexts(
 
   for (const relPath of candidatePaths.slice(0, 5)) {
     try {
-      const fullPath = posixPath.resolve(workspacePath, relPath.replace(/\\/g, "/"));
+      const fullPath = pathResolve(workspacePath, relPath);
       if (existsSync(fullPath)) {
         const stat = statSync(fullPath);
         if (stat.isFile() && stat.size < 50000) {
