@@ -77,6 +77,26 @@ export const FeasibilityAssessmentSchema = z.object({
 });
 export type FeasibilityAssessment = z.infer<typeof FeasibilityAssessmentSchema>;
 
+export const CollaborationPlaybookSchema = z.object({
+  playbook: z.enum([
+    'supportive_coauthor',
+    'graceful_watchdog',
+    'autonomous_strike',
+    'variant_extension',
+  ]),
+  title: z.string(),
+  rationale: z.string(),
+  actionableSteps: z.array(z.string()),
+  coAuthorAttribution: z
+    .object({
+      suggestedGitTrailer: z.string(),
+      authorLogin: z.string(),
+    })
+    .optional(),
+  commentDraft: z.string().optional(),
+});
+export type CollaborationPlaybook = z.infer<typeof CollaborationPlaybookSchema>;
+
 export const QualificationResultSchema = z.object({
   isQualified: z.boolean(),
   disqualifyReason: z.string().optional(),
@@ -87,6 +107,7 @@ export const QualificationResultSchema = z.object({
   authorFirstRightDetails: z.string().optional(),
   inspectedCommentsCount: z.number(),
   botRules: z.array(z.string()),
+  collaborationPlaybook: CollaborationPlaybookSchema.optional(),
 });
 export type QualificationResult = z.infer<typeof QualificationResultSchema>;
 

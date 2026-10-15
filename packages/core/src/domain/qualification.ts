@@ -8,6 +8,7 @@
 
 import type { QualificationResult } from "../contracts/schemas.js";
 import type { ApiStatus } from "../discovery/github-client.js";
+import { deriveCollaborationPlaybook } from "./collaboration-playbook.js";
 
 export type { QualificationResult };
 export type QualificationTrack = "fast_track" | "standard_track";
@@ -27,6 +28,15 @@ export const ACTION_BLOCKING_LABELS = [
   "won't fix",
   "won't-fix",
   "stale",
+  // Top modern OSS blocking labels (astral-sh/uv, vllm, fastapi)
+  "needs-decision",
+  "needs decision",
+  "needs-design",
+  "needs design",
+  "design-needed",
+  "rfc",
+  "rfc-needed",
+  "proposal",
 ] as const;
 
 export interface IssueCommentItem {
@@ -150,6 +160,7 @@ function matchesIntentRule(rule: IntentRule, text: string): boolean {
 
 export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   const {
+    issueNumber = 1,
     issueTitle,
     issueBody,
     labels,
@@ -165,7 +176,7 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     timelineApiStatus = "OK",
     customIntentRules,
     customBlockingLabels,
-    now,
+    now = Date.now(),
   } = input;
 
   const linkedPrsList: LinkedPrItem[] = [...(linkedPrs || [])];
@@ -388,6 +399,16 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
       authorFirstRightActive: false,
       inspectedCommentsCount: comments.length,
       botRules,
+      collaborationPlaybook: deriveCollaborationPlaybook({
+        isOpen,
+        hasExistingPr: false,
+        hasClaimant: true,
+        claimantDetails,
+        authorFirstRightActive: false,
+        authorLogin,
+        issueNumber,
+        issueTitle,
+      }),
     };
   }
 
@@ -432,6 +453,16 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     normalizedLabels.some((l) => /\b(?:docs?|documentation|typos?|spelling)\b/i.test(l)) ||
     /\b(?:typos?|documentation|readme)\b/i.test(fullText);
 
+  const collaborationPlaybook = deriveCollaborationPlaybook({
+    isOpen,
+    hasExistingPr: effectiveLinkedPrsCount > 0,
+    hasClaimant: false,
+    authorFirstRightActive,
+    authorLogin,
+    issueNumber,
+    issueTitle,
+  });
+
   return {
     isQualified: !authorFirstRightActive,
     disqualifyReason: authorFirstRightActive
@@ -444,5 +475,6 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     authorFirstRightDetails,
     inspectedCommentsCount: comments.length,
     botRules,
+    collaborationPlaybook,
   };
 }
