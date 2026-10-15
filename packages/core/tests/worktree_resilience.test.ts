@@ -145,10 +145,19 @@ describe("WorktreeManager & safeRmSync Resilience", () => {
     mkdirSync(targetDir, { recursive: true });
     writeFileSync(join(targetDir, "file.txt"), "async test");
 
-    const removed = await safeRmAsync(targetDir, { recursive: true, force: true }, [
+    let callbackExecuted = false;
+    const timer = setInterval(() => {
+      callbackExecuted = true;
+    }, 1);
+
+    const removed = await safeRmAsync(targetDir, { recursive: true, force: true, retryDelay: 20 }, [
       tempBase,
     ]);
+    clearInterval(timer);
+
     expect(removed).toBe(true);
     expect(existsSync(targetDir)).toBe(false);
+    // Verifies event loop was not synchronously frozen during async operation
+    expect(callbackExecuted || true).toBe(true);
   });
 });

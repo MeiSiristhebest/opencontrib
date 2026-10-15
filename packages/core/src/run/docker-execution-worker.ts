@@ -327,7 +327,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         "-v",
         `${cwd}:/source:ro`,
         "-v",
-        `${hostCoverageDir}:/workspace/coverage:rw`,
+        `${hostCoverageDir}:/coverage-sink:rw`,
         "-w",
         "/workspace",
         this.image,
@@ -336,7 +336,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         'mkdir -p /workspace && cp -R -P /source/. /workspace/ && ' +
         'if [ -f /workspace/.git ] || ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then ' +
         '  rm -rf /workspace/.git && git init -q /workspace && (cd /workspace && git config user.name "OpenContrib" && git config user.email "bot@opencontrib.local" && git add -A && git commit -qm "baseline" --allow-empty 2>/dev/null || true); ' +
-        'fi && mkdir -p /workspace/coverage && exec sh -c "$1"',
+        'fi && sh -c "$1"; STATUS=$?; if [ -d /workspace/coverage ]; then cp -R -P /workspace/coverage/. /coverage-sink/ 2>/dev/null || true; fi; exit $STATUS',
         "opencontrib-green-execution",
         executionCommand(job.testCommand, job.workspace.workspacePath),
       ];
@@ -429,7 +429,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       testIdentity: job.redEvidence.testIdentity,
       passedUnitTestsCount: observedCounts.passed,
       failedUnitTestsCount: observedCounts.failed,
-      handleLeakCheckPassed: testsPassed && raceCollisions === 0 ? "PASS" : "FAIL",
+      handleLeakCheckPassed: "UNAVAILABLE",
     };
   }
 }

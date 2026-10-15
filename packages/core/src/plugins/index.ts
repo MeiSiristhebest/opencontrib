@@ -144,6 +144,7 @@ export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
 import { ProbeRegistry } from '../probe/registry.js';
 import { runProbes } from '../probe/runner.js';
 import { extractRepoFingerprint } from '../probe/fingerprint.js';
+import { canExecuteProbe } from '../probe/negotiator.js';
 import type { ProbeDescriptor, PointerStoreApi, RepoFingerprint } from '../kernel/contract.js';
 import type { ProbeManifest, ProbeNegotiationPlan } from '../probe/types.js';
 
@@ -154,6 +155,8 @@ export function createProbeDescriptorFromManifest(manifest: ProbeManifest): Prob
     category: manifest.category,
     description: manifest.description,
     match: (fingerprint: RepoFingerprint) => {
+      if (!canExecuteProbe(manifest)) return false;
+
       const languages = manifest.activation.languages;
       const langMatch =
         languages.includes('*') ||
@@ -239,7 +242,7 @@ export async function createDefaultPluginHost(
     }
   }
 
-  const registry = new ProbeRegistry();
+  const registry = new ProbeRegistry(options.pluginsDir);
   for (const manifest of registry.listAll()) {
     if (!existingIds.has(manifest.name.toLowerCase())) {
       host.register(createProbeDescriptorFromManifest(manifest));

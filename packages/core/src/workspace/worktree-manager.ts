@@ -12,6 +12,7 @@ import {
   writeFileSync,
   type Stats,
 } from "fs";
+import { rm as rmAsync } from "fs/promises";
 import { homedir as osHomedir, tmpdir } from "os";
 import { dirname, join, resolve, sep } from "path";
 import { sanitizeRunId } from "../run/artifact-bundle.js";
@@ -183,13 +184,14 @@ export async function safeRmAsync(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      rmSync(resolved, {
+      await rmAsync(resolved, {
         recursive: opts.recursive ?? true,
         force: opts.force ?? true,
       });
       return true;
     } catch (err: any) {
       lastError = err;
+      if (err?.code === "ENOENT") return true;
       if (attempt < maxRetries) {
         if (
           process.platform === "win32" &&
