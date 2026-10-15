@@ -84,7 +84,7 @@ export function triagePointerFindings(
     // Evaluate significance using ODCR Universal Standards
     const significance = evaluateDefectSignificance({
       title: ptr.title,
-      description: ptr.description,
+      description: ptr.slice?.ruleExplanation || ptr.slice?.codeSnippet || (ptr as any).description || '',
       category: ptr.category,
       communityPhilosophy,
       hasExecutableRepro: false,

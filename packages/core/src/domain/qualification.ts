@@ -262,6 +262,7 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
       hasClaimant: false,
       authorFirstRightActive: false,
       inspectedCommentsCount: comments.length,
+      botRules: [],
     };
   }
 

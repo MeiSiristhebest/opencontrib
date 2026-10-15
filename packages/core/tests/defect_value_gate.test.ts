@@ -173,31 +173,46 @@ describe('Universal Open-Source Defect & Contribution Rubric (ODCR v2.0)', () =>
     it('automatically filters out noisy defensive findings and prioritizes high-value pointers', () => {
       const pointers: PointerStub[] = [
         {
+          id: 'fp-1',
           uri: 'file:///repo/src/private.ts#L10',
+          file: 'src/private.ts',
+          line: 10,
           title: 'Speculative null check just in case in internal helper',
-          description: 'defensively check if argument might be null',
+          slice: {
+            codeSnippet: 'defensively check if argument might be null',
+            ruleExplanation: 'defensively check if argument might be null',
+          },
           severity: 'high',
           category: 'dead_code',
           confidence: 90,
-          fingerprint: 'fp-1',
         },
         {
+          id: 'fp-2',
           uri: 'file:///repo/src/auth.ts#L42',
+          file: 'src/auth.ts',
+          line: 42,
           title: 'SSRF filter bypass via bracketed IPv6 (CWE-918)',
-          description: 'CWE-918: unstripped brackets on IPv6 host allow bypassing loopback blocklist',
+          slice: {
+            codeSnippet: 'CWE-918: unstripped brackets on IPv6 host allow bypassing loopback blocklist',
+            ruleExplanation: 'CWE-918: unstripped brackets on IPv6 host allow bypassing loopback blocklist',
+          },
           severity: 'high',
           category: 'security_cwe',
           confidence: 95,
-          fingerprint: 'fp-2',
         },
         {
+          id: 'fp-3',
           uri: 'file:///repo/src/sync.ts#L88',
+          file: 'src/sync.ts',
+          line: 88,
           title: 'Mutex lock held forever causing deadlock under concurrent error',
-          description: 'Missing defer Unlock causes deadlock and process freeze',
+          slice: {
+            codeSnippet: 'Missing defer Unlock causes deadlock and process freeze',
+            ruleExplanation: 'Missing defer Unlock causes deadlock and process freeze',
+          },
           severity: 'high',
-          category: 'concurrency_race',
+          category: 'lifecycle_leak',
           confidence: 90,
-          fingerprint: 'fp-3',
         },
       ];
 
@@ -208,7 +223,7 @@ describe('Universal Open-Source Defect & Contribution Rubric (ODCR v2.0)', () =>
       });
 
       expect(result.triagedCount).toBe(2);
-      expect(result.topPointers.map((p) => p.fingerprint)).toEqual(['fp-2', 'fp-3']);
+      expect(result.topPointers.map((p) => p.id)).toEqual(['fp-2', 'fp-3']);
       expect(result.topPointers[0].significance?.tier).toBe('tier1_critical');
       expect(result.topPointers[1].significance?.tier).toBe('tier2_concurrency');
     });
