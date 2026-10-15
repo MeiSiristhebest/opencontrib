@@ -423,7 +423,7 @@ export async function scoutOpportunities(
         authorLogin: item.user?.login,
         comments,
         commentsApiStatus: commentsResult.status,
-        existingLinkedPrsCount: openCount,
+        existingLinkedPrsCount: openCount > 0 ? openCount : linkedPrItems.length,
         hasPrLinked: openCount > 0 || linkedPrItems.length > 0,
         linkedPrs: linkedPrItems,
         timelineApiStatus: timelineResult.status,

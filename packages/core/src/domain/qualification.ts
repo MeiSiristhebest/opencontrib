@@ -57,9 +57,9 @@ export interface IntentRule {
  * External callers can extend this set via `qualifyIssue(input, { customRules })`.
  */
 export const DEFAULT_INTENT_RULES: IntentRule[] = [
-  // --- PR Announcement (immediate disqualification) ---
   { category: 'pr_announcement', pattern: /i(?:\s*have|'ve|\s*just)?\s*(?:opened|submitted|created|pushed)\s*(?:a\s*)?(?:pr|pull\s*request)/i, strength: 'strong', description: 'Developer announces opened PR' },
   { category: 'pr_announcement', pattern: /fix(?:es)?\s*(?:in|via|at)\s*(?:pr|#\d+|pull)/i, strength: 'strong', description: 'Developer references fix in PR' },
+  { category: 'pr_announcement', pattern: /(?:here(?:'s| is)|check out|submitted)\s*(?:the\s*)?(?:pr|fix)?:?\s*https?:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/i, strength: 'strong', description: 'Developer links to fix PR' },
 
   // --- Work Claim (30-day activity window) ---
   { category: 'work_claim', pattern: /\b(?:i am working on this|i'm working on this)\b/i, strength: 'strong', description: 'Explicit "working on this"' },
@@ -162,10 +162,16 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     now,
   } = input;
 
-  const linkedPrsList = linkedPrs || [];
+  const linkedPrsList: LinkedPrItem[] = [...(linkedPrs || [])];
+
   const effectiveLinkedPrsCount =
-    existingLinkedPrsCount ??
-    (linkedPrsList.length > 0 ? linkedPrsList.length : hasPrLinked ? 1 : 0);
+    linkedPrsList.length > 0
+      ? linkedPrsList.length
+      : existingLinkedPrsCount !== undefined && existingLinkedPrsCount > 0
+        ? existingLinkedPrsCount
+        : hasPrLinked
+          ? 1
+          : 0;
 
   const normalizedLabels = labels.map((l) =>
     l.toLowerCase().replace(/[-_]+/g, " ").trim(),
