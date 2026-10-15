@@ -53,6 +53,135 @@ describe('Discovery & Qualification Engine', () => {
     expect(res.disqualifyReason).toContain('announced a fix PR in comments');
   });
 
+  it('disqualifies issue if issue body announces an existing PR', () => {
+    const res = qualifyIssue({
+      issueNumber: 1020,
+      issueTitle: 'Memory leak in worker loop',
+      issueBody: 'Worker process leaks 10MB per minute. Fixed in PR #204.',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+    });
+
+    expect(res.isQualified).toBe(false);
+    expect(res.hasExistingPr).toBe(true);
+    expect(res.disqualifyReason).toContain('Issue description already announces or links an existing PR');
+  });
+
+  it('disqualifies issue on Chinese PR announcement and work claims', () => {
+    const resPr = qualifyIssue({
+      issueNumber: 1021,
+      issueTitle: '修复并发死锁',
+      issueBody: '高并发场景下发生死锁。',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [
+        {
+          id: 1,
+          body: '针对这个问题已提 PR #987，请 review',
+          user: { login: 'devZh' },
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+    expect(resPr.isQualified).toBe(false);
+    expect(resPr.hasExistingPr).toBe(true);
+
+    const resClaim = qualifyIssue({
+      issueNumber: 1022,
+      issueTitle: '补充缺失文档',
+      issueBody: '缺少配置说明。',
+      labels: ['documentation'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [
+        {
+          id: 2,
+          body: '我来修复这个问题！',
+          user: { login: 'claimantZh' },
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+    expect(resClaim.isQualified).toBe(false);
+    expect(resClaim.hasClaimant).toBe(true);
+  });
+
+  it('disqualifies issue if hasPrLinked is true or linkedPrs are provided', () => {
+    const resBool = qualifyIssue({
+      issueNumber: 103,
+      issueTitle: 'Crashing on nil config',
+      issueBody: 'Steps to reproduce...',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+      hasPrLinked: true,
+    });
+    expect(resBool.isQualified).toBe(false);
+    expect(resBool.hasExistingPr).toBe(true);
+    expect(resBool.disqualifyReason).toContain('active PR(s) associated');
+
+    const resList = qualifyIssue({
+      issueNumber: 104,
+      issueTitle: 'Deadlock on shutdown',
+      issueBody: 'Steps to reproduce...',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+      linkedPrs: [{ number: 1126, state: 'open', title: 'fix(shutdown): avoid deadlock' }],
+    });
+    expect(resList.isQualified).toBe(false);
+    expect(resList.hasExistingPr).toBe(true);
+    expect(resList.disqualifyReason).toContain('#1126');
+
+    const resMerged = qualifyIssue({
+      issueNumber: 105,
+      issueTitle: 'Stale open issue with merged fix',
+      issueBody: 'Steps to reproduce...',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [],
+      linkedPrs: [{ number: 994, state: 'closed', isMerged: true, title: 'fix: already resolved' }],
+    });
+    expect(resMerged.isQualified).toBe(false);
+    expect(resMerged.hasExistingPr).toBe(true);
+    expect(resMerged.disqualifyReason).toContain('merged/closed PR(s)');
+  });
+
+  it('disqualifies issue when a developer claims fix shape is ready or turnaround promise', () => {
+    const res = qualifyIssue({
+      issueNumber: 1717,
+      issueTitle: 'review hangs on stalled LLM request',
+      issueBody: 'Neither the group budget nor per-request HTTP timeout fires...',
+      labels: ['bug'],
+      isOpen: true,
+      assignees: [],
+      createdAt: new Date().toISOString(),
+      comments: [
+        {
+          id: 1,
+          body: "Either way I have the fix shape ready and can turn it around quickly once the dump picks the branch.",
+          user: { login: 'kittimzhe' },
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+    expect(res.isQualified).toBe(false);
+    expect(res.hasClaimant).toBe(true);
+    expect(res.disqualifyReason).toContain('@kittimzhe');
+  });
+
   it('does NOT disqualify issue for conversational or unrelated PR mentions in comments', () => {
     const res = qualifyIssue({
       issueNumber: 1021,

@@ -8,6 +8,7 @@ import {
   assessFeasibility,
   detectSystemCapabilities,
   diagnoseManifests,
+  GitHubClient,
   qualifyIssue,
   rankOpportunitySignals,
   runDoctorAudit,
@@ -100,6 +101,10 @@ export function registerDiscoveryTools(
     "contrib_qualify_issue",
     "Verify if an issue is safe and qualified for external contribution (checks author-first-right, anti-bandwagoning, and blocking labels)",
     {
+      repo: z
+        .string()
+        .optional()
+        .describe("Target repository owner/repo for authoritative live verification"),
       issueNumber: z.number().describe("GitHub issue number"),
       issueTitle: z.string().describe("GitHub issue title"),
       issueBody: z.string().optional().describe("GitHub issue body"),
@@ -130,7 +135,67 @@ export function registerDiscoveryTools(
         .describe("Recent issue comments for bandwagoning check"),
     },
     wrapHandler(async (args) => {
-      const qualification = qualifyIssue(args as any);
+      let qualification: any;
+
+      if (args.repo) {
+        const parts = args.repo.trim().split("/");
+        if (parts.length === 2) {
+          const [owner, repo] = parts;
+          const client = new GitHubClient();
+          const [issueRes, commentsRes, prsRes] = await Promise.all([
+            client.getIssue(owner, repo, args.issueNumber),
+            client.getIssueComments(owner, repo, args.issueNumber),
+            client.getIssueLinkedPrs(owner, repo, args.issueNumber),
+          ]);
+
+          if (issueRes.status === "OK" && issueRes.data) {
+            const issue = issueRes.data;
+            const comments = (commentsRes.data || []).map((c: any) => ({
+              id: c.id,
+              body: c.body || "",
+              user: { login: c.user?.login },
+              author_association: c.author_association,
+              created_at: c.created_at,
+            }));
+
+            const linkedPrItems =
+              prsRes.status === "OK" && prsRes.data
+                ? [
+                    ...(prsRes.data.open || []).map((n) => ({
+                      number: n,
+                      state: "open",
+                    })),
+                    ...(prsRes.data.closed || []).map((n) => ({
+                      number: n,
+                      state: "closed",
+                      isMerged: true,
+                    })),
+                  ]
+                : [];
+
+            qualification = qualifyIssue({
+              issueNumber: issue.number,
+              issueTitle: issue.title,
+              issueBody: issue.body || "",
+              labels: issue.labels || [],
+              isOpen: issue.state === "open",
+              assignees: issue.assignees || [],
+              createdAt: issue.createdAt || new Date().toISOString(),
+              authorLogin: issue.author,
+              comments,
+              commentsApiStatus: commentsRes.status,
+              existingLinkedPrsCount: prsRes.data?.open?.length ?? 0,
+              hasPrLinked: (prsRes.data?.all?.length ?? 0) > 0,
+              linkedPrs: linkedPrItems,
+              timelineApiStatus: prsRes.status,
+            });
+          }
+        }
+      }
+
+      if (!qualification) {
+        qualification = qualifyIssue(args as any);
+      }
 
       return {
         content: [

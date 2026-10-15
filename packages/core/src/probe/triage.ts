@@ -1,4 +1,8 @@
 import type { DefectCategory, FindingSeverity, PointerStub } from '../kernel/contract.js';
+import {
+  evaluateDefectSignificance,
+  type DefectSignificanceResult,
+} from '../domain/defect-value-gate.js';
 
 export interface TriageWeightsConfig {
   severityWeights?: Partial<Record<FindingSeverity, number>>;
@@ -25,6 +29,7 @@ export const DEFAULT_CATEGORY_MULTIPLIERS: Record<string, number> = {
 export interface TriagedPointerFinding extends PointerStub {
   triageScore: number;
   resolveCommand: string;
+  significance?: DefectSignificanceResult;
 }
 
 export interface TriageOptions {
@@ -32,6 +37,11 @@ export interface TriageOptions {
   minConfidence?: number;
   includeAll?: boolean;
   weights?: TriageWeightsConfig;
+  communityPhilosophy?: 'minimal_core' | 'standard' | 'enterprise';
+  /**
+   * Filter out low-value defensive anti-patterns and Tier 5 hygiene (Default: true)
+   */
+  filterAntiPatterns?: boolean;
 }
 
 /**
@@ -47,7 +57,14 @@ export function triagePointerFindings(
   topPointers: TriagedPointerFinding[];
   summary: string;
 } {
-  const { limit = 5, minConfidence = 80, includeAll = false, weights = {} } = options;
+  const {
+    limit = 5,
+    minConfidence = 80,
+    includeAll = false,
+    weights = {},
+    communityPhilosophy = 'standard',
+    filterAntiPatterns = true,
+  } = options;
 
   const severityWeights: Record<FindingSeverity, number> = {
     ...DEFAULT_SEVERITY_WEIGHTS,
@@ -63,16 +80,35 @@ export function triagePointerFindings(
     const sevWeight = severityWeights[ptr.severity] || 50;
     const catMult = categoryMultipliers[ptr.category] || 1.0;
     const conf = typeof ptr.confidence === 'number' ? ptr.confidence : 80;
-    const triageScore = Math.round(sevWeight * catMult * (conf / 100));
+
+    // Evaluate significance using ODCR Universal Standards
+    const significance = evaluateDefectSignificance({
+      title: ptr.title,
+      description: ptr.slice?.ruleExplanation || ptr.slice?.codeSnippet || (ptr as any).description || '',
+      category: ptr.category,
+      communityPhilosophy,
+      hasExecutableRepro: false,
+    });
+
+    const significanceMultiplier = significance.isAccepted
+      ? 1.0 + (significance.significanceScore / 200) // Up to +50% bonus for Tier 1-3
+      : 0.2; // Massive penalty for anti-patterns and Tier 5
+
+    const triageScore = Math.round(sevWeight * catMult * (conf / 100) * significanceMultiplier);
 
     return {
       ...ptr,
       triageScore,
+      significance,
       resolveCommand: `opencontrib pointer resolve ${ptr.uri} --view slice`,
     };
   });
 
-  const filtered = scored.filter((p) => (p.confidence ?? 80) >= minConfidence);
+  const validPointers = (filterAntiPatterns && !includeAll)
+    ? scored.filter((p) => p.significance?.isAccepted !== false)
+    : scored;
+
+  const filtered = validPointers.filter((p) => (p.confidence ?? 80) >= minConfidence);
   const sorted = filtered.sort((a, b) => b.triageScore - a.triageScore);
   const topPointers = includeAll ? sorted : sorted.slice(0, limit);
 
@@ -80,6 +116,6 @@ export function triagePointerFindings(
     totalCount: pointers.length,
     triagedCount: topPointers.length,
     topPointers,
-    summary: `Triaged ${pointers.length} raw findings to top ${topPointers.length} actionable high-value defect pointers (min confidence: ${minConfidence}%).`,
+    summary: `Triaged ${pointers.length} raw findings to top ${topPointers.length} actionable high-value defect pointers (min confidence: ${minConfidence}%, ODCR anti-pattern filter: ${filterAntiPatterns ? 'active' : 'disabled'}).`,
   };
 }

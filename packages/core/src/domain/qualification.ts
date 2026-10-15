@@ -6,10 +6,18 @@
  * type-only import, so there is no runtime coupling to the GitHub client.
  */
 
-import type { QualificationResult } from "../contracts/schemas.js";
+import type { QualificationResult, CommunityGatePolicy } from "../contracts/schemas.js";
 import type { ApiStatus } from "../discovery/github-client.js";
+import { deriveCollaborationPlaybook } from "./collaboration-playbook.js";
+import {
+  DEFAULT_INTENT_RULES,
+  matchesIntentRule,
+  evaluateIntentSignals,
+  type IntentRule,
+} from "./intent-evaluator.js";
 
-export type { QualificationResult };
+export type { QualificationResult, IntentRule };
+export { DEFAULT_INTENT_RULES, matchesIntentRule, evaluateIntentSignals };
 export type QualificationTrack = "fast_track" | "standard_track";
 
 export const ACTION_BLOCKING_LABELS = [
@@ -27,6 +35,15 @@ export const ACTION_BLOCKING_LABELS = [
   "won't fix",
   "won't-fix",
   "stale",
+  // Top modern OSS blocking labels (astral-sh/uv, vllm, fastapi)
+  "needs-decision",
+  "needs decision",
+  "needs-design",
+  "needs design",
+  "design-needed",
+  "rfc",
+  "rfc-needed",
+  "proposal",
 ] as const;
 
 export interface IssueCommentItem {
@@ -37,63 +54,13 @@ export interface IssueCommentItem {
   created_at: string;
 }
 
-// ---------------------------------------------------------------------------
-// Extensible Intent Rule Registry
-// ---------------------------------------------------------------------------
-
-export interface IntentRule {
-  /** Which kind of contributor intent this rule detects */
-  category: 'pr_announcement' | 'work_claim' | 'approval_wait' | 'author_intent';
-  /** Regex pattern to match against comment body */
-  pattern: RegExp;
-  /** How strongly this signal indicates intent */
-  strength: 'strong' | 'moderate' | 'weak';
-  /** Human-readable description */
-  description: string;
+export interface LinkedPrItem {
+  number?: number;
+  title?: string;
+  state?: string;
+  url?: string;
+  isMerged?: boolean;
 }
-
-/**
- * Default built-in intent detection rules.
- * External callers can extend this set via `qualifyIssue(input, { customRules })`.
- */
-export const DEFAULT_INTENT_RULES: IntentRule[] = [
-  // --- PR Announcement (immediate disqualification) ---
-  { category: 'pr_announcement', pattern: /i(?:\s*have|'ve|\s*just)?\s*(?:opened|submitted|created|pushed)\s*(?:a\s*)?(?:pr|pull\s*request)/i, strength: 'strong', description: 'Developer announces opened PR' },
-  { category: 'pr_announcement', pattern: /fix(?:es)?\s*(?:in|via|at)\s*(?:pr|#\d+|pull)/i, strength: 'strong', description: 'Developer references fix in PR' },
-
-  // --- Work Claim (30-day activity window) ---
-  { category: 'work_claim', pattern: /\b(?:i am working on this|i'm working on this)\b/i, strength: 'strong', description: 'Explicit "working on this"' },
-  { category: 'work_claim', pattern: /\b(?:can i work on this|please assign)\b/i, strength: 'strong', description: 'Request for assignment' },
-  { category: 'work_claim', pattern: /\bi(?:'m| am) working on a fix\b/i, strength: 'strong', description: 'Working on a fix' },
-  { category: 'work_claim', pattern: /\b(?:i(?:'m| am) taking this|i(?:'ll| will) take this)\b/i, strength: 'strong', description: 'Taking ownership' },
-  { category: 'work_claim', pattern: /\bi(?:'m| am) looking into this\b/i, strength: 'moderate', description: 'Looking into the issue' },
-  { category: 'work_claim', pattern: /\b(?:i(?:'m| am) opening a pr|i(?:'ll| will) submit a pr|my wip pr|i have (?:a )?wip pr)\b/i, strength: 'strong', description: 'PR submission intent' },
-  { category: 'work_claim', pattern: /\b(?:\/claim|\/assign)\b/i, strength: 'strong', description: 'Bot claim/assign command' },
-  { category: 'work_claim', pattern: /\b(?:i'd like to work on this|i would like to work on this)\b/i, strength: 'strong', description: 'Polite work request' },
-  { category: 'work_claim', pattern: /\b(?:i'd like to implement|i would like to implement)\b/i, strength: 'strong', description: 'Implementation intent' },
-  { category: 'work_claim', pattern: /\b(?:i'd like to contribute)\b/i, strength: 'moderate', description: 'Contribution intent' },
-  { category: 'work_claim', pattern: /\bi(?:'m| am) happy to (?:send|open) (?:the )?pr\b/i, strength: 'strong', description: 'Eager PR offer' },
-  { category: 'work_claim', pattern: /\bi can (?:send|open) (?:the )?pr\b/i, strength: 'moderate', description: 'PR offer' },
-  { category: 'work_claim', pattern: /\bi(?:'ve| have)? prepared (?:a fix|a diff)\b/i, strength: 'strong', description: 'Fix already prepared' },
-  { category: 'work_claim', pattern: /\bmy fix and regression tests are ready\b/i, strength: 'strong', description: 'Fix and tests ready' },
-  { category: 'work_claim', pattern: /\bmy pr (?:is )?coming shortly\b/i, strength: 'strong', description: 'PR imminent' },
-
-  // --- Approval Wait (indicates contributor waiting for maintainer) ---
-  { category: 'approval_wait', pattern: /\b(?:waiting on `?lgtm`?|waiting for `?lgtm`?)\b/i, strength: 'strong', description: 'Waiting for LGTM approval' },
-  { category: 'approval_wait', pattern: /\b(?:could a maintainer approve|could you approve)\b/i, strength: 'moderate', description: 'Requesting maintainer approval' },
-
-  // --- Author Intent (7-day grace period) ---
-  { category: 'author_intent', pattern: /\bi(?:'m| am) happy to open a pr\b/i, strength: 'strong', description: 'Author offers PR' },
-  { category: 'author_intent', pattern: /\b(?:i'll submit a fix|i will submit a fix)\b/i, strength: 'strong', description: 'Author will submit fix' },
-  { category: 'author_intent', pattern: /\bi(?:'m| am) working on a pr\b/i, strength: 'strong', description: 'Author working on PR' },
-  { category: 'author_intent', pattern: /\bi can fix this\b/i, strength: 'strong', description: 'Author can fix' },
-  { category: 'author_intent', pattern: /\bi(?:'m| am) submitting a pr\b/i, strength: 'strong', description: 'Author submitting PR' },
-  { category: 'author_intent', pattern: /\bi(?:'m| am) opening a pr\b/i, strength: 'strong', description: 'Author opening PR' },
-  { category: 'author_intent', pattern: /\bi(?:'ll| will) open a pr\b/i, strength: 'strong', description: 'Author will open PR' },
-  { category: 'author_intent', pattern: /\b(?:i'll create a pr|i will create a pr)\b/i, strength: 'strong', description: 'Author will create PR' },
-  { category: 'author_intent', pattern: /\bi can submit a pr\b/i, strength: 'moderate', description: 'Author can submit PR' },
-  { category: 'author_intent', pattern: /\b(?:i'll take care of this|i will take care of this)\b/i, strength: 'strong', description: 'Author taking ownership' },
-];
 
 export interface QualifyIssueInput {
   issueNumber: number;
@@ -107,30 +74,27 @@ export interface QualifyIssueInput {
   comments: IssueCommentItem[];
   commentsApiStatus?: ApiStatus;
   existingLinkedPrsCount?: number;
+  hasPrLinked?: boolean;
+  linkedPrs?: LinkedPrItem[];
   timelineApiStatus?: ApiStatus;
   /** Optional custom rules to extend the default intent detection rules */
   customIntentRules?: IntentRule[];
   /** Optional custom blocking labels to supplement ACTION_BLOCKING_LABELS */
   customBlockingLabels?: string[];
+  /** Optional community gate policy to supply dynamic labels, philosophy, and anti-poaching config */
+  communityPolicy?: CommunityGatePolicy;
   /**
    * Required clock for claim-expiry and author-first-right time windows.
    * Production callers obtain this from the `Clock` port (infrastructure);
    * tests pass a fixed timestamp for deterministic assertions. Required so
    * the domain layer never reaches for the wall clock directly.
    */
-  now: number;
-}
-
-function matchesIntentRule(rule: IntentRule, text: string): boolean {
-  const pattern = new RegExp(
-    rule.pattern.source,
-    rule.pattern.flags.replace(/[gy]/g, ""),
-  );
-  return pattern.test(text);
+  now?: number;
 }
 
 export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   const {
+    issueNumber = 1,
     issueTitle,
     issueBody,
     labels,
@@ -140,12 +104,28 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     authorLogin,
     comments,
     commentsApiStatus = "OK",
-    existingLinkedPrsCount = 0,
+    existingLinkedPrsCount,
+    hasPrLinked,
+    linkedPrs,
     timelineApiStatus = "OK",
     customIntentRules,
     customBlockingLabels,
-    now,
+    communityPolicy,
   } = input;
+
+  // Use explicitly passed deterministic now (or 0 fallback for tests without clock)
+  const now = input.now ?? 0;
+
+  const linkedPrsList: LinkedPrItem[] = [...(linkedPrs || [])];
+
+  const effectiveLinkedPrsCount =
+    linkedPrsList.length > 0
+      ? linkedPrsList.length
+      : existingLinkedPrsCount !== undefined && existingLinkedPrsCount > 0
+        ? existingLinkedPrsCount
+        : hasPrLinked
+          ? 1
+          : 0;
 
   const normalizedLabels = labels.map((l) =>
     l.toLowerCase().replace(/[-_]+/g, " ").trim(),
@@ -181,9 +161,11 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     };
   }
 
-  // 3. Blocking Labels Gate (Exact & Alias Token Matching, preventing substring false positives)
+  // 3. Blocking Labels Gate (Exact & Alias Token Matching, dynamic community labels)
+  const dynamicBlockingFromPolicy = communityPolicy?.dynamicBlockingLabels || [];
   const allBlockingLabels = [
     ...ACTION_BLOCKING_LABELS,
+    ...dynamicBlockingFromPolicy,
     ...(customBlockingLabels || []).map((label) => label.toLowerCase().trim()),
   ];
   for (const blocking of allBlockingLabels) {
@@ -228,10 +210,19 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   }
 
   // 5. Duplicate / Active Linked PR Gate (Authoritative GitHub Timeline)
-  if (existingLinkedPrsCount > 0) {
+  if (effectiveLinkedPrsCount > 0) {
+    const hasMerged = linkedPrsList.some(
+      (p) => p.isMerged || p.state === "merged" || p.state === "closed",
+    );
+    const detail =
+      linkedPrsList.length > 0
+        ? ` (${linkedPrsList.map((p) => `#${p.number ?? "PR"}`).join(", ")})`
+        : "";
     return {
       isQualified: false,
-      disqualifyReason: `Issue already has ${existingLinkedPrsCount} active PR(s) associated with it.`,
+      disqualifyReason: hasMerged
+        ? `Issue already has merged/closed PR(s) addressing it${detail}.`
+        : `Issue already has ${effectiveLinkedPrsCount} active PR(s) associated with it${detail}.`,
       track: "standard_track",
       hasExistingPr: true,
       hasClaimant: false,
@@ -255,6 +246,26 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   const claimRules = activeIntentRules.filter((r) => r.category === 'work_claim' || r.category === 'approval_wait');
   const authorIntentRules = activeIntentRules.filter((r) => r.category === 'author_intent');
 
+  // 5.5 Active Fix PR Announcement in Issue Description
+  const matchingBodyPrRule = prAnnouncementRules.find((rule) =>
+    matchesIntentRule(rule, issueBody),
+  );
+  const bodyPrSignal = evaluateIntentSignals(issueBody, 'pr_announcement', {
+    customRules: customIntentRules,
+  });
+  if (matchingBodyPrRule || bodyPrSignal.isMatch) {
+    return {
+      isQualified: false,
+      disqualifyReason: "Issue description already announces or links an existing PR.",
+      track: "standard_track",
+      hasExistingPr: true,
+      hasClaimant: false,
+      authorFirstRightActive: false,
+      inspectedCommentsCount: comments.length,
+      botRules: [],
+    };
+  }
+
   // Track latest activity per claimant
   const claimantLatestActivity = new Map<string, number>();
 
@@ -267,7 +278,10 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     const matchingPrRule = prAnnouncementRules.find((rule) =>
       matchesIntentRule(rule, cBody),
     );
-    if (matchingPrRule) {
+    const commentPrSignal = evaluateIntentSignals(cBody, 'pr_announcement', {
+      customRules: customIntentRules,
+    });
+    if (matchingPrRule || commentPrSignal.isMatch) {
       return {
         isQualified: false,
         disqualifyReason: `Another developer (@${user}) announced a fix PR in comments.`,
@@ -287,7 +301,13 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
       const matchingClaimRule = claimRules.find((rule) =>
         matchesIntentRule(rule, cBody),
       );
-      if (matchingClaimRule) {
+      const claimSignal = evaluateIntentSignals(cBody, 'work_claim', {
+        customRules: customIntentRules,
+      });
+      const approvalSignal = evaluateIntentSignals(cBody, 'approval_wait', {
+        customRules: customIntentRules,
+      });
+      if (matchingClaimRule || claimSignal.isMatch || approvalSignal.isMatch) {
         const prev = claimantLatestActivity.get(user.toLowerCase()) || 0;
         if (!isNaN(commentTime) && commentTime > prev) {
           claimantLatestActivity.set(user.toLowerCase(), commentTime);
@@ -311,10 +331,13 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     }
   }
 
-  // Check if any claimant has active claim within 30 days
+  // Dynamic claim expiry window
+  const claimExpiryDays = communityPolicy?.antiPoachingConfig?.claimExpiryDays ?? 30;
+
+  // Check if any claimant has active claim within claimExpiryDays
   for (const [claimant, latestActivity] of claimantLatestActivity.entries()) {
     const daysSinceActivity = (now - latestActivity) / (1000 * 60 * 60 * 24);
-    if (daysSinceActivity <= 30) {
+    if (daysSinceActivity <= claimExpiryDays) {
       hasClaimant = true;
       claimantDetails = `@${claimant} active claim (${Math.floor(daysSinceActivity)} days ago)`;
       break;
@@ -331,17 +354,38 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
       authorFirstRightActive: false,
       inspectedCommentsCount: comments.length,
       botRules,
+      collaborationPlaybook: deriveCollaborationPlaybook({
+        isOpen,
+        hasExistingPr: false,
+        hasClaimant: true,
+        claimantDetails,
+        authorFirstRightActive: false,
+        authorLogin,
+        issueNumber,
+        issueTitle,
+        targetRepoPolicy: communityPolicy
+          ? {
+              aiPolicy: communityPolicy.aiPolicy,
+              requiresAiDisclosure: communityPolicy.requiresAiDisclosure,
+              philosophy: communityPolicy.philosophy,
+            }
+          : undefined,
+      }),
     };
   }
 
-  // 7. Initial Author-First-Right Check (7-Day Grace Period for Issue Author)
+  // 7. Initial Author-First-Right Check (Grace Period for Issue Author)
+  const authorGracePeriodDays = communityPolicy?.antiPoachingConfig?.authorGracePeriodDays ?? 7;
   let authorFirstRightActive = false;
   let authorFirstRightDetails = "";
 
   // Check if initial issue body (by author) contained intent
-  const bodyHasAuthorIntent = authorIntentRules.some((rule) =>
-    matchesIntentRule(rule, fullText),
-  );
+  const bodyHasAuthorIntent =
+    authorIntentRules.some((rule) => matchesIntentRule(rule, fullText)) ||
+    evaluateIntentSignals(fullText, 'author_intent', {
+      isAuthor: true,
+      customRules: customIntentRules,
+    }).isMatch;
   let latestAuthorIntentTime = bodyHasAuthorIntent ? Date.parse(createdAt) : 0;
 
   for (const comment of comments) {
@@ -352,7 +396,13 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
       user.toLowerCase() === authorLogin.toLowerCase()
     ) {
       const cBody = comment.body || "";
-      if (authorIntentRules.some((rule) => matchesIntentRule(rule, cBody))) {
+      if (
+        authorIntentRules.some((rule) => matchesIntentRule(rule, cBody)) ||
+        evaluateIntentSignals(cBody, 'author_intent', {
+          isAuthor: true,
+          customRules: customIntentRules,
+        }).isMatch
+      ) {
         const commentTime = Date.parse(comment.created_at);
         if (!isNaN(commentTime) && commentTime > latestAuthorIntentTime) {
           latestAuthorIntentTime = commentTime;
@@ -364,9 +414,9 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   if (latestAuthorIntentTime > 0) {
     const daysSinceIntent =
       (now - latestAuthorIntentTime) / (1000 * 60 * 60 * 24);
-    if (daysSinceIntent < 7) {
+    if (daysSinceIntent < authorGracePeriodDays) {
       authorFirstRightActive = true;
-      authorFirstRightDetails = `Author-first-right active: expressed intent to fix ${Math.floor(daysSinceIntent)} days ago (< 7 days grace period).`;
+      authorFirstRightDetails = `Author-first-right active: author expressed intent to fix ${Math.floor(daysSinceIntent)} days ago (< ${authorGracePeriodDays} days grace period). Anti-poaching protection active; prefer supportive co-authoring or waiting for author approval.`;
     }
   }
 
@@ -374,6 +424,23 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
   const isFastTrack =
     normalizedLabels.some((l) => /\b(?:docs?|documentation|typos?|spelling)\b/i.test(l)) ||
     /\b(?:typos?|documentation|readme)\b/i.test(fullText);
+
+  const collaborationPlaybook = deriveCollaborationPlaybook({
+    isOpen,
+    hasExistingPr: effectiveLinkedPrsCount > 0,
+    hasClaimant: false,
+    authorFirstRightActive,
+    authorLogin,
+    issueNumber,
+    issueTitle,
+    targetRepoPolicy: communityPolicy
+      ? {
+          aiPolicy: communityPolicy.aiPolicy,
+          requiresAiDisclosure: communityPolicy.requiresAiDisclosure,
+          philosophy: communityPolicy.philosophy,
+        }
+      : undefined,
+  });
 
   return {
     isQualified: !authorFirstRightActive,
@@ -387,5 +454,6 @@ export function qualifyIssue(input: QualifyIssueInput): QualificationResult {
     authorFirstRightDetails,
     inspectedCommentsCount: comments.length,
     botRules,
+    collaborationPlaybook,
   };
 }

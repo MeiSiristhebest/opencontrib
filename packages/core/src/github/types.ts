@@ -38,6 +38,9 @@ export interface ProviderIssue {
   htmlUrl: string;
   body?: string;
   labels?: string[];
+  assignees?: string[];
+  createdAt?: string;
+  author?: string;
 }
 
 export interface RepoDetails {

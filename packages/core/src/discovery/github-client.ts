@@ -114,8 +114,9 @@ export class GitHubClient {
     repo: string,
     issue_number: number,
     maxPages = 2,
+    knownTotalComments?: number,
   ): Promise<ApiResult<any[]>> {
-    return this.source.getIssueComments(owner, repo, issue_number, maxPages);
+    return this.source.getIssueComments(owner, repo, issue_number, maxPages, knownTotalComments);
   }
 
   getIssue(
@@ -169,6 +170,23 @@ export class GitHubClient {
   /** Fetches real repository metadata. Fail-Safe: never returns fake mock data on error. */
   getRepoDetails(owner: string, repo: string): Promise<ApiResult<RepoDetails>> {
     return this.source.getRepoDetails(owner, repo);
+  }
+
+  /** Discovers unique linked PRs via timeline events and PR search. */
+  getIssueLinkedPrs(
+    owner: string,
+    repo: string,
+    issue_number: number,
+    maxPages = 2,
+    issueTitle?: string,
+  ): Promise<ApiResult<{ open: number[]; closed: number[]; all: number[] }>> {
+    return (this.source as any).getIssueLinkedPrs(
+      owner,
+      repo,
+      issue_number,
+      maxPages,
+      issueTitle,
+    );
   }
 
   /** Checks unique active open linked PRs via timeline events. */

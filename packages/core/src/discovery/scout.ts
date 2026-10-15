@@ -386,8 +386,28 @@ export async function scoutOpportunities(
       }
 
       // Paged comments and timeline with rich ApiStatus
-      const commentsResult = await resolvedClient.getIssueComments(owner, repo, item.number);
-      const timelineResult = await resolvedClient.getIssueLinkedPrsCount(owner, repo, item.number);
+      const commentsResult = await resolvedClient.getIssueComments(
+        owner,
+        repo,
+        item.number,
+        2,
+        typeof item.comments === "number" ? item.comments : undefined,
+      );
+      const prsDetails = (resolvedClient as any).getIssueLinkedPrs
+        ? await (resolvedClient as any).getIssueLinkedPrs(owner, repo, item.number, 3, item.title)
+        : null;
+      const timelineResult = prsDetails ?? (await resolvedClient.getIssueLinkedPrsCount(owner, repo, item.number));
+
+      const openCount = typeof timelineResult.data === 'number'
+        ? timelineResult.data
+        : (timelineResult.data as any).open?.length ?? 0;
+
+      const linkedPrItems = prsDetails && prsDetails.status === 'OK' && typeof prsDetails.data === 'object'
+        ? [
+            ...((prsDetails.data as any).open || []).map((n: number) => ({ number: n, state: 'open' })),
+            ...((prsDetails.data as any).closed || []).map((n: number) => ({ number: n, state: 'closed', isMerged: true })),
+          ]
+        : [];
 
       const comments = commentsResult.data.map((c: any) => ({
         id: c.id,
@@ -409,7 +429,9 @@ export async function scoutOpportunities(
         authorLogin: item.user?.login,
         comments,
         commentsApiStatus: commentsResult.status,
-        existingLinkedPrsCount: timelineResult.data,
+        existingLinkedPrsCount: openCount > 0 ? openCount : linkedPrItems.length,
+        hasPrLinked: openCount > 0 || linkedPrItems.length > 0,
+        linkedPrs: linkedPrItems,
         timelineApiStatus: timelineResult.status,
       });
 

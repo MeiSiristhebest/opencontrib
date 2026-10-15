@@ -184,19 +184,22 @@ export class OctokitIssueSource {
   }
 
   /**
-   * Paged comments retrieval with central retry wrapper and rich error status.
+   * Paged comments retrieval with central retry wrapper, rich error status,
+   * and tail-page retrieval for long threads to ensure recent claims and PRs are inspected.
    */
   async getIssueComments(
     owner: string,
     repo: string,
     issue_number: number,
     maxPages = 2,
+    knownTotalComments?: number,
   ): Promise<ApiResult<any[]>> {
-    const cacheKey = `comments_${owner}_${repo}_${issue_number}_${maxPages}`;
+    const cacheKey = `comments_${owner}_${repo}_${issue_number}_${maxPages}_${knownTotalComments ?? 0}`;
     const cached = this.cache.get<any[]>(cacheKey);
     if (cached) return { status: 'OK', data: cached };
 
     const allComments: any[] = [];
+    const seenIds = new Set<any>();
 
     for (let page = 1; page <= maxPages; page++) {
       const res = await this.request(async () => {
@@ -218,8 +221,37 @@ export class OctokitIssueSource {
         };
       }
 
-      allComments.push(...res.data.data);
+      for (const comment of res.data.data) {
+        if (!seenIds.has(comment.id)) {
+          seenIds.add(comment.id);
+          allComments.push(comment);
+        }
+      }
       if (res.data.data.length < 50) break;
+    }
+
+    // If there are many comments beyond maxPages, fetch the tail page to capture recent claims / PR postings
+    if (knownTotalComments && knownTotalComments > maxPages * 50) {
+      const lastPage = Math.ceil(knownTotalComments / 50);
+      if (lastPage > maxPages) {
+        const tailRes = await this.request(async () => {
+          return await this.octokit.rest.issues.listComments({
+            owner,
+            repo,
+            issue_number,
+            per_page: 50,
+            page: lastPage,
+          });
+        });
+        if (tailRes.status === 'OK' && Array.isArray(tailRes.data?.data)) {
+          for (const comment of tailRes.data.data) {
+            if (!seenIds.has(comment.id)) {
+              seenIds.add(comment.id);
+              allComments.push(comment);
+            }
+          }
+        }
+      }
     }
 
     this.cache.set(cacheKey, allComments);
@@ -244,6 +276,13 @@ export class OctokitIssueSource {
       };
     }
     const issue = res.data.data as any;
+    const assignees = Array.isArray(issue.assignees)
+      ? issue.assignees
+          .map((a: any) => String(a?.login || ''))
+          .filter(Boolean)
+      : issue.assignee?.login
+        ? [String(issue.assignee.login)]
+        : [];
     return {
       status: 'OK',
       data: {
@@ -253,6 +292,9 @@ export class OctokitIssueSource {
         htmlUrl: String(issue.html_url || ''),
         body: String(issue.body ?? ''),
         labels: mapIssueLabels(issue.labels),
+        assignees,
+        createdAt: issue.created_at ? String(issue.created_at) : undefined,
+        author: issue.user?.login ? String(issue.user.login) : undefined,
       },
     };
   }
@@ -444,20 +486,23 @@ export class OctokitIssueSource {
   }
 
   /**
-   * Checks unique active open linked PRs via timeline events.
-   * Uses Set<number> to count unique open PR numbers across timeline events.
+   * Discovers unique linked PR numbers via timeline events and PR search fallback.
+   * Recognizes cross-referenced and connected events as well as active in-flight PRs.
    */
-  async getIssueLinkedPrsCount(
+  async getIssueLinkedPrs(
     owner: string,
     repo: string,
     issue_number: number,
-    maxPages = 2,
-  ): Promise<ApiResult<number>> {
-    const cacheKey = `issue_timeline_${owner}_${repo}_${issue_number}_${maxPages}`;
-    const cached = this.cache.get<number>(cacheKey);
+    maxPages = 3,
+    issueTitle?: string,
+  ): Promise<ApiResult<{ open: number[]; closed: number[]; all: number[] }>> {
+    const titleSlug = issueTitle ? `_${issueTitle.toLowerCase().replace(/[^\w]/g, '').slice(0, 16)}` : '';
+    const cacheKey = `issue_linked_prs_${owner}_${repo}_${issue_number}_${maxPages}${titleSlug}`;
+    const cached = this.cache.get<{ open: number[]; closed: number[]; all: number[] }>(cacheKey);
     if (cached !== null) return { status: 'OK', data: cached };
 
-    const openPrNumbers = new Set<number>();
+    const openPrs = new Set<number>();
+    const closedPrs = new Set<number>();
 
     for (let page = 1; page <= maxPages; page++) {
       const res = await this.request(async () => {
@@ -473,21 +518,32 @@ export class OctokitIssueSource {
       if (res.status !== 'OK' || !res.data) {
         return {
           status: res.status,
-          data: 0,
+          data: { open: [], closed: [], all: [] },
           error: res.error,
           statusCode: res.statusCode,
         };
       }
 
       for (const event of res.data.data) {
-        if (
-          event.event === 'cross-referenced' &&
-          (event as any).source?.issue?.pull_request
-        ) {
-          const prNumber = (event as any).source?.issue?.number;
-          const prState = (event as any).source?.issue?.state;
-          if (prState === 'open' && typeof prNumber === 'number') {
-            openPrNumbers.add(prNumber);
+        // 1. Cross-referenced events
+        const sourceIssue = (event as any).source?.issue;
+        if (sourceIssue && (sourceIssue.pull_request || sourceIssue.html_url?.includes('/pull/'))) {
+          const prNumber = sourceIssue.number;
+          const prState = sourceIssue.state;
+          if (typeof prNumber === 'number') {
+            if (prState === 'open') openPrs.add(prNumber);
+            else closedPrs.add(prNumber);
+          }
+        }
+
+        // 2. Connected events (e.g. linked via UI or GraphQL)
+        const subject = (event as any).subject;
+        if (subject && (subject.pull_request || subject.html_url?.includes('/pull/'))) {
+          const prNumber = subject.number;
+          const prState = subject.state;
+          if (typeof prNumber === 'number') {
+            if (prState === 'open') openPrs.add(prNumber);
+            else closedPrs.add(prNumber);
           }
         }
       }
@@ -495,9 +551,102 @@ export class OctokitIssueSource {
       if (res.data.data.length < 50) break;
     }
 
-    const uniqueOpenCount = openPrNumbers.size;
-    this.cache.set(cacheKey, uniqueOpenCount);
-    return { status: 'OK', data: uniqueOpenCount };
+    // Double-check fallback: check search API for both open and closed PRs referencing this issue
+    if (openPrs.size === 0 && closedPrs.size === 0) {
+      try {
+        const searchRes = await this.request(async () => {
+          return await this.octokit.rest.search.issuesAndPullRequests({
+            q: `repo:${owner}/${repo} is:pr ${issue_number}`,
+            per_page: 5,
+          });
+        }, 1);
+
+        if (searchRes.status === 'OK' && searchRes.data?.data?.items) {
+          const issueNumStr = String(issue_number);
+          for (const item of searchRes.data.data.items) {
+            const text = `${item.title} ${item.body || ''}`;
+            const regex = new RegExp(`(?:#|issues/|pull/)${issueNumStr}\\b`, 'i');
+            if (regex.test(text) && typeof item.number === 'number' && item.number !== issue_number) {
+              if (item.state === 'open') {
+                openPrs.add(item.number);
+              } else {
+                closedPrs.add(item.number);
+              }
+            }
+          }
+        }
+      } catch {
+        // best-effort search fallback, ignore rate limit or indexing errors
+      }
+    }
+
+    // Semantic collision fallback: if still 0 and issueTitle is provided, check distinctive tokens in open PR titles
+    if (openPrs.size === 0 && issueTitle) {
+      try {
+        const stopWords = new Set([
+          'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+          'is', 'are', 'was', 'were', 'be', 'been', 'support', 'add', 'fix',
+          'feat', 'feature', 'bug', 'file', 'extension', 'handling', 'review',
+          'not', 'and', 'or', 'when', 'from',
+        ]);
+        const tokens = issueTitle
+          .toLowerCase()
+          .replace(/[^\w\s]/g, ' ')
+          .split(/\s+/)
+          .filter((t) => t.length >= 4 && !stopWords.has(t));
+
+        for (const rawToken of tokens.slice(0, 2)) {
+          const token = rawToken.trim();
+          if (!token) continue;
+          const tokenRes = await this.request(async () => {
+            return await this.octokit.rest.search.issuesAndPullRequests({
+              q: `repo:${owner}/${repo} is:pr is:open ${token} in:title`,
+              per_page: 5,
+            });
+          }, 1);
+
+          if (tokenRes.status === 'OK' && tokenRes.data?.data?.items) {
+            for (const item of tokenRes.data.data.items) {
+              if (typeof item.number === 'number' && item.number !== issue_number) {
+                openPrs.add(item.number);
+              }
+            }
+          }
+          if (openPrs.size > 0) break;
+        }
+      } catch {
+        // best-effort semantic search fallback
+      }
+    }
+
+    const result = {
+      open: Array.from(openPrs),
+      closed: Array.from(closedPrs),
+      all: Array.from(new Set([...openPrs, ...closedPrs])),
+    };
+    this.cache.set(cacheKey, result);
+    return { status: 'OK', data: result };
+  }
+
+  /**
+   * Checks unique active open linked PRs via timeline events and PR search.
+   */
+  async getIssueLinkedPrsCount(
+    owner: string,
+    repo: string,
+    issue_number: number,
+    maxPages = 2,
+  ): Promise<ApiResult<number>> {
+    const res = await this.getIssueLinkedPrs(owner, repo, issue_number, maxPages);
+    if (res.status !== 'OK') {
+      return {
+        status: res.status,
+        data: 0,
+        error: res.error,
+        statusCode: res.statusCode,
+      };
+    }
+    return { status: 'OK', data: res.data.open.length };
   }
 
   /**
@@ -508,10 +657,10 @@ export class OctokitIssueSource {
     repo: string,
     issue_number: number,
   ): Promise<ApiResult<boolean>> {
-    const res = await this.getIssueLinkedPrsCount(owner, repo, issue_number);
+    const res = await this.getIssueLinkedPrs(owner, repo, issue_number);
     return {
       status: res.status,
-      data: res.data > 0,
+      data: res.data.open.length > 0,
       error: res.error,
       statusCode: res.statusCode,
     };

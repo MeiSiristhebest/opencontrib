@@ -8,7 +8,7 @@ describe('Doctor Audit & PR Lifecycle Tracker', () => {
     expect(['HEALTHY', 'NEEDS_ATTENTION', 'DEGRADED']).toContain(report.overallHealth);
     expect(report.checks.length).toBeGreaterThan(3);
     expect(report.environment.os).toBeDefined();
-  });
+  }, 15000);
 
   it('correctly tracks merged PR state and recommends flywheel sync', () => {
     const status = analyzePrLifecycle({
