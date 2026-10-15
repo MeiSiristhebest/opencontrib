@@ -459,11 +459,31 @@ export class WorktreeManager {
       }
       if (!existsSync(cachedRepoPath)) {
         const cloneUrl = `https://github.com/${repoFullName}.git`;
-        const cloneResult = this.runGit(
-          ["clone", "--bare", "--depth", "1", cloneUrl, cachedRepoPath],
+        let cloneResult = this.runGit(
+          ["clone", "--bare", "--filter=blob:none", cloneUrl, cachedRepoPath],
           undefined,
           GIT_NETWORK_TIMEOUT_MS,
         );
+        if (!cloneResult.success) {
+          if (existsSync(cachedRepoPath)) {
+            safeRmSync(cachedRepoPath, { recursive: true, force: true });
+          }
+          cloneResult = this.runGit(
+            ["clone", "--bare", "--depth", "50", cloneUrl, cachedRepoPath],
+            undefined,
+            GIT_NETWORK_TIMEOUT_MS,
+          );
+        }
+        if (!cloneResult.success) {
+          if (existsSync(cachedRepoPath)) {
+            safeRmSync(cachedRepoPath, { recursive: true, force: true });
+          }
+          cloneResult = this.runGit(
+            ["clone", "--bare", "--depth", "1", cloneUrl, cachedRepoPath],
+            undefined,
+            GIT_NETWORK_TIMEOUT_MS,
+          );
+        }
         if (!cloneResult.success) {
           if (existsSync(cachedRepoPath)) {
             safeRmSync(cachedRepoPath, { recursive: true, force: true });
@@ -580,11 +600,10 @@ export class WorktreeManager {
         });
       }
       const cloneUrl = `https://github.com/${repoFullName}.git`;
-      const cloneRes = this.runGit(
+      let cloneRes = this.runGit(
         [
           "clone",
-          "--depth",
-          "1",
+          "--filter=blob:none",
           "-b",
           defaultBranch,
           cloneUrl,
@@ -593,6 +612,52 @@ export class WorktreeManager {
         undefined,
         GIT_NETWORK_TIMEOUT_MS,
       );
+      if (!cloneRes.success) {
+        if (existsSync(workspacePath)) {
+          safeRmSync(workspacePath, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: 200,
+          });
+        }
+        cloneRes = this.runGit(
+          [
+            "clone",
+            "--depth",
+            "50",
+            "-b",
+            defaultBranch,
+            cloneUrl,
+            workspacePath,
+          ],
+          undefined,
+          GIT_NETWORK_TIMEOUT_MS,
+        );
+      }
+      if (!cloneRes.success) {
+        if (existsSync(workspacePath)) {
+          safeRmSync(workspacePath, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: 200,
+          });
+        }
+        cloneRes = this.runGit(
+          [
+            "clone",
+            "--depth",
+            "1",
+            "-b",
+            defaultBranch,
+            cloneUrl,
+            workspacePath,
+          ],
+          undefined,
+          GIT_NETWORK_TIMEOUT_MS,
+        );
+      }
       if (cloneRes.success) {
         const fallbackBaseCommitSha = this.resolveUpstreamBase(
           workspacePath,

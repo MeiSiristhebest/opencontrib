@@ -141,6 +141,73 @@ export const STANDARD_CAPABILITIES: CapabilityProviderDescriptor[] = [
   },
 ];
 
+import { ProbeRegistry } from '../probe/registry.js';
+import { runProbes } from '../probe/runner.js';
+import { extractRepoFingerprint } from '../probe/fingerprint.js';
+import type { ProbeDescriptor, PointerStoreApi, RepoFingerprint } from '../kernel/contract.js';
+import type { ProbeManifest, ProbeNegotiationPlan } from '../probe/types.js';
+
+export function createProbeDescriptorFromManifest(manifest: ProbeManifest): ProbeDescriptor {
+  return {
+    id: manifest.name,
+    name: manifest.description || manifest.name,
+    category: manifest.category,
+    description: manifest.description,
+    match: (fingerprint: RepoFingerprint) => {
+      const languages = manifest.activation.languages;
+      const langMatch =
+        languages.includes('*') ||
+        languages.some((ml) => ml.toLowerCase() === fingerprint.primaryLanguage.toLowerCase()) ||
+        fingerprint.languages.some((l) => languages.some((ml) => ml.toLowerCase() === l.language.toLowerCase()));
+      if (!langMatch) return false;
+
+      if (manifest.activation.manifestFiles && manifest.activation.manifestFiles.length > 0) {
+        const hasManifest = manifest.activation.manifestFiles.some((mf) =>
+          fingerprint.manifests.includes(mf),
+        );
+        if (!hasManifest) return false;
+      }
+
+      return true;
+    },
+    scan: async (targetPath: string, pointers: PointerStoreApi) => {
+      const fp = await extractRepoFingerprint(targetPath);
+      const plan: ProbeNegotiationPlan = {
+        target: targetPath,
+        fingerprint: fp,
+        selectedProbes: [manifest],
+        skippedProbes: [],
+        estimatedDurationMs: manifest.execution.timeoutMs || 30000,
+      };
+      const runResult = await runProbes(plan, { timeoutMs: manifest.execution.timeoutMs });
+      for (const finding of runResult.findings) {
+        pointers.create({
+          namespace: 'findings',
+          id: finding.id || `probe-${manifest.name}-${finding.file}-${finding.line}`,
+          title: finding.title,
+          category: finding.category,
+          severity: finding.severity,
+          file: finding.file,
+          line: finding.line,
+          confidence: finding.prPotentialScore || 85,
+          affectedSymbol: finding.affectedSymbol,
+          callSite: finding.callSite,
+          dataFlow: finding.dataFlow,
+          slice: {
+            codeSnippet: finding.description,
+            ruleExplanation: `${finding.title} (${finding.cwe || finding.ruleId || manifest.name})`,
+            remediationSuggestion: finding.remediation,
+          },
+          evidence: {
+            pocCode: finding.pocSnippet,
+            rawPayload: finding as any,
+          },
+        });
+      }
+    },
+  };
+}
+
 /**
  * Creates and initializes a PluginHost with standard capabilities filtered by workspace configuration
  */
@@ -157,6 +224,25 @@ export async function createDefaultPluginHost(
       await host.registerPlugin(plugin);
     } catch (err: any) {
       console.error(`[createDefaultPluginHost] Plugin "${plugin.name}" failed to activate, skipping:`, err.message);
+    }
+  }
+
+  // Register remaining probes from canonical ProbeRegistry (Single Source of Truth)
+  const existingProbes = host.listAll();
+  const existingIds = new Set<string>();
+  for (const p of existingProbes) {
+    existingIds.add(p.id.toLowerCase());
+    if (p.aliases) {
+      for (const a of p.aliases) {
+        existingIds.add(a.toLowerCase());
+      }
+    }
+  }
+
+  const registry = new ProbeRegistry();
+  for (const manifest of registry.listAll()) {
+    if (!existingIds.has(manifest.name.toLowerCase())) {
+      host.register(createProbeDescriptorFromManifest(manifest));
     }
   }
 

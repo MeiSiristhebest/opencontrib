@@ -189,3 +189,52 @@ ${serializeSubRule(rule.rule, 1)}
 ${fixLine}
 `;
 }
+
+import { DEFECT_TAXONOMY_CATALOG, type DefectTaxonomyPattern } from '../catalog/defect-taxonomy.js';
+
+export function taxonomyPatternToYamlRule(pattern: DefectTaxonomyPattern): ASTGrepYamlRule | null {
+  if (pattern.language === 'polyglot') {
+    return null;
+  }
+  const lang = pattern.language as ASTGrepYamlRule['language'];
+  return {
+    id: pattern.id,
+    language: lang,
+    severity: pattern.severity,
+    message: pattern.description || pattern.name,
+    rule: {
+      pattern: pattern.rule.pattern,
+      inside: pattern.rule.inside ? { pattern: pattern.rule.inside.pattern, kind: pattern.rule.inside.kind } : undefined,
+      not: pattern.rule.not ? {
+        pattern: pattern.rule.not.pattern,
+        inside: pattern.rule.not.inside ? { pattern: pattern.rule.not.inside.pattern } : undefined,
+      } : undefined,
+    },
+    fix: pattern.fixTemplate,
+    metadata: {
+      cwe: pattern.cwe,
+      category: pattern.domain.toLowerCase(),
+      impact: pattern.impact,
+    },
+  };
+}
+
+export function getAllAstGrepRules(): ASTGrepYamlRule[] {
+  const rulesMap = new Map<string, ASTGrepYamlRule>();
+
+  for (const r of STANDARD_AST_RELATIONAL_RULES) {
+    rulesMap.set(r.id, r);
+  }
+
+  for (const pattern of DEFECT_TAXONOMY_CATALOG) {
+    if (!rulesMap.has(pattern.id)) {
+      const converted = taxonomyPatternToYamlRule(pattern);
+      if (converted) {
+        rulesMap.set(converted.id, converted);
+      }
+    }
+  }
+
+  return Array.from(rulesMap.values());
+}
+

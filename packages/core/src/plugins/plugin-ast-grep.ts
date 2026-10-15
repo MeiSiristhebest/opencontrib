@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { OpenContribPlugin, PluginContext } from '../kernel/contract.js';
 import { getToolTimeout } from '../kernel/config.js';
-import { STANDARD_AST_RELATIONAL_RULES, serializeRuleToYaml } from '../probe/adapters/ast-grep-rules.js';
+import { getAllAstGrepRules, serializeRuleToYaml } from '../probe/adapters/ast-grep-rules.js';
 
 export interface ASTGrepMatch {
   text: string;
@@ -145,7 +145,7 @@ export const astGrepPlugin: OpenContribPlugin = {
         }
 
         // 2. Deep Relational Rules Execution — filter by languages actually present in the repo
-        for (const rule of STANDARD_AST_RELATIONAL_RULES.filter((r) => repoLanguages.includes(r.language))) {
+        for (const rule of getAllAstGrepRules().filter((r) => repoLanguages.includes(r.language))) {
           try {
             const ruleDef = rule.rule;
             const needsYaml = ruleDef.kind || ruleDef.inside || ruleDef.has || ruleDef.not || ruleDef.any || ruleDef.all;
