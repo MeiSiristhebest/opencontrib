@@ -71,7 +71,12 @@ export interface DualStageReproductionResult {
   completedRuns: number;
 }
 
-export function getProcessHandleCount(): number | null {
+/**
+ * Samples the open OS handle / file descriptor count for a given process PID.
+ * Defaults to the current runner process if no target PID is supplied.
+ */
+export function getProcessHandleCount(targetPid?: number): number | null {
+  const pid = targetPid ?? process.pid;
   try {
     if (process.platform === "win32") {
       const res = defaultSandboxRuntime.executeInSandbox({
@@ -80,7 +85,7 @@ export function getProcessHandleCount(): number | null {
         args: [
           "-NoProfile",
           "-Command",
-          `(Get-Process -Id ${process.pid}).HandleCount`,
+          `(Get-Process -Id ${pid}).HandleCount`,
         ],
         timeoutMs: 4000,
         allowHostFallback: true,
@@ -91,7 +96,7 @@ export function getProcessHandleCount(): number | null {
       const res = defaultSandboxRuntime.executeInSandbox({
         cwd: process.cwd(),
         command: "lsof",
-        args: ["-p", process.pid.toString()],
+        args: ["-p", pid.toString()],
         timeoutMs: 4000,
         allowHostFallback: true,
       });

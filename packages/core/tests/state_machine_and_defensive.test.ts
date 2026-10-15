@@ -480,6 +480,23 @@ describe("Resilient Sandbox Runner & Targeted Package Resolver", () => {
     expect(parsed.args).toEqual(["-e", source]);
   });
 
+  it("preserves native Windows path separators without backslash swallowing", () => {
+    const raw = 'pytest C:\\Users\\Alice\\project\\tests\\test_foo.py --verbose';
+    const parsed = parseCommandSpec(raw);
+    expect(parsed.executable).toBe("pytest");
+    expect(parsed.args).toEqual(["C:\\Users\\Alice\\project\\tests\\test_foo.py", "--verbose"]);
+
+    const quoted = 'python "C:\\Users\\Bob\\app\\main.py"';
+    const parsedQuoted = parseCommandSpec(quoted);
+    expect(parsedQuoted.executable).toBe("python");
+    expect(parsedQuoted.args).toEqual(["C:\\Users\\Bob\\app\\main.py"]);
+
+    const escapedSpace = 'ls my\\ folder/file.txt';
+    const parsedEscaped = parseCommandSpec(escapedSpace);
+    expect(parsedEscaped.executable).toBe("ls");
+    expect(parsedEscaped.args).toEqual(["my folder/file.txt"]);
+  });
+
   it("resolves smallest directory target from modified files", () => {
     const target = resolveTargetedTestPackage([
       "internal/diff/parser.go",

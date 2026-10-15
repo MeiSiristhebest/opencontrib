@@ -163,8 +163,10 @@ export const astGrepPlugin: OpenContribPlugin = {
               stdout = execResult.stdout;
               fs.unlinkSync(yamlPath);
             } else {
+              if (!ruleDef.pattern) continue;
               const langFlag = LANG_FLAG[rule.language] || rule.language;
-              const cmd = `${bin} run -p "${ruleDef.pattern}" --lang ${langFlag} --json=compact`;
+              const escapedPattern = ruleDef.pattern.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+              const cmd = `${bin} run -p "${escapedPattern}" --lang ${langFlag} --json=compact`;
               const execResult = await host.exec(cmd, {
                 cwd: targetPath,
                 timeout: getToolTimeout('AST_GREP'),

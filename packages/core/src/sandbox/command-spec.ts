@@ -36,7 +36,40 @@ export function parseCommandSpec(rawCommand: string, options: Partial<CommandSpe
     }
 
     if (char === '\\') {
-      isEscaped = true;
+      const nextChar = i + 1 < trimmed.length ? trimmed[i + 1] : undefined;
+
+      // In single quotes, backslash is always literal
+      if (inSingleQuote) {
+        currentToken += char;
+        continue;
+      }
+
+      // In double quotes, backslash only escapes quotes ("), backslashes (\), dollars ($), or backticks (`)
+      if (inDoubleQuote) {
+        if (nextChar === '"' || nextChar === '\\' || nextChar === '$' || nextChar === '`') {
+          isEscaped = true;
+          continue;
+        }
+        currentToken += char;
+        continue;
+      }
+
+      // Outside quotes:
+      // An escape is only intended if followed by a quote (", '), backslash (\), or whitespace (' ', '\t').
+      // When followed by path characters or letters (e.g. C:\Users\repo\test.ts or \foo\bar),
+      // the backslash is a path separator and must NOT be swallowed!
+      if (
+        nextChar === '"' ||
+        nextChar === "'" ||
+        nextChar === '\\' ||
+        nextChar === ' ' ||
+        nextChar === '\t'
+      ) {
+        isEscaped = true;
+        continue;
+      }
+
+      currentToken += char;
       continue;
     }
 

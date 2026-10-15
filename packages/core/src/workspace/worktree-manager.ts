@@ -40,16 +40,10 @@ function tryClearWindowsReadOnly(targetPath: string): void {
   } catch {}
 }
 
-export function safeRmSync(
+function verifyDeletionAllowed(
   targetPath: string,
-  opts: {
-    recursive?: boolean;
-    force?: boolean;
-    maxRetries?: number;
-    retryDelay?: number;
-  } = {},
   allowedParents?: string[],
-): boolean {
+): { allowed: boolean; resolved: string } {
   const resolved = norm(resolve(targetPath));
   const homedirPath = norm(resolve(osHomedir()));
   const tempDir = norm(resolve(tmpdir()));
@@ -82,7 +76,7 @@ export function safeRmSync(
     );
     console.error(`  Allowed: ${defaultAllowed.join(", ")}`);
     console.error(`  Target:  ${resolved}`);
-    return false;
+    return { allowed: false, resolved };
   }
 
   // Never delete root directories themselves (only their children)
@@ -97,7 +91,7 @@ export function safeRmSync(
     console.error(
       `[SAFE_RMSNRC] BLOCKED: Refusing to delete root directory '${targetPath}'`,
     );
-    return false;
+    return { allowed: false, resolved };
   }
 
   // Never delete a protected workspace (guardfile enforcement)
@@ -105,8 +99,25 @@ export function safeRmSync(
     console.error(
       `[SAFE_RMSNRC] BLOCKED: '${targetPath}' contains .opencontrib-guard, refusing to delete protected workspace`,
     );
-    return false;
+    return { allowed: false, resolved };
   }
+
+  return { allowed: true, resolved };
+}
+
+export function safeRmSync(
+  targetPath: string,
+  opts: {
+    recursive?: boolean;
+    force?: boolean;
+    maxRetries?: number;
+    retryDelay?: number;
+  } = {},
+  allowedParents?: string[],
+): boolean {
+  const check = verifyDeletionAllowed(targetPath, allowedParents);
+  if (!check.allowed) return false;
+  const resolved = check.resolved;
 
   const maxRetries = opts.maxRetries ?? (process.platform === "win32" ? 5 : 2);
   const retryDelay = opts.retryDelay ?? 150;
@@ -128,10 +139,14 @@ export function safeRmSync(
         ) {
           tryClearWindowsReadOnly(resolved);
         }
-        const start = Date.now();
         const waitMs = retryDelay * (attempt + 1);
-        while (Date.now() - start < waitMs) {
-          // busy wait short backoff
+        try {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+        } catch {
+          const start = Date.now();
+          while (Date.now() - start < waitMs) {
+            // fallback busy wait if SharedArrayBuffer not permitted
+          }
         }
       }
     }
@@ -139,6 +154,56 @@ export function safeRmSync(
 
   console.error(
     `[SAFE_RMSNRC] FAILED: rmSync('${targetPath}'): ${lastError?.message || "unknown error"}`,
+  );
+  return false;
+}
+
+/**
+ * Asynchronous, non-blocking variant of safeRmSync.
+ * Uses native async timer backoff to release the event loop during file lock retries.
+ */
+export async function safeRmAsync(
+  targetPath: string,
+  opts: {
+    recursive?: boolean;
+    force?: boolean;
+    maxRetries?: number;
+    retryDelay?: number;
+  } = {},
+  allowedParents?: string[],
+): Promise<boolean> {
+  const check = verifyDeletionAllowed(targetPath, allowedParents);
+  if (!check.allowed) return false;
+  const resolved = check.resolved;
+
+  const maxRetries = opts.maxRetries ?? (process.platform === "win32" ? 5 : 2);
+  const retryDelay = opts.retryDelay ?? 150;
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      rmSync(resolved, {
+        recursive: opts.recursive ?? true,
+        force: opts.force ?? true,
+      });
+      return true;
+    } catch (err: any) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        if (
+          process.platform === "win32" &&
+          (err.code === "EPERM" || err.code === "EACCES")
+        ) {
+          tryClearWindowsReadOnly(resolved);
+        }
+        const waitMs = retryDelay * (attempt + 1);
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+    }
+  }
+
+  console.error(
+    `[SAFE_RMASYNC] FAILED: rmSync('${targetPath}'): ${lastError?.message || "unknown error"}`,
   );
   return false;
 }

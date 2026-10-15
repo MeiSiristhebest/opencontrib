@@ -7,7 +7,7 @@ import { mkdtempSync, existsSync, lstatSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { parseCommandSpec, type CommandSpec } from "./command-spec.js";
-import { safeRmSync } from "../workspace/worktree-manager.js";
+import { safeRmSync, safeRmAsync } from "../workspace/worktree-manager.js";
 import { sensitiveDeniedPaths } from "./denied-paths.js";
 
 export interface SandboxExecutionOptions {
@@ -403,11 +403,9 @@ export class SanitizedLocalSandboxProvider implements SandboxProvider {
           existsSync(sandboxTempDir) &&
           sandboxTempDir.includes("opencontrib-sandbox-")
         ) {
-          try {
-            safeRmSync(sandboxTempDir, { recursive: true, force: true });
-          } catch {
+          void safeRmAsync(sandboxTempDir, { recursive: true, force: true }).catch(() => {
             // temp cleanup fallback
-          }
+          });
         }
         const exitCode = timedOut ? 124 : (code ?? 0);
         const combined = `${stdout}\n${stderr}`.trim();

@@ -79,6 +79,163 @@ export class IstanbulSummaryCoverageAdapter implements TestCoverageAdapter {
   }
 }
 
+/**
+ * Precomputes line numbers that are independently verifiable as non-executable
+ * (comments, blank lines, multi-line interface/type declarations, pure punctuation).
+ */
+export function computeNonExecutableLines(lines: string[]): Set<number> {
+  const nonExec = new Set<number>();
+  let inBlockComment = false;
+  let inTypeBlock = false;
+  let typeBlockBraceDepth = 0;
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const lineNum = idx + 1;
+    const raw = lines[idx];
+    const line = raw.trim();
+
+    if (line === "") {
+      nonExec.add(lineNum);
+      continue;
+    }
+
+    if (inBlockComment) {
+      nonExec.add(lineNum);
+      if (line.includes("*/")) {
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (line.startsWith("/*")) {
+      nonExec.add(lineNum);
+      if (!line.includes("*/")) {
+        inBlockComment = true;
+      }
+      continue;
+    }
+
+    if (
+      line.startsWith("//") ||
+      line.startsWith("#") ||
+      line.startsWith("--") ||
+      line.startsWith("<!--") ||
+      line.endsWith("-->")
+    ) {
+      nonExec.add(lineNum);
+      continue;
+    }
+
+    if (inTypeBlock) {
+      nonExec.add(lineNum);
+      for (const char of line) {
+        if (char === "{") typeBlockBraceDepth++;
+        if (char === "}") {
+          typeBlockBraceDepth--;
+          if (typeBlockBraceDepth <= 0) {
+            inTypeBlock = false;
+            break;
+          }
+        }
+      }
+      continue;
+    }
+
+    if (/^(?:export\s+)?(?:interface|type)\s+/.test(line)) {
+      nonExec.add(lineNum);
+      if (line.includes("{")) {
+        typeBlockBraceDepth = 0;
+        for (const char of line) {
+          if (char === "{") typeBlockBraceDepth++;
+          if (char === "}") typeBlockBraceDepth--;
+        }
+        if (typeBlockBraceDepth > 0) {
+          inTypeBlock = true;
+        }
+      }
+      continue;
+    }
+
+    if (/^[{}()[\];,]+$/.test(line)) {
+      nonExec.add(lineNum);
+      continue;
+    }
+
+    if (
+      line.startsWith("import type ") ||
+      line.startsWith("export type ") ||
+      line.startsWith("declare ") ||
+      line === '"""' ||
+      line === "'''" ||
+      line === "pass" ||
+      line === "..."
+    ) {
+      nonExec.add(lineNum);
+      continue;
+    }
+  }
+
+  return nonExec;
+}
+
+/**
+ * Detect lines that are independently known to be non-executable tokens or comments
+ * across common programming languages (JS/TS, Python, Go, Rust, C/C++, Java).
+ *
+ * LCOV and statement coverage probes (Istanbul, V8, llvm-cov, coverage.py) do NOT
+ * emit `DA:<line>,<hits>` records for comments, blank lines, type declarations, or
+ * standalone structural brackets/delimiters. Excluding these lines from being treated
+ * as "omitted executable lines" prevents false-negative UNAVAILABLE verdicts.
+ */
+export function isIndependentlyNonExecutableSourceLine(rawLine: string): boolean {
+  const line = rawLine.trim();
+  if (line === "") return true;
+
+  // Single-line and multi-line comment delimiters (JS/TS, Go, Rust, C/C++, Java, Python, Shell, SQL, Lua)
+  if (
+    line.startsWith("//") ||
+    line.startsWith("#") ||
+    line.startsWith("/*") ||
+    line.startsWith("*") ||
+    line.endsWith("*/") ||
+    line.startsWith("--") ||
+    line.startsWith("<!--") ||
+    line.endsWith("-->")
+  ) {
+    return true;
+  }
+
+  // Pure delimiters / structural brackets / semicolons / commas (e.g. `}`, `};`, `]`, `);`, `{`)
+  if (/^[{}()[\];,]+$/.test(line)) {
+    return true;
+  }
+
+  // TypeScript / Flow compile-time type-only annotations erased at runtime
+  if (
+    line.startsWith("import type ") ||
+    line.startsWith("export type ") ||
+    line.startsWith("type ") ||
+    line.startsWith("interface ") ||
+    line.startsWith("declare ") ||
+    /^export\s+interface\s+/.test(line)
+  ) {
+    return true;
+  }
+
+  // Python docstrings or placeholders
+  if (
+    line === '"""' ||
+    line === "'''" ||
+    (line.startsWith('"""') && line.endsWith('"""') && line.length > 3) ||
+    line === "pass" ||
+    line === "..."
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 /** LCOV executable line hits intersected with the actual base-to-workspace diff. */
 export class LcovChangedLineCoverageAdapter implements TestCoverageAdapter {
   readonly name = "lcov-changed-lines";
@@ -173,11 +330,13 @@ export class LcovChangedLineCoverageAdapter implements TestCoverageAdapter {
         const hits = sourceFiles.get(file);
         if (!hits) return undefined;
         const lines = readFileSync(containedPath(cwd, file)!, "utf8").split(/\r?\n/);
+        const nonExecLines = computeNonExecutableLines(lines);
         for (const number of numbers) {
           if (!hits.has(number)) {
-            // A report cannot establish that omitted source is non-executable.
-            // Only blank lines are independently known to have no code here.
-            if (lines[number - 1]?.trim() === "") continue;
+            // A report cannot establish that omitted source is non-executable unless
+            // the source line is independently verifiable as non-executable (e.g. comments,
+            // blank lines, type declarations, structural brackets).
+            if (nonExecLines.has(number) || isIndependentlyNonExecutableSourceLine(lines[number - 1] ?? "")) continue;
             return undefined;
           }
           total++;

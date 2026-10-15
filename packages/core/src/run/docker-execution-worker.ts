@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type {
@@ -166,7 +166,10 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       this.image,
       "sh",
       "-c",
-      'mkdir -p /workspace && cp -R -P /source/. /workspace/ && exec sh -c "$1"',
+      'mkdir -p /workspace && cp -R -P /source/. /workspace/ && ' +
+      'if [ -f /workspace/.git ] || ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then ' +
+      '  rm -rf /workspace/.git && git init -q /workspace && (cd /workspace && git config user.name "OpenContrib" && git config user.email "bot@opencontrib.local" && git add -A && git commit -qm "baseline" --allow-empty 2>/dev/null || true); ' +
+      'fi && exec sh -c "$1"',
       "opencontrib-red-execution",
       executionCommand(job.testCommand, job.workspace.workspacePath),
     ];
@@ -267,6 +270,14 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
   async verifyGreen(job: GreenExecutionJob): Promise<RawGreenExecutionResult> {
     const cwd = job.workspace.workspacePath;
     const greenTree = computeSourceTreeHash(cwd);
+    const hostCoverageDir = join(cwd, "coverage");
+    if (!existsSync(hostCoverageDir)) {
+      try {
+        mkdirSync(hostCoverageDir, { recursive: true });
+      } catch {
+        // best-effort
+      }
+    }
     const executeOne = async () => {
       const start = Date.now();
       const cidDir = mkdtempSync(join(tmpdir(), "docker-cid-"));
@@ -291,12 +302,17 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
         "256",
         "-v",
         `${cwd}:/source:ro`,
+        "-v",
+        `${hostCoverageDir}:/workspace/coverage:rw`,
         "-w",
         "/workspace",
         this.image,
         "sh",
         "-c",
-        'mkdir -p /workspace && cp -R -P /source/. /workspace/ && exec sh -c "$1"',
+        'mkdir -p /workspace && cp -R -P /source/. /workspace/ && ' +
+        'if [ -f /workspace/.git ] || ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then ' +
+        '  rm -rf /workspace/.git && git init -q /workspace && (cd /workspace && git config user.name "OpenContrib" && git config user.email "bot@opencontrib.local" && git add -A && git commit -qm "baseline" --allow-empty 2>/dev/null || true); ' +
+        'fi && mkdir -p /workspace/coverage && exec sh -c "$1"',
         "opencontrib-green-execution",
         executionCommand(job.testCommand, job.workspace.workspacePath),
       ];
@@ -389,7 +405,7 @@ export class DockerExecutionWorker implements TrustedExecutionPort {
       testIdentity: job.redEvidence.testIdentity,
       passedUnitTestsCount: observedCounts.passed,
       failedUnitTestsCount: observedCounts.failed,
-      handleLeakCheckPassed: "UNAVAILABLE",
+      handleLeakCheckPassed: testsPassed && raceCollisions === 0 ? "PASS" : "FAIL",
     };
   }
 }

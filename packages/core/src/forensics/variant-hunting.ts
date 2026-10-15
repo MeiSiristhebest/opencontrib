@@ -52,7 +52,8 @@ export class VariantHunter {
           : 'ts';
 
         const pattern = `${finding.affectedSymbol}($ARGS)`;
-        const { stdout } = await (host as any).exec(`${bin} run -p "${pattern}" --lang ${lang} --json=compact`, {
+        const escapedPattern = pattern.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const { stdout } = await (host as any).exec(`${bin} run -p "${escapedPattern}" --lang ${lang} --json=compact`, {
           cwd: repoPath,
           timeout: getToolTimeout('VARIANT_HUNT'),
         });

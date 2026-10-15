@@ -169,6 +169,25 @@ describe("LCOV changed-line coverage", () => {
     writeFileSync(file, "SF:../value.ts\nDA:1,1\nend_of_record\n");
     expect(await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext)).toBeUndefined();
   }));
+
+  test("excludes non-executable comments, type imports, interfaces, and brackets from false UNAVAILABLE verdict", () => withTmpDir(async dir => {
+    const file = prepare(dir);
+    writeFileSync(
+      join(dir, "value.ts"),
+      "// Single line comment\n" +
+      "import type { Config } from './config.js';\n" +
+      "export const value = 2;\n" +
+      "interface ExtraConfig {\n" +
+      "  flag?: boolean;\n" +
+      "}\n" +
+      "export const other = 2;\n" +
+      "export const unchanged = 1;\n",
+    );
+    // Standard coverage engines only instrument executable lines (value = 2 and other = 2)
+    writeFileSync(file, "SF:value.ts\nDA:3,1\nDA:7,1\nend_of_record\n");
+    const result = await new LcovChangedLineCoverageAdapter().resolve(dir, executionContext);
+    expect(result).toBe(100);
+  }));
 });
 
 describe("Evidence coverage measurement status", () => {
