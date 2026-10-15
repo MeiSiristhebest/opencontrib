@@ -244,6 +244,13 @@ export class OctokitIssueSource {
       };
     }
     const issue = res.data.data as any;
+    const assignees = Array.isArray(issue.assignees)
+      ? issue.assignees
+          .map((a: any) => String(a?.login || ''))
+          .filter(Boolean)
+      : issue.assignee?.login
+        ? [String(issue.assignee.login)]
+        : [];
     return {
       status: 'OK',
       data: {
@@ -253,6 +260,9 @@ export class OctokitIssueSource {
         htmlUrl: String(issue.html_url || ''),
         body: String(issue.body ?? ''),
         labels: mapIssueLabels(issue.labels),
+        assignees,
+        createdAt: issue.created_at ? String(issue.created_at) : undefined,
+        author: issue.user?.login ? String(issue.user.login) : undefined,
       },
     };
   }
